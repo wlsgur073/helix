@@ -18,7 +18,9 @@ export function buildCodexExecArgs(question: string, outFile: string): string[] 
 /** Pure: decide availability from `codex --version` and `codex login status` output. */
 export function interpretPreflight(versionOut: string, loginOut: string): Availability {
   if (!/codex-cli\s+\d+\.\d+\.\d+/i.test(versionOut)) return { available: false, reason: 'codex CLI not found' };
-  if (!/logged in/i.test(loginOut)) return { available: false, reason: 'codex not logged in (run: codex login)' };
+  // "logged in" is a substring of "Not logged in" — must exclude the negative forms.
+  const loggedIn = /logged in/i.test(loginOut) && !/not logged in|logged out|not authenticated/i.test(loginOut);
+  if (!loggedIn) return { available: false, reason: 'codex not logged in (run: codex login)' };
   return { available: true };
 }
 
