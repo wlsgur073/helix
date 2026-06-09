@@ -1,0 +1,7 @@
+{
+  "name": "helix",
+  "version": "0.1.0",
+  "description": "Judgment-first partner: one voice as counselor/programmer/engineer/architect, non-sycophantic, uncertainty-honest, English-default with Korean register awareness.",
+  "author": { "name": "wlsgur073" },
+  "keywords": ["assistant", "judgment", "memory", "dual-verify"]
+}
