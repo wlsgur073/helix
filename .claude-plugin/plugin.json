@@ -1,7 +1,7 @@
 {
   "name": "helix",
   "version": "0.1.0",
-  "description": "Judgment-first partner: one voice as counselor/programmer/engineer/architect, non-sycophantic, uncertainty-honest, English-default with Korean register awareness.",
+  "description": "Helix: verifiable, trust-indexed cross-session memory (provenance firewall, fail-closed) with optional Codex dual-verify, for Claude Code via MCP. Voice/persona is yours to customize (CLAUDE.md or an output style).",
   "author": { "name": "wlsgur073" },
   "keywords": ["assistant", "judgment", "memory", "dual-verify"]
 }
