@@ -19,7 +19,7 @@ function tmpLedger() {
 }
 
 describe('compactLedger', () => {
-  it('drops content of erased ids but keeps a content-free audit row', () => {
+  it('drops the erased item from the live set but keeps a content-free tombstone', () => {
     const p = tmpLedger();
     appendRecord(p, rec({ id: 'm_1', content: 'keep me' }));
     appendRecord(p, rec({ id: 'secret', content: 'PASSWORD', classification: 'personal' }));
@@ -28,11 +28,12 @@ describe('compactLedger', () => {
     compactLedger(p, { erasedIds: new Set(['secret']) });
 
     const after = parseLedger(p);
-    expect(after.find((r) => r.id === 'm_1')?.content).toBe('keep me');
-    const erased = after.find((r) => r.id === 'secret');
-    expect(erased).toBeDefined();
-    expect(erased!.content).toBe('');
-    expect(erased!.classification).toBe('secret-redacted');
+    expect(after.find((r) => r.id === 'm_1')?.content).toBe('keep me'); // unaffected fact kept
+    expect(after.find((r) => r.id === 'secret')).toBeUndefined();       // erased: gone from live set
+    const tomb = after.find((r) => r.id === 'e_1');                     // tombstone remains for audit
+    expect(tomb).toBeDefined();
+    expect(tomb!.content).toBe('');
+    expect(JSON.stringify(after)).not.toContain('PASSWORD');            // no plaintext anywhere
   });
 
   it('drops superseded records entirely', () => {
