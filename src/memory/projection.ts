@@ -6,6 +6,11 @@ export type Projection = Map<string, MemoryRecord>;
  * Replay the ledger into a map of currently-live items.
  * supersede/invalidate/erase markers remove the item they reference; they are not facts.
  * A 'supersede' record is itself the live replacement, so it stays.
+ *
+ * SEAM (Phase 2): 'assert' and (currently) 'verify' records both fall through to `live`.
+ * No v1 code emits 'verify' records yet — Phase 2 wires verification outcomes into records
+ * and MUST decide their projection semantics: a verify event is not itself a recallable
+ * fact, and a 'verify' carrying `supersedes` is presently ignored by this loop.
  */
 export function buildProjection(records: MemoryRecord[]): Projection {
   const removed = new Set<string>();
