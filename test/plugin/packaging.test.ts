@@ -38,7 +38,7 @@ describe('persona output-style', () => {
     expect(body.length).toBeGreaterThan(800);
     for (const kw of ['counselor', 'programmer', 'engineer', 'architect',
                       'one continuous voice', 'self-critique', 'uncertain',
-                      'English', '존댓말', '반말', 'mode']) {
+                      'English', '존댓말', '반말', '제안형', 'mode']) {
       expect(body, `persona must address "${kw}"`).toContain(kw);
     }
     expect(body).not.toMatch(/\/helix:(counselor|programmer|engineer|architect)/);
