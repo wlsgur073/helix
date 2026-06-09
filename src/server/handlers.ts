@@ -2,6 +2,9 @@ import type { MemoryStore, CommitInput } from '../memory/store.js';
 
 export interface ToolResult {
   content: Array<{ type: 'text'; text: string }>;
+  // The MCP SDK's tool-result type carries an index signature for _meta/extras;
+  // mirroring it keeps these results assignable to the SDK without importing its types.
+  [key: string]: unknown;
 }
 const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] });
 
