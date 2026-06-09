@@ -10,7 +10,7 @@ function deps(over: Partial<DualVerifyDeps>): DualVerifyDeps {
     ...over,
   };
 }
-const enabled = (): HelixConfig => ({ dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high' } });
+const enabled = (): HelixConfig => ({ dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high' } });
 
 describe('dualVerify', () => {
   it('degrades (ran=false) when disabled, without calling the runner', async () => {
@@ -54,5 +54,14 @@ describe('dualVerify', () => {
       deps({ config: enabled(), runner: async () => ({ ok: true, answer: 'use mysql instead' }) }));
     expect(r.ran).toBe(true);
     expect(r.agreement?.verdict).toBe('diverge');
+  });
+
+  it('passes the configured model + effort to the runner', async () => {
+    let seen: { model?: string | null; effort?: string } | undefined;
+    await dualVerify({ question: 'q', helixAnswer: 'a' }, deps({
+      config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'xhigh' } },
+      runner: async (_q, opts) => { seen = opts; return { ok: true, answer: 'x' }; },
+    }));
+    expect(seen).toEqual({ model: 'gpt-5.5', effort: 'xhigh' });
   });
 });

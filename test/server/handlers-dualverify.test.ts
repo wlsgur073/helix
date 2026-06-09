@@ -8,7 +8,7 @@ import { DEFAULT_CONFIG } from '../../src/config.js';
 function deps(over: Partial<DualVerifyHandlerDeps>): DualVerifyHandlerDeps {
   const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-hdv-')), 'audit.jsonl');
   return {
-    config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high' } },
+    config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high' } },
     runner: async () => ({ ok: true, answer: 'use postgres' }),
     checkAvailable: async () => ({ available: true }),
     auditPath,

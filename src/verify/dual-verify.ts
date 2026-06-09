@@ -34,7 +34,10 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
   if (!avail.available) return { ran: false, attempted: false, reason: avail.reason ?? 'codex unavailable' };
 
   // Past the gates: the next call spends the user's Codex quota (metered).
-  const res = await deps.runner(params.question);
+  const res = await deps.runner(params.question, {
+    model: deps.config.dualVerify.model,
+    effort: deps.config.dualVerify.effort,
+  });
   if (!res.ok) return { ran: false, attempted: true, reason: `codex run failed: ${res.error}` };
 
   const agreement = buildAgreementMap(params.helixAnswer, res.answer);

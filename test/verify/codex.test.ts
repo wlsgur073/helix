@@ -16,6 +16,23 @@ describe('buildCodexExecArgs', () => {
     expect(() => buildCodexExecArgs('--dangerously-bypass-approvals-and-sandbox', '/tmp/o')).toThrow(/flag-smuggling|start with/i);
     expect(() => buildCodexExecArgs('  -s danger-full-access', '/tmp/o')).toThrow();
   });
+
+  it('adds -m model and -c model_reasoning_effort when opts given', () => {
+    expect(buildCodexExecArgs('q', '/tmp/o', { model: 'gpt-5.5', effort: 'xhigh' })).toEqual([
+      'exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', '/tmp/o',
+      '-m', 'gpt-5.5', '-c', 'model_reasoning_effort=xhigh', 'q',
+    ]);
+  });
+
+  it('omits -m when model is null (inherit codex default), still sets effort', () => {
+    const args = buildCodexExecArgs('q', '/tmp/o', { model: null, effort: 'high' });
+    expect(args).not.toContain('-m');
+    expect(args).toContain('model_reasoning_effort=high');
+  });
+
+  it('rejects a malformed model (argv safety)', () => {
+    expect(() => buildCodexExecArgs('q', '/tmp/o', { model: 'bad; rm -rf' })).toThrow(/invalid codex model/i);
+  });
 });
 
 describe('interpretPreflight', () => {
