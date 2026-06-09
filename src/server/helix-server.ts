@@ -1,11 +1,21 @@
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { MemoryStore } from '../memory/store.js';
-import { handleCommit, handleRecall, handleInspect, handleErase, handleDualVerify } from './handlers.js';
+import { handleCommit, handleRecall, handleInspect, handleErase, handleDualVerify, type DualVerifyHandlerDeps } from './handlers.js';
+import { loadConfig } from '../config.js';
+import { realCodexRunner, checkCodexAvailable } from '../verify/codex.js';
 
 /** Build a Helix MCP server with the memory tools registered against `store`. */
-export function buildServer(store: MemoryStore): McpServer {
+export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps): McpServer {
   const server = new McpServer({ name: 'helix', version: '0.1.0' });
+  const dv: DualVerifyHandlerDeps = dualDeps ?? {
+    config: loadConfig(),
+    runner: realCodexRunner,
+    checkAvailable: checkCodexAvailable,
+    auditPath: join(homedir(), '.helix', 'audit.jsonl'),
+  };
 
   server.registerTool('helix_memory_commit', {
     title: 'Commit memory',
@@ -37,10 +47,10 @@ export function buildServer(store: MemoryStore): McpServer {
   }, async (args) => handleErase(store, args));
 
   server.registerTool('helix_dual_verify', {
-    title: 'Dual-verify (Phase 3 stub)',
-    description: 'Cross-validate an answer with Codex. Not available until Phase 3.',
-    inputSchema: { question: z.string() },
-  }, async (args) => handleDualVerify(store, args));
+    title: 'Dual-verify with Codex',
+    description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota).",
+    inputSchema: { question: z.string(), helixAnswer: z.string() },
+  }, async (args) => handleDualVerify(args, dv));
 
   return server;
 }

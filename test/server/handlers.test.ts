@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
-import { handleCommit, handleRecall, handleInspect, handleErase, handleDualVerify } from '../../src/server/handlers.js';
+import { handleCommit, handleRecall, handleInspect, handleErase } from '../../src/server/handlers.js';
 
 function store() {
   let n = 0;
@@ -37,9 +37,5 @@ describe('tool handlers', () => {
     const rec = s.commit({ content: 'gone soon' });
     handleErase(s, { id: rec.id });
     expect(s.inspect()).toHaveLength(0);
-  });
-
-  it('handleDualVerify is a clearly-labeled stub in Phase 2 (no codex call)', () => {
-    expect(text(handleDualVerify(store(), { question: 'x' }))).toMatch(/not available|stub|phase 3/i);
   });
 });
