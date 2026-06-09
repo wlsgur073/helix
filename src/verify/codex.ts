@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 export type CodexResult = { ok: true; answer: string } | { ok: false; error: string };
-export interface CodexRunOptions { model?: string | null; effort?: string }
+export interface CodexRunOptions { model?: string | null; effort?: string | null }
 export type CodexRunner = (question: string, opts?: CodexRunOptions) => Promise<CodexResult>;
 export interface Availability { available: boolean; reason?: string }
 

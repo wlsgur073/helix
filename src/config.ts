@@ -14,9 +14,10 @@ export interface HelixConfig {
     enabled: boolean;
     mode: DualVerifyMode;
     stakesFloor: StakesFloor;
-    /** Codex model. `null` => omit -m and inherit codex's own default (zero-maintenance "always latest"). */
+    /** Codex model. `null` (default) => omit -m so codex uses its own ~/.codex/config.toml model. */
     model: string | null;
-    effort: ReasoningEffort;
+    /** Reasoning effort. `null` (default) => omit -c so codex uses its config.toml effort. */
+    effort: ReasoningEffort | null;
   };
 }
 
@@ -25,10 +26,11 @@ export const DEFAULT_CONFIG: HelixConfig = {
     enabled: false,
     mode: 'compare',
     stakesFloor: 'high',
-    // Keep current with the latest Codex model. Set model:null in config to instead inherit
-    // codex's own default (so it tracks latest without editing this pin).
-    model: 'gpt-5.5',
-    effort: 'high',
+    // Default: inherit the user's ~/.codex/config.toml (no hardcoding, tracks whatever they set
+    // there). Pass -m / -c only when these are set here, to deliberately override codex's own
+    // model/effort for dual-verify specifically.
+    model: null,
+    effort: null,
   },
 };
 
@@ -59,8 +61,8 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
       if (dv.model === null || (typeof dv.model === 'string' && MODEL_RE.test(dv.model))) {
         merged.dualVerify.model = dv.model;
       }
-      if (typeof dv.effort === 'string' && EFFORTS.includes(dv.effort as ReasoningEffort)) {
-        merged.dualVerify.effort = dv.effort as ReasoningEffort;
+      if (dv.effort === null || (typeof dv.effort === 'string' && EFFORTS.includes(dv.effort as ReasoningEffort))) {
+        merged.dualVerify.effort = dv.effort as ReasoningEffort | null;
       }
     }
   }

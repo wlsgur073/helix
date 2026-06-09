@@ -57,7 +57,7 @@ describe('dualVerify', () => {
   });
 
   it('passes the configured model + effort to the runner', async () => {
-    let seen: { model?: string | null; effort?: string } | undefined;
+    let seen: { model?: string | null; effort?: string | null } | undefined;
     await dualVerify({ question: 'q', helixAnswer: 'a' }, deps({
       config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'xhigh' } },
       runner: async (_q, opts) => { seen = opts; return { ok: true, answer: 'x' }; },

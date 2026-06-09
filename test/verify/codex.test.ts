@@ -33,6 +33,12 @@ describe('buildCodexExecArgs', () => {
   it('rejects a malformed model (argv safety)', () => {
     expect(() => buildCodexExecArgs('q', '/tmp/o', { model: 'bad; rm -rf' })).toThrow(/invalid codex model/i);
   });
+
+  it('omits both -m and -c when model and effort are null (full inherit from codex config)', () => {
+    expect(buildCodexExecArgs('q', '/tmp/o', { model: null, effort: null })).toEqual([
+      'exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', '/tmp/o', 'q',
+    ]);
+  });
 });
 
 describe('interpretPreflight', () => {

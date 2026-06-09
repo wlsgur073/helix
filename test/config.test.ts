@@ -36,10 +36,10 @@ describe('loadConfig', () => {
     expect(loadConfig({ projectPath: p, globalPath: join(dir, 'x.json') }).dualVerify.enabled).toBe(false);
   });
 
-  it('defaults model to gpt-5.5 and effort to high', () => {
+  it('defaults model and effort to null (inherit codex ~/.codex/config.toml)', () => {
     const cfg = loadConfig({ projectPath: join(tmpDir(), 'n.json'), globalPath: join(tmpDir(), 'n.json') });
-    expect(cfg.dualVerify.model).toBe('gpt-5.5');
-    expect(cfg.dualVerify.effort).toBe('high');
+    expect(cfg.dualVerify.model).toBeNull();
+    expect(cfg.dualVerify.effort).toBeNull();
   });
 
   it('reads valid model + effort overrides (incl. xhigh)', () => {
@@ -54,8 +54,8 @@ describe('loadConfig', () => {
     const dir = tmpDir();
     const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { model: 'bad; rm -rf', effort: 'ultra' } }));
     const cfg = loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') });
-    expect(cfg.dualVerify.model).toBe('gpt-5.5');
-    expect(cfg.dualVerify.effort).toBe('high');
+    expect(cfg.dualVerify.model).toBeNull();   // default kept (malformed rejected)
+    expect(cfg.dualVerify.effort).toBeNull();  // default kept (unknown rejected)
   });
 
   it('allows model:null to inherit codex default', () => {
