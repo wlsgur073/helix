@@ -1,0 +1,20 @@
+# Helix's local philosophy.  Soul of the project — kept off git intentionally.
+guideline/
+docs/
+
+# Operating shell — also local, mirrors guideline/'s privacy.
+CLAUDE.md
+
+# Tooling learning state (guardians-of-the-claude, etc.) — local-only.
+.claude/
+
+# Helix session-local working state
+.helix/
+
+# Obsidian vault — local-only, contains personal notes and work-in-progress.
+vault/
+**/.obsidian/
+
+# Node
+node_modules/
+dist/
