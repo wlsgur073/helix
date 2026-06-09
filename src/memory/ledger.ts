@@ -57,6 +57,9 @@ export function compactLedger(path: LedgerPath, opts: CompactOptions): void {
     if (!opts.erasedIds.has(r.id)) kept.push(r);
   }
   // Keep a content-free tombstone for each erase marker (audit: an erasure happened).
+  // NOTE: tombstones persist across compactions, retaining `supersedes: <erasedId>`. With
+  // randomUUID ids, reusing an erased id is effectively impossible; but if ids ever become
+  // caller-supplied, a reused id would be silently removed by the stale tombstone.
   for (const r of records) {
     if (r.type === 'erase') kept.push({ ...r, content: '' });
   }

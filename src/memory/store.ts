@@ -51,6 +51,9 @@ export class MemoryStore {
     let classification: Classification = input.classification ?? 'normal';
     const scan = detectSecret(input.content);
     if (scan.hit) {
+      // v1 stores only the redacted content + classification. redactSecret also returns
+      // {kind, hash}; persisting the hash (for dedupe/recognition per spec §7.4) is deferred
+      // until there is a consumer and a schema slot for it.
       const red = redactSecret(input.content, scan.kind ?? 'secret');
       content = red.content;
       classification = red.classification;
