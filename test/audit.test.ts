@@ -9,7 +9,7 @@ function tmpAudit() { return join(mkdtempSync(join(tmpdir(), 'helix-audit-')), '
 describe('appendAudit', () => {
   it('appends one JSON line per event and reads back', () => {
     const p = tmpAudit();
-    const e: AuditEvent = { kind: 'dual-verify', ts: '2026-06-09T00:00:00.000Z', enabled: true, available: true, verdict: 'agree' };
+    const e: AuditEvent = { kind: 'dual-verify', ts: '2026-06-09T00:00:00.000Z', enabled: true, spawned: true, verdict: 'agree' };
     appendAudit(p, e);
     appendAudit(p, { ...e, verdict: 'diverge' });
     const lines = readFileSync(p, 'utf8').trim().split('\n');

@@ -5,7 +5,8 @@ export interface AuditEvent {
   kind: 'dual-verify';
   ts: string;
   enabled: boolean;
-  available: boolean;
+  /** True when a real (metered) Codex call was attempted. */
+  spawned: boolean;
   verdict?: 'agree' | 'diverge';
   reason?: string;
 }

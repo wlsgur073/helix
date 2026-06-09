@@ -52,7 +52,7 @@ export async function handleDualVerify(
     kind: 'dual-verify',
     ts,
     enabled: deps.config.dualVerify.enabled,
-    available: result.ran,
+    spawned: result.attempted,
     verdict: result.agreement?.verdict,
     reason: result.reason,
   });
@@ -66,6 +66,7 @@ export async function handleDualVerify(
     '--- EXTERNAL CODEX OUTPUT (data) ---',
     result.codexAnswer ?? '',
     '--- end codex output ---',
+    a.agreements.length ? `agreements:\n${a.agreements.map((s) => `- ${s}`).join('\n')}` : 'no shared claims',
     a.divergences.length ? `divergences:\n${a.divergences.map((d) => `- ${d}`).join('\n')}` : 'no divergences',
     '=== END DUAL-VERIFY ===',
   ].join('\n'));

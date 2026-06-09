@@ -18,6 +18,7 @@ describe('dualVerify', () => {
     const r = await dualVerify({ question: 'q', helixAnswer: 'a' },
       deps({ runner: async () => { called = true; return { ok: true, answer: 'x' }; } }));
     expect(r.ran).toBe(false);
+    expect(r.attempted).toBe(false); // no metered call
     expect(r.reason).toMatch(/disabled/i);
     expect(called).toBe(false);
   });
@@ -34,6 +35,7 @@ describe('dualVerify', () => {
     const r = await dualVerify({ question: 'q', helixAnswer: 'a' },
       deps({ config: enabled(), runner: async () => ({ ok: false, error: 'timeout' }) }));
     expect(r.ran).toBe(false);
+    expect(r.attempted).toBe(true); // codex WAS reached (metered) — the run itself failed
     expect(r.reason).toMatch(/timeout/);
     expect(r.codexAnswer).toBeUndefined();
   });
