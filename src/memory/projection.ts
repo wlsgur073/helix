@@ -7,15 +7,21 @@ export type Projection = Map<string, MemoryRecord>;
  * supersede/invalidate/erase markers remove the item they reference; they are not facts.
  * A 'supersede' record is itself the live replacement, so it stays.
  *
- * SEAM (Phase 2): 'assert' and (currently) 'verify' records both fall through to `live`.
- * No v1 code emits 'verify' records yet — Phase 2 wires verification outcomes into records
- * and MUST decide their projection semantics: a verify event is not itself a recallable
- * fact, and a 'verify' carrying `supersedes` is presently ignored by this loop.
+ * 'verify' records update their target's state (referenced via `supersedes`) and are NOT
+ * surfaced as live facts — a verify event is not itself recallable.
  */
 export function buildProjection(records: MemoryRecord[]): Projection {
   const removed = new Set<string>();
   const live = new Map<string, MemoryRecord>();
   for (const r of records) {
+    if (r.type === 'verify') {
+      const target = r.supersedes;
+      if (target && live.has(target)) {
+        const cur = live.get(target)!;
+        live.set(target, { ...cur, state: r.state });
+      }
+      continue; // a verify is not itself a recallable fact
+    }
     if (r.type === 'supersede' || r.type === 'invalidate' || r.type === 'erase') {
       if (r.supersedes) removed.add(r.supersedes);
       if (r.type === 'supersede') live.set(r.id, r); // the replacement fact stays live
