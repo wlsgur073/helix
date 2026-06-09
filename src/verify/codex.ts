@@ -12,6 +12,13 @@ export interface Availability { available: boolean; reason?: string }
 
 /** Build the `codex exec` argv: read-only sandbox + ephemeral + final message to a file. */
 export function buildCodexExecArgs(question: string, outFile: string): string[] {
+  // Argv flag-smuggling guard (security): the question is a single positional argv element.
+  // A value beginning with '-' could be parsed by codex as a CLI flag — e.g.
+  // `--dangerously-bypass-approvals-and-sandbox`, which would defeat the `-s read-only`
+  // sandbox we set here. Refuse any leading-dash question (degrades cleanly via the runner).
+  if (question.trimStart().startsWith('-')) {
+    throw new Error('codex question must not start with "-" (argv flag-smuggling guard)');
+  }
   return ['exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', outFile, question];
 }
 
