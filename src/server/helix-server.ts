@@ -48,8 +48,12 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   server.registerTool('helix_dual_verify', {
     title: 'Dual-verify with Codex',
-    description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota).",
-    inputSchema: { question: z.string(), helixAnswer: z.string() },
+    description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor.",
+    inputSchema: {
+      question: z.string(),
+      helixAnswer: z.string(),
+      stakes: z.enum(['low', 'medium', 'high']).optional(),
+    },
   }, async (args) => handleDualVerify(args, dv));
 
   return server;

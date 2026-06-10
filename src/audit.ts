@@ -7,6 +7,7 @@ export interface AuditEvent {
   enabled: boolean;
   /** True when a real (metered) Codex call was attempted. */
   spawned: boolean;
+  mode?: 'compare' | 'critique';
   verdict?: 'agree' | 'diverge';
   reason?: string;
 }
