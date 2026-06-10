@@ -1,0 +1,6 @@
+{
+  "helix": {
+    "command": "node",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/bin/helix-mcp.mjs"]
+  }
+}
