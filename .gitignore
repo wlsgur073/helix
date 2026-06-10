@@ -18,3 +18,5 @@ vault/
 # Node
 node_modules/
 dist/
+# NOTE: bin/ (esbuild bundles) is committed on purpose — a cloned plugin gets no
+# npm install, so the MCP server + hook scripts must be self-contained files.
