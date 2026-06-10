@@ -1,43 +1,64 @@
 import { describe, it, expect } from 'vitest';
-import { buildCodexExecArgs, interpretPreflight } from '../../src/verify/codex.js';
+import { buildCodexExecArgs, interpretPreflight, interpretWhereOutput } from '../../src/verify/codex.js';
 
-describe('buildCodexExecArgs', () => {
-  it('builds the read-only, ephemeral, output-to-file exec command (verified vs codex-cli 0.138)', () => {
-    expect(buildCodexExecArgs('what is 2+2?', '/tmp/out.txt')).toEqual([
-      'exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', '/tmp/out.txt', 'what is 2+2?',
+describe('buildCodexExecArgs (prompt-via-stdin contract)', () => {
+  it('builds the read-only, ephemeral, output-to-file command ending with "-" (verified vs codex-cli 0.138)', () => {
+    expect(buildCodexExecArgs('/tmp/out.txt')).toEqual([
+      'exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', '/tmp/out.txt', '-',
     ]);
   });
-  it('passes the question verbatim as the final positional arg (mid-string flags are inert)', () => {
-    const args = buildCodexExecArgs('use --flags; and "quotes"', '/tmp/o');
-    expect(args[args.length - 1]).toBe('use --flags; and "quotes"');
-  });
 
-  it('refuses a leading-dash question (argv flag-smuggling guard)', () => {
-    expect(() => buildCodexExecArgs('--dangerously-bypass-approvals-and-sandbox', '/tmp/o')).toThrow(/flag-smuggling|start with/i);
-    expect(() => buildCodexExecArgs('  -s danger-full-access', '/tmp/o')).toThrow();
-  });
-
-  it('adds -m model and -c model_reasoning_effort when opts given', () => {
-    expect(buildCodexExecArgs('q', '/tmp/o', { model: 'gpt-5.5', effort: 'xhigh' })).toEqual([
+  it('never carries free text in argv — every element is a literal, the outFile, or a validated token', () => {
+    expect(buildCodexExecArgs('/tmp/o', { model: 'gpt-5.5', effort: 'xhigh' })).toEqual([
       'exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', '/tmp/o',
-      '-m', 'gpt-5.5', '-c', 'model_reasoning_effort=xhigh', 'q',
+      '-m', 'gpt-5.5', '-c', 'model_reasoning_effort=xhigh', '-',
     ]);
   });
 
-  it('omits -m when model is null (inherit codex default), still sets effort', () => {
-    const args = buildCodexExecArgs('q', '/tmp/o', { model: null, effort: 'high' });
-    expect(args).not.toContain('-m');
-    expect(args).toContain('model_reasoning_effort=high');
-  });
-
-  it('rejects a malformed model (argv safety)', () => {
-    expect(() => buildCodexExecArgs('q', '/tmp/o', { model: 'bad; rm -rf' })).toThrow(/invalid codex model/i);
-  });
-
-  it('omits both -m and -c when model and effort are null (full inherit from codex config)', () => {
-    expect(buildCodexExecArgs('q', '/tmp/o', { model: null, effort: null })).toEqual([
-      'exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', '/tmp/o', 'q',
+  it('omits -m and -c when model/effort are null (inherit ~/.codex/config.toml)', () => {
+    expect(buildCodexExecArgs('/tmp/o', { model: null, effort: null })).toEqual([
+      'exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', '/tmp/o', '-',
     ]);
+  });
+
+  it('rejects a malformed model or effort (argv safety)', () => {
+    expect(() => buildCodexExecArgs('/tmp/o', { model: 'bad; rm -rf' })).toThrow(/invalid codex model/i);
+    expect(() => buildCodexExecArgs('/tmp/o', { effort: 'x high' })).toThrow(/invalid codex effort/i);
+  });
+});
+
+describe('interpretWhereOutput (Windows-safe launcher resolution)', () => {
+  const js = (dir: string) => `${dir}\\node_modules\\@openai\\codex\\bin\\codex.js`;
+
+  it('POSIX: codex is directly spawnable, no resolution needed', () => {
+    expect(interpretWhereOutput('linux', '', () => false)).toEqual({ file: 'codex', argsPrefix: [] });
+  });
+
+  it('win32: an npm .cmd shim resolves to its underlying codex.js, run by our own node', () => {
+    const dir = 'C:\\nodejs';
+    // `where codex` lists the extension-less POSIX-sh shim first, then the .cmd
+    const out = `${dir}\\codex\r\n${dir}\\codex.cmd\r\n`;
+    expect(interpretWhereOutput('win32', out, (p) => p === js(dir))).toEqual({
+      file: process.execPath,
+      argsPrefix: [js(dir)],
+    });
+  });
+
+  it('win32: takes the first usable entry in PATH order (a native .exe is spawned directly)', () => {
+    const out = 'C:\\tools\\codex.exe\r\nC:\\nodejs\\codex.cmd\r\n';
+    expect(interpretWhereOutput('win32', out, () => true)).toEqual({ file: 'C:\\tools\\codex.exe', argsPrefix: [] });
+  });
+
+  it('win32: a .cmd whose codex.js cannot be found -> null (fail-closed; never shell:true)', () => {
+    expect(interpretWhereOutput('win32', 'C:\\nodejs\\codex.cmd\r\n', () => false)).toBeNull();
+  });
+
+  it('win32: extension-less sh shims are skipped (CreateProcess cannot exec them)', () => {
+    expect(interpretWhereOutput('win32', 'C:\\nodejs\\codex\r\n', () => true)).toBeNull();
+  });
+
+  it('win32: empty where output -> null', () => {
+    expect(interpretWhereOutput('win32', '', () => false)).toBeNull();
   });
 });
 
