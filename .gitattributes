@@ -1,0 +1,4 @@
+# Committed build artifacts: byte-exact, never EOL-converted. esbuild emits LF; with
+# core.autocrlf=true a checkout would rewrite these to CRLF and break the byte-for-byte
+# freshness check (and the "what a cloned plugin runs" guarantee). Treat them as opaque.
+bin/** -text
