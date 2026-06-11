@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -60,23 +60,34 @@ export function interpretWhereOutput(
   return null;
 }
 
-let cachedInvocation: CodexInvocation | null | undefined;
+/** Pure: how to kill the codex process tree on timeout. On win32 the resolved launcher is
+ *  `node codex.js`, which spawns the native codex as a GRANDCHILD; child.kill() (TerminateProcess)
+ *  would orphan it (metered run keeps spending quota), so we tree-kill via taskkill /T. On POSIX
+ *  the direct child IS codex and receives the signal — no tree kill needed. */
+export function treeKillSpec(platform: NodeJS.Platform, pid: number): { cmd: string; args: string[] } | null {
+  return platform === 'win32' ? { cmd: 'taskkill', args: ['/PID', String(pid), '/T', '/F'] } : null;
+}
 
-/** Resolve (and cache) the codex launcher. null => not launchable (degrade fail-closed). */
+let cachedInvocation: CodexInvocation | null = null; // null = not yet resolved (NEGATIVE results are not cached)
+
+/** Resolve the codex launcher, caching only SUCCESS. A transient `where` failure must not
+ *  pin null for the whole server lifetime — a user who then installs codex can retry. */
 export async function resolveCodexInvocation(): Promise<CodexInvocation | null> {
-  if (cachedInvocation !== undefined) return cachedInvocation;
+  if (cachedInvocation) return cachedInvocation;
   if (process.platform !== 'win32') {
     cachedInvocation = { file: 'codex', argsPrefix: [] };
     return cachedInvocation;
   }
+  let inv: CodexInvocation | null = null;
   try {
     // where.exe is a real executable (System32), safe to execFile directly.
     const { stdout } = await execFileAsync('where', ['codex'], { timeout: 10_000 });
-    cachedInvocation = interpretWhereOutput('win32', stdout ?? '', existsSync);
+    inv = interpretWhereOutput('win32', stdout ?? '', existsSync);
   } catch {
-    cachedInvocation = null;
+    inv = null;
   }
-  return cachedInvocation;
+  if (inv) cachedInvocation = inv; // cache success only
+  return inv;
 }
 
 interface RunOutcome { code: number | null; stdout: string; stderr: string }
@@ -90,7 +101,12 @@ function runCodex(inv: CodexInvocation, args: string[], input: string | null, ti
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
-      child.kill();
+      const spec = treeKillSpec(process.platform, child.pid ?? -1);
+      if (spec && child.pid !== undefined) {
+        try { execFileSync(spec.cmd, spec.args, { stdio: 'ignore' }); } catch { try { child.kill(); } catch { /* gone */ } }
+      } else {
+        try { child.kill(); } catch { /* gone */ }
+      }
       reject(new Error(`codex timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     child.stdout?.on('data', (d: Buffer) => { if (stdout.length < 65_536) stdout += String(d); });

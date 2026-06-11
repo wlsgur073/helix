@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCodexExecArgs, interpretPreflight, interpretWhereOutput } from '../../src/verify/codex.js';
+import { buildCodexExecArgs, interpretPreflight, interpretWhereOutput, treeKillSpec } from '../../src/verify/codex.js';
 
 describe('buildCodexExecArgs (prompt-via-stdin contract)', () => {
   it('builds the read-only, ephemeral, output-to-file command ending with "-" (verified vs codex-cli 0.138)', () => {
@@ -59,6 +59,16 @@ describe('interpretWhereOutput (Windows-safe launcher resolution)', () => {
 
   it('win32: empty where output -> null', () => {
     expect(interpretWhereOutput('win32', '', () => false)).toBeNull();
+  });
+});
+
+describe('treeKillSpec (Windows orphan prevention)', () => {
+  it('win32: kills the whole tree via taskkill /T so the native codex grandchild dies too', () => {
+    expect(treeKillSpec('win32', 4321)).toEqual({ cmd: 'taskkill', args: ['/PID', '4321', '/T', '/F'] });
+  });
+  it('POSIX: null — the direct codex child receives the signal, no tree kill needed', () => {
+    expect(treeKillSpec('linux', 4321)).toBeNull();
+    expect(treeKillSpec('darwin', 4321)).toBeNull();
   });
 });
 

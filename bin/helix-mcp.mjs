@@ -21562,7 +21562,7 @@ function loadConfig(opts = {}) {
 }
 
 // src/verify/codex.ts
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync as readFileSync3, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname as dirname3, join as join2 } from "node:path";
@@ -21595,20 +21595,25 @@ function interpretWhereOutput(platform, whereOutput, exists) {
   }
   return null;
 }
-var cachedInvocation;
+function treeKillSpec(platform, pid) {
+  return platform === "win32" ? { cmd: "taskkill", args: ["/PID", String(pid), "/T", "/F"] } : null;
+}
+var cachedInvocation = null;
 async function resolveCodexInvocation() {
-  if (cachedInvocation !== void 0) return cachedInvocation;
+  if (cachedInvocation) return cachedInvocation;
   if (process.platform !== "win32") {
     cachedInvocation = { file: "codex", argsPrefix: [] };
     return cachedInvocation;
   }
+  let inv = null;
   try {
     const { stdout } = await execFileAsync("where", ["codex"], { timeout: 1e4 });
-    cachedInvocation = interpretWhereOutput("win32", stdout ?? "", existsSync);
+    inv = interpretWhereOutput("win32", stdout ?? "", existsSync);
   } catch {
-    cachedInvocation = null;
+    inv = null;
   }
-  return cachedInvocation;
+  if (inv) cachedInvocation = inv;
+  return inv;
 }
 function runCodex(inv, args, input, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -21618,7 +21623,22 @@ function runCodex(inv, args, input, timeoutMs) {
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
-      child.kill();
+      const spec = treeKillSpec(process.platform, child.pid ?? -1);
+      if (spec && child.pid !== void 0) {
+        try {
+          execFileSync(spec.cmd, spec.args, { stdio: "ignore" });
+        } catch {
+          try {
+            child.kill();
+          } catch {
+          }
+        }
+      } else {
+        try {
+          child.kill();
+        } catch {
+        }
+      }
       reject(new Error(`codex timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     child.stdout?.on("data", (d) => {
