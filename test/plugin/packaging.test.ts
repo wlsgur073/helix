@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -44,4 +46,22 @@ describe('hooks/hooks.json (plugin hooks registration)', () => {
     expect(existsSync(join(root, 'bin/hooks/session-start.mjs'))).toBe(true);
     expect(existsSync(join(root, 'bin/hooks/session-end.mjs'))).toBe(true);
   });
+});
+
+describe('committed bundles are fresh', () => {
+  // Rebuild from current src into a temp dir and byte-compare against the committed bin/.
+  // This catches the real failure mode: a dev edits src, runs green tests, and commits
+  // without rebuilding — shipping a stale bundle. (esbuild is deterministic for a fixed
+  // version + input, so identical src reproduces identical bytes.)
+  it('rebuilding from src reproduces bin/ byte-for-byte (else: run npm run build)', () => {
+    const out = mkdtempSync(join(tmpdir(), 'helix-freshbuild-'));
+    execFileSync(process.execPath, [join(root, 'build.mjs')], {
+      cwd: root, env: { ...process.env, HELIX_BUILD_OUT: out }, stdio: 'ignore',
+    });
+    for (const rel of ['helix-mcp.mjs', 'hooks/session-start.mjs', 'hooks/session-end.mjs']) {
+      const committed = readFileSync(join(root, 'bin', rel));
+      const rebuilt = readFileSync(join(out, rel));
+      expect(rebuilt.equals(committed), `bin/${rel} is stale — run npm run build and commit bin/`).toBe(true);
+    }
+  }, 30_000);
 });

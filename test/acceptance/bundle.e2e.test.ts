@@ -12,8 +12,13 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BUNDLE = join(root, 'bin', 'helix-mcp.mjs');
 
+// Strip ALL HELIX_* from the inherited env so a developer's exported HELIX_LEDGER /
+// HELIX_SESSIONS (precedence over HELIX_HOME) cannot make these "hermetic" tests read or
+// COMPACT the developer's real ledger. Only the explicit HELIX_HOME below takes effect.
 const cleanEnv = (): Record<string, string> =>
-  Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined)) as Record<string, string>;
+  Object.fromEntries(
+    Object.entries(process.env).filter(([k, v]) => v !== undefined && !k.startsWith('HELIX_')),
+  ) as Record<string, string>;
 
 let open: Client[] = [];
 

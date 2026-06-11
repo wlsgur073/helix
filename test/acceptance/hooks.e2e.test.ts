@@ -11,8 +11,12 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const START = join(root, 'bin', 'hooks', 'session-start.mjs');
 const END = join(root, 'bin', 'hooks', 'session-end.mjs');
 
+// Strip ALL HELIX_* from the inherited env (see bundle.e2e.test.ts) so a dev-exported
+// HELIX_LEDGER/HELIX_SESSIONS can't outrank the temp HELIX_HOME and hit real state.
 const cleanEnv = (): Record<string, string> =>
-  Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined)) as Record<string, string>;
+  Object.fromEntries(
+    Object.entries(process.env).filter(([k, v]) => v !== undefined && !k.startsWith('HELIX_')),
+  ) as Record<string, string>;
 
 function runHook(script: string, home: string, stdin: string): Promise<{ code: number | null; stdout: string }> {
   return new Promise((resolve, reject) => {
