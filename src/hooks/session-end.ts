@@ -24,4 +24,5 @@ try {
 } catch {
   // never block session end
 }
-process.exit(0);
+// No explicit exit(0): stdin is fully consumed above, so natural exit yields code 0 and
+// flushes any pending writes (process.exit can truncate them).

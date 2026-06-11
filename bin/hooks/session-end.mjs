@@ -33,4 +33,3 @@ try {
   }
 } catch {
 }
-process.exit(0);
