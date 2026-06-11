@@ -1,0 +1,15 @@
+{
+  "name": "helix",
+  "description": "Verifiable, trust-indexed cross-session memory + optional Codex dual-verify for Claude Code.",
+  "owner": { "name": "wlsgur073", "url": "https://github.com/wlsgur073" },
+  "plugins": [
+    {
+      "name": "helix",
+      "source": "./",
+      "version": "0.1.0",
+      "description": "Trust-indexed cross-session memory (provenance firewall, fail-closed) with optional Codex dual-verify — MCP tools + SessionStart/End hooks.",
+      "author": { "name": "wlsgur073" },
+      "keywords": ["memory", "mcp", "dual-verify", "claude-code"]
+    }
+  ]
+}
