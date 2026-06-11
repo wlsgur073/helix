@@ -10,11 +10,15 @@ import { realCodexRunner, checkCodexAvailable } from '../verify/codex.js';
 /** Build a Helix MCP server with the memory tools registered against `store`. */
 export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps): McpServer {
   const server = new McpServer({ name: 'helix', version: '0.1.0' });
+  // The no-deps fallback must honor HELIX_HOME too, or it would silently read the real
+  // ~/.helix/config.json and write the real audit log under test isolation (the index.ts
+  // entry always passes explicit deps; this keeps a future caller from breaking isolation).
+  const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
   const dv: DualVerifyHandlerDeps = dualDeps ?? {
-    config: loadConfig(),
+    config: loadConfig({ globalPath: join(home, 'config.json') }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
-    auditPath: join(homedir(), '.helix', 'audit.jsonl'),
+    auditPath: join(home, 'audit.jsonl'),
   };
 
   server.registerTool('helix_memory_commit', {

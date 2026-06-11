@@ -77,6 +77,17 @@ describe('dualVerify', () => {
     expect(r.ran).toBe(true);
   });
 
+  it('refuses fail-closed when the payload contains a secret — never sends it to external Codex', async () => {
+    let called = false;
+    const r = await dualVerify(
+      { question: 'is this key live?', helixAnswer: 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34' },
+      deps({ config: enabled(), runner: async () => { called = true; return { ok: true, answer: 'x' }; } }));
+    expect(r.ran).toBe(false);
+    expect(r.attempted).toBe(false);
+    expect(r.reason).toMatch(/secret/i);
+    expect(called).toBe(false); // the secret must not leave the machine
+  });
+
   it('passes the configured model + effort to the runner', async () => {
     let seen: { model?: string | null; effort?: string | null } | undefined;
     await dualVerify({ question: 'q', helixAnswer: 'a' }, deps({

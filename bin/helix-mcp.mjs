@@ -21423,6 +21423,9 @@ async function dualVerify(params, deps) {
   if (params.stakes && STAKES_RANK[params.stakes] < STAKES_RANK[floor]) {
     return { ran: false, attempted: false, reason: `stakes '${params.stakes}' below configured floor '${floor}'` };
   }
+  if (detectSecret(params.question).hit || detectSecret(params.helixAnswer).hit) {
+    return { ran: false, attempted: false, reason: "refused: payload contains a secret (not sent to external Codex)" };
+  }
   const avail = await deps.checkAvailable();
   if (!avail.available) return { ran: false, attempted: false, reason: avail.reason ?? "codex unavailable" };
   const mode = deps.config.dualVerify.mode;
@@ -21688,11 +21691,12 @@ var realCodexRunner = createCodexRunner();
 // src/server/helix-server.ts
 function buildServer(store2, dualDeps) {
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
+  const home2 = process.env.HELIX_HOME ?? join3(homedir2(), ".helix");
   const dv = dualDeps ?? {
-    config: loadConfig(),
+    config: loadConfig({ globalPath: join3(home2, "config.json") }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
-    auditPath: join3(homedir2(), ".helix", "audit.jsonl")
+    auditPath: join3(home2, "audit.jsonl")
   };
   server2.registerTool("helix_memory_commit", {
     title: "Commit memory",

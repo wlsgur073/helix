@@ -2,6 +2,7 @@ import type { HelixConfig } from '../config.js';
 import type { Availability, CodexRunner } from './codex.js';
 import { buildAgreementMap, type AgreementMap } from './agreement-map.js';
 import { neutralizeFenceMarkers } from '../memory/content-frame.js';
+import { detectSecret } from '../memory/secret-scan.js';
 
 export interface DualVerifyDeps {
   config: HelixConfig;
@@ -55,6 +56,14 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
   const floor = deps.config.dualVerify.stakesFloor;
   if (params.stakes && STAKES_RANK[params.stakes] < STAKES_RANK[floor]) {
     return { ran: false, attempted: false, reason: `stakes '${params.stakes}' below configured floor '${floor}'` };
+  }
+
+  // Outbound secret firewall: dual-verify ships context to an EXTERNAL model (OpenAI cloud).
+  // The memory path redacts secrets before persisting locally; this sibling path must not be
+  // a softer exfiltration channel. Fail closed — refuse rather than redact (a redacted
+  // question/answer would make the verification meaningless anyway). Free, local, pre-spawn.
+  if (detectSecret(params.question).hit || detectSecret(params.helixAnswer).hit) {
+    return { ran: false, attempted: false, reason: 'refused: payload contains a secret (not sent to external Codex)' };
   }
 
   const avail = await deps.checkAvailable();
