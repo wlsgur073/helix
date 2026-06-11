@@ -2,13 +2,15 @@ import { appendFileSync, readFileSync, mkdirSync, openSync, fsyncSync, closeSync
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
+import { withFileLock } from './lock.js';
 
 export type LedgerPath = string;
 
-/** Append one record as a single JSONL line. Creates parent dirs as needed. */
+/** Append one record as a single JSONL line. Creates parent dirs as needed.
+ *  Locked so a concurrent compaction (rewrite+rename) in another process can't drop it. */
 export function appendRecord(path: LedgerPath, record: MemoryRecord): void {
   mkdirSync(dirname(path), { recursive: true });
-  appendFileSync(path, JSON.stringify(record) + '\n');
+  withFileLock(path, () => appendFileSync(path, JSON.stringify(record) + '\n'));
 }
 
 /** Read every record from the ledger, in append order. Missing file -> []. */
@@ -47,30 +49,37 @@ export interface CompactOptions {
  * marker (so an erasure leaves an audit trace but no plaintext — satisfies right-to-erasure).
  */
 export function compactLedger(path: LedgerPath, opts: CompactOptions): void {
-  const records = parseLedger(path);
+  // Hold the lock across read -> rewrite -> rename so a concurrent append can't be lost and a
+  // stale snapshot can't resurrect erased content. parseLedger runs INSIDE the lock, so we
+  // always compact the latest committed state.
+  withFileLock(path, () => {
+    const records = parseLedger(path);
 
-  // The live projection already excludes superseded/invalidated/erased targets and applies
-  // verify states, so materializing it yields the canonical current facts.
-  const live = buildProjection(records);
-  const kept: MemoryRecord[] = [];
-  for (const r of live.values()) {
-    if (!opts.erasedIds.has(r.id)) kept.push(r);
-  }
-  // Keep a content-free tombstone for each erase marker (audit: an erasure happened).
-  // NOTE: tombstones persist across compactions, retaining `supersedes: <erasedId>`. With
-  // randomUUID ids, reusing an erased id is effectively impossible; but if ids ever become
-  // caller-supplied, a reused id would be silently removed by the stale tombstone.
-  for (const r of records) {
-    if (r.type === 'erase') kept.push({ ...r, content: '' });
-  }
+    // The live projection already excludes superseded/invalidated/erased targets and applies
+    // verify states, so materializing it yields the canonical current facts.
+    const live = buildProjection(records);
+    const kept: MemoryRecord[] = [];
+    for (const r of live.values()) {
+      if (!opts.erasedIds.has(r.id)) kept.push(r);
+    }
+    // Keep a content-free tombstone for each erase marker (audit: an erasure happened).
+    // NOTE: tombstones persist across compactions, retaining `supersedes: <erasedId>`. With
+    // randomUUID ids, reusing an erased id is effectively impossible; but if ids ever become
+    // caller-supplied, a reused id would be silently removed by the stale tombstone.
+    for (const r of records) {
+      if (r.type === 'erase') kept.push({ ...r, content: '' });
+    }
 
-  const tmp = path + '.tmp';
-  const fd = openSync(tmp, 'w');
-  try {
-    for (const r of kept) writeSync(fd, JSON.stringify(r) + '\n');
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  renameSync(tmp, path); // atomic on the same filesystem
+    // Per-process tmp name: even if the lock is ever stolen, two processes never share a
+    // half-written tmp file (the rename stays atomic on the same filesystem).
+    const tmp = `${path}.${process.pid}.tmp`;
+    const fd = openSync(tmp, 'w');
+    try {
+      for (const r of kept) writeSync(fd, JSON.stringify(r) + '\n');
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmp, path); // atomic on the same filesystem
+  });
 }

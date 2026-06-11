@@ -13014,7 +13014,7 @@ var StdioServerTransport = class {
 import { randomUUID } from "node:crypto";
 
 // src/memory/ledger.ts
-import { appendFileSync, readFileSync, mkdirSync, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
+import { appendFileSync, readFileSync, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 // src/memory/projection.ts
@@ -13053,10 +13053,57 @@ function recall(projection, query, opts = {}) {
   return scored.slice(0, max).map((s) => s.rec);
 }
 
+// src/memory/lock.ts
+import { mkdirSync, rmSync, statSync } from "node:fs";
+var DEFAULT_STALE_MS = 1e4;
+var DEFAULT_MAX_WAIT_MS = 5e3;
+var RETRY_MS = 25;
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function withFileLock(target, fn, opts = {}) {
+  const lockDir = target + ".lock";
+  const staleMs = opts.staleMs ?? DEFAULT_STALE_MS;
+  const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
+  let waited = 0;
+  for (; ; ) {
+    try {
+      mkdirSync(lockDir);
+      break;
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      let ageMs = 0;
+      try {
+        ageMs = Date.now() - statSync(lockDir).mtimeMs;
+      } catch {
+        ageMs = 0;
+      }
+      if (ageMs > staleMs) {
+        try {
+          rmSync(lockDir, { recursive: true, force: true });
+        } catch {
+        }
+        continue;
+      }
+      if (waited >= maxWaitMs) throw new Error(`withFileLock: timed out acquiring ${lockDir} after ${maxWaitMs}ms`);
+      sleepSync(RETRY_MS);
+      waited += RETRY_MS;
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      rmSync(lockDir, { recursive: true, force: true });
+    } catch {
+    }
+  }
+}
+
 // src/memory/ledger.ts
 function appendRecord(path, record2) {
-  mkdirSync(dirname(path), { recursive: true });
-  appendFileSync(path, JSON.stringify(record2) + "\n");
+  mkdirSync2(dirname(path), { recursive: true });
+  withFileLock(path, () => appendFileSync(path, JSON.stringify(record2) + "\n"));
 }
 function parseLedger(path) {
   let text;
@@ -13078,24 +13125,26 @@ function parseLedger(path) {
   return out;
 }
 function compactLedger(path, opts) {
-  const records = parseLedger(path);
-  const live = buildProjection(records);
-  const kept = [];
-  for (const r of live.values()) {
-    if (!opts.erasedIds.has(r.id)) kept.push(r);
-  }
-  for (const r of records) {
-    if (r.type === "erase") kept.push({ ...r, content: "" });
-  }
-  const tmp = path + ".tmp";
-  const fd = openSync(tmp, "w");
-  try {
-    for (const r of kept) writeSync(fd, JSON.stringify(r) + "\n");
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  renameSync(tmp, path);
+  withFileLock(path, () => {
+    const records = parseLedger(path);
+    const live = buildProjection(records);
+    const kept = [];
+    for (const r of live.values()) {
+      if (!opts.erasedIds.has(r.id)) kept.push(r);
+    }
+    for (const r of records) {
+      if (r.type === "erase") kept.push({ ...r, content: "" });
+    }
+    const tmp = `${path}.${process.pid}.tmp`;
+    const fd = openSync(tmp, "w");
+    try {
+      for (const r of kept) writeSync(fd, JSON.stringify(r) + "\n");
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmp, path);
+  });
 }
 
 // src/memory/secret-scan.ts
@@ -21443,10 +21492,10 @@ async function dualVerify(params, deps) {
 }
 
 // src/audit.ts
-import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync2 } from "node:fs";
+import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync3 } from "node:fs";
 import { dirname as dirname2 } from "node:path";
 function appendAudit(path, event) {
-  mkdirSync2(dirname2(path), { recursive: true });
+  mkdirSync3(dirname2(path), { recursive: true });
   appendFileSync2(path, JSON.stringify(event) + "\n");
 }
 
@@ -21563,7 +21612,7 @@ function loadConfig(opts = {}) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync as readFileSync3, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync as readFileSync3, rmSync as rmSync2 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname as dirname3, join as join2 } from "node:path";
 import { promisify } from "node:util";
@@ -21700,7 +21749,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation) {
       return { ok: false, error: e.message };
     } finally {
       try {
-        rmSync(dir, { recursive: true, force: true });
+        rmSync2(dir, { recursive: true, force: true });
       } catch {
       }
     }
