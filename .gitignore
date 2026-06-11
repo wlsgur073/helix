@@ -1,22 +1,50 @@
-# Helix's local philosophy.  Soul of the project — kept off git intentionally.
+# Helix — .gitignore
+# Committed surface = the plugin itself: .claude-plugin/ .mcp.json hooks/ bin/
+# src/ test/ scripts/ build.mjs and the root configs. Everything below is
+# private, generated, or machine-local.
+# (gitignore has NO inline comments — every comment is its own line.)
+
+# ── Private — kept off git intentionally ──
+# guideline/ = project philosophy (authoritative); docs/ = research/specs/plans;
+# CLAUDE.md = operating shell. All local-only.
 guideline/
 docs/
-
-# Operating shell — also local, mirrors guideline/'s privacy.
 CLAUDE.md
 
-# Tooling learning state (guardians-of-the-claude, etc.) — local-only.
+# ── Machine-local state (per-user, never shared) ──
+# .claude/ = Claude Code config + tooling state
+# .helix/  = Helix runtime state (ledger, config, audit, sessions)
+# .remember/ = session-continuity buffer (also self-ignored within)
+# vault/ + **/.obsidian/ = Obsidian vault, personal notes / WIP
 .claude/
-
-# Helix session-local working state
 .helix/
-
-# Obsidian vault — local-only, contains personal notes and work-in-progress.
+.remember/
 vault/
 **/.obsidian/
 
-# Node
+# ── Dependencies & build output ──
+# dist/ = tsc emit target (typecheck is --noEmit; the real build → bin/).
+# bin/ is committed ON PURPOSE: a cloned plugin gets no `npm install`, so the
+# bundled MCP server + hook scripts must ship as self-contained files.
 node_modules/
 dist/
-# NOTE: bin/ (esbuild bundles) is committed on purpose — a cloned plugin gets no
-# npm install, so the MCP server + hook scripts must be self-contained files.
+*.tsbuildinfo
+
+# ── Test / coverage artifacts ──
+coverage/
+
+# ── Secrets & local env ──
+.env
+.env.*
+
+# ── Logs ──
+*.log
+npm-debug.log*
+
+# ── OS & editor cruft ──
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
