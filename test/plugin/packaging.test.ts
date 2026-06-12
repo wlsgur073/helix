@@ -17,12 +17,22 @@ describe('plugin manifest', () => {
   });
 });
 
-describe('.mcp.json (plugin MCP registration)', () => {
-  it('registers the helix stdio server at the plugin-format top level (no mcpServers wrapper)', () => {
-    const m = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf8'));
-    expect(m.mcpServers).toBeUndefined(); // plugin format: server names at top level
-    expect(m.helix.command).toBe('node');
-    expect(m.helix.args).toEqual(['${CLAUDE_PLUGIN_ROOT}/bin/helix-mcp.mjs']);
+describe('plugin MCP registration (.claude-plugin/plugin.json mcpServers)', () => {
+  // MCP is declared inline in the plugin manifest (not a repo-root .mcp.json). A repo-root
+  // .mcp.json would ALSO be loaded as a project-scoped MCP config, where ${CLAUDE_PLUGIN_ROOT}
+  // is undefined — /doctor then warns "Missing environment variables". Inline plugin.json is
+  // only ever read in plugin context, where the variable resolves.
+  it('registers the helix stdio server inline in the plugin manifest', () => {
+    const m = JSON.parse(readFileSync(join(root, '.claude-plugin/plugin.json'), 'utf8'));
+    expect(m.mcpServers.helix.command).toBe('node');
+    expect(m.mcpServers.helix.args).toEqual(['${CLAUDE_PLUGIN_ROOT}/bin/helix-mcp.mjs']);
+  });
+
+  it('no repo-root .mcp.json exists (would dual-load as a project-scoped config)', () => {
+    // Guard the migration: a reintroduced repo-root .mcp.json is also scanned as a
+    // project-scoped MCP config, where ${CLAUDE_PLUGIN_ROOT} is undefined → /doctor warns.
+    // `claude plugin validate` does not inspect MCP structure, so this test is the only guard.
+    expect(existsSync(join(root, '.mcp.json'))).toBe(false);
   });
 
   it('the referenced server bundle exists (committed, self-contained)', () => {

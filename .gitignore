@@ -1,5 +1,5 @@
 # Helix — .gitignore
-# Committed surface = the plugin itself: .claude-plugin/ .mcp.json hooks/ bin/
+# Committed surface = the plugin itself: .claude-plugin/ (MCP inline) hooks/ bin/
 # src/ test/ scripts/ build.mjs and the root configs. Everything below is
 # private, generated, or machine-local.
 # (gitignore has NO inline comments — every comment is its own line.)

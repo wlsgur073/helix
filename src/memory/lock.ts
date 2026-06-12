@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, statSync } from 'node:fs';
 
-// Cross-process advisory lock around the JSONL ledger. The .mcp.json ships no per-session
+// Cross-process advisory lock around the JSONL ledger. The plugin ships no per-session
 // isolation, so concurrent Claude Code sessions each run a helix-mcp process against the same
 // ~/.helix/memory.jsonl. Without serialization a compaction (read -> rewrite -> rename) can
 // drop a commit appended by another process, or a pre-erase snapshot can rewrite erased
