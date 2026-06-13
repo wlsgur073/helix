@@ -1,4 +1,5 @@
 import type { MemoryRecord } from '../types.js';
+import { rankRecords } from './retrieval.js';
 
 export type Projection = Map<string, MemoryRecord>;
 
@@ -38,19 +39,9 @@ export interface RecallOptions {
 }
 
 /**
- * Return the live items relevant to a query. v1 ranking is simple lexical term-overlap;
- * ranked FTS/BM25 retrieval is summoned later (spec §6). Results are capped so injected
- * tokens stay bounded regardless of total memory size (spec §8).
+ * Return the live items relevant to a query, ranked by the lexical scorer
+ * (phrase/coverage-first, BM25-assisted, trust-margin). See src/memory/retrieval.ts.
  */
 export function recall(projection: Projection, query: string, opts: RecallOptions = {}): MemoryRecord[] {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const scored: Array<{ rec: MemoryRecord; score: number }> = [];
-  for (const rec of projection.values()) {
-    const text = rec.content.toLowerCase();
-    const score = terms.reduce((n, t) => (text.includes(t) ? n + 1 : n), 0);
-    if (score > 0) scored.push({ rec, score });
-  }
-  scored.sort((a, b) => b.score - a.score);
-  const max = opts.maxItems ?? 20;
-  return scored.slice(0, max).map((s) => s.rec);
+  return rankRecords([...projection.values()], query, opts);
 }

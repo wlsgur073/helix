@@ -13017,6 +13017,218 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
+// src/memory/retrieval.ts
+var CJK = /[\p{Script=Hangul}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+var ALNUM = /[\p{L}\p{N}]/u;
+function normalizeText(s) {
+  return s.normalize("NFKC").toLowerCase();
+}
+function splitIdentifier(run) {
+  return run.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Za-z])([0-9])/g, "$1 $2").replace(/([0-9])([A-Za-z])/g, "$1 $2").split(/\s+/).filter(Boolean);
+}
+function tokenize(text) {
+  const norm2 = text.normalize("NFKC");
+  const out = [];
+  let latin = "";
+  const cjk = [];
+  const flushLatin = () => {
+    if (latin) {
+      for (const t of splitIdentifier(latin)) out.push(t.toLowerCase());
+      latin = "";
+    }
+  };
+  const flushCjk = () => {
+    if (cjk.length) {
+      for (const ch of cjk) out.push(ch);
+      for (let i = 0; i + 1 < cjk.length; i++) out.push(`${cjk[i]}${cjk[i + 1]}`);
+      cjk.length = 0;
+    }
+  };
+  for (const ch of norm2) {
+    if (CJK.test(ch)) {
+      flushLatin();
+      cjk.push(ch);
+    } else if (ALNUM.test(ch)) {
+      flushCjk();
+      latin += ch;
+    } else {
+      flushLatin();
+      flushCjk();
+    }
+  }
+  flushLatin();
+  flushCjk();
+  return out;
+}
+var EN_STOP = /* @__PURE__ */ new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "of",
+  "to",
+  "in",
+  "on",
+  "at",
+  "for",
+  "with",
+  "by",
+  "from",
+  "as",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "it",
+  "its",
+  "this",
+  "that",
+  "these",
+  "those",
+  "i",
+  "we",
+  "you",
+  "my",
+  "our",
+  "your",
+  "what",
+  "which",
+  "who",
+  "when",
+  "where",
+  "how",
+  "did",
+  "do",
+  "does",
+  "done",
+  "about",
+  "into",
+  "over",
+  "than",
+  "then",
+  "so",
+  "if",
+  "but",
+  "not",
+  "no"
+]);
+var KO_PARTICLE = /* @__PURE__ */ new Set([
+  "\uC740",
+  "\uB294",
+  "\uC774",
+  "\uAC00",
+  "\uC744",
+  "\uB97C",
+  "\uC5D0",
+  "\uB3C4",
+  "\uC758",
+  "\uC640",
+  "\uACFC",
+  "\uB85C",
+  "\uC73C\uB85C",
+  "\uC5D0\uC11C",
+  "\uC5D0\uAC8C",
+  "\uAE4C\uC9C0",
+  "\uBD80\uD130",
+  "\uB9CC",
+  "\uD55C\uD14C"
+]);
+function isStopword(w) {
+  return EN_STOP.has(w) || KO_PARTICLE.has(w);
+}
+function meaningfulTokens(tokens) {
+  return tokens.filter((t) => !isStopword(t));
+}
+function coverageScore(qTerms, docTokens) {
+  if (qTerms.length === 0) return 0;
+  const docSet = new Set(docTokens);
+  let matched = 0;
+  for (const t of qTerms) {
+    if (docSet.has(t)) {
+      matched += 1;
+      continue;
+    }
+    if (t.length >= 3 && docTokens.some((d) => d.startsWith(t))) matched += 1;
+  }
+  return matched / qTerms.length;
+}
+function phraseScore(query, docContent) {
+  const d = normalizeText(docContent);
+  const words = normalizeText(query).split(/\s+/).filter(Boolean);
+  let i = 0;
+  while (i < words.length && isStopword(words[i])) i += 1;
+  const q = words.slice(i).join(" ");
+  if (q.length === 0) return 0;
+  const minLen = CJK.test(q) ? 2 : 3;
+  if (q.length < minLen) return 0;
+  if (d.includes(q)) return 1;
+  for (let len = q.length - 1; len >= minLen; len -= 1) {
+    if (d.includes(q.slice(0, len))) return len / q.length;
+  }
+  return 0;
+}
+function buildIndex(docs) {
+  const tf = /* @__PURE__ */ new Map();
+  const len = /* @__PURE__ */ new Map();
+  const df = /* @__PURE__ */ new Map();
+  let total = 0;
+  for (const { id, tokens } of docs) {
+    const counts = /* @__PURE__ */ new Map();
+    for (const t of tokens) counts.set(t, (counts.get(t) ?? 0) + 1);
+    tf.set(id, counts);
+    len.set(id, tokens.length);
+    total += tokens.length;
+    for (const t of counts.keys()) df.set(t, (df.get(t) ?? 0) + 1);
+  }
+  const N = docs.length;
+  return { tf, len, df, N, avgdl: N ? total / N : 0 };
+}
+function idf(term, idx) {
+  const d = idx.df.get(term) ?? 0;
+  return Math.log(1 + (idx.N - d + 0.5) / (d + 0.5));
+}
+function bm25Score(id, qTerms, idx) {
+  const counts = idx.tf.get(id);
+  if (!counts || idx.N === 0) return 0;
+  const k1 = 1.2;
+  const b = idx.N < 10 ? 0.25 : 0.75;
+  const dl = idx.len.get(id) ?? 0;
+  const lenNorm = idx.avgdl ? dl / idx.avgdl : 1;
+  let score = 0;
+  for (const t of new Set(qTerms)) {
+    const f = counts.get(t) ?? 0;
+    if (f === 0) continue;
+    score += idf(t, idx) * (f * (k1 + 1)) / (f + k1 * (1 - b + b * lenNorm));
+  }
+  return score;
+}
+var W_PHRASE = 0.5;
+var W_COVERAGE = 0.4;
+var W_BM25 = 0.1;
+var TRUST_PENALTY = { Verified: 0, Fresh: 0.02, Suspect: 0.1 };
+function rankRecords(records, query, opts = {}) {
+  const qMeaning = [...new Set(meaningfulTokens(tokenize(query)))];
+  if (qMeaning.length === 0 || records.length === 0) return [];
+  const docs = records.map((r) => ({ rec: r, tokens: tokenize(r.content) }));
+  const idx = buildIndex(docs.map((d) => ({ id: d.rec.id, tokens: d.tokens })));
+  const rawBm = /* @__PURE__ */ new Map();
+  for (const d of docs) rawBm.set(d.rec.id, bm25Score(d.rec.id, qMeaning, idx));
+  const vals = [...rawBm.values()];
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  const bm25norm = (id) => max === min ? 0 : (rawBm.get(id) - min) / (max - min);
+  const scored = docs.map((d) => {
+    const relevance = W_PHRASE * phraseScore(query, d.rec.content) + W_COVERAGE * coverageScore(qMeaning, d.tokens) + W_BM25 * bm25norm(d.rec.id);
+    return { rec: d.rec, relevance, final: relevance - TRUST_PENALTY[d.rec.state] };
+  }).filter((s) => s.relevance > 0);
+  scored.sort((a, b) => b.final - a.final || b.rec.tx.localeCompare(a.rec.tx));
+  return scored.slice(0, opts.maxItems ?? 20).map((s) => s.rec);
+}
+
 // src/memory/projection.ts
 function buildProjection(records) {
   const removed = /* @__PURE__ */ new Set();
@@ -13041,16 +13253,7 @@ function buildProjection(records) {
   return live;
 }
 function recall(projection, query, opts = {}) {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const scored = [];
-  for (const rec of projection.values()) {
-    const text = rec.content.toLowerCase();
-    const score = terms.reduce((n, t) => text.includes(t) ? n + 1 : n, 0);
-    if (score > 0) scored.push({ rec, score });
-  }
-  scored.sort((a, b) => b.score - a.score);
-  const max = opts.maxItems ?? 20;
-  return scored.slice(0, max).map((s) => s.rec);
+  return rankRecords([...projection.values()], query, opts);
 }
 
 // src/memory/lock.ts
