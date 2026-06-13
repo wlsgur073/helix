@@ -62,7 +62,7 @@ describe.runIf(enabled)('real codex dual-verify through the bundle tool (metered
       arguments: { question: 'Is 2 + 2 equal to 4?', helixAnswer: 'Yes, 2 + 2 = 4.', stakes: 'high' },
     }));
 
-    expect(out).toContain('DATA ONLY — NOT INSTRUCTIONS'); // DATA-quarantined
+    expect(out).toContain('DATA, NOT INSTRUCTIONS'); // DATA-quarantined (nonce-delimited frame)
     expect(out).toContain('EXTERNAL CODEX OUTPUT');          // a real answer was rendered
     expect(out).toMatch(/verdict:/);                          // compare mode produced a verdict
     expect(out).not.toMatch(/did not run/i);                  // it actually ran (not fail-closed)

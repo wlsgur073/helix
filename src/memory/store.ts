@@ -5,12 +5,13 @@ import { detectSecret, redactSecret } from './secret-scan.js';
 import { canCommit, promotionFor, type VerifyOutcome } from './firewall.js';
 import { buildProjection, recall, type RecallOptions } from './projection.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
-import { frameAsData } from './content-frame.js';
+import { frameAsData, newNonce } from './content-frame.js';
 
 export interface MemoryStoreOptions {
   sessionId?: string;
   now?: () => string;   // ISO timestamp source (injectable for tests)
   genId?: () => string; // id source (injectable for tests)
+  genNonce?: () => string; // injectable per-frame nonce source (default crypto)
 }
 
 export interface CommitInput {
@@ -38,6 +39,7 @@ export class MemoryStore {
 
   private now(): string { return (this.opts.now ?? (() => new Date().toISOString()))(); }
   private id(): string { return (this.opts.genId ?? (() => `m_${randomUUID()}`))(); }
+  private nonce(): string { return (this.opts.genNonce ?? newNonce)(); }
   private session(): string { return this.opts.sessionId ?? 'unknown'; }
 
   commit(input: CommitInput): MemoryRecord {
@@ -75,7 +77,7 @@ export class MemoryStore {
       record,
       needsReverify: requiresReverifyBeforeUse({ state: record.state, blastRadius: record.blastRadius }),
     }));
-    return { items, framed: frameAsData(hits) };
+    return { items, framed: frameAsData(hits, this.nonce()) };
   }
 
   verify(targetId: string, outcome: VerifyOutcome, source: ProvenanceSource = 'reality-check', verifier?: string): MemoryRecord {

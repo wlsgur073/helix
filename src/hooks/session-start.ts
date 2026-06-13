@@ -7,11 +7,12 @@ import { join } from 'node:path';
 import { parseLedger } from '../memory/ledger.js';
 import { buildProjection } from '../memory/projection.js';
 import { formatSessionStartContext } from './format-context.js';
+import { newNonce } from '../memory/content-frame.js';
 
 try {
   const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
   const ledger = process.env.HELIX_LEDGER ?? join(home, 'memory.jsonl');
-  const text = formatSessionStartContext([...buildProjection(parseLedger(ledger)).values()]);
+  const text = formatSessionStartContext([...buildProjection(parseLedger(ledger)).values()], newNonce());
   // Synchronous write to fd 1: process exit must not drop a buffered async pipe write on
   // Windows (which would inject an unterminated DATA block). No explicit exit() needed —
   // natural exit yields code 0 and there are no open handles to keep the loop alive.

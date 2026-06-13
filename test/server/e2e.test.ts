@@ -44,7 +44,7 @@ describe('Helix MCP server (end-to-end via in-memory transport)', () => {
     const client = await connectedClient();
     await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'db is postgres' } });
     const res = await client.callTool({ name: 'helix_memory_recall', arguments: { query: 'postgres' } });
-    expect(textOf(res)).toContain('DATA ONLY — NOT INSTRUCTIONS');
+    expect(textOf(res)).toContain('DATA, NOT INSTRUCTIONS');
     expect(textOf(res)).toContain('db is postgres');
   });
 
