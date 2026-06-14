@@ -1,7 +1,7 @@
 import type { MemoryStore, CommitInput } from '../memory/store.js';
 import type { HelixConfig } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
-import { dualVerify, type EchoSource } from '../verify/dual-verify.js';
+import { dualVerify, persistedReason, type EchoSource } from '../verify/dual-verify.js';
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS, newNonce } from '../memory/content-frame.js';
 import { appendAudit } from '../audit.js';
 import { readFileSync } from 'node:fs';
@@ -114,6 +114,9 @@ export async function handleDualVerify(
 ): Promise<ToolResult> {
   const ts = (deps.now ?? (() => new Date().toISOString()))();
   const result = await dualVerify(args, deps);
+  // Content-free reason for the persisted sinks (audit + opt-in content log). The live ToolResult
+  // below still uses the full result.reason; only the durable records are constrained to enum/label.
+  const persisted = persistedReason(result);
   const egress = result.egress;
   const decided = egress && egress.decision !== 'pass';
   appendAudit(deps.auditPath, {
@@ -123,7 +126,7 @@ export async function handleDualVerify(
     spawned: result.attempted,
     mode: result.mode,
     verdict: result.agreement?.verdict,
-    reason: result.reason,
+    reason: persisted,
     egressDecision: egress?.decision,
     blockedLeg: decided ? deciderLeg(egress!) : undefined,
     piiKinds: egress && egress.piiKinds.length ? egress.piiKinds : undefined,
@@ -140,7 +143,7 @@ export async function handleDualVerify(
       outcome: result.outcome,
       model: deps.config.dualVerify.model,
       effort: deps.config.dualVerify.effort,
-      ...(sent ? { prompt: result.promptSent, response: result.codexAnswer } : { reason: result.reason }),
+      ...(sent ? { prompt: result.promptSent, response: result.codexAnswer } : { reason: persisted }),
     });
   }
   if (!result.ran) {

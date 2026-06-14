@@ -135,6 +135,23 @@ describe('handleDualVerify egress audit', () => {
   });
 });
 
+describe('handleDualVerify: error reason is content-free in the persisted sinks', () => {
+  // dualVerify's `error` reason embeds up to 500 chars of Codex stderr (codex.ts). That free-text
+  // is fine in the ephemeral ToolResult (debuggability) but must NEVER reach audit.jsonl, whose
+  // invariant is enum/label only. persistedReason reduces it to a static label at the boundary.
+  it('keeps codex stderr in the live ToolResult but NEVER writes it to audit', async () => {
+    const STDERR = 'codex exited 1: STDERR-LEAK-MARKER-1234 internal trace path /tmp/x';
+    const d = deps({ runner: async () => ({ ok: false, error: STDERR }) });
+    const res = await handleDualVerify({ question: 'q', helixAnswer: 'a' }, d);
+    // live result keeps the stderr so the operator can debug the failed run
+    expect(text(res)).toContain('STDERR-LEAK-MARKER-1234');
+    // audit stays content-free: not a byte of the stderr body lands on disk
+    const raw = readFileSync(d.auditPath, 'utf8');
+    expect(raw).not.toContain('STDERR-LEAK-MARKER-1234');
+    expect(JSON.parse(raw.trim()).reason).toBe('codex run failed');
+  });
+});
+
 const onConfig = (over: Partial<HelixConfig['dualVerify']> = {}) =>
   ({ dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: null, effort: null, memoryEgress: 'block', logContent: true, ...over } } as HelixConfig);
 
@@ -187,6 +204,38 @@ describe('handleDualVerify: opt-in content log (logContent)', () => {
     await handleDualVerify({ question: 'q', helixAnswer: 'a' }, d);
     const entry = JSON.parse(readFileSync(d.codexLogPath, 'utf8').trim());
     expect(entry.outcome).toBe('error');
+    expect('prompt' in entry).toBe(false);
+    expect('response' in entry).toBe(false);
+  });
+
+  it('logContent:true + error -> the logged reason is content-free (codex stderr stripped)', async () => {
+    const d = deps({ config: onConfig(), runner: async () => ({ ok: false, error: 'codex exited 1: STDERR-IN-LOG-MARKER' }) });
+    await handleDualVerify({ question: 'q', helixAnswer: 'a' }, d);
+    const raw = readFileSync(d.codexLogPath, 'utf8');
+    expect(raw).not.toContain('STDERR-IN-LOG-MARKER');   // stderr never reaches the durable log
+    expect(JSON.parse(raw.trim()).reason).toBe('codex run failed');
+  });
+
+  it('logContent:true + skipped (below-floor) -> one metadata-only line, NO prompt/response', async () => {
+    const d = deps({ config: onConfig(), runner: async () => { throw new Error('must not spawn below floor'); } });
+    await handleDualVerify({ question: 'q', helixAnswer: 'a', stakes: 'low' }, d);
+    const lines = readFileSync(d.codexLogPath, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    const entry = JSON.parse(lines[0]!);
+    expect(entry.outcome).toBe('skipped');
+    expect(entry.reason).toMatch(/below configured floor/);
+    expect('prompt' in entry).toBe(false);
+    expect('response' in entry).toBe(false);
+  });
+
+  it('logContent:true + skipped (disabled) -> one metadata-only line, NO prompt/response', async () => {
+    const d = deps({ config: onConfig({ enabled: false }) });
+    await handleDualVerify({ question: 'q', helixAnswer: 'a' }, d);
+    const lines = readFileSync(d.codexLogPath, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    const entry = JSON.parse(lines[0]!);
+    expect(entry.outcome).toBe('skipped');
+    expect(entry.reason).toMatch(/disabled/);
     expect('prompt' in entry).toBe(false);
     expect('response' in entry).toBe(false);
   });

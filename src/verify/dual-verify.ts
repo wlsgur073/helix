@@ -46,6 +46,21 @@ export interface DualVerifyResult {
   egress?: EgressVerdict;
 }
 
+/**
+ * Content-free reason for the PERSISTED sinks (audit.jsonl + the opt-in content log). The live
+ * ToolResult still uses the full `result.reason`; only the persisted ledgers are constrained.
+ *
+ * The 'error' outcome's reason embeds up to 500 chars of Codex stderr (codex.ts) — the only
+ * unbounded free-text that reaches `reason` — so it is reduced to a static label here to honour the
+ * "audit = enum/label only" invariant. Every other outcome's reason is already enum/count-derived
+ * (disabled / below-floor / classifyEgress's content-free verdict / interpretPreflight's static
+ * strings) and passes through unchanged. The host-visible stderr lives on in the ToolResult, where
+ * free-text is legitimate (it is the host's own tool-call result, not a durable store).
+ */
+export function persistedReason(result: Pick<DualVerifyResult, 'outcome' | 'reason'>): string | undefined {
+  return result.outcome === 'error' ? 'codex run failed' : result.reason;
+}
+
 /** Critique-mode prompt: the answer under review is framed as data, not instructions.
  *  Forged markers in helixAnswer are normalized (NFKC/control/bidi/fence-break) so it cannot
  *  escape the frame sent to Codex. Outbound normalization only — no nonce/datamark (spec §11). */

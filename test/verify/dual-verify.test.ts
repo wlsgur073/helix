@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dualVerify, type DualVerifyDeps, type EchoSource } from '../../src/verify/dual-verify.js';
+import { dualVerify, persistedReason, type DualVerifyDeps, type EchoSource } from '../../src/verify/dual-verify.js';
 import { DEFAULT_CONFIG, type HelixConfig } from '../../src/config.js';
 import type { CodexOutcome } from '../../src/codex-log.js';
 
@@ -265,5 +265,24 @@ describe('dualVerify: outcome + promptSent (for opt-in content logging)', () => 
     expect(r.promptSent).toContain('which db?');
     expect(r.promptSent).toContain('use postgres');
     expect(r.promptSent).toMatch(/data to critique/i);
+  });
+});
+
+describe('persistedReason (content-free reason for the durable sinks)', () => {
+  it("reduces the 'error' outcome to a static label, dropping the embedded codex stderr", () => {
+    const withStderr = 'codex run failed: codex exited 1: STDERR-MARKER traceback /tmp/x';
+    expect(persistedReason({ outcome: 'error', reason: withStderr })).toBe('codex run failed');
+    expect(persistedReason({ outcome: 'error', reason: withStderr })).not.toContain('STDERR-MARKER');
+  });
+
+  it('passes through the already content-free reason for every non-error outcome', () => {
+    expect(persistedReason({ outcome: 'skipped', reason: 'dual-verify is disabled in config' }))
+      .toBe('dual-verify is disabled in config');
+    expect(persistedReason({ outcome: 'skipped', reason: "stakes 'low' below configured floor 'high'" }))
+      .toBe("stakes 'low' below configured floor 'high'");
+    expect(persistedReason({ outcome: 'refused', reason: 'blocked: memory-echo (2 items)' }))
+      .toBe('blocked: memory-echo (2 items)');
+    expect(persistedReason({ outcome: 'unavailable', reason: 'not logged in' })).toBe('not logged in');
+    expect(persistedReason({ outcome: 'sent', reason: undefined })).toBeUndefined();
   });
 });
