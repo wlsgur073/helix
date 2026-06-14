@@ -17,7 +17,9 @@ const server = buildServer(store, {
   config: loadConfig({ globalPath: join(home, 'config.json') }),
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
+  echo: { mode: 'enforce', ledgerTexts: () => store.inspect().map((r) => ({ id: r.id, content: r.content })) },
   auditPath: join(home, 'audit.jsonl'),
+  codexLogPath: join(home, 'codex-log.jsonl'),
 });
 const transport = new StdioServerTransport();
 await server.connect(transport);

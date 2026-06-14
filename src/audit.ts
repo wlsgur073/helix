@@ -10,6 +10,12 @@ export interface AuditEvent {
   mode?: 'compare' | 'critique';
   verdict?: 'agree' | 'diverge';
   reason?: string;
+  // --- egress guard fields (2b): enum / ID only — NEVER a matched span, secret, PII value,
+  // or memory snippet. Both blocked AND allowed-override events are logged. ---
+  egressDecision?: 'pass' | 'blocked' | 'allowed_override';
+  blockedLeg?: 'secret' | 'pii' | 'memory_echo';                       // the deciding leg
+  piiKinds?: Array<'email' | 'phone' | 'credit_card' | 'national_id'>; // labels, never values
+  echoMemoryIds?: string[];                                            // ledger IDs, never text
 }
 
 /** Append one audit event as a JSONL line. Creates parent dirs as needed. */

@@ -11,6 +11,15 @@ export interface CodexRunOptions { model?: string | null; effort?: string | null
 export type CodexRunner = (question: string, opts?: CodexRunOptions) => Promise<CodexResult>;
 export interface Availability { available: boolean; reason?: string }
 
+export type CodexAuthMode = 'chatgpt' | 'api-key' | 'none' | 'unknown';
+export interface CodexStatus {
+  cliFound: boolean;        // codex CLI present + version-parseable
+  version?: string;         // e.g. "0.139.0"
+  available: boolean;       // logged in (usable)
+  authMode: CodexAuthMode;
+  reason?: string;          // why unavailable, when !available
+}
+
 /** How to launch codex: the program file plus any argv prefix (e.g. the shim's JS entry). */
 export interface CodexInvocation { file: string; argsPrefix: string[] }
 
@@ -120,13 +129,43 @@ function runCodex(inv: CodexInvocation, args: string[], input: string | null, ti
   });
 }
 
-/** Pure: decide availability from `codex --version` and `codex login status` output. */
-export function interpretPreflight(versionOut: string, loginOut: string): Availability {
-  if (!/codex-cli\s+\d+\.\d+\.\d+/i.test(versionOut)) return { available: false, reason: 'codex CLI not found' };
-  // "logged in" is a substring of "Not logged in" — must exclude the negative forms.
+/**
+ * Pure: derive full status from `codex --version` and `codex login status` output.
+ * version/availability reuse the existing preflight rules; authMode is best-effort text parsing
+ * (Codex login status is human text, not a contract) with an `unknown` fallback so an
+ * unrecognized-but-logged-in phrasing degrades instead of crashing. The OPENAI_API_KEY *presence*
+ * (never its value) nudges ambiguous logged-in cases toward 'api-key'; login text is authoritative.
+ */
+export function interpretStatus(versionOut: string, loginOut: string): CodexStatus {
+  const m = /codex-cli\s+(\d+\.\d+\.\d+)/i.exec(versionOut);
+  const cliFound = m !== null;
+  const version = m?.[1];
+  if (!cliFound) {
+    return { cliFound: false, version: undefined, available: false, authMode: 'none', reason: 'codex CLI not found' };
+  }
+  // "logged in" is a substring of "Not logged in" — exclude the negative forms.
   const loggedIn = /logged in/i.test(loginOut) && !/not logged in|logged out|not authenticated/i.test(loginOut);
-  if (!loggedIn) return { available: false, reason: 'codex not logged in (run: codex login)' };
-  return { available: true };
+  if (!loggedIn) {
+    return { cliFound: true, version, available: false, authMode: 'none', reason: 'codex not logged in (run: codex login)' };
+  }
+  let authMode: CodexAuthMode;
+  if (/using ChatGPT/i.test(loginOut)) {
+    authMode = 'chatgpt';
+  } else if (/api[ -]?key|using an API key/i.test(loginOut)) {
+    authMode = 'api-key';
+  } else if (process.env.OPENAI_API_KEY) {
+    authMode = 'api-key'; // secondary signal: env-key presence (not value) on ambiguous phrasing
+  } else {
+    authMode = 'unknown';
+  }
+  return { cliFound: true, version, available: true, authMode };
+}
+
+/** Pure: decide availability from `codex --version` and `codex login status` output.
+ *  Delegates to interpretStatus so parsing has a single source of truth; contract is unchanged. */
+export function interpretPreflight(versionOut: string, loginOut: string): Availability {
+  const s = interpretStatus(versionOut, loginOut);
+  return s.available ? { available: true } : { available: false, reason: s.reason };
 }
 
 /** Real preflight through the resolved launcher. Any error -> unavailable (fail-closed). */
@@ -140,6 +179,26 @@ export async function checkCodexAvailable(invocation?: CodexInvocation | null): 
     return interpretPreflight(v.stdout + v.stderr, l.stdout + l.stderr);
   } catch (e) {
     return { available: false, reason: `codex preflight failed: ${(e as Error).message}` };
+  }
+}
+
+/**
+ * Real status probe through the resolved launcher. Runs `--version` + `login status` (each a 10s
+ * timeout, no quota spent), feeds stdout+stderr to interpretStatus. Any spawn/parse error ->
+ * a fail-closed not-found/not-logged-in status; never throws. FREE (no `codex exec`).
+ */
+export async function checkCodexStatus(invocation?: CodexInvocation | null): Promise<CodexStatus> {
+  try {
+    const inv = invocation !== undefined ? invocation : await resolveCodexInvocation();
+    if (!inv) {
+      return { cliFound: false, version: undefined, available: false, authMode: 'none', reason: 'codex launcher not found on PATH' };
+    }
+    const v = await runCodex(inv, ['--version'], null, 10_000);
+    const l = await runCodex(inv, ['login', 'status'], null, 10_000);
+    // Some CLIs print to stderr; feed both streams to the interpreter.
+    return interpretStatus(v.stdout + v.stderr, l.stdout + l.stderr);
+  } catch (e) {
+    return { cliFound: false, version: undefined, available: false, authMode: 'none', reason: `codex status check failed: ${(e as Error).message}` };
   }
 }
 

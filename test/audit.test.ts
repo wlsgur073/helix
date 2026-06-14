@@ -17,4 +17,30 @@ describe('appendAudit', () => {
     expect(JSON.parse(lines[0]!).kind).toBe('dual-verify');
     expect(JSON.parse(lines[1]!).verdict).toBe('diverge');
   });
+
+  it('round-trips the enum/ID-only egress fields', () => {
+    const p = tmpAudit();
+    const e: AuditEvent = {
+      kind: 'dual-verify', ts: '2026-06-14T00:00:00.000Z', enabled: true, spawned: false,
+      reason: 'blocked: memory-echo (2 items)',
+      egressDecision: 'blocked', blockedLeg: 'memory_echo',
+      piiKinds: ['email', 'credit_card'], echoMemoryIds: ['m_1', 'm_2'],
+    };
+    appendAudit(p, e);
+    const back = JSON.parse(readFileSync(p, 'utf8').trim());
+    expect(back.egressDecision).toBe('blocked');
+    expect(back.blockedLeg).toBe('memory_echo');
+    expect(back.piiKinds).toEqual(['email', 'credit_card']);
+    expect(back.echoMemoryIds).toEqual(['m_1', 'm_2']);
+  });
+
+  it('round-trips an allowed_override egress event', () => {
+    const p = tmpAudit();
+    const e: AuditEvent = {
+      kind: 'dual-verify', ts: '2026-06-14T00:00:00.000Z', enabled: true, spawned: true,
+      egressDecision: 'allowed_override', blockedLeg: 'pii', piiKinds: ['credit_card'],
+    };
+    appendAudit(p, e);
+    expect(JSON.parse(readFileSync(p, 'utf8').trim()).egressDecision).toBe('allowed_override');
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCodexExecArgs, interpretPreflight, interpretWhereOutput, treeKillSpec } from '../../src/verify/codex.js';
+import { buildCodexExecArgs, interpretPreflight, interpretStatus, interpretWhereOutput, treeKillSpec } from '../../src/verify/codex.js';
 
 describe('buildCodexExecArgs (prompt-via-stdin contract)', () => {
   it('builds the read-only, ephemeral, output-to-file command ending with "-" (verified vs codex-cli 0.138)', () => {
@@ -83,5 +83,63 @@ describe('interpretPreflight', () => {
     const r = interpretPreflight('codex-cli 0.138.0', 'Not logged in');
     expect(r.available).toBe(false);
     expect(r.reason).toMatch(/login/i);
+  });
+});
+
+describe('interpretStatus (pure: version + auth mode + availability)', () => {
+  it('ChatGPT subscription: cliFound + version + available + authMode chatgpt', () => {
+    const s = interpretStatus('codex-cli 0.139.0', 'Logged in using ChatGPT');
+    expect(s.cliFound).toBe(true);
+    expect(s.version).toBe('0.139.0');
+    expect(s.available).toBe(true);
+    expect(s.authMode).toBe('chatgpt');
+    expect(s.reason).toBeUndefined();
+  });
+
+  it('API-key login: authMode api-key, still available', () => {
+    const s = interpretStatus('codex-cli 0.139.0', 'Logged in using an API key');
+    expect(s.available).toBe(true);
+    expect(s.authMode).toBe('api-key');
+  });
+
+  it('not logged in: available false, authMode none, reason mentions login', () => {
+    const s = interpretStatus('codex-cli 0.139.0', 'Not logged in');
+    expect(s.cliFound).toBe(true);
+    expect(s.available).toBe(false);
+    expect(s.authMode).toBe('none');
+    expect(s.reason).toMatch(/login/i);
+  });
+
+  it('logged in but unrecognized phrasing: degrades to unknown, never crashes, still available', () => {
+    const s = interpretStatus('codex-cli 0.139.0', 'Logged in via some-new-provider-2099');
+    expect(s.available).toBe(true);
+    expect(s.authMode).toBe('unknown');
+  });
+
+  it('empty/garbage version: cliFound false, available false (fail-closed)', () => {
+    const s = interpretStatus('command not found', '');
+    expect(s.cliFound).toBe(false);
+    expect(s.version).toBeUndefined();
+    expect(s.available).toBe(false);
+    expect(s.authMode).toBe('none');
+    expect(s.reason).toMatch(/not found/i);
+  });
+});
+
+describe('interpretPreflight (regression: delegates to interpretStatus, contract preserved)', () => {
+  it('available when version matches and logged in', () => {
+    expect(interpretPreflight('codex-cli 0.138.0', 'Logged in using ChatGPT')).toEqual({ available: true });
+  });
+  it('unavailable when the version string is absent (CLI not found)', () => {
+    expect(interpretPreflight('command not found', 'Logged in using ChatGPT').available).toBe(false);
+  });
+  it('unavailable when not logged in, with a login hint', () => {
+    const r = interpretPreflight('codex-cli 0.138.0', 'Not logged in');
+    expect(r.available).toBe(false);
+    expect(r.reason).toMatch(/login/i);
+  });
+  it('result carries ONLY available+reason (no extra status fields leak through the contract)', () => {
+    expect(Object.keys(interpretPreflight('codex-cli 0.138.0', 'Logged in using ChatGPT'))).toEqual(['available']);
+    expect(Object.keys(interpretPreflight('codex-cli 0.138.0', 'Not logged in')).sort()).toEqual(['available', 'reason']);
   });
 });

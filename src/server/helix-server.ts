@@ -3,9 +3,9 @@ import { homedir } from 'node:os';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { MemoryStore } from '../memory/store.js';
-import { handleCommit, handleRecall, handleInspect, handleErase, handleDualVerify, type DualVerifyHandlerDeps } from './handlers.js';
+import { handleCommit, handleRecall, handleInspect, handleErase, handleDualVerify, handleCodexStatus, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
-import { realCodexRunner, checkCodexAvailable } from '../verify/codex.js';
+import { realCodexRunner, checkCodexAvailable, checkCodexStatus } from '../verify/codex.js';
 
 /** Build a Helix MCP server with the memory tools registered against `store`. */
 export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps): McpServer {
@@ -18,7 +18,15 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     config: loadConfig({ globalPath: join(home, 'config.json') }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
+    echo: { mode: 'enforce', ledgerTexts: () => store.inspect().map((r) => ({ id: r.id, content: r.content })) },
     auditPath: join(home, 'audit.jsonl'),
+    codexLogPath: join(home, 'codex-log.jsonl'),
+  };
+
+  const codexStatusDeps: CodexStatusDeps = {
+    inspect: () => checkCodexStatus(),
+    config: dv.config,
+    codexLogPath: dv.codexLogPath,
   };
 
   server.registerTool('helix_memory_commit', {
@@ -59,6 +67,12 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       stakes: z.enum(['low', 'medium', 'high']).optional(),
     },
   }, async (args) => handleDualVerify(args, dv));
+
+  server.registerTool('helix_codex_status', {
+    title: 'Codex status',
+    description: 'Show whether Helix is connected to Codex (CLI/version, login, auth mode), the dual-verify config, and the content-log state. Free — no metered Codex call.',
+    inputSchema: {},
+  }, async () => handleCodexStatus(codexStatusDeps));
 
   return server;
 }

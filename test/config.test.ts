@@ -63,4 +63,41 @@ describe('loadConfig', () => {
     const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { model: null } }));
     expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.model).toBeNull();
   });
+
+  it('defaults memoryEgress to block (fail-closed)', () => {
+    const cfg = loadConfig({ projectPath: join(tmpDir(), 'n.json'), globalPath: join(tmpDir(), 'n.json') });
+    expect(cfg.dualVerify.memoryEgress).toBe('block');
+    expect(DEFAULT_CONFIG.dualVerify.memoryEgress).toBe('block');
+  });
+
+  it('reads a valid memoryEgress override (allow)', () => {
+    const dir = tmpDir();
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { memoryEgress: 'allow' } }));
+    expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.memoryEgress).toBe('allow');
+  });
+
+  it('falls back to block on an unrecognized memoryEgress value (invalid config fails closed)', () => {
+    const dir = tmpDir();
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { memoryEgress: 'yes-please' } }));
+    expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.memoryEgress).toBe('block');
+  });
+});
+
+describe('loadConfig: dualVerify.logContent (opt-in content log gate)', () => {
+  it('defaults logContent to false (content logging OFF by default)', () => {
+    const cfg = loadConfig({ projectPath: join(tmpDir(), 'n.json'), globalPath: join(tmpDir(), 'n.json') });
+    expect(cfg.dualVerify.logContent).toBe(false);
+  });
+
+  it('reads logContent:true when explicitly set', () => {
+    const dir = tmpDir();
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { logContent: true } }));
+    expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.logContent).toBe(true);
+  });
+
+  it('rejects a non-boolean logContent, fail-closed to false (OFF)', () => {
+    const dir = tmpDir();
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { logContent: 'yes' } }));
+    expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.logContent).toBe(false);
+  });
 });

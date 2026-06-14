@@ -2,12 +2,20 @@ import type { HelixConfig } from '../config.js';
 import type { Availability, CodexRunner } from './codex.js';
 import { buildAgreementMap, type AgreementMap } from './agreement-map.js';
 import { normalizeUntrusted } from '../memory/content-frame.js';
-import { detectSecret } from '../memory/secret-scan.js';
+import { classifyEgress, type EgressVerdict } from '../risk/trifecta.js';
+import type { CodexOutcome } from '../codex-log.js';
+
+/** Compile-time-required ledger source for the echo leg. No silent fail-open: a server that forgets
+ *  to wire it fails to compile; a test that genuinely skips echo writes { mode: 'disabled' }. */
+export type EchoSource =
+  | { mode: 'enforce'; ledgerTexts: () => Array<{ id: string; content: string }> }
+  | { mode: 'disabled' };   // explicit opt-out — tests/dev ONLY, never production
 
 export interface DualVerifyDeps {
   config: HelixConfig;
   runner: CodexRunner;
   checkAvailable: () => Promise<Availability>;
+  echo: EchoSource;
 }
 
 export type Stakes = 'low' | 'medium' | 'high';
@@ -25,11 +33,17 @@ export interface DualVerifyResult {
   ran: boolean;
   /** True when a real (metered) Codex call was attempted (passed the enabled+available gates). */
   attempted: boolean;
+  /** Explicit branch outcome — drives opt-in content logging without fragile string-matching. */
+  outcome: CodexOutcome;
+  /** Exact prompt sent to Codex — ONLY on outcome 'sent'. For logging only; NEVER returned to the host. */
+  promptSent?: string;
   reason?: string;
   mode?: HelixConfig['dualVerify']['mode'];
   codexAnswer?: string;   // raw Codex output — DATA, never executed
   agreement?: AgreementMap;
   critique?: string;      // critique mode: Codex's review of helixAnswer, verbatim (DATA)
+  /** S1 egress verdict (enum/ID/label only). Present on every return AFTER the egress gate. */
+  egress?: EgressVerdict;
 }
 
 /** Critique-mode prompt: the answer under review is framed as data, not instructions.
@@ -47,41 +61,49 @@ export function buildCritiquePrompt(question: string, helixAnswer: string): stri
 }
 
 /**
- * Cross-validate helixAnswer against Codex. Gates: enabled -> stakesFloor -> available -> ran
- * (cheapest first: the floor gate is free, the availability preflight spawns processes).
+ * Cross-validate helixAnswer against Codex. Gates: enabled -> stakesFloor -> egress-guard (S1,
+ * secret/PII/memory-echo) -> available -> ran (cheapest first; the egress guard is free + pre-spawn).
  * On any gate failure it degrades with a reason and NO codexAnswer (never fabricates).
  */
 export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps): Promise<DualVerifyResult> {
-  if (!deps.config.dualVerify.enabled) return { ran: false, attempted: false, reason: 'dual-verify is disabled in config' };
+  if (!deps.config.dualVerify.enabled) {
+    return { ran: false, attempted: false, outcome: 'skipped', reason: 'dual-verify is disabled in config' };
+  }
 
   const floor = deps.config.dualVerify.stakesFloor;
   if (params.stakes && STAKES_RANK[params.stakes] < STAKES_RANK[floor]) {
-    return { ran: false, attempted: false, reason: `stakes '${params.stakes}' below configured floor '${floor}'` };
+    return { ran: false, attempted: false, outcome: 'skipped', reason: `stakes '${params.stakes}' below configured floor '${floor}'` };
   }
 
-  // Outbound secret firewall: dual-verify ships context to an EXTERNAL model (OpenAI cloud).
-  // The memory path redacts secrets before persisting locally; this sibling path must not be
-  // a softer exfiltration channel. Fail closed — refuse rather than redact (a redacted
-  // question/answer would make the verification meaningless anyway). Free, local, pre-spawn.
-  if (detectSecret(params.question).hit || detectSecret(params.helixAnswer).hit) {
-    return { ran: false, attempted: false, reason: 'refused: payload contains a secret (not sent to external Codex)' };
+  // Outbound egress firewall (S1): classifyEgress subsumes the old secret-only test and adds PII +
+  // memory-echo legs. Secrets block regardless of policy; non-secret legs are gated by
+  // dualVerify.memoryEgress. Free, local, pre-spawn.
+  const ledger = deps.echo.mode === 'enforce' ? deps.echo.ledgerTexts() : null;
+  const verdict = classifyEgress({
+    texts: [params.question, params.helixAnswer],
+    ledger,
+    policy: deps.config.dualVerify.memoryEgress,
+  });
+  if (verdict.decision === 'blocked') {
+    return { ran: false, attempted: false, outcome: 'refused', reason: verdict.reason, egress: verdict };
   }
 
   const avail = await deps.checkAvailable();
-  if (!avail.available) return { ran: false, attempted: false, reason: avail.reason ?? 'codex unavailable' };
+  if (!avail.available) {
+    return { ran: false, attempted: false, outcome: 'unavailable', reason: avail.reason ?? 'codex unavailable', egress: verdict };
+  }
 
   // Past the gates: the next call spends the user's Codex quota (metered).
   const mode = deps.config.dualVerify.mode;
   const prompt = mode === 'critique' ? buildCritiquePrompt(params.question, params.helixAnswer) : params.question;
-  const res = await deps.runner(prompt, {
-    model: deps.config.dualVerify.model,
-    effort: deps.config.dualVerify.effort,
-  });
-  if (!res.ok) return { ran: false, attempted: true, reason: `codex run failed: ${res.error}` };
+  const res = await deps.runner(prompt, { model: deps.config.dualVerify.model, effort: deps.config.dualVerify.effort });
+  if (!res.ok) {
+    return { ran: false, attempted: true, outcome: 'error', reason: `codex run failed: ${res.error}`, egress: verdict };
+  }
 
   if (mode === 'critique') {
-    return { ran: true, attempted: true, mode, codexAnswer: res.answer, critique: res.answer };
+    return { ran: true, attempted: true, outcome: 'sent', promptSent: prompt, mode, codexAnswer: res.answer, critique: res.answer, egress: verdict };
   }
   const agreement = buildAgreementMap(params.helixAnswer, res.answer);
-  return { ran: true, attempted: true, mode, codexAnswer: res.answer, agreement };
+  return { ran: true, attempted: true, outcome: 'sent', promptSent: prompt, mode, codexAnswer: res.answer, agreement, egress: verdict };
 }

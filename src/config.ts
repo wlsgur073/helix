@@ -18,6 +18,12 @@ export interface HelixConfig {
     model: string | null;
     /** Reasoning effort. `null` (default) => omit -c so codex uses its config.toml effort. */
     effort: ReasoningEffort | null;
+    /** Egress policy for non-secret legs (memory-echo / PII). User-edited only; default 'block'.
+     *  Secrets block regardless. Read once at startup (a mid-session flip needs a restart). */
+    memoryEgress: 'block' | 'allow';
+    /** Opt-in: persist the exact Codex prompt+response to ~/.helix/codex-log.jsonl. Default false
+     *  (OFF). audit.jsonl still records decision metadata regardless of this flag. */
+    logContent: boolean;
   };
 }
 
@@ -31,6 +37,11 @@ export const DEFAULT_CONFIG: HelixConfig = {
     // model/effort for dual-verify specifically.
     model: null,
     effort: null,
+    // Block memory-derived / PII egress to the external Codex model by default. User opts into risk
+    // by editing this to 'allow' (a human edit, outside model control). Invalid value => 'block'.
+    memoryEgress: 'block',
+    // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
+    logContent: false,
   },
 };
 
@@ -64,6 +75,8 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
       if (dv.effort === null || (typeof dv.effort === 'string' && EFFORTS.includes(dv.effort as ReasoningEffort))) {
         merged.dualVerify.effort = dv.effort as ReasoningEffort | null;
       }
+      if (dv.memoryEgress === 'block' || dv.memoryEgress === 'allow') merged.dualVerify.memoryEgress = dv.memoryEgress;
+      if (typeof dv.logContent === 'boolean') merged.dualVerify.logContent = dv.logContent;
     }
   }
   return merged;
