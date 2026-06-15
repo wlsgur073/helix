@@ -31,12 +31,13 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   server.registerTool('helix_memory_commit', {
     title: 'Commit memory',
-    description: 'Store a fact in Helix memory (secret-scanned; provenance recorded).',
+    description: 'Store a fact in Helix memory (secret-scanned; provenance recorded). Pass supersedes=<id> to update (replace) an existing item instead of adding a duplicate.',
     inputSchema: {
       content: z.string(),
       source: z.enum(['user', 'reality-check', 'codex-agree']).optional(),
       blastRadius: z.enum(['read-only', 'local-reversible', 'hard-to-reverse', 'external']).optional(),
       classification: z.enum(['normal', 'personal']).optional(),
+      supersedes: z.string().optional(),
     },
   }, async (args) => handleCommit(store, args));
 

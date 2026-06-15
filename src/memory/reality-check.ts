@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import type { VerifyOutcome } from './firewall.js';
 
 export type RealityCheck =
@@ -6,6 +6,9 @@ export type RealityCheck =
   | { kind: 'file-contains'; path: string; pattern: string };
 
 const INDETERMINATE: VerifyOutcome = { ran: false, indeterminate: true, passed: false };
+
+/** file-contains read bound: an oversized file is indeterminate (never read whole into memory). */
+const MAX_FILE_BYTES = 5_000_000;
 
 /**
  * Run a mechanical reality-check. Fail-closed: anything unrecognized, malformed, or
@@ -22,6 +25,7 @@ export function runRealityCheck(check: RealityCheck): VerifyOutcome {
       case 'file-contains': {
         if (typeof check.path !== 'string' || typeof check.pattern !== 'string') return INDETERMINATE;
         if (!existsSync(check.path)) return { ran: true, indeterminate: false, passed: false };
+        if (statSync(check.path).size > MAX_FILE_BYTES) return INDETERMINATE; // oversized -> can't verify safely
         const text = readFileSync(check.path, 'utf8');
         return { ran: true, indeterminate: false, passed: text.includes(check.pattern) };
       }

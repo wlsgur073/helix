@@ -1,6 +1,6 @@
 import type { MemoryRecord, MemoryState } from '../types.js';
 import { requiresReverifyBeforeUse } from '../memory/state-machine.js';
-import { normalizeUntrusted, frameOpen, frameClose, DATA_SEMANTICS } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS } from '../memory/content-frame.js';
 import { classifyEmission } from '../risk/trifecta.js';
 
 export interface FormatOptions {
@@ -32,8 +32,10 @@ export function formatSessionStartContext(records: MemoryRecord[], nonce: string
     const flag = requiresReverifyBeforeUse({ state: r.state, blastRadius: r.blastRadius })
       ? '(re-verify before use) '
       : '';
-    const safe = normalizeUntrusted(r.content.replace(/\s+/g, ' ').trim(), maxItemChars);
-    return `DATA[${r.state}]| ${flag}${safe}`;
+    // Route per-line marking + normalization through the shared datamark() helper (content-frame
+    // invariant: untrusted text is framed via the shared helpers, not re-implemented). Content is
+    // pre-collapsed to one line so the mark stays one-per-record.
+    return datamark(`${flag}${r.content.replace(/\s+/g, ' ').trim()}`, `DATA[${r.state}]| `, maxItemChars);
   });
   let dropped = usable.length - lines.length;
 

@@ -56,4 +56,15 @@ describe('Helix MCP server (end-to-end via in-memory transport)', () => {
     const res = await client.callTool({ name: 'helix_dual_verify', arguments: { question: 'x', helixAnswer: 'y' } });
     expect(textOf(res)).toMatch(/disabled|did not run/i);
   });
+
+  it('commit with supersedes replaces the prior item over the protocol (update, not duplicate)', async () => {
+    const client = await connectedClient();
+    const first = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'the db is postgres' } });
+    const id = /"id":"([^"]+)"/.exec(textOf(first))?.[1];
+    expect(id).toBeTruthy();
+    await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'the db is mysql', supersedes: id } });
+    const out = textOf(await client.callTool({ name: 'helix_memory_inspect', arguments: {} }));
+    expect(out).toContain('the db is mysql');
+    expect(out).not.toContain('postgres'); // the old item was superseded, not duplicated
+  });
 });

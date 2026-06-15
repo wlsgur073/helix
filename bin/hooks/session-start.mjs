@@ -64,7 +64,7 @@ import { randomBytes } from "node:crypto";
 function newNonce() {
   return randomBytes(16).toString("hex");
 }
-var FENCE_RUN = /[=\-~`–—―─-╿]{3,}/gu;
+var FENCE_RUN = /[=\-~`*_‐‑‒–—―−─-╿]{3,}/gu;
 function breakFenceRuns(s) {
   return s.replace(FENCE_RUN, (run) => [...run].join(" "));
 }
@@ -83,10 +83,14 @@ function frameOpen(label, nonce) {
 function frameClose(nonce) {
   return `===HELIX ${nonce} END===`;
 }
+function datamark(text, mark, maxChars) {
+  const normalized = normalizeUntrusted(text, maxChars).replace(/\n+$/, "");
+  return normalized.split("\n").map((line) => mark + line).join("\n");
+}
 
 // src/risk/trifecta.ts
 var EGRESS_VERB = /\b(send|post|upload|email|exfiltrate|transmit|leak|forward|fetch)\b/;
-var SENSITIVE_REF = /(contents of|read\s+~?\/|password|passwords|secret|api[_-]?key|\bkey\b|all your\b|credentials?)/;
+var SENSITIVE_REF = /(contents of|read\s+~?\/|password|passwords|secret|api[ _-]?key|\b(?:private|ssh|access|signing|encryption)[ _-]?keys?\b|all your\b|credentials?)/;
 function classifyEmission(content) {
   const norm = content.normalize("NFKC").toLowerCase();
   return { flagged: EGRESS_VERB.test(norm) && SENSITIVE_REF.test(norm) };
@@ -104,8 +108,7 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   if (usable.length === 0) return "";
   const lines = usable.slice(0, maxItems).map((r) => {
     const flag = requiresReverifyBeforeUse({ state: r.state, blastRadius: r.blastRadius }) ? "(re-verify before use) " : "";
-    const safe = normalizeUntrusted(r.content.replace(/\s+/g, " ").trim(), maxItemChars);
-    return `DATA[${r.state}]| ${flag}${safe}`;
+    return datamark(`${flag}${r.content.replace(/\s+/g, " ").trim()}`, `DATA[${r.state}]| `, maxItemChars);
   });
   let dropped = usable.length - lines.length;
   const renderedRecords = usable.slice(0, maxItems);

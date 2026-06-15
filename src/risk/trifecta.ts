@@ -3,7 +3,7 @@
 // the 2a DATA-quarantine. S1 (classifyEgress) is an enforceable egress gate; S2 (classifyEmission)
 // is an advisory flag. detectEcho is a verbatim-copy tripwire, not an exfiltration guard.
 
-import { detectSecret } from '../memory/secret-scan.js';
+import { findSecrets } from '../memory/secret-scan.js';
 import { detectPII, type PiiKind } from '../memory/pii-scan.js';
 
 export interface LedgerItem {
@@ -44,6 +44,14 @@ export function detectEcho(
   const haystack = normalizeForMatch(texts.join('\n')).slice(0, maxScan);
   if (haystack.length < k) return { memoryIds: [] };
 
+  // Precompute the haystack's length-k windows ONCE (O(haystack)); each item then matches iff any
+  // of its k-grams is in the set (O(item) hash lookups). Equivalent to the prior per-position
+  // `haystack.includes(window)` but O(n+m) instead of O(n*m). The no-echo case (the common path,
+  // every position checked) was the previous worst case and runs on EVERY dual-verify over the full
+  // ledger (the server wires ledgerTexts = all items), so the quadratic form was a real hot-path cliff.
+  const windows = new Set<string>();
+  for (let i = 0; i + k <= haystack.length; i++) windows.add(haystack.slice(i, i + k));
+
   const ids: string[] = [];
   const seen = new Set<string>();
   for (const item of ledger) {
@@ -51,7 +59,7 @@ export function detectEcho(
     const norm = normalizeForMatch(item.content).slice(0, PER_ITEM_CAP);
     if (norm.length < k) continue;
     for (let i = 0; i + k <= norm.length; i++) {
-      if (haystack.includes(norm.slice(i, i + k))) {
+      if (windows.has(norm.slice(i, i + k))) {
         ids.push(item.id);
         seen.add(item.id);
         break;
@@ -90,7 +98,9 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   const text = input.texts.join('\n');
 
   // --- run every detector first; record everything for audit ---
-  const secretHit = detectSecret(text).hit;
+  const secretSpans = findSecrets(text);
+  const secretHit = secretSpans.length > 0;
+  const secretNamed = secretSpans.some((s) => s.tier === 'named'); // high-confidence provider pattern
 
   const piiHits = detectPII(text);
   const piiKinds: PiiKind[] = [...new Set(piiHits.map((h) => h.kind))];
@@ -110,7 +120,10 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   const gated = input.policy === 'allow' ? 'allowed_override' : 'blocked';
 
   // --- precedence-ordered decision (§6); first match wins ---
-  if (secretHit) {
+  // A NAMED secret (provider pattern, high confidence) is override-proof: policy='allow' cannot
+  // release it. A high-entropy-ONLY hit (low confidence, e.g. a git SHA) is gated like high PII —
+  // blocked by default but policy-overridable — so a false positive cannot permanently wedge dual-verify.
+  if (secretNamed) {
     return { decision: 'blocked', legs, piiKinds, echoMemoryIds, reason: 'blocked: secret token (override-proof)' };
   }
   if (echoHit) {
@@ -123,6 +136,13 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
     return {
       decision: gated, legs, piiKinds, echoMemoryIds,
       reason: `${gated === 'blocked' ? 'blocked' : 'allowed_override'}: high-severity PII (${piiKinds.length} kinds)`,
+    };
+  }
+  if (secretHit) {
+    // entropy-only secret (no named pattern matched): low-confidence, so policy-overridable.
+    return {
+      decision: gated, legs, piiKinds, echoMemoryIds,
+      reason: `${gated === 'blocked' ? 'blocked' : 'allowed_override'}: high-entropy token (low-confidence)`,
     };
   }
   if (bulkLowPii) {
@@ -145,7 +165,7 @@ export interface EmissionFlag {
 // Conservative co-occurrence signals. An egress verb AND a sensitive-data reference must BOTH
 // appear (within the normalized content) before flagging — either alone is too noisy.
 const EGRESS_VERB = /\b(send|post|upload|email|exfiltrate|transmit|leak|forward|fetch)\b/;
-const SENSITIVE_REF = /(contents of|read\s+~?\/|password|passwords|secret|api[_-]?key|\bkey\b|all your\b|credentials?)/;
+const SENSITIVE_REF = /(contents of|read\s+~?\/|password|passwords|secret|api[ _-]?key|\b(?:private|ssh|access|signing|encryption)[ _-]?keys?\b|all your\b|credentials?)/;
 
 /**
  * S2 advisory classifier: flag injection-shaped content (egress verb AND sensitive-data

@@ -12,7 +12,10 @@ function sentences(answer: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-const norm = (s: string): string => s.toLowerCase();
+/** Content tokens of a sentence: lowercased runs of letters/digits (punctuation/spacing dropped). */
+function tokenSet(s: string): Set<string> {
+  return new Set(s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+}
 
 function jaccard(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 && b.size === 0) return 1;
@@ -21,25 +24,32 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return union === 0 ? 1 : inter / union;
 }
 
+/** A claim "matches" one on the other side when their content-token overlap clears this bar.
+ *  This makes reordering and paraphrase count as agreement; the prior verbatim-sentence heuristic
+ *  treated any rewording as divergence, so the verdict read 'diverge' for almost every real pair. */
+const SENTENCE_SIM = 0.5;
+
 /**
- * Compare Helix's answer with Codex's answer. Both are DATA: this function only inspects
- * and reports, it never interprets either side as instructions. Comparison is
- * case-insensitive, but original text is preserved in agreements/divergences so the user
- * sees exactly what each side said. v1 uses a sentence-overlap heuristic; a richer claim
- * extractor can replace it later behind the same signature.
+ * Compare Helix's answer with Codex's. Both are DATA: this only inspects and reports, it never
+ * interprets either side as instructions. A claim agrees when some claim on the other side shares
+ * >= SENTENCE_SIM of its content tokens; a claim with no counterpart is a divergence. Original
+ * casing is preserved in the lists so the user sees exactly what each side said. v1 used a richer
+ * claim extractor's place-holder (verbatim-sentence overlap); this is still a heuristic.
  */
 export function buildAgreementMap(helixAnswer: string, codexAnswer: string): AgreementMap {
   const helix = sentences(helixAnswer);
   const codex = sentences(codexAnswer);
-  const helixKeys = new Set(helix.map(norm));
-  const codexKeys = new Set(codex.map(norm));
+  const helixTok = helix.map(tokenSet);
+  const codexTok = codex.map(tokenSet);
 
-  const agreements = helix.filter((s) => codexKeys.has(norm(s)));
+  const matched = (t: Set<string>, pool: Set<string>[]): boolean => pool.some((p) => jaccard(t, p) >= SENTENCE_SIM);
+
+  const agreements = helix.filter((_, i) => matched(helixTok[i]!, codexTok));
   const divergences = [
-    ...helix.filter((s) => !codexKeys.has(norm(s))),
-    ...codex.filter((s) => !helixKeys.has(norm(s))),
+    ...helix.filter((_, i) => !matched(helixTok[i]!, codexTok)),
+    ...codex.filter((_, i) => !matched(codexTok[i]!, helixTok)),
   ];
 
-  const verdict: AgreementMap['verdict'] = jaccard(helixKeys, codexKeys) > 0.5 ? 'agree' : 'diverge';
+  const verdict: AgreementMap['verdict'] = divergences.length === 0 ? 'agree' : 'diverge';
   return { verdict, agreements, divergences };
 }

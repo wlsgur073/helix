@@ -107,4 +107,10 @@ describe('formatSessionStartContext', () => {
     const out = formatSessionStartContext([rec({ content: 'user prefers Korean replies' })], N);
     expect(out).not.toContain('egress-shaped content flagged');
   });
+
+  it('routes through the shared datamark so fence runs in content are broken (J5-7 invariant)', () => {
+    const out = formatSessionStartContext([rec({ content: 'note *** then ___ rule' })], N);
+    expect(out).not.toContain('***');
+    expect(out).not.toContain('___');
+  });
 });

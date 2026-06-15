@@ -3,6 +3,15 @@ import { detectPII, type PiiHit } from '../../src/memory/pii-scan.js';
 
 const kinds = (hits: PiiHit[]) => hits.map((h) => h.kind).sort();
 
+// Build a checksum-valid KR RRN (runtime-assembled; keeps no real-looking RRN literal in source).
+function rrnWithChecksum(yymmdd: string, first6OfSecond: string): string {
+  const d = (yymmdd + first6OfSecond).split('').map(Number);
+  const w = [2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5];
+  const sum = d.reduce((a, n, i) => a + n * w[i]!, 0);
+  const check = (11 - (sum % 11)) % 10;
+  return `${yymmdd}-${first6OfSecond}${check}`;
+}
+
 describe('detectPII', () => {
   it('detects an email as low severity', () => {
     const hits = detectPII('contact kim@example.com please');
@@ -34,10 +43,18 @@ describe('detectPII', () => {
     expect(detectPII('the build took 1234567890 milliseconds')).toEqual([]);
   });
 
-  it('detects a KR RRN as high severity national_id', () => {
-    // synthetic RRN shape (6 digits - 7 digits); not a valid issued number.
-    const hits = detectPII('주민번호 000000-0000000 입력');
+  it('detects a checksum-valid KR RRN as high severity national_id', () => {
+    const rrn = rrnWithChecksum('900101', '100000'); // runtime-assembled, checksum-valid, synthetic
+    const hits = detectPII(`주민번호 ${rrn} 입력`);
     expect(hits.some((h) => h.kind === 'national_id' && h.severity === 'high')).toBe(true);
+  });
+
+  it('does NOT flag a bad-checksum RRN-shaped number (validation cuts the false positive)', () => {
+    expect(detectPII('order 000000-0000000 shipped').some((h) => h.kind === 'national_id')).toBe(false);
+  });
+
+  it('does NOT flag a structurally-invalid SSN (area 000)', () => {
+    expect(detectPII('ref 000-12-3456 here').some((h) => h.kind === 'national_id')).toBe(false);
   });
 
   it('detects a US SSN shape as high severity national_id', () => {

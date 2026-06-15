@@ -23,6 +23,12 @@ describe('runRealityCheck', () => {
     expect(runRealityCheck({ kind: 'file-contains', path: p, pattern: 'mysql' }).passed).toBe(false);
   });
 
+  it('file-contains on an oversized file is indeterminate (read DoS guard, fail-closed)', () => {
+    const p = tmpFile('x'.repeat(5_000_001)); // > MAX_FILE_BYTES (5_000_000)
+    expect(runRealityCheck({ kind: 'file-contains', path: p, pattern: 'x' }))
+      .toEqual({ ran: false, indeterminate: true, passed: false });
+  });
+
   it('fail-closed: unknown kind is indeterminate, never passed', () => {
     const r = runRealityCheck({ kind: 'telepathy' } as never);
     expect(r.indeterminate).toBe(true);

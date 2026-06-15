@@ -6887,7 +6887,7 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join4 } from "node:path";
+import { join as join5 } from "node:path";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -9908,13 +9908,13 @@ function _array(Class2, element, params) {
   });
 }
 function _custom(Class2, fn, _params) {
-  const norm2 = normalizeParams(_params);
-  norm2.abort ?? (norm2.abort = true);
+  const norm = normalizeParams(_params);
+  norm.abort ?? (norm.abort = true);
   const schema = new Class2({
     type: "custom",
     check: "custom",
     fn,
-    ...norm2
+    ...norm
   });
   return schema;
 }
@@ -13014,7 +13014,7 @@ var StdioServerTransport = class {
 import { randomUUID } from "node:crypto";
 
 // src/memory/ledger.ts
-import { appendFileSync, readFileSync, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
+import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 // src/memory/retrieval.ts
@@ -13027,7 +13027,7 @@ function splitIdentifier(run) {
   return run.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Za-z])([0-9])/g, "$1 $2").replace(/([0-9])([A-Za-z])/g, "$1 $2").split(/\s+/).filter(Boolean);
 }
 function tokenize(text) {
-  const norm2 = text.normalize("NFKC");
+  const norm = text.normalize("NFKC");
   const out = [];
   let latin = "";
   const cjk = [];
@@ -13044,7 +13044,7 @@ function tokenize(text) {
       cjk.length = 0;
     }
   };
-  for (const ch of norm2) {
+  for (const ch of norm) {
     if (CJK.test(ch)) {
       flushLatin();
       cjk.push(ch);
@@ -13257,7 +13257,9 @@ function recall(projection, query, opts = {}) {
 }
 
 // src/memory/lock.ts
-import { mkdirSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, rmSync, statSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 var DEFAULT_STALE_MS = 1e4;
 var DEFAULT_MAX_WAIT_MS = 5e3;
 var RETRY_MS = 25;
@@ -13266,38 +13268,51 @@ function sleepSync(ms) {
 }
 function withFileLock(target, fn, opts = {}) {
   const lockDir = target + ".lock";
+  const ownerFile = join(lockDir, "owner");
+  const token = `${process.pid}-${randomBytes(8).toString("hex")}`;
   const staleMs = opts.staleMs ?? DEFAULT_STALE_MS;
   const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   let waited = 0;
   for (; ; ) {
+    let acquired = false;
     try {
       mkdirSync(lockDir);
+      acquired = true;
+      writeFileSync(ownerFile, token);
       break;
     } catch (e) {
-      if (e.code !== "EEXIST") throw e;
-      let ageMs = 0;
-      try {
-        ageMs = Date.now() - statSync(lockDir).mtimeMs;
-      } catch {
-        ageMs = 0;
-      }
-      if (ageMs > staleMs) {
+      if (!acquired) {
+        if (e.code !== "EEXIST") throw e;
+        let ageMs = 0;
         try {
-          rmSync(lockDir, { recursive: true, force: true });
+          ageMs = Date.now() - statSync(lockDir).mtimeMs;
         } catch {
+          ageMs = 0;
         }
+        if (ageMs > staleMs) {
+          try {
+            rmSync(lockDir, { recursive: true, force: true });
+          } catch {
+          }
+          continue;
+        }
+        if (waited >= maxWaitMs) throw new Error(`withFileLock: timed out acquiring ${lockDir} after ${maxWaitMs}ms`);
+        sleepSync(RETRY_MS);
+        waited += RETRY_MS;
         continue;
       }
-      if (waited >= maxWaitMs) throw new Error(`withFileLock: timed out acquiring ${lockDir} after ${maxWaitMs}ms`);
-      sleepSync(RETRY_MS);
-      waited += RETRY_MS;
+      try {
+        rmSync(lockDir, { recursive: true, force: true });
+      } catch {
+      }
+      throw e;
     }
   }
   try {
     return fn();
   } finally {
     try {
-      rmSync(lockDir, { recursive: true, force: true });
+      if (readFileSync(ownerFile, "utf8") === token) rmSync(lockDir, { recursive: true, force: true });
     } catch {
     }
   }
@@ -13311,7 +13326,7 @@ function appendRecord(path, record2) {
 function parseLedger(path) {
   let text;
   try {
-    text = readFileSync(path, "utf8");
+    text = readFileSync2(path, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") return [];
     throw err;
@@ -13351,7 +13366,6 @@ function compactLedger(path, opts) {
 }
 
 // src/memory/secret-scan.ts
-import { createHash } from "node:crypto";
 var PATTERNS = [
   { kind: "pem-private-key", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
   { kind: "aws-access-key", re: /\bAKIA[0-9A-Z]{16}\b/ },
@@ -13378,28 +13392,49 @@ function entropy(s) {
   }
   return bits;
 }
-function hasHighEntropyToken(content) {
-  for (const tok of content.split(/\s+/)) {
-    if (tok.length >= 24 && /[A-Za-z]/.test(tok) && /[0-9]/.test(tok) && entropy(tok) >= 3.5) {
-      return true;
+function isHighEntropyToken(tok) {
+  return tok.length >= 24 && /[A-Za-z]/.test(tok) && /[0-9]/.test(tok) && entropy(tok) >= 3.5;
+}
+function mergeSpans(spans) {
+  const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
+  const out = [];
+  for (const s of sorted) {
+    const last = out[out.length - 1];
+    if (last && s.start < last.end) {
+      last.end = Math.max(last.end, s.end);
+      if (last.tier !== "named" && s.tier === "named") {
+        last.tier = "named";
+        last.kind = s.kind;
+      }
+    } else {
+      out.push({ ...s });
     }
   }
-  return false;
+  return out;
 }
-function detectSecret(content) {
+function findSecrets(content) {
+  const spans = [];
   for (const { kind, re } of PATTERNS) {
-    if (re.test(content)) return { hit: true, kind };
+    const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+    for (let m = g.exec(content); m !== null; m = g.exec(content)) {
+      spans.push({ start: m.index, end: m.index + m[0].length, kind, tier: "named" });
+      if (g.lastIndex === m.index) g.lastIndex++;
+    }
   }
-  if (hasHighEntropyToken(content)) return { hit: true, kind: "high-entropy" };
-  return { hit: false };
+  const tok = /\S+/g;
+  for (let m = tok.exec(content); m !== null; m = tok.exec(content)) {
+    if (isHighEntropyToken(m[0])) {
+      spans.push({ start: m.index, end: m.index + m[0].length, kind: "high-entropy", tier: "entropy" });
+    }
+  }
+  return mergeSpans(spans);
 }
-function redactSecret(original, kind) {
-  return {
-    content: "",
-    classification: "secret-redacted",
-    kind,
-    hash: createHash("sha256").update(original).digest("hex")
-  };
+function redactSecrets(content, spans) {
+  let out = content;
+  for (const s of [...spans].sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, s.start) + `[redacted:${s.kind}]` + out.slice(s.end);
+  }
+  return { content: out, classification: "secret-redacted", kinds: [...new Set(spans.map((s) => s.kind))] };
 }
 
 // src/memory/firewall.ts
@@ -13426,11 +13461,11 @@ function requiresReverifyBeforeUse(item) {
 }
 
 // src/memory/content-frame.ts
-import { randomBytes } from "node:crypto";
+import { randomBytes as randomBytes2 } from "node:crypto";
 function newNonce() {
-  return randomBytes(16).toString("hex");
+  return randomBytes2(16).toString("hex");
 }
-var FENCE_RUN = /[=\-~`–—―─-╿]{3,}/gu;
+var FENCE_RUN = /[=\-~`*_‐‑‒–—―−─-╿]{3,}/gu;
 function breakFenceRuns(s) {
   return s.replace(FENCE_RUN, (run) => [...run].join(" "));
 }
@@ -13494,9 +13529,9 @@ var MemoryStore = class {
     const ts = this.now();
     let content = input.content;
     let classification = input.classification ?? "normal";
-    const scan = detectSecret(input.content);
-    if (scan.hit) {
-      const red = redactSecret(input.content, scan.kind ?? "secret");
+    const spans = findSecrets(input.content);
+    if (spans.length > 0) {
+      const red = redactSecrets(input.content, spans);
       content = red.content;
       classification = red.classification;
     }
@@ -13505,11 +13540,13 @@ var MemoryStore = class {
       tx: ts,
       validFrom: input.validFrom ?? ts,
       validTo: input.validTo ?? null,
-      type: "assert",
+      // supersedes set => 'supersede' (projection drops the old item and keeps this one as the live
+      // replacement, so an update replaces rather than duplicates); otherwise a plain 'assert'.
+      type: input.supersedes ? "supersede" : "assert",
       state: "Fresh",
       content,
       provenance: { source, sessionId: this.session() },
-      supersedes: null,
+      supersedes: input.supersedes ?? null,
       blastRadius: input.blastRadius ?? null,
       reverifyTrigger: null,
       classification
@@ -13570,7 +13607,7 @@ var MemoryStore = class {
 };
 
 // src/server/helix-server.ts
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // node_modules/zod/v3/external.js
@@ -21668,24 +21705,28 @@ var EMPTY_COMPLETION_RESULT = {
 function sentences(answer) {
   return answer.split(/[.\n;]+/).map((s) => s.trim()).filter((s) => s.length > 0);
 }
-var norm = (s) => s.toLowerCase();
+function tokenSet(s) {
+  return new Set(s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+}
 function jaccard(a, b) {
   if (a.size === 0 && b.size === 0) return 1;
   const inter = [...a].filter((x) => b.has(x)).length;
   const union2 = (/* @__PURE__ */ new Set([...a, ...b])).size;
   return union2 === 0 ? 1 : inter / union2;
 }
+var SENTENCE_SIM = 0.5;
 function buildAgreementMap(helixAnswer, codexAnswer) {
   const helix = sentences(helixAnswer);
   const codex = sentences(codexAnswer);
-  const helixKeys = new Set(helix.map(norm));
-  const codexKeys = new Set(codex.map(norm));
-  const agreements = helix.filter((s) => codexKeys.has(norm(s)));
+  const helixTok = helix.map(tokenSet);
+  const codexTok = codex.map(tokenSet);
+  const matched = (t, pool) => pool.some((p) => jaccard(t, p) >= SENTENCE_SIM);
+  const agreements = helix.filter((_, i) => matched(helixTok[i], codexTok));
   const divergences = [
-    ...helix.filter((s) => !codexKeys.has(norm(s))),
-    ...codex.filter((s) => !helixKeys.has(norm(s)))
+    ...helix.filter((_, i) => !matched(helixTok[i], codexTok)),
+    ...codex.filter((_, i) => !matched(codexTok[i], helixTok))
   ];
-  const verdict = jaccard(helixKeys, codexKeys) > 0.5 ? "agree" : "diverge";
+  const verdict = divergences.length === 0 ? "agree" : "diverge";
   return { verdict, agreements, divergences };
 }
 
@@ -21698,7 +21739,8 @@ var LOW_PATTERNS = [
   { kind: "phone", re: /(?<!\d)(?:\(\d{3}\)\s?\d{3}[-.\s]\d{4}|\d{2,3}[-.\s]\d{3,4}[-.\s]\d{4})(?!\d)/g }
 ];
 var CARD_RE = /(?<!\d)(?:\d[ -]?){13,19}(?<![ -])/g;
-var NATIONAL_ID_RE = /(?<!\d)(?:\d{6}-\d{7}|\d{3}-\d{2}-\d{4})(?!\d)/g;
+var SSN_RE = /(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)/g;
+var RRN_RE = /(?<!\d)\d{6}-\d{7}(?!\d)/g;
 function luhnValid(digits) {
   let sum = 0;
   let dbl = false;
@@ -21714,6 +21756,23 @@ function luhnValid(digits) {
   }
   return sum % 10 === 0 && digits.length >= 13;
 }
+function validSsn(span) {
+  const area = Number(span.slice(0, 3));
+  const group = Number(span.slice(4, 6));
+  const serial = Number(span.slice(7, 11));
+  return area !== 0 && area !== 666 && group !== 0 && serial !== 0;
+}
+function validRrn(span) {
+  const d = span.replace("-", "");
+  if (d.length !== 13) return false;
+  const gender = d.charCodeAt(6) - 48;
+  if (gender < 1 || gender > 8) return false;
+  const weights = [2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5];
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += (d.charCodeAt(i) - 48) * weights[i];
+  const check2 = (11 - sum % 11) % 10;
+  return check2 === d.charCodeAt(12) - 48;
+}
 function detectPII(text) {
   const hits = [];
   for (const { kind, re } of LOW_PATTERNS) {
@@ -21722,9 +21781,13 @@ function detectPII(text) {
       hits.push({ kind, severity: "low", start: m.index, end: m.index + m[0].length });
     }
   }
-  NATIONAL_ID_RE.lastIndex = 0;
-  for (let m = NATIONAL_ID_RE.exec(text); m !== null; m = NATIONAL_ID_RE.exec(text)) {
-    hits.push({ kind: "national_id", severity: "high", start: m.index, end: m.index + m[0].length });
+  SSN_RE.lastIndex = 0;
+  for (let m = SSN_RE.exec(text); m !== null; m = SSN_RE.exec(text)) {
+    if (validSsn(m[0])) hits.push({ kind: "national_id", severity: "high", start: m.index, end: m.index + m[0].length });
+  }
+  RRN_RE.lastIndex = 0;
+  for (let m = RRN_RE.exec(text); m !== null; m = RRN_RE.exec(text)) {
+    if (validRrn(m[0])) hits.push({ kind: "national_id", severity: "high", start: m.index, end: m.index + m[0].length });
   }
   CARD_RE.lastIndex = 0;
   for (let m = CARD_RE.exec(text); m !== null; m = CARD_RE.exec(text)) {
@@ -21749,14 +21812,16 @@ function detectEcho(texts, ledger2, opts = {}) {
   const maxScan = opts.maxScan ?? DEFAULT_MAX_SCAN;
   const haystack = normalizeForMatch(texts.join("\n")).slice(0, maxScan);
   if (haystack.length < k) return { memoryIds: [] };
+  const windows = /* @__PURE__ */ new Set();
+  for (let i = 0; i + k <= haystack.length; i++) windows.add(haystack.slice(i, i + k));
   const ids = [];
   const seen = /* @__PURE__ */ new Set();
   for (const item of ledger2) {
     if (seen.has(item.id)) continue;
-    const norm2 = normalizeForMatch(item.content).slice(0, PER_ITEM_CAP);
-    if (norm2.length < k) continue;
-    for (let i = 0; i + k <= norm2.length; i++) {
-      if (haystack.includes(norm2.slice(i, i + k))) {
+    const norm = normalizeForMatch(item.content).slice(0, PER_ITEM_CAP);
+    if (norm.length < k) continue;
+    for (let i = 0; i + k <= norm.length; i++) {
+      if (windows.has(norm.slice(i, i + k))) {
         ids.push(item.id);
         seen.add(item.id);
         break;
@@ -21768,7 +21833,9 @@ function detectEcho(texts, ledger2, opts = {}) {
 var BULK_PII_N = 3;
 function classifyEgress(input) {
   const text = input.texts.join("\n");
-  const secretHit = detectSecret(text).hit;
+  const secretSpans = findSecrets(text);
+  const secretHit = secretSpans.length > 0;
+  const secretNamed = secretSpans.some((s) => s.tier === "named");
   const piiHits = detectPII(text);
   const piiKinds = [...new Set(piiHits.map((h) => h.kind))];
   const highPii = piiHits.some((h) => h.severity === "high");
@@ -21782,7 +21849,7 @@ function classifyEgress(input) {
   if (piiHits.length > 0) legs.push("pii");
   if (echoHit) legs.push("memory_echo");
   const gated = input.policy === "allow" ? "allowed_override" : "blocked";
-  if (secretHit) {
+  if (secretNamed) {
     return { decision: "blocked", legs, piiKinds, echoMemoryIds, reason: "blocked: secret token (override-proof)" };
   }
   if (echoHit) {
@@ -21803,6 +21870,15 @@ function classifyEgress(input) {
       reason: `${gated === "blocked" ? "blocked" : "allowed_override"}: high-severity PII (${piiKinds.length} kinds)`
     };
   }
+  if (secretHit) {
+    return {
+      decision: gated,
+      legs,
+      piiKinds,
+      echoMemoryIds,
+      reason: `${gated === "blocked" ? "blocked" : "allowed_override"}: high-entropy token (low-confidence)`
+    };
+  }
   if (bulkLowPii) {
     return {
       decision: gated,
@@ -21818,10 +21894,10 @@ function classifyEgress(input) {
   return { decision: "pass", legs, piiKinds, echoMemoryIds, reason: "pass: no egress legs" };
 }
 var EGRESS_VERB = /\b(send|post|upload|email|exfiltrate|transmit|leak|forward|fetch)\b/;
-var SENSITIVE_REF = /(contents of|read\s+~?\/|password|passwords|secret|api[_-]?key|\bkey\b|all your\b|credentials?)/;
+var SENSITIVE_REF = /(contents of|read\s+~?\/|password|passwords|secret|api[ _-]?key|\b(?:private|ssh|access|signing|encryption)[ _-]?keys?\b|all your\b|credentials?)/;
 function classifyEmission(content) {
-  const norm2 = content.normalize("NFKC").toLowerCase();
-  return { flagged: EGRESS_VERB.test(norm2) && SENSITIVE_REF.test(norm2) };
+  const norm = content.normalize("NFKC").toLowerCase();
+  return { flagged: EGRESS_VERB.test(norm) && SENSITIVE_REF.test(norm) };
 }
 
 // src/verify/dual-verify.ts
@@ -21882,10 +21958,10 @@ function appendAudit(path, event) {
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync3 } from "node:fs";
+import { readFileSync as readFileSync4 } from "node:fs";
 
 // src/codex-log.ts
-import { appendFileSync as appendFileSync3, chmodSync, existsSync, mkdirSync as mkdirSync4, readFileSync as readFileSync2, writeFileSync } from "node:fs";
+import { appendFileSync as appendFileSync3, chmodSync, existsSync, mkdirSync as mkdirSync4, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
 import { dirname as dirname3 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
@@ -21899,9 +21975,9 @@ function appendCodexLog(path, entry) {
       } catch {
       }
     }
-    const lines = readFileSync2(path, "utf8").split("\n").filter((l) => l !== "");
+    const lines = readFileSync3(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
-      writeFileSync(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
+      writeFileSync2(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
   } catch {
   }
@@ -21935,7 +22011,7 @@ function handleErase(store2, args) {
 }
 function codexLogCount(path) {
   try {
-    return readFileSync3(path, "utf8").split("\n").filter((l) => l !== "").length;
+    return readFileSync4(path, "utf8").split("\n").filter((l) => l !== "").length;
   } catch {
     return 0;
   }
@@ -22029,11 +22105,11 @@ async function handleDualVerify(args, deps) {
 }
 
 // src/config.ts
-import { readFileSync as readFileSync4 } from "node:fs";
+import { readFileSync as readFileSync5 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join as join2 } from "node:path";
 var EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
-var MODEL_RE = /^[A-Za-z0-9._:-]+$/;
+var MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
 var DEFAULT_CONFIG = {
   dualVerify: {
     enabled: false,
@@ -22053,14 +22129,14 @@ var DEFAULT_CONFIG = {
 };
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync4(path, "utf8"));
+    return JSON.parse(readFileSync5(path, "utf8"));
   } catch {
     return null;
   }
 }
 function loadConfig(opts = {}) {
-  const projectPath = opts.projectPath ?? join(process.cwd(), ".helix", "config.json");
-  const globalPath = opts.globalPath ?? join(homedir(), ".helix", "config.json");
+  const projectPath = opts.projectPath ?? join2(process.cwd(), ".helix", "config.json");
+  const globalPath = opts.globalPath ?? join2(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
   for (const path of [globalPath, projectPath]) {
     const raw = readJson(path);
@@ -22086,15 +22162,15 @@ function loadConfig(opts = {}) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync2, mkdtempSync, readFileSync as readFileSync5, rmSync as rmSync2 } from "node:fs";
+import { existsSync as existsSync2, mkdtempSync, readFileSync as readFileSync6, rmSync as rmSync2 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname as dirname4, join as join2 } from "node:path";
+import { dirname as dirname4, join as join3 } from "node:path";
 import { promisify } from "node:util";
 var execFileAsync = promisify(execFile);
 function buildCodexExecArgs(outFile, opts = {}) {
   const args = ["exec", "--skip-git-repo-check", "-s", "read-only", "--ephemeral", "-o", outFile];
   if (opts.model != null && opts.model !== "") {
-    if (!/^[A-Za-z0-9._:-]+$/.test(opts.model)) throw new Error(`invalid codex model "${opts.model}" (argv safety)`);
+    if (!/^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/.test(opts.model)) throw new Error(`invalid codex model "${opts.model}" (argv safety)`);
     args.push("-m", opts.model);
   }
   if (opts.effort != null && opts.effort !== "") {
@@ -22112,7 +22188,7 @@ function interpretWhereOutput(platform, whereOutput, exists) {
     const lower = line.toLowerCase();
     if (lower.endsWith(".exe")) return { file: line, argsPrefix: [] };
     if (lower.endsWith(".cmd") || lower.endsWith(".bat")) {
-      const js = join2(dirname4(line), "node_modules", "@openai", "codex", "bin", "codex.js");
+      const js = join3(dirname4(line), "node_modules", "@openai", "codex", "bin", "codex.js");
       if (exists(js)) return { file: process.execPath, argsPrefix: [js] };
     }
   }
@@ -22240,8 +22316,8 @@ function createCodexRunner(resolveInv = resolveCodexInvocation) {
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
-    const dir = mkdtempSync(join2(tmpdir(), "helix-codex-"));
-    const outFile = join2(dir, "out.txt");
+    const dir = mkdtempSync(join3(tmpdir(), "helix-codex-"));
+    const outFile = join3(dir, "out.txt");
     try {
       const { code, stderr } = await runCodex(inv, buildCodexExecArgs(outFile, opts), question, 12e4);
       if (code !== 0) {
@@ -22249,7 +22325,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation) {
       }
       let answer = "";
       try {
-        answer = readFileSync5(outFile, "utf8").trim();
+        answer = readFileSync6(outFile, "utf8").trim();
       } catch {
       }
       return answer ? { ok: true, answer } : { ok: false, error: "codex produced no output" };
@@ -22268,14 +22344,14 @@ var realCodexRunner = createCodexRunner();
 // src/server/helix-server.ts
 function buildServer(store2, dualDeps) {
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
-  const home2 = process.env.HELIX_HOME ?? join3(homedir2(), ".helix");
+  const home2 = process.env.HELIX_HOME ?? join4(homedir2(), ".helix");
   const dv = dualDeps ?? {
-    config: loadConfig({ globalPath: join3(home2, "config.json") }),
+    config: loadConfig({ globalPath: join4(home2, "config.json") }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
     echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map((r) => ({ id: r.id, content: r.content })) },
-    auditPath: join3(home2, "audit.jsonl"),
-    codexLogPath: join3(home2, "codex-log.jsonl")
+    auditPath: join4(home2, "audit.jsonl"),
+    codexLogPath: join4(home2, "codex-log.jsonl")
   };
   const codexStatusDeps = {
     inspect: () => checkCodexStatus(),
@@ -22284,12 +22360,13 @@ function buildServer(store2, dualDeps) {
   };
   server2.registerTool("helix_memory_commit", {
     title: "Commit memory",
-    description: "Store a fact in Helix memory (secret-scanned; provenance recorded).",
+    description: "Store a fact in Helix memory (secret-scanned; provenance recorded). Pass supersedes=<id> to update (replace) an existing item instead of adding a duplicate.",
     inputSchema: {
       content: external_exports.string(),
       source: external_exports.enum(["user", "reality-check", "codex-agree"]).optional(),
       blastRadius: external_exports.enum(["read-only", "local-reversible", "hard-to-reverse", "external"]).optional(),
-      classification: external_exports.enum(["normal", "personal"]).optional()
+      classification: external_exports.enum(["normal", "personal"]).optional(),
+      supersedes: external_exports.string().optional()
     }
   }, async (args) => handleCommit(store2, args));
   server2.registerTool("helix_memory_recall", {
@@ -22325,16 +22402,16 @@ function buildServer(store2, dualDeps) {
 }
 
 // src/server/index.ts
-var home = process.env.HELIX_HOME ?? join4(homedir3(), ".helix");
-var ledger = process.env.HELIX_LEDGER ?? join4(home, "memory.jsonl");
+var home = process.env.HELIX_HOME ?? join5(homedir3(), ".helix");
+var ledger = process.env.HELIX_LEDGER ?? join5(home, "memory.jsonl");
 var store = new MemoryStore(ledger, { sessionId: process.env.HELIX_SESSION ?? "cli" });
 var server = buildServer(store, {
-  config: loadConfig({ globalPath: join4(home, "config.json") }),
+  config: loadConfig({ globalPath: join5(home, "config.json") }),
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
   echo: { mode: "enforce", ledgerTexts: () => store.inspect().map((r) => ({ id: r.id, content: r.content })) },
-  auditPath: join4(home, "audit.jsonl"),
-  codexLogPath: join4(home, "codex-log.jsonl")
+  auditPath: join5(home, "audit.jsonl"),
+  codexLogPath: join5(home, "codex-log.jsonl")
 });
 var transport = new StdioServerTransport();
 await server.connect(transport);

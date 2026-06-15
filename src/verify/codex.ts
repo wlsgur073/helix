@@ -32,7 +32,7 @@ export interface CodexInvocation { file: string; argsPrefix: string[] }
 export function buildCodexExecArgs(outFile: string, opts: CodexRunOptions = {}): string[] {
   const args = ['exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', outFile];
   if (opts.model != null && opts.model !== '') {
-    if (!/^[A-Za-z0-9._:-]+$/.test(opts.model)) throw new Error(`invalid codex model "${opts.model}" (argv safety)`);
+    if (!/^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/.test(opts.model)) throw new Error(`invalid codex model "${opts.model}" (argv safety)`);
     args.push('-m', opts.model);
   }
   if (opts.effort != null && opts.effort !== '') {

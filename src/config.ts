@@ -7,7 +7,7 @@ export type StakesFloor = 'low' | 'medium' | 'high';
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 const EFFORTS: readonly ReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh'];
-const MODEL_RE = /^[A-Za-z0-9._:-]+$/; // argv-safe model token (no leading dash, no shell/space chars)
+const MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/; // argv-safe model token: no leading dash, no shell/space chars
 
 export interface HelixConfig {
   dualVerify: {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectSecret, redactSecret } from '../../src/memory/secret-scan.js';
+import { detectSecret, findSecrets, redactSecrets } from '../../src/memory/secret-scan.js';
 
 describe('secret scanner', () => {
   it('flags PEM private key blocks', () => {
@@ -46,10 +46,12 @@ describe('secret scanner', () => {
     expect(detectSecret('the eyJ prefix marks a base64url JSON header').hit).toBe(false);
     expect(detectSecret('npm_config_registry is an env var name').hit).toBe(false);
   });
-  it('redactSecret replaces content with a content-free marker', () => {
-    const r = redactSecret('AKIAIOSFODNN7EXAMPLE', 'aws-key');
-    expect(r.content).toBe('');
+  it('redactSecrets replaces only the secret span, preserving surrounding text', () => {
+    const content = 'aws key AKIAIOSFODNN7EXAMPLE here';
+    const r = redactSecrets(content, findSecrets(content));
+    expect(r.content).toBe('aws key [redacted:aws-access-key] here');
     expect(r.classification).toBe('secret-redacted');
-    expect(typeof r.hash).toBe('string');
+    expect(r.content).not.toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(r.kinds).toContain('aws-access-key');
   });
 });

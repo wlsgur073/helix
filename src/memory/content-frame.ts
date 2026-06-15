@@ -7,8 +7,10 @@ export function newNonce(): string {
 }
 
 // Fence characters whose 3+ runs could read as a structural marker / code fence / rule.
-// '=' '-' '~' '`' , em/en dash + horizontal bar (U+2013/2014/2015), box-drawing (U+2500–257F).
-const FENCE_RUN = /[=\-~`–—―─-╿]{3,}/gu;
+// ASCII: '=' '-' '~' '`' '*' '_' (markdown thematic breaks / code fences). Dash-likes NFKC
+// does NOT fold (so they survive normalization): U+2010-2012 hyphen/figure dash, U+2212 minus,
+// U+2013/2014/2015 en/em dash + horizontal bar. Box-drawing: U+2500-257F.
+const FENCE_RUN = /[=\-~`*_‐‑‒–—―−─-╿]{3,}/gu;
 
 /** Break a fence run by inserting ASCII spaces between every char ("===" -> "= = ="). */
 function breakFenceRuns(s: string): string {

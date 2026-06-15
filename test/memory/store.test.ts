@@ -27,12 +27,13 @@ describe('MemoryStore.commit', () => {
     expect(parseLedger(ledger)).toHaveLength(1);
   });
 
-  it('redacts a detected secret before it is written (no plaintext on disk)', () => {
+  it('redacts a detected secret in place, preserving surrounding text (no plaintext on disk)', () => {
     const { store, ledger } = tmpStore();
     store.commit({ content: 'aws key AKIAIOSFODNN7EXAMPLE here' });
     const onDisk = parseLedger(ledger)[0]!;
     expect(onDisk.classification).toBe('secret-redacted');
-    expect(onDisk.content).toBe('');
+    expect(onDisk.content).toContain('[redacted:aws-access-key]');
+    expect(onDisk.content).toContain('aws key'); // surrounding text preserved (no whole-record loss)
     expect(readFileSync(ledger, 'utf8')).not.toContain('AKIAIOSFODNN7EXAMPLE');
   });
 
