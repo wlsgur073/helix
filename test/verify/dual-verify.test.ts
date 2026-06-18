@@ -14,9 +14,20 @@ function deps(over: Partial<DualVerifyDeps>): DualVerifyDeps {
     ...over,
   };
 }
-const enabled = (): HelixConfig => ({ dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high', memoryEgress: 'block', logContent: false } });
+const enabled = (): HelixConfig => ({ dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high', timeoutMs: 120_000, memoryEgress: 'block', logContent: false } });
 
 describe('dualVerify', () => {
+  it('forwards config.dualVerify.timeoutMs to the runner', async () => {
+    let seenTimeout: number | undefined;
+    const cfg = enabled();
+    cfg.dualVerify.timeoutMs = 234567;
+    await dualVerify({ question: 'q', helixAnswer: 'a' }, deps({
+      config: cfg,
+      runner: async (_q, opts) => { seenTimeout = opts?.timeoutMs; return { ok: true, answer: 'x' }; },
+    }));
+    expect(seenTimeout).toBe(234567);
+  });
+
   it('degrades (ran=false) when disabled, without calling the runner', async () => {
     let called = false;
     const r = await dualVerify({ question: 'q', helixAnswer: 'a' },
@@ -93,18 +104,18 @@ describe('dualVerify', () => {
   });
 
   it('passes the configured model + effort to the runner', async () => {
-    let seen: { model?: string | null; effort?: string | null } | undefined;
+    let seen: { model?: string | null; effort?: string | null; timeoutMs?: number } | undefined;
     await dualVerify({ question: 'q', helixAnswer: 'a' }, deps({
-      config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'xhigh', memoryEgress: 'block', logContent: false } },
+      config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'xhigh', timeoutMs: 120_000, memoryEgress: 'block', logContent: false } },
       runner: async (_q, opts) => { seen = opts; return { ok: true, answer: 'x' }; },
     }));
-    expect(seen).toEqual({ model: 'gpt-5.5', effort: 'xhigh' });
+    expect(seen).toEqual({ model: 'gpt-5.5', effort: 'xhigh', timeoutMs: 120_000 });
   });
 });
 
 describe('critique mode', () => {
   const critiqueCfg = (): HelixConfig =>
-    ({ dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, memoryEgress: 'block', logContent: false } });
+    ({ dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, memoryEgress: 'block', logContent: false } });
 
   it('sends a critique prompt carrying the question and the data-framed answer', async () => {
     let prompt = '';
@@ -258,7 +269,7 @@ describe('dualVerify: outcome + promptSent (for opt-in content logging)', () => 
 
   it('critique success -> outcome sent, promptSent equals the critique prompt (contains question + answer)', async () => {
     const critiqueCfg: HelixConfig =
-      { dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, memoryEgress: 'block', logContent: false } };
+      { dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, memoryEgress: 'block', logContent: false } };
     const r = await dualVerify({ question: 'which db?', helixAnswer: 'use postgres' },
       deps({ config: critiqueCfg, runner: async () => ({ ok: true, answer: 'fine' }) }));
     expectOutcome(r.outcome, 'sent');

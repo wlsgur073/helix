@@ -83,6 +83,31 @@ describe('loadConfig', () => {
   });
 });
 
+describe('loadConfig: dualVerify.timeoutMs (configurable Codex runner cap)', () => {
+  it('defaults timeoutMs to a positive number', () => {
+    const cfg = loadConfig({ projectPath: join(tmpDir(), 'n.json'), globalPath: join(tmpDir(), 'n.json') });
+    expect(typeof cfg.dualVerify.timeoutMs).toBe('number');
+    expect(cfg.dualVerify.timeoutMs).toBeGreaterThan(0);
+    expect(DEFAULT_CONFIG.dualVerify.timeoutMs).toBe(cfg.dualVerify.timeoutMs);
+  });
+  it('reads a valid timeoutMs override', () => {
+    const dir = tmpDir();
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { timeoutMs: 240000 } }));
+    expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.timeoutMs).toBe(240000);
+  });
+  it('rejects out-of-band / non-integer timeoutMs, keeping the default (fail-safe)', () => {
+    const dir = tmpDir();
+    const def = DEFAULT_CONFIG.dualVerify.timeoutMs;
+    // 0/-5/'soon' (non-positive, non-number), NaN/Infinity (non-finite), 0.5 (fractional),
+    // 999 (< 1s floor), and 2_147_483_648 (> Node setTimeout 32-bit ceiling -> Node would clamp
+    // the real delay to 1ms, an instant timeout). All must fall back to the default.
+    for (const bad of [0, -5, 'soon', NaN, Infinity, -Infinity, 0.5, 999, 2_147_483_648] as unknown[]) {
+      const p = join(dir, `t${String(bad)}.json`); writeFileSync(p, JSON.stringify({ dualVerify: { timeoutMs: bad } }));
+      expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.timeoutMs).toBe(def);
+    }
+  });
+});
+
 describe('loadConfig: dualVerify.logContent (opt-in content log gate)', () => {
   it('defaults logContent to false (content logging OFF by default)', () => {
     const cfg = loadConfig({ projectPath: join(tmpDir(), 'n.json'), globalPath: join(tmpDir(), 'n.json') });

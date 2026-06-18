@@ -32,6 +32,10 @@ const PATTERNS: ReadonlyArray<{ kind: string; re: RegExp }> = [
   { kind: 'bearer-token', re: /\b[Bb]earer\s+[A-Za-z0-9._\-]{20,}\b/ },
   // No leading \b: real keys are often prefixed (db_password=...), and a secret
   // scanner should err toward over-flagging rather than miss a credential.
+  // Known limitation: this also flags prose like "pass: install" as a secret (and, via the egress
+  // guard, override-proof-blocks it). A naive value-shape tighten regressed recall (missed
+  // alpha-only secrets) and still mis-fired on punctuated prose, so the broad form is kept until a
+  // precision-preserving fix lands.
   { kind: 'secret-assignment', re: /(pass(word)?|secret|api[_-]?key)\s*[=:]\s*\S{6,}/i },
 ];
 

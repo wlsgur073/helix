@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 export type CodexResult = { ok: true; answer: string } | { ok: false; error: string };
-export interface CodexRunOptions { model?: string | null; effort?: string | null }
+export interface CodexRunOptions { model?: string | null; effort?: string | null; timeoutMs?: number }
 export type CodexRunner = (question: string, opts?: CodexRunOptions) => Promise<CodexResult>;
 export interface Availability { available: boolean; reason?: string }
 
@@ -205,6 +205,7 @@ export async function checkCodexStatus(invocation?: CodexInvocation | null): Pro
 /** Build a runner that spawns `codex exec` with the prompt on stdin and reads -o's file. */
 export function createCodexRunner(
   resolveInv: () => Promise<CodexInvocation | null> = resolveCodexInvocation,
+  run: (inv: CodexInvocation, args: string[], input: string | null, timeoutMs: number) => Promise<RunOutcome> = runCodex,
 ): CodexRunner {
   return async (question, opts = {}) => {
     const inv = await resolveInv();
@@ -212,7 +213,9 @@ export function createCodexRunner(
     const dir = mkdtempSync(join(tmpdir(), 'helix-codex-'));
     const outFile = join(dir, 'out.txt');
     try {
-      const { code, stderr } = await runCodex(inv, buildCodexExecArgs(outFile, opts), question, 120_000);
+      // The timeout is configurable (dualVerify.timeoutMs flows in via opts); the old hardcoded
+      // 120s capped heavy prompts. 120_000 stays as the fallback for direct callers.
+      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, opts.timeoutMs ?? 120_000);
       if (code !== 0) {
         return { ok: false, error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ''}` };
       }

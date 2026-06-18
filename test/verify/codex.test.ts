@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCodexExecArgs, interpretPreflight, interpretStatus, interpretWhereOutput, treeKillSpec } from '../../src/verify/codex.js';
+import { buildCodexExecArgs, createCodexRunner, interpretPreflight, interpretStatus, interpretWhereOutput, treeKillSpec } from '../../src/verify/codex.js';
 
 describe('buildCodexExecArgs (prompt-via-stdin contract)', () => {
   it('builds the read-only, ephemeral, output-to-file command ending with "-" (verified vs codex-cli 0.138)', () => {
@@ -24,6 +24,26 @@ describe('buildCodexExecArgs (prompt-via-stdin contract)', () => {
   it('rejects a malformed model or effort (argv safety)', () => {
     expect(() => buildCodexExecArgs('/tmp/o', { model: 'bad; rm -rf' })).toThrow(/invalid codex model/i);
     expect(() => buildCodexExecArgs('/tmp/o', { effort: 'x high' })).toThrow(/invalid codex effort/i);
+  });
+
+  it('does NOT put timeoutMs into argv — it is a spawn option, not a codex flag', () => {
+    expect(buildCodexExecArgs('/tmp/o', { model: null, effort: null, timeoutMs: 99999 })).toEqual([
+      'exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', '/tmp/o', '-',
+    ]);
+  });
+});
+
+describe('createCodexRunner (configurable timeout)', () => {
+  const inv = { file: 'codex', argsPrefix: [] };
+  it('forwards opts.timeoutMs to the spawn; defaults to 120000 when omitted', async () => {
+    const seen: number[] = [];
+    const fakeRun = async (
+      _inv: { file: string; argsPrefix: string[] }, _args: string[], _input: string | null, timeoutMs: number,
+    ) => { seen.push(timeoutMs); return { code: 0, stdout: '', stderr: '' }; };
+    const runner = createCodexRunner(async () => inv, fakeRun);
+    await runner('q', { timeoutMs: 250000 });
+    await runner('q');
+    expect(seen).toEqual([250000, 120000]);
   });
 });
 

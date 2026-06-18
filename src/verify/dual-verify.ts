@@ -111,7 +111,11 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
   // Past the gates: the next call spends the user's Codex quota (metered).
   const mode = deps.config.dualVerify.mode;
   const prompt = mode === 'critique' ? buildCritiquePrompt(params.question, params.helixAnswer) : params.question;
-  const res = await deps.runner(prompt, { model: deps.config.dualVerify.model, effort: deps.config.dualVerify.effort });
+  const res = await deps.runner(prompt, {
+    model: deps.config.dualVerify.model,
+    effort: deps.config.dualVerify.effort,
+    timeoutMs: deps.config.dualVerify.timeoutMs,
+  });
   if (!res.ok) {
     return { ran: false, attempted: true, outcome: 'error', reason: `codex run failed: ${res.error}`, egress: verdict };
   }

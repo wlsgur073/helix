@@ -13379,6 +13379,10 @@ var PATTERNS = [
   { kind: "bearer-token", re: /\b[Bb]earer\s+[A-Za-z0-9._\-]{20,}\b/ },
   // No leading \b: real keys are often prefixed (db_password=...), and a secret
   // scanner should err toward over-flagging rather than miss a credential.
+  // Known limitation: this also flags prose like "pass: install" as a secret (and, via the egress
+  // guard, override-proof-blocks it). A naive value-shape tighten regressed recall (missed
+  // alpha-only secrets) and still mis-fired on punctuated prose, so the broad form is kept until a
+  // precision-preserving fix lands.
   { kind: "secret-assignment", re: /(pass(word)?|secret|api[_-]?key)\s*[=:]\s*\S{6,}/i }
 ];
 function entropy(s) {
@@ -22020,7 +22024,11 @@ async function dualVerify(params, deps) {
   }
   const mode = deps.config.dualVerify.mode;
   const prompt = mode === "critique" ? buildCritiquePrompt(params.question, params.helixAnswer) : params.question;
-  const res = await deps.runner(prompt, { model: deps.config.dualVerify.model, effort: deps.config.dualVerify.effort });
+  const res = await deps.runner(prompt, {
+    model: deps.config.dualVerify.model,
+    effort: deps.config.dualVerify.effort,
+    timeoutMs: deps.config.dualVerify.timeoutMs
+  });
   if (!res.ok) {
     return { ran: false, attempted: true, outcome: "error", reason: `codex run failed: ${res.error}`, egress: verdict };
   }
@@ -22206,6 +22214,9 @@ var DEFAULT_CONFIG = {
     // model/effort for dual-verify specifically.
     model: null,
     effort: null,
+    // Codex run timeout (ms). 5 min gives heavy prompts headroom (the old 120s cap timed them out);
+    // the process is tree-killed on timeout so a higher ceiling does not leak a hung run.
+    timeoutMs: 3e5,
     // Block memory-derived / PII egress to the external Codex model by default. User opts into risk
     // by editing this to 'allow' (a human edit, outside model control). Invalid value => 'block'.
     memoryEgress: "block",
@@ -22238,6 +22249,10 @@ function loadConfig(opts = {}) {
       }
       if (dv.effort === null || typeof dv.effort === "string" && EFFORTS.includes(dv.effort)) {
         merged.dualVerify.effort = dv.effort;
+      }
+      const t = dv.timeoutMs;
+      if (typeof t === "number" && Number.isInteger(t) && t >= 1e3 && t <= 2147483647) {
+        merged.dualVerify.timeoutMs = t;
       }
       if (dv.memoryEgress === "block" || dv.memoryEgress === "allow") merged.dualVerify.memoryEgress = dv.memoryEgress;
       if (typeof dv.logContent === "boolean") merged.dualVerify.logContent = dv.logContent;
@@ -22398,14 +22413,14 @@ async function checkCodexStatus(invocation) {
     return { cliFound: false, version: void 0, available: false, authMode: "none", reason: `codex status check failed: ${e.message}` };
   }
 }
-function createCodexRunner(resolveInv = resolveCodexInvocation) {
+function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) {
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
     const dir = mkdtempSync(join4(tmpdir(), "helix-codex-"));
     const outFile = join4(dir, "out.txt");
     try {
-      const { code, stderr } = await runCodex(inv, buildCodexExecArgs(outFile, opts), question, 12e4);
+      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, opts.timeoutMs ?? 12e4);
       if (code !== 0) {
         return { ok: false, error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ""}` };
       }

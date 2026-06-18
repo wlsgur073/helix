@@ -17,7 +17,7 @@ function deps(status: CodexStatus, over: Partial<CodexStatusDeps> = {}): CodexSt
   };
 }
 const enabledCfg = (): HelixConfig => ({
-  dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: null, effort: null, memoryEgress: 'block', logContent: false },
+  dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, memoryEgress: 'block', logContent: false },
 });
 
 describe('handleCodexStatus', () => {
@@ -64,14 +64,14 @@ describe('handleCodexStatus', () => {
   it('content log ON reports ON + path + entry count (counts existing lines, missing -> 0)', async () => {
     const logPath = join(mkdtempSync(join(tmpdir(), 'helix-cstaton-')), 'codex-log.jsonl');
     writeFileSync(logPath, '{"ts":"t","kind":"compare","outcome":"sent"}\n{"ts":"t","kind":"compare","outcome":"skipped"}\n');
-    const onCfg: HelixConfig = { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: null, effort: null, memoryEgress: 'block', logContent: true } };
+    const onCfg: HelixConfig = { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, memoryEgress: 'block', logContent: true } };
     const res = await handleCodexStatus(deps({ cliFound: true, version: '0.139.0', available: true, authMode: 'chatgpt' }, { config: onCfg, codexLogPath: logPath }));
     expect(text(res)).toMatch(/content log:\s*ON/i);
     expect(text(res)).toContain('2 entries');
   });
 
   it('content log ON with a missing file reports 0 entries (never throws)', async () => {
-    const onCfg: HelixConfig = { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: null, effort: null, memoryEgress: 'block', logContent: true } };
+    const onCfg: HelixConfig = { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, memoryEgress: 'block', logContent: true } };
     const res = await handleCodexStatus(deps({ cliFound: true, version: '0.139.0', available: true, authMode: 'chatgpt' }, { config: onCfg }));
     expect(text(res)).toMatch(/content log:\s*ON/i);
     expect(text(res)).toContain('0 entries');

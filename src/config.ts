@@ -18,6 +18,10 @@ export interface HelixConfig {
     model: string | null;
     /** Reasoning effort. `null` (default) => omit -c so codex uses its config.toml effort. */
     effort: ReasoningEffort | null;
+    /** Codex run timeout in ms. Heavy dual-verify prompts exceed the old hardcoded 120s,
+     *  so this is configurable. Must be an integer in [1000, 2_147_483_647]; anything else
+     *  (non-integer, < 1s, > Node's setTimeout ceiling, NaN, ∞) falls back to the default. */
+    timeoutMs: number;
     /** Egress policy for non-secret legs (memory-echo / PII). User-edited only; default 'block'.
      *  Secrets block regardless. Read once at startup (a mid-session flip needs a restart). */
     memoryEgress: 'block' | 'allow';
@@ -37,6 +41,9 @@ export const DEFAULT_CONFIG: HelixConfig = {
     // model/effort for dual-verify specifically.
     model: null,
     effort: null,
+    // Codex run timeout (ms). 5 min gives heavy prompts headroom (the old 120s cap timed them out);
+    // the process is tree-killed on timeout so a higher ceiling does not leak a hung run.
+    timeoutMs: 300_000,
     // Block memory-derived / PII egress to the external Codex model by default. User opts into risk
     // by editing this to 'allow' (a human edit, outside model control). Invalid value => 'block'.
     memoryEgress: 'block',
@@ -74,6 +81,13 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
       }
       if (dv.effort === null || (typeof dv.effort === 'string' && EFFORTS.includes(dv.effort as ReasoningEffort))) {
         merged.dualVerify.effort = dv.effort as ReasoningEffort | null;
+      }
+      // Integer ms within a sane band: >= 1s (a real Codex call never completes faster) and
+      // <= the Node setTimeout 32-bit ceiling — above it Node clamps the delay to 1ms, silently
+      // inverting intent (asked-for-longer => instant timeout). Anything else keeps the default.
+      const t = dv.timeoutMs;
+      if (typeof t === 'number' && Number.isInteger(t) && t >= 1_000 && t <= 2_147_483_647) {
+        merged.dualVerify.timeoutMs = t;
       }
       if (dv.memoryEgress === 'block' || dv.memoryEgress === 'allow') merged.dualVerify.memoryEgress = dv.memoryEgress;
       if (typeof dv.logContent === 'boolean') merged.dualVerify.logContent = dv.logContent;
