@@ -125,6 +125,14 @@ export class MemoryStore {
     return { items, framed: frameAsData(items.map(({ record, scope }) => ({ record, scope })), this.nonce()) };
   }
 
+  /** Which ledger currently holds `id` (project iff owned and present); defaults to global. */
+  private ledgerOf(id: string): LedgerPath {
+    if (buildProjection(parseLedger(this.global)).has(id)) return this.global;
+    const p = this.opts.project;
+    if (p && isOwned(p.root, p.home) && buildProjection(parseLedger(p.ledger)).has(id)) return p.ledger;
+    return this.global;
+  }
+
   verify(targetId: string, outcome: VerifyOutcome, source: ProvenanceSource = 'reality-check', verifier?: string): MemoryRecord {
     const ts = this.now();
     const state = promotionFor({ source, sessionId: this.session(), verifier }, outcome);
@@ -134,7 +142,7 @@ export class MemoryStore {
       provenance: { source, sessionId: this.session(), verifier },
       supersedes: targetId, blastRadius: null, reverifyTrigger: null, classification: 'normal',
     };
-    appendRecord(this.global, record);
+    appendRecord(this.ledgerOf(targetId), record);
     return record;
   }
 
@@ -144,12 +152,13 @@ export class MemoryStore {
 
   erase(id: string): void {
     const ts = this.now();
-    appendRecord(this.global, {
+    const ledger = this.ledgerOf(id);
+    appendRecord(ledger, {
       id: this.id(), tx: ts, validFrom: ts, validTo: null,
       type: 'erase', content: '', state: 'Suspect',
       provenance: { source: 'user', sessionId: this.session() },
       supersedes: id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
     });
-    compactLedger(this.global, { erasedIds: new Set([id]) });
+    compactLedger(ledger, { erasedIds: new Set([id]) });
   }
 }

@@ -13629,6 +13629,13 @@ var MemoryStore = class {
     }));
     return { items, framed: frameAsData(items.map(({ record: record2, scope }) => ({ record: record2, scope })), this.nonce()) };
   }
+  /** Which ledger currently holds `id` (project iff owned and present); defaults to global. */
+  ledgerOf(id) {
+    if (buildProjection(parseLedger(this.global)).has(id)) return this.global;
+    const p = this.opts.project;
+    if (p && isOwned(p.root, p.home) && buildProjection(parseLedger(p.ledger)).has(id)) return p.ledger;
+    return this.global;
+  }
   verify(targetId, outcome, source = "reality-check", verifier) {
     const ts = this.now();
     const state = promotionFor({ source, sessionId: this.session(), verifier }, outcome);
@@ -13646,7 +13653,7 @@ var MemoryStore = class {
       reverifyTrigger: null,
       classification: "normal"
     };
-    appendRecord(this.global, record2);
+    appendRecord(this.ledgerOf(targetId), record2);
     return record2;
   }
   inspect() {
@@ -13654,7 +13661,8 @@ var MemoryStore = class {
   }
   erase(id) {
     const ts = this.now();
-    appendRecord(this.global, {
+    const ledger2 = this.ledgerOf(id);
+    appendRecord(ledger2, {
       id: this.id(),
       tx: ts,
       validFrom: ts,
@@ -13668,7 +13676,7 @@ var MemoryStore = class {
       reverifyTrigger: null,
       classification: "normal"
     });
-    compactLedger(this.global, { erasedIds: /* @__PURE__ */ new Set([id]) });
+    compactLedger(ledger2, { erasedIds: /* @__PURE__ */ new Set([id]) });
   }
 };
 

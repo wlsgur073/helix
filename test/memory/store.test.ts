@@ -159,3 +159,23 @@ describe('MemoryStore scoped recall/inspect', () => {
     expect(r.items.map((i) => i.scope)).toEqual(['global']);
   });
 });
+
+describe('MemoryStore erase/verify routing', () => {
+  it('erases a project item from the project ledger, leaving global intact', () => {
+    const { store, proj } = tmpLayered();
+    const g = store.commit({ content: 'global keep', scope: 'global' });
+    const p = store.commit({ content: 'project gone', scope: 'project' });
+    store.erase(p.id);
+    const live = store.inspect();
+    expect(live.find((s) => s.record.id === p.id)).toBeUndefined();
+    expect(live.find((s) => s.record.id === g.id)).toBeDefined();
+    expect(readFileSync(join(proj, '.helix', 'memory.jsonl'), 'utf8')).not.toContain('project gone');
+  });
+
+  it('verifies a project item in place (promotes within the project ledger)', () => {
+    const { store } = tmpLayered();
+    const p = store.commit({ content: 'project fact', scope: 'project' });
+    store.verify(p.id, { ran: true, indeterminate: false, passed: true });
+    expect(store.inspect().find((s) => s.record.id === p.id)?.record.state).toBe('Verified');
+  });
+});
