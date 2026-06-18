@@ -13,7 +13,10 @@ CLAUDE.md
 
 # ── Machine-local state (per-user, never shared) ──
 # .claude/ = Claude Code config + tooling state
-# .helix/  = Helix runtime state (ledger, config, audit, sessions)
+# .helix/  = Helix project scope layer: memory.jsonl (project ledger) + .owner (ownership stamp)
+#            + optional config.json. Kept private by default so each developer has their own
+#            project memory; team sharing is opt-in (un-ignore + helix_memory_adopt).
+#            Global/user-level state (audit, sessions, registry) lives in ~/.helix/, not here.
 # .remember/ = session-continuity buffer (also self-ignored within)
 # vault/ + **/.obsidian/ = Obsidian vault, personal notes / WIP
 .claude/
