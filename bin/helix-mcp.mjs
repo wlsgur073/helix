@@ -13253,9 +13253,6 @@ function buildProjection(records) {
   for (const id of removed) live.delete(id);
   return live;
 }
-function recall(projection, query, opts = {}) {
-  return rankRecords([...projection.values()], query, opts);
-}
 
 // src/memory/lock.ts
 import { mkdirSync, rmSync, statSync, readFileSync, writeFileSync } from "node:fs";
@@ -13493,11 +13490,11 @@ function makeDataFrame(opts) {
   const body = opts.lines.length === 0 ? ["(no relevant memory)"] : opts.lines.map((l) => datamark(l.text, l.mark, opts.maxChars));
   return [frameOpen(opts.label, opts.nonce), DATA_SEMANTICS, ...body, frameClose(opts.nonce)].join("\n");
 }
-function frameAsData(records, nonce) {
+function frameAsData(scoped, nonce) {
   return makeDataFrame({
     label: "RECALLED MEMORY",
     nonce,
-    lines: records.map((r) => ({ text: r.content, mark: `DATA[${r.state}]| ` }))
+    lines: scoped.map(({ record: record2, scope }) => ({ text: record2.content, mark: `DATA[${record2.state}:${scope}]| ` }))
   });
 }
 
@@ -13611,14 +13608,26 @@ var MemoryStore = class {
     }
     return p.ledger;
   }
+  /** Live records from global + (project iff owned), each tagged with its scope. */
+  scopedProjection() {
+    const out = [];
+    for (const r of buildProjection(parseLedger(this.global)).values()) out.push({ record: r, scope: "global" });
+    const p = this.opts.project;
+    if (p && isOwned(p.root, p.home)) {
+      for (const r of buildProjection(parseLedger(p.ledger)).values()) out.push({ record: r, scope: "project" });
+    }
+    return out;
+  }
   recall(query, opts = {}) {
-    const projection = buildProjection(parseLedger(this.global));
-    const hits = recall(projection, query, opts);
+    const scoped = this.scopedProjection();
+    const scopeById = new Map(scoped.map((s) => [s.record.id, s.scope]));
+    const hits = rankRecords(scoped.map((s) => s.record), query, opts);
     const items = hits.map((record2) => ({
       record: record2,
+      scope: scopeById.get(record2.id) ?? "global",
       needsReverify: requiresReverifyBeforeUse({ state: record2.state, blastRadius: record2.blastRadius })
     }));
-    return { items, framed: frameAsData(hits, this.nonce()) };
+    return { items, framed: frameAsData(items.map(({ record: record2, scope }) => ({ record: record2, scope })), this.nonce()) };
   }
   verify(targetId, outcome, source = "reality-check", verifier) {
     const ts = this.now();
@@ -13641,7 +13650,7 @@ var MemoryStore = class {
     return record2;
   }
   inspect() {
-    return [...buildProjection(parseLedger(this.global)).values()];
+    return this.scopedProjection();
   }
   erase(id) {
     const ts = this.now();
@@ -22059,7 +22068,7 @@ function handleRecall(store2, args) {
   return ok(framed + reverifyNote + egressNote);
 }
 function handleInspect(store2, _args) {
-  const rows = store2.inspect().map((r) => `- ${r.id} [${r.state}] ${r.content}`);
+  const rows = store2.inspect().map(({ record: record2, scope }) => `- ${record2.id} [${record2.state}:${scope}] ${record2.content}`);
   return ok(rows.length ? rows.join("\n") : "(memory is empty)");
 }
 function handleErase(store2, args) {
@@ -22406,7 +22415,7 @@ function buildServer(store2, dualDeps) {
     config: loadConfig({ globalPath: join5(home2, "config.json") }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
-    echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map((r) => ({ id: r.id, content: r.content })) },
+    echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
     auditPath: join5(home2, "audit.jsonl"),
     codexLogPath: join5(home2, "codex-log.jsonl")
   };
@@ -22466,7 +22475,7 @@ var server = buildServer(store, {
   config: loadConfig({ globalPath: join6(home, "config.json") }),
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
-  echo: { mode: "enforce", ledgerTexts: () => store.inspect().map((r) => ({ id: r.id, content: r.content })) },
+  echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
   auditPath: join6(home, "audit.jsonl"),
   codexLogPath: join6(home, "codex-log.jsonl")
 });

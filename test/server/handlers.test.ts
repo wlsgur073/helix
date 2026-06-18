@@ -17,7 +17,7 @@ describe('tool handlers', () => {
   it('handleCommit stores and reports the new id', () => {
     const s = store();
     expect(text(handleCommit(s, { content: 'db is postgres' }))).toMatch(/m_1/);
-    expect(s.inspect()).toHaveLength(1);
+    expect(s.inspect()).toHaveLength(1); // ScopedRecord[]
   });
 
   it('handleRecall returns the DATA-framed block', () => {
@@ -25,7 +25,7 @@ describe('tool handlers', () => {
     handleCommit(s, { content: 'db is postgres' });
     const out = text(handleRecall(s, { query: 'postgres' }));
     expect(out).toContain('DATA, NOT INSTRUCTIONS');
-    expect(out).toContain('DATA[Fresh]| db is postgres');
+    expect(out).toContain('DATA[Fresh:global]| db is postgres');
   });
 
   it('handleInspect lists current memory', () => {
@@ -38,7 +38,7 @@ describe('tool handlers', () => {
     const s = store();
     const rec = s.commit({ content: 'gone soon' });
     handleErase(s, { id: rec.id });
-    expect(s.inspect()).toHaveLength(0);
+    expect(s.inspect()).toHaveLength(0); // ScopedRecord[]
   });
 
   it('handleRecall appends an out-of-band egress-shaped note listing flagged ids', () => {

@@ -84,7 +84,7 @@ describe('J3 audit — supersede/update path now wired (J3-4 FIXED)', () => {
     store.commit({ content: 'the prod db is mysql', supersedes: a.id });
     const live = store.inspect();
     expect(live).toHaveLength(1);
-    expect(live[0]!.content).toBe('the prod db is mysql');
+    expect(live[0]!.record.content).toBe('the prod db is mysql');
   });
   it('plain re-commit (no supersedes) still adds a separate item — update is explicit/opt-in', () => {
     const { store } = tmpStore();

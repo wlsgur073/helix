@@ -83,7 +83,7 @@ describe('helix bundle e2e (hermetic)', () => {
 
     // (2) The hostile content surfaces ONLY as a per-line datamarked DATA[ ] line — it did not
     //     forge a real close, so it stays quarantined as data, never re-read as an instruction.
-    const body = out.indexOf(`DATA[Fresh]| ${hostile}`);
+    const body = out.indexOf(`DATA[Fresh:global]| ${hostile}`);
     expect(body).toBeGreaterThan(header);
 
     // (3) The real close uses the SAME nonce as the open and sits at the very end, after the

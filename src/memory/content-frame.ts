@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { MemoryRecord } from '../types.js';
+import type { ScopedRecord } from '../types.js';
 
 /** 128-bit CSPRNG hex nonce. Impure — callers invoke it; pure framers take the result as a param. */
 export function newNonce(): string {
@@ -61,11 +61,11 @@ export function makeDataFrame(opts: {
   return [frameOpen(opts.label, opts.nonce), DATA_SEMANTICS, ...body, frameClose(opts.nonce)].join('\n');
 }
 
-/** Memory-recall frame: thin wrapper that datamarks each record with its trust state. */
-export function frameAsData(records: MemoryRecord[], nonce: string): string {
+/** Memory-recall frame: datamarks each record with its trust state and scope. */
+export function frameAsData(scoped: ScopedRecord[], nonce: string): string {
   return makeDataFrame({
     label: 'RECALLED MEMORY',
     nonce,
-    lines: records.map((r) => ({ text: r.content, mark: `DATA[${r.state}]| ` })),
+    lines: scoped.map(({ record, scope }) => ({ text: record.content, mark: `DATA[${record.state}:${scope}]| ` })),
   });
 }

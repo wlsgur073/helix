@@ -35,7 +35,7 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
 }
 
 export function handleInspect(store: MemoryStore, _args: Record<string, never>): ToolResult {
-  const rows = store.inspect().map((r) => `- ${r.id} [${r.state}] ${r.content}`);
+  const rows = store.inspect().map(({ record, scope }) => `- ${record.id} [${record.state}:${scope}] ${record.content}`);
   return ok(rows.length ? rows.join('\n') : '(memory is empty)');
 }
 

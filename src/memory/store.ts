@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import type { BlastRadius, Classification, MemoryRecord, MemoryScope, ProvenanceSource } from '../types.js';
+import type { BlastRadius, Classification, MemoryRecord, MemoryScope, ProvenanceSource, ScopedRecord } from '../types.js';
 import { appendRecord, parseLedger, compactLedger, type LedgerPath } from './ledger.js';
 import { findSecrets, redactSecrets } from './secret-scan.js';
 import { canCommit, promotionFor, type VerifyOutcome } from './firewall.js';
-import { buildProjection, recall, type RecallOptions } from './projection.js';
+import { buildProjection, type RecallOptions } from './projection.js';
+import { rankRecords } from './retrieval.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce } from './content-frame.js';
 import { isOwned, stampOwnership } from './ownership.js';
@@ -36,6 +37,7 @@ export interface CommitInput {
 
 export interface RecalledItem {
   record: MemoryRecord;
+  scope: MemoryScope;
   needsReverify: boolean;
 }
 
@@ -100,14 +102,27 @@ export class MemoryStore {
     return p.ledger;
   }
 
+  /** Live records from global + (project iff owned), each tagged with its scope. */
+  private scopedProjection(): ScopedRecord[] {
+    const out: ScopedRecord[] = [];
+    for (const r of buildProjection(parseLedger(this.global)).values()) out.push({ record: r, scope: 'global' });
+    const p = this.opts.project;
+    if (p && isOwned(p.root, p.home)) {
+      for (const r of buildProjection(parseLedger(p.ledger)).values()) out.push({ record: r, scope: 'project' });
+    }
+    return out;
+  }
+
   recall(query: string, opts: RecallOptions = {}): RecallResult {
-    const projection = buildProjection(parseLedger(this.global));
-    const hits = recall(projection, query, opts);
+    const scoped = this.scopedProjection();
+    const scopeById = new Map(scoped.map((s) => [s.record.id, s.scope]));
+    const hits = rankRecords(scoped.map((s) => s.record), query, opts);
     const items: RecalledItem[] = hits.map((record) => ({
       record,
+      scope: scopeById.get(record.id) ?? 'global',
       needsReverify: requiresReverifyBeforeUse({ state: record.state, blastRadius: record.blastRadius }),
     }));
-    return { items, framed: frameAsData(hits, this.nonce()) };
+    return { items, framed: frameAsData(items.map(({ record, scope }) => ({ record, scope })), this.nonce()) };
   }
 
   verify(targetId: string, outcome: VerifyOutcome, source: ProvenanceSource = 'reality-check', verifier?: string): MemoryRecord {
@@ -123,8 +138,8 @@ export class MemoryStore {
     return record;
   }
 
-  inspect(): MemoryRecord[] {
-    return [...buildProjection(parseLedger(this.global)).values()];
+  inspect(): ScopedRecord[] {
+    return this.scopedProjection();
   }
 
   erase(id: string): void {
