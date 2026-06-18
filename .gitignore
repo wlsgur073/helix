@@ -19,11 +19,13 @@ CLAUDE.md
 #            Global/user-level state (audit, sessions, registry) lives in ~/.helix/, not here.
 # .remember/ = session-continuity buffer (also self-ignored within)
 # vault/ + **/.obsidian/ = Obsidian vault, personal notes / WIP
+# .playwright-mcp/ = Playwright MCP server local output (screenshots, traces)
 .claude/
 .helix/
 .remember/
 vault/
 **/.obsidian/
+.playwright-mcp/
 
 # ── Dependencies & build output ──
 # dist/ = tsc emit target (typecheck is --noEmit; the real build → bin/).
