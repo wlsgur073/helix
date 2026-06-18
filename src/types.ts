@@ -47,3 +47,12 @@ export interface MemoryRecord {
   reverifyTrigger: ReverifyTrigger | null;
   classification: Classification;
 }
+
+/** In-memory scope tag for a recalled item — derived from its source ledger, never persisted. */
+export type MemoryScope = 'global' | 'project';
+
+/** A record paired with the scope it was loaded from. */
+export interface ScopedRecord {
+  record: MemoryRecord;
+  scope: MemoryScope;
+}

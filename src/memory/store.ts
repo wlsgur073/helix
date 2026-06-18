@@ -1,17 +1,23 @@
 import { randomUUID } from 'node:crypto';
-import type { BlastRadius, Classification, MemoryRecord, ProvenanceSource } from '../types.js';
+import { existsSync } from 'node:fs';
+import type { BlastRadius, Classification, MemoryRecord, MemoryScope, ProvenanceSource } from '../types.js';
 import { appendRecord, parseLedger, compactLedger, type LedgerPath } from './ledger.js';
 import { findSecrets, redactSecrets } from './secret-scan.js';
 import { canCommit, promotionFor, type VerifyOutcome } from './firewall.js';
 import { buildProjection, recall, type RecallOptions } from './projection.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce } from './content-frame.js';
+import { isOwned, stampOwnership } from './ownership.js';
 
 export interface MemoryStoreOptions {
   sessionId?: string;
   now?: () => string;   // ISO timestamp source (injectable for tests)
   genId?: () => string; // id source (injectable for tests)
   genNonce?: () => string; // injectable per-frame nonce source (default crypto)
+  /** When set, enables the project scope layer (in-repo ledger + ownership gate). */
+  project?: { ledger: string; root: string; home: string };
+  /** Injectable ownership stamp source (default crypto). */
+  genStamp?: () => string;
 }
 
 export interface CommitInput {
@@ -24,6 +30,8 @@ export interface CommitInput {
   /** Id of an existing item this commit replaces. Set => emit a 'supersede' (update-in-place)
    *  instead of an 'assert', so a changed fact replaces the old one rather than duplicating it. */
   supersedes?: string | null;
+  /** Where to store the fact. Default 'project' when a project layer is active, else 'global'. */
+  scope?: MemoryScope;
 }
 
 export interface RecalledItem {
@@ -38,7 +46,7 @@ export interface RecallResult {
 
 /** Orchestrates the deterministic core modules over a real JSONL ledger file. */
 export class MemoryStore {
-  constructor(private readonly ledger: LedgerPath, private readonly opts: MemoryStoreOptions = {}) {}
+  constructor(private readonly global: LedgerPath, private readonly opts: MemoryStoreOptions = {}) {}
 
   private now(): string { return (this.opts.now ?? (() => new Date().toISOString()))(); }
   private id(): string { return (this.opts.genId ?? (() => `m_${randomUUID()}`))(); }
@@ -71,12 +79,29 @@ export class MemoryStore {
       provenance: { source, sessionId: this.session() },
       supersedes: input.supersedes ?? null, blastRadius: input.blastRadius ?? null, reverifyTrigger: null, classification,
     };
-    appendRecord(this.ledger, record);
+    appendRecord(this.targetLedger(input.scope), record);
     return record;
   }
 
+  /** Resolve the ledger to write to. Project scope claims ownership on first use and refuses a
+   *  pre-existing unowned (foreign) ledger. Falls back to global when no project layer is active. */
+  private targetLedger(scope: MemoryScope | undefined): LedgerPath {
+    const p = this.opts.project;
+    if (scope === 'global' || !p) return this.global;
+    if (!isOwned(p.root, p.home)) {
+      if (existsSync(p.ledger)) {
+        throw new Error(
+          'commit: a project memory file exists here that Helix did not create — ' +
+          'adopt it explicitly (helix_memory_adopt) or remove it',
+        );
+      }
+      stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
+    }
+    return p.ledger;
+  }
+
   recall(query: string, opts: RecallOptions = {}): RecallResult {
-    const projection = buildProjection(parseLedger(this.ledger));
+    const projection = buildProjection(parseLedger(this.global));
     const hits = recall(projection, query, opts);
     const items: RecalledItem[] = hits.map((record) => ({
       record,
@@ -94,22 +119,22 @@ export class MemoryStore {
       provenance: { source, sessionId: this.session(), verifier },
       supersedes: targetId, blastRadius: null, reverifyTrigger: null, classification: 'normal',
     };
-    appendRecord(this.ledger, record);
+    appendRecord(this.global, record);
     return record;
   }
 
   inspect(): MemoryRecord[] {
-    return [...buildProjection(parseLedger(this.ledger)).values()];
+    return [...buildProjection(parseLedger(this.global)).values()];
   }
 
   erase(id: string): void {
     const ts = this.now();
-    appendRecord(this.ledger, {
+    appendRecord(this.global, {
       id: this.id(), tx: ts, validFrom: ts, validTo: null,
       type: 'erase', content: '', state: 'Suspect',
       provenance: { source: 'user', sessionId: this.session() },
       supersedes: id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
     });
-    compactLedger(this.ledger, { erasedIds: new Set([id]) });
+    compactLedger(this.global, { erasedIds: new Set([id]) });
   }
 }

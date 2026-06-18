@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { parseLedger } from '../../src/memory/ledger.js';
+import { isOwned } from '../../src/memory/ownership.js';
 
 function tmpStore() {
   const dir = mkdtempSync(join(tmpdir(), 'helix-store-'));
@@ -91,5 +92,42 @@ describe('MemoryStore recall / verify / inspect / erase', () => {
     store.erase(a.id);
     expect(store.inspect().find((r) => r.id === a.id)).toBeUndefined();
     expect(readFileSync(ledger, 'utf8')).not.toContain('sensitive personal note');
+  });
+});
+
+function tmpLayered() {
+  const home = mkdtempSync(join(tmpdir(), 'helix-home-'));
+  const proj = mkdtempSync(join(tmpdir(), 'helix-proj-'));
+  const globalLedger = join(home, 'memory.jsonl');
+  let n = 0;
+  const store = new MemoryStore(globalLedger, {
+    sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
+    genStamp: () => 'STAMP', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj, home },
+  });
+  return { store, home, proj, globalLedger };
+}
+
+describe('MemoryStore scope routing', () => {
+  it('defaults commit to the project ledger and claims ownership on first use', () => {
+    const { store, proj, home, globalLedger } = tmpLayered();
+    store.commit({ content: 'this repo uses esbuild' });
+    expect(isOwned(proj, home)).toBe(true);
+    expect(parseLedger(join(proj, '.helix', 'memory.jsonl'))).toHaveLength(1);
+    expect(existsSync(globalLedger)).toBe(false); // nothing went global
+  });
+
+  it('routes scope=global to the global ledger', () => {
+    const { store, globalLedger, proj } = tmpLayered();
+    store.commit({ content: 'user prefers concise voice', scope: 'global' });
+    expect(parseLedger(globalLedger)).toHaveLength(1);
+    expect(existsSync(join(proj, '.helix', 'memory.jsonl'))).toBe(false);
+  });
+
+  it('refuses a project commit when an unowned project ledger already exists', () => {
+    const { store, proj } = tmpLayered();
+    // simulate a cloned-in foreign ledger: file present, no ownership stamp/registry
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), '{}\n');
+    expect(() => store.commit({ content: 'x' })).toThrow(/not create|adopt/i);
   });
 });
