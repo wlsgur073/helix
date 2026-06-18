@@ -84,6 +84,36 @@ Helix keeps two ledgers that it always reads together:
 - **Secret hygiene.** Common credential formats and high-entropy tokens are redacted before anything is written, and dual-verify refuses to send a payload containing a secret to the external model.
 - **Right-to-erasure.** `erase` physically rewrites the ledger to remove the content, leaving only a content-free tombstone. The ledger is locked across processes, so concurrent sessions can't corrupt it or resurrect erased data.
 
+## Trust & data flow (what runs on your machine)
+
+Helix is local-first. Installing it lets Claude Code run code on your machine — here is exactly what that code does:
+
+- **MCP server** (`node bin/helix-mcp.mjs`, launched by Claude Code): reads and writes memory under `~/.helix/` (and an owned `<project>/.helix/` ledger when present). It makes **no network calls** except the optional dual-verify path below.
+- **Session hooks:** SessionStart reads your trusted memory and injects it into the session as quarantined DATA (never as instructions); SessionEnd appends a session record. Neither sends anything off-machine.
+- **No telemetry.** Helix never phones home.
+
+### What dual-verify sends (only when you enable it)
+
+`helix_dual_verify` spawns the external **Codex CLI** to cross-check an answer. It is **off by default** (`dualVerify.enabled`).
+
+- **Sent:** exactly the `question` + `helixAnswer` you pass to the tool — nothing else (no memory, no files).
+- **Blocked before sending:** an egress guard refuses the call if the payload contains a credential (override-proof), high-severity or bulk PII, or a verbatim copy of a stored memory.
+- **Logging:** off by default. The exact prompt/response are written to `~/.helix/codex-log.jsonl` (`0o600`) only if you set `dualVerify.logContent: true`; the audit log stays content-free regardless.
+- **Disable:** set `dualVerify.enabled: false` (the default) — or never create the config.
+
+## Security & threat model
+
+Helix is a defense kit for **memory & context poisoning** (OWASP Agentic Top 10 — ASI06). Its guarantees:
+
+- **Provenance firewall (fail-closed):** only you or a reality-check can promote a memory to `Verified`; external agreement never can.
+- **Trust states & re-verify:** `Fresh / Verified / Suspect`, with re-verification required before a `Suspect` item is used on a high-blast-radius path.
+- **Quarantine:** untrusted text is normalized and datamarked inside a nonce-framed DATA block, so it cannot act as an instruction.
+- **Egress guard:** the only outbound path (dual-verify) is gated for secrets / PII / memory echo.
+
+**Out of scope:** the dual-verify echo check is a verbatim-copy tripwire, not a robust exfiltration guard against a host model that transforms content. The primary boundary is the provenance firewall + secret-scan + DATA-quarantine.
+
+Report vulnerabilities privately — see [SECURITY.md](./SECURITY.md).
+
 ## Development
 
 ```bash
