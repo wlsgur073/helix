@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { parseLedger } from '../../src/memory/ledger.js';
 import { isOwned } from '../../src/memory/ownership.js';
+import type { MemoryRecord } from '../../src/types.js';
 
 function tmpStore() {
   const dir = mkdtempSync(join(tmpdir(), 'helix-store-'));
@@ -162,7 +163,7 @@ describe('MemoryStore scoped recall/inspect', () => {
 
 describe('MemoryStore erase/verify routing', () => {
   it('erases a project item from the project ledger, leaving global intact', () => {
-    const { store, proj } = tmpLayered();
+    const { store, proj, globalLedger } = tmpLayered();
     const g = store.commit({ content: 'global keep', scope: 'global' });
     const p = store.commit({ content: 'project gone', scope: 'project' });
     store.erase(p.id);
@@ -170,12 +171,20 @@ describe('MemoryStore erase/verify routing', () => {
     expect(live.find((s) => s.record.id === p.id)).toBeUndefined();
     expect(live.find((s) => s.record.id === g.id)).toBeDefined();
     expect(readFileSync(join(proj, '.helix', 'memory.jsonl'), 'utf8')).not.toContain('project gone');
+    // Assert tombstone landed in project ledger and NOT in the global ledger
+    const isErase = (r: MemoryRecord) => r.type === 'erase' && r.supersedes === p.id;
+    expect(parseLedger(globalLedger).some(isErase)).toBe(false);
   });
 
   it('verifies a project item in place (promotes within the project ledger)', () => {
-    const { store } = tmpLayered();
+    const { store, proj, globalLedger } = tmpLayered();
     const p = store.commit({ content: 'project fact', scope: 'project' });
     store.verify(p.id, { ran: true, indeterminate: false, passed: true });
     expect(store.inspect().find((s) => s.record.id === p.id)?.record.state).toBe('Verified');
+    // Assert verify record landed in the project ledger and NOT in the global ledger
+    const projLedger = join(proj, '.helix', 'memory.jsonl');
+    const isVerify = (r: MemoryRecord) => r.type === 'verify' && r.supersedes === p.id;
+    expect(parseLedger(projLedger).some(isVerify)).toBe(true);
+    expect(parseLedger(globalLedger).some(isVerify)).toBe(false);
   });
 });
