@@ -150,6 +150,14 @@ export class MemoryStore {
     return this.scopedProjection();
   }
 
+  /** Explicitly adopt the active project ledger (trust its current contents). For team-shared
+   *  ledgers. Throws if no project layer is active. */
+  adopt(): void {
+    const p = this.opts.project;
+    if (!p) throw new Error('adopt: no project scope is active');
+    stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
+  }
+
   erase(id: string): void {
     const ts = this.now();
     const ledger = this.ledgerOf(id);

@@ -30,12 +30,13 @@ const textOf = (res: unknown): string =>
   ((res as { content?: Array<{ text?: string }> }).content ?? []).map((c) => c.text ?? '').join('');
 
 describe('Helix MCP server (end-to-end via in-memory transport)', () => {
-  it('lists all six helix tools over the protocol', async () => {
+  it('lists all seven helix tools over the protocol', async () => {
     const client = await connectedClient();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'helix_codex_status',
       'helix_dual_verify',
+      'helix_memory_adopt',
       'helix_memory_commit',
       'helix_memory_erase',
       'helix_memory_inspect',

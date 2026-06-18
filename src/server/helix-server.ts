@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { MemoryStore } from '../memory/store.js';
-import { handleCommit, handleRecall, handleInspect, handleErase, handleDualVerify, handleCodexStatus, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
+import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus } from '../verify/codex.js';
 
@@ -38,6 +38,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       blastRadius: z.enum(['read-only', 'local-reversible', 'hard-to-reverse', 'external']).optional(),
       classification: z.enum(['normal', 'personal']).optional(),
       supersedes: z.string().optional(),
+      scope: z.enum(['project', 'global']).optional(),
     },
   }, async (args) => handleCommit(store, args));
 
@@ -74,6 +75,12 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     description: 'Show whether Helix is connected to Codex (CLI/version, login, auth mode), the dual-verify config, and the content-log state. Free — no metered Codex call.',
     inputSchema: {},
   }, async () => handleCodexStatus(codexStatusDeps));
+
+  server.registerTool('helix_memory_adopt', {
+    title: 'Adopt project memory',
+    description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted.",
+    inputSchema: {},
+  }, async () => handleAdopt(store, {}));
 
   return server;
 }

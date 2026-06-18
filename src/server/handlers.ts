@@ -44,6 +44,11 @@ export function handleErase(store: MemoryStore, args: { id: string }): ToolResul
   return ok(`erased ${args.id}`);
 }
 
+export function handleAdopt(store: MemoryStore, _args: Record<string, never>): ToolResult {
+  store.adopt();
+  return ok('adopted: this project ledger is now trusted by this Helix install');
+}
+
 export interface CodexStatusDeps {
   inspect: () => Promise<CodexStatus>;   // default checkCodexStatus
   config: HelixConfig;                   // dual-verify enabled/mode + logContent

@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
-import { handleCommit, handleRecall, handleInspect, handleErase } from '../../src/server/handlers.js';
+import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt } from '../../src/server/handlers.js';
+import { isOwned } from '../../src/memory/ownership.js';
 
 function store() {
   let n = 0;
@@ -58,5 +59,33 @@ describe('tool handlers', () => {
     handleCommit(s, { content: 'the deploy uses the blue cluster' });
     const out = text(handleRecall(s, { query: 'deploy' }));
     expect(out).not.toContain('egress-shaped content flagged');
+  });
+});
+
+function layeredStore() {
+  const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+  const proj = mkdtempSync(join(tmpdir(), 'helix-p-'));
+  let n = 0;
+  const s = new MemoryStore(join(home, 'memory.jsonl'), {
+    sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
+    genStamp: () => 'S', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj, home },
+  });
+  return { store: s, home, proj };
+}
+
+describe('scope + adopt handlers', () => {
+  it('handleCommit honors scope=global', () => {
+    const { store } = layeredStore();
+    handleCommit(store, { content: 'user-level fact', scope: 'global' });
+    expect(store.inspect().find((s) => s.scope === 'global')?.record.content).toBe('user-level fact');
+  });
+
+  it('handleAdopt makes a pre-existing foreign project ledger owned', () => {
+    const { store, proj, home } = layeredStore();
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), '{}\n');
+    expect(isOwned(proj, home)).toBe(false);
+    handleAdopt(store, {});
+    expect(isOwned(proj, home)).toBe(true);
   });
 });

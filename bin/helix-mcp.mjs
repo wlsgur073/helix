@@ -2980,7 +2980,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve2.call(this, root, ref);
+      let _sch = resolve3.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3007,7 +3007,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve2(root, ref) {
+    function resolve3(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3638,7 +3638,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve2(baseURI, relativeURI, options) {
+    function resolve3(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3896,7 +3896,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve2,
+      resolve: resolve3,
       resolveComponent,
       equal,
       serialize,
@@ -6887,7 +6887,8 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join6 } from "node:path";
+import { join as join6, resolve as resolve2 } from "node:path";
+import { existsSync as existsSync4 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -12999,12 +13000,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve2) => {
+    return new Promise((resolve3) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve2();
+        resolve3();
       } else {
-        this._stdout.once("drain", resolve2);
+        this._stdout.once("drain", resolve3);
       }
     });
   }
@@ -13505,8 +13506,8 @@ import { join as join2, resolve } from "node:path";
 function registryPath(home2) {
   return join2(home2, "projects.json");
 }
-function ownerFile(projectRoot) {
-  return join2(projectRoot, ".helix", ".owner");
+function ownerFile(projectRoot2) {
+  return join2(projectRoot2, ".helix", ".owner");
 }
 function readRegistry(home2) {
   try {
@@ -13515,26 +13516,26 @@ function readRegistry(home2) {
     return {};
   }
 }
-function readOwner(projectRoot) {
+function readOwner(projectRoot2) {
   try {
-    return readFileSync3(ownerFile(projectRoot), "utf8").trim();
+    return readFileSync3(ownerFile(projectRoot2), "utf8").trim();
   } catch {
     return null;
   }
 }
-function isOwned(projectRoot, home2) {
-  const entry = readRegistry(home2)[resolve(projectRoot)];
+function isOwned(projectRoot2, home2) {
+  const entry = readRegistry(home2)[resolve(projectRoot2)];
   if (!entry) return false;
-  const stamp = readOwner(projectRoot);
+  const stamp = readOwner(projectRoot2);
   return stamp !== null && stamp === entry.stamp;
 }
-function stampOwnership(projectRoot, home2, opts = {}) {
+function stampOwnership(projectRoot2, home2, opts = {}) {
   const stamp = (opts.genStamp ?? (() => randomBytes3(16).toString("hex")))();
   const adoptedAt = (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
-  mkdirSync3(join2(projectRoot, ".helix"), { recursive: true });
-  writeFileSync2(ownerFile(projectRoot), stamp);
+  mkdirSync3(join2(projectRoot2, ".helix"), { recursive: true });
+  writeFileSync2(ownerFile(projectRoot2), stamp);
   const reg = readRegistry(home2);
-  reg[resolve(projectRoot)] = { stamp, adoptedAt };
+  reg[resolve(projectRoot2)] = { stamp, adoptedAt };
   mkdirSync3(home2, { recursive: true });
   writeFileSync2(registryPath(home2), JSON.stringify(reg, null, 2));
 }
@@ -13659,10 +13660,17 @@ var MemoryStore = class {
   inspect() {
     return this.scopedProjection();
   }
+  /** Explicitly adopt the active project ledger (trust its current contents). For team-shared
+   *  ledgers. Throws if no project layer is active. */
+  adopt() {
+    const p = this.opts.project;
+    if (!p) throw new Error("adopt: no project scope is active");
+    stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
+  }
   erase(id) {
     const ts = this.now();
-    const ledger2 = this.ledgerOf(id);
-    appendRecord(ledger2, {
+    const ledger = this.ledgerOf(id);
+    appendRecord(ledger, {
       id: this.id(),
       tx: ts,
       validFrom: ts,
@@ -13676,7 +13684,7 @@ var MemoryStore = class {
       reverifyTrigger: null,
       classification: "normal"
     });
-    compactLedger(ledger2, { erasedIds: /* @__PURE__ */ new Set([id]) });
+    compactLedger(ledger, { erasedIds: /* @__PURE__ */ new Set([id]) });
   }
 };
 
@@ -19746,7 +19754,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
+        await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -19763,7 +19771,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -19841,7 +19849,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve2(parseResult.data);
+            resolve3(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -20102,12 +20110,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve2, interval);
+      const timeoutId = setTimeout(resolve3, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -21207,7 +21215,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
+      await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -21881,7 +21889,7 @@ var PER_ITEM_CAP = 1e4;
 function normalizeForMatch(s) {
   return s.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
 }
-function detectEcho(texts, ledger2, opts = {}) {
+function detectEcho(texts, ledger, opts = {}) {
   const k = opts.k ?? DEFAULT_K;
   const maxScan = opts.maxScan ?? DEFAULT_MAX_SCAN;
   const haystack = normalizeForMatch(texts.join("\n")).slice(0, maxScan);
@@ -21890,7 +21898,7 @@ function detectEcho(texts, ledger2, opts = {}) {
   for (let i = 0; i + k <= haystack.length; i++) windows.add(haystack.slice(i, i + k));
   const ids = [];
   const seen = /* @__PURE__ */ new Set();
-  for (const item of ledger2) {
+  for (const item of ledger) {
     if (seen.has(item.id)) continue;
     const norm = normalizeForMatch(item.content).slice(0, PER_ITEM_CAP);
     if (norm.length < k) continue;
@@ -21997,10 +22005,10 @@ async function dualVerify(params, deps) {
   if (params.stakes && STAKES_RANK[params.stakes] < STAKES_RANK[floor]) {
     return { ran: false, attempted: false, outcome: "skipped", reason: `stakes '${params.stakes}' below configured floor '${floor}'` };
   }
-  const ledger2 = deps.echo.mode === "enforce" ? deps.echo.ledgerTexts() : null;
+  const ledger = deps.echo.mode === "enforce" ? deps.echo.ledgerTexts() : null;
   const verdict = classifyEgress({
     texts: [params.question, params.helixAnswer],
-    ledger: ledger2,
+    ledger,
     policy: deps.config.dualVerify.memoryEgress
   });
   if (verdict.decision === "blocked") {
@@ -22082,6 +22090,10 @@ function handleInspect(store2, _args) {
 function handleErase(store2, args) {
   store2.erase(args.id);
   return ok(`erased ${args.id}`);
+}
+function handleAdopt(store2, _args) {
+  store2.adopt();
+  return ok("adopted: this project ledger is now trusted by this Helix install");
 }
 function codexLogCount(path) {
   try {
@@ -22289,7 +22301,7 @@ async function resolveCodexInvocation() {
   return inv;
 }
 function runCodex(inv, args, input, timeoutMs) {
-  return new Promise((resolve2, reject) => {
+  return new Promise((resolve3, reject) => {
     const child = spawn(inv.file, [...inv.argsPrefix, ...args], {
       stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"]
     });
@@ -22326,7 +22338,7 @@ function runCodex(inv, args, input, timeoutMs) {
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve2({ code, stdout, stderr });
+      resolve3({ code, stdout, stderr });
     });
     if (input !== null && child.stdin) {
       child.stdin.on("error", () => {
@@ -22440,7 +22452,8 @@ function buildServer(store2, dualDeps) {
       source: external_exports.enum(["user", "reality-check", "codex-agree"]).optional(),
       blastRadius: external_exports.enum(["read-only", "local-reversible", "hard-to-reverse", "external"]).optional(),
       classification: external_exports.enum(["normal", "personal"]).optional(),
-      supersedes: external_exports.string().optional()
+      supersedes: external_exports.string().optional(),
+      scope: external_exports.enum(["project", "global"]).optional()
     }
   }, async (args) => handleCommit(store2, args));
   server2.registerTool("helix_memory_recall", {
@@ -22472,13 +22485,22 @@ function buildServer(store2, dualDeps) {
     description: "Show whether Helix is connected to Codex (CLI/version, login, auth mode), the dual-verify config, and the content-log state. Free \u2014 no metered Codex call.",
     inputSchema: {}
   }, async () => handleCodexStatus(codexStatusDeps));
+  server2.registerTool("helix_memory_adopt", {
+    title: "Adopt project memory",
+    description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted.",
+    inputSchema: {}
+  }, async () => handleAdopt(store2, {}));
   return server2;
 }
 
 // src/server/index.ts
 var home = process.env.HELIX_HOME ?? join6(homedir3(), ".helix");
-var ledger = process.env.HELIX_LEDGER ?? join6(home, "memory.jsonl");
-var store = new MemoryStore(ledger, { sessionId: process.env.HELIX_SESSION ?? "cli" });
+var globalLedger = process.env.HELIX_LEDGER ?? join6(home, "memory.jsonl");
+var projectRoot = process.cwd();
+var projectLedger = join6(projectRoot, ".helix", "memory.jsonl");
+var projectActive = existsSync4(join6(projectRoot, ".helix")) && resolve2(projectLedger) !== resolve2(globalLedger);
+var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
+var store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? "cli", project });
 var server = buildServer(store, {
   config: loadConfig({ globalPath: join6(home, "config.json") }),
   runner: realCodexRunner,
