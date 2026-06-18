@@ -3,7 +3,7 @@
 // break session start: on ANY error it injects nothing and still exits 0.
 import { writeSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { parseLedger } from '../memory/ledger.js';
 import { buildProjection } from '../memory/projection.js';
 import { formatSessionStartContext } from './format-context.js';
@@ -37,7 +37,7 @@ try {
       if (isOwned(cwd, home)) {
         const projLedger = projectLedgerPath(cwd);
         // guard: never read the global ledger as a "project" layer (cwd == ~ collision)
-        if (projLedger !== globalLedger) {
+        if (resolve(projLedger) !== resolve(globalLedger)) {
           for (const r of buildProjection(parseLedger(projLedger)).values()) scoped.push({ record: r, scope: 'project' });
         }
       }

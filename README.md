@@ -25,7 +25,7 @@ Restart Claude Code, then confirm the server is live with `/mcp` (you should see
 
 ## What you get
 
-Five MCP tools:
+Seven MCP tools:
 
 | Tool | Purpose |
 |------|---------|
@@ -33,7 +33,9 @@ Five MCP tools:
 | `helix_memory_recall` | Retrieve relevant memory as a quarantined DATA block |
 | `helix_memory_inspect` | List current memory items with their trust state |
 | `helix_memory_erase` | Physically erase an item (right-to-erasure) |
+| `helix_memory_adopt` | Trust the current project's pre-existing memory file (for a recognized/team-shared ledger; default-deny) |
 | `helix_dual_verify` | Cross-check an answer with Codex (off by default) |
+| `helix_codex_status` | Show Codex connection state (CLI/version, login, auth mode), dual-verify config, and content-log state — free, no metered call |
 
 Two hooks run automatically: **SessionStart** injects current, trusted memory into the session; **SessionEnd** records the session. Global state lives under `~/.helix/` (`memory.jsonl`, `audit.jsonl`, `sessions.jsonl`, `config.json`, `projects.json`). Project memory lives at `<project-root>/.helix/memory.jsonl` (see [Memory scope](#memory-scope) below).
 

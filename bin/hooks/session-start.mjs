@@ -1,7 +1,7 @@
 // src/hooks/session-start.ts
 import { writeSync as writeSync2 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join2 } from "node:path";
+import { join as join2, resolve as resolve2 } from "node:path";
 
 // src/memory/ledger.ts
 import { appendFileSync, readFileSync, mkdirSync, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
@@ -186,7 +186,7 @@ try {
     try {
       if (isOwned(cwd, home)) {
         const projLedger = projectLedgerPath(cwd);
-        if (projLedger !== globalLedger) {
+        if (resolve2(projLedger) !== resolve2(globalLedger)) {
           for (const r of buildProjection(parseLedger(projLedger)).values()) scoped.push({ record: r, scope: "project" });
         }
       }
