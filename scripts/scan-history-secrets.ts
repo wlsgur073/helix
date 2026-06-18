@@ -3,7 +3,7 @@
 // NAMED (high-confidence) hits by kind + blob + path — never the secret value.
 // Usage: npx tsx scripts/scan-history-secrets.ts
 // Note: Helix's pattern set (~12 providers + generic assignment) is narrower than a
-// dedicated scanner like gitleaks; treat that as a CI fast-follow for broader coverage.
+// purpose-built secret scanner; treat a broader-ruleset scanner as a CI fast-follow.
 import { execFileSync } from 'node:child_process';
 import { findSecrets } from '../src/memory/secret-scan.js';
 
@@ -15,8 +15,8 @@ const KNOWN_SAFE = /AKIAIOSFODNN7EXAMPLE/;
 //  - the detector source: its pattern/keyword string literals self-match
 //  - bin/**             : built bundles, derived from the (scanned) src/ tree
 // Limitation: a real secret hard-coded directly into a detector source file or a
-// test fixture would be allowlisted. Those files are reviewed by hand; a dedicated
-// scanner (gitleaks, broader ruleset) is recommended as a CI fast-follow.
+// test fixture would be allowlisted. Those files are reviewed by hand; a purpose-built
+// secret scanner with a broader ruleset is recommended as a CI fast-follow.
 const ALLOWLIST_PATHS: RegExp[] = [
   /^test\//,
   /^src\/memory\/secret-scan\.ts$/,
