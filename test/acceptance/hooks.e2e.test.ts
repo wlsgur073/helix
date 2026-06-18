@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stampOwnership } from '../../src/memory/ownership.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const START = join(root, 'bin', 'hooks', 'session-start.mjs');
@@ -44,7 +45,7 @@ describe('session-start hook e2e', () => {
     const { code, stdout } = await runHook(START, home, '{}');
     expect(code).toBe(0);
     expect(stdout).toContain('DATA, NOT INSTRUCTIONS');
-    expect(stdout).toContain('DATA[Fresh]| '); // per-line datamarked provenance
+    expect(stdout).toContain('DATA[Fresh:global]| '); // per-line datamarked provenance
     expect(stdout).toContain('user prefers vitest over jest');
   }, 20_000);
 
@@ -87,5 +88,32 @@ describe('session-end hook e2e', () => {
     const { code } = await runHook(END, home, 'not json');
     expect(code).toBe(0);
     expect(existsSync(join(home, 'sessions.jsonl'))).toBe(false);
+  }, 20_000);
+});
+
+describe('session-start hook project scope e2e', () => {
+  it('merges global + OWNED project ledger via stdin cwd', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-hook-'));
+    const proj = mkdtempSync(join(tmpdir(), 'helix-proj-'));
+    writeFileSync(join(home, 'memory.jsonl'), record('global preference here') + '\n');
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), record('project-only fact here') + '\n');
+    stampOwnership(proj, home, { genStamp: () => 'OWN' }); // make it owned in this temp home
+    const { code, stdout } = await runHook(START, home, JSON.stringify({ cwd: proj }));
+    expect(code).toBe(0);
+    expect(stdout).toContain('DATA[Fresh:global]| global preference here');
+    expect(stdout).toContain('DATA[Fresh:project]| project-only fact here');
+  }, 20_000);
+
+  it('ignores a FOREIGN (unowned) project ledger — global only', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-hook-'));
+    const proj = mkdtempSync(join(tmpdir(), 'helix-proj-'));
+    writeFileSync(join(home, 'memory.jsonl'), record('global preference here') + '\n');
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), record('forged project fact', 'Verified') + '\n');
+    const { code, stdout } = await runHook(START, home, JSON.stringify({ cwd: proj })); // no stampOwnership
+    expect(code).toBe(0);
+    expect(stdout).toContain('global preference here');
+    expect(stdout).not.toContain('forged project fact');
   }, 20_000);
 });

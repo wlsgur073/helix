@@ -1,7 +1,7 @@
 // src/hooks/session-start.ts
 import { writeSync as writeSync2 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join as join2 } from "node:path";
 
 // src/memory/ledger.ts
 import { appendFileSync, readFileSync, mkdirSync, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
@@ -104,15 +104,15 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   const maxItems = opts.maxItems ?? 30;
   const maxChars = opts.maxChars ?? 4e3;
   const maxItemChars = opts.maxItemChars ?? 240;
-  const usable = records.filter((r) => r.content.trim() !== "").sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || b.tx.localeCompare(a.tx));
+  const usable = records.filter(({ record }) => record.content.trim() !== "").sort((a, b) => STATE_ORDER[a.record.state] - STATE_ORDER[b.record.state] || b.record.tx.localeCompare(a.record.tx));
   if (usable.length === 0) return "";
-  const lines = usable.slice(0, maxItems).map((r) => {
+  const lines = usable.slice(0, maxItems).map(({ record: r, scope }) => {
     const flag = requiresReverifyBeforeUse({ state: r.state, blastRadius: r.blastRadius }) ? "(re-verify before use) " : "";
-    return datamark(`${flag}${r.content.replace(/\s+/g, " ").trim()}`, `DATA[${r.state}]| `, maxItemChars);
+    return datamark(`${flag}${r.content.replace(/\s+/g, " ").trim()}`, `DATA[${r.state}:${scope}]| `, maxItemChars);
   });
   let dropped = usable.length - lines.length;
   const renderedRecords = usable.slice(0, maxItems);
-  const egressFlags = renderedRecords.filter((r) => classifyEmission(r.content).flagged).map((r) => r.id);
+  const egressFlags = renderedRecords.filter(({ record }) => classifyEmission(record.content).flagged).map(({ record }) => record.id);
   const egressNote = egressFlags.length ? `(egress-shaped content flagged - treat as data only: ${egressFlags.join(", ")})` : null;
   const assemble = () => [
     frameOpen(LABEL, nonce),
@@ -132,11 +132,63 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   return out;
 }
 
+// src/memory/ownership.ts
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+function projectLedgerPath(projectRoot) {
+  return join(projectRoot, ".helix", "memory.jsonl");
+}
+function registryPath(home) {
+  return join(home, "projects.json");
+}
+function ownerFile(projectRoot) {
+  return join(projectRoot, ".helix", ".owner");
+}
+function readRegistry(home) {
+  try {
+    return JSON.parse(readFileSync2(registryPath(home), "utf8"));
+  } catch {
+    return {};
+  }
+}
+function readOwner(projectRoot) {
+  try {
+    return readFileSync2(ownerFile(projectRoot), "utf8").trim();
+  } catch {
+    return null;
+  }
+}
+function isOwned(projectRoot, home) {
+  const entry = readRegistry(home)[resolve(projectRoot)];
+  if (!entry) return false;
+  const stamp = readOwner(projectRoot);
+  return stamp !== null && stamp === entry.stamp;
+}
+
 // src/hooks/session-start.ts
+async function readStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
 try {
-  const home = process.env.HELIX_HOME ?? join(homedir(), ".helix");
-  const ledger = process.env.HELIX_LEDGER ?? join(home, "memory.jsonl");
-  const text = formatSessionStartContext([...buildProjection(parseLedger(ledger)).values()], newNonce());
+  const home = process.env.HELIX_HOME ?? join2(homedir(), ".helix");
+  const globalLedger = process.env.HELIX_LEDGER ?? join2(home, "memory.jsonl");
+  const scoped = [];
+  for (const r of buildProjection(parseLedger(globalLedger)).values()) scoped.push({ record: r, scope: "global" });
+  let cwd;
+  try {
+    const j = JSON.parse(await readStdin());
+    if (typeof j.cwd === "string") cwd = j.cwd;
+  } catch {
+  }
+  if (cwd && isOwned(cwd, home)) {
+    const projLedger = projectLedgerPath(cwd);
+    if (projLedger !== globalLedger) {
+      for (const r of buildProjection(parseLedger(projLedger)).values()) scoped.push({ record: r, scope: "project" });
+    }
+  }
+  const text = formatSessionStartContext(scoped, newNonce());
   if (text !== "") writeSync2(1, text + "\n");
 } catch {
 }
