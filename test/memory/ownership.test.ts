@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { isOwned, stampOwnership, projectLedgerPath } from '../../src/memory/ownership.js';
 
 function dirs() {
@@ -26,7 +26,7 @@ describe('ownership', () => {
     expect(existsSync(join(proj, '.helix', '.owner'))).toBe(true);
     expect(readFileSync(join(proj, '.helix', '.owner'), 'utf8')).toBe('STAMP1');
     const reg = JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8'));
-    expect(reg[proj].stamp).toBe('STAMP1');
+    expect(reg[resolve(proj)].stamp).toBe('STAMP1');
     expect(isOwned(proj, home)).toBe(true);
   });
 
