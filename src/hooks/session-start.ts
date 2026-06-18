@@ -32,12 +32,16 @@ try {
     if (typeof j.cwd === 'string') cwd = j.cwd;
   } catch { /* no/garbage stdin -> global only */ }
 
-  if (cwd && isOwned(cwd, home)) {
-    const projLedger = projectLedgerPath(cwd);
-    // guard: never read the global ledger as a "project" layer (cwd == ~ collision)
-    if (projLedger !== globalLedger) {
-      for (const r of buildProjection(parseLedger(projLedger)).values()) scoped.push({ record: r, scope: 'project' });
-    }
+  if (cwd) {
+    try {
+      if (isOwned(cwd, home)) {
+        const projLedger = projectLedgerPath(cwd);
+        // guard: never read the global ledger as a "project" layer (cwd == ~ collision)
+        if (projLedger !== globalLedger) {
+          for (const r of buildProjection(parseLedger(projLedger)).values()) scoped.push({ record: r, scope: 'project' });
+        }
+      }
+    } catch { /* unreadable/foreign project ledger → global only */ }
   }
 
   const text = formatSessionStartContext(scoped, newNonce());

@@ -63,6 +63,14 @@ describe('session-start hook e2e', () => {
     expect(code).toBe(0);
     expect(stdout).toBe('');
   }, 20_000);
+
+  it('garbage stdin: still injects global memory, exits 0', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-hook-'));
+    writeFileSync(join(home, 'memory.jsonl'), record('global fact survives bad stdin') + '\n');
+    const { code, stdout } = await runHook(START, home, 'not json');
+    expect(code).toBe(0);
+    expect(stdout).toContain('global fact survives bad stdin');
+  }, 20_000);
 });
 
 describe('session-end hook e2e', () => {

@@ -182,10 +182,15 @@ try {
     if (typeof j.cwd === "string") cwd = j.cwd;
   } catch {
   }
-  if (cwd && isOwned(cwd, home)) {
-    const projLedger = projectLedgerPath(cwd);
-    if (projLedger !== globalLedger) {
-      for (const r of buildProjection(parseLedger(projLedger)).values()) scoped.push({ record: r, scope: "project" });
+  if (cwd) {
+    try {
+      if (isOwned(cwd, home)) {
+        const projLedger = projectLedgerPath(cwd);
+        if (projLedger !== globalLedger) {
+          for (const r of buildProjection(parseLedger(projLedger)).values()) scoped.push({ record: r, scope: "project" });
+        }
+      }
+    } catch {
     }
   }
   const text = formatSessionStartContext(scoped, newNonce());
