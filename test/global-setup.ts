@@ -6,8 +6,9 @@ const TEST_TMP_PREFIX = 'helix-'; // the dash excludes the runtime corral dir na
 
 export interface TempEntry { name: string; isDir: boolean; mtimeMs: number }
 
-/** Pure: names of helix-* directories created during this run (mtime >= startMs). The timestamp
- *  guard avoids deleting a concurrent `npm test` invocation's in-flight fixtures. */
+/** Pure: names of helix-* directories created during this run (mtime >= startMs). The
+ *  mtimeMs >= startMs guard preserves fixtures created before this run started (including an
+ *  earlier concurrent run); it does not fully isolate two simultaneous runs. */
 export function selectRunTempDirs(entries: TempEntry[], startMs: number): string[] {
   return entries
     .filter((e) => e.isDir && e.name.startsWith(TEST_TMP_PREFIX) && e.mtimeMs >= startMs)
