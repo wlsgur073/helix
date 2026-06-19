@@ -47,6 +47,16 @@ describe('createCodexRunner (configurable timeout)', () => {
     await runner('q');
     expect(seen).toEqual([250000, 120000]);
   });
+
+  it('hard-clamps opts.timeoutMs to the 1h maximum', async () => {
+    const seen: number[] = [];
+    const fakeRun = async (
+      _inv: { file: string; argsPrefix: string[] }, _args: string[], _input: string | null, timeoutMs: number,
+    ) => { seen.push(timeoutMs); return { code: 0, stdout: '', stderr: '' }; };
+    const runner = createCodexRunner(async () => inv, fakeRun);
+    await runner('q', { timeoutMs: 7_200_000 }); // 2h -> clamped to 1h
+    expect(seen).toEqual([3_600_000]);
+  });
 });
 
 describe('createCodexRunner (scratch dir corralled under <temp>/helix)', () => {

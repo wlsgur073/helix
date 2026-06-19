@@ -6887,8 +6887,8 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join6, resolve as resolve2 } from "node:path";
-import { existsSync as existsSync4 } from "node:fs";
+import { join as join7, resolve as resolve2 } from "node:path";
+import { existsSync as existsSync5 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -13693,7 +13693,7 @@ var MemoryStore = class {
 };
 
 // src/server/helix-server.ts
-import { join as join5 } from "node:path";
+import { join as join6 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // node_modules/zod/v3/external.js
@@ -22264,10 +22264,61 @@ function loadConfig(opts = {}) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync3, mkdirSync as mkdirSync6, mkdtempSync, readFileSync as readFileSync7, rmSync as rmSync2 } from "node:fs";
+import { existsSync as existsSync4, mkdirSync as mkdirSync6, mkdtempSync, readFileSync as readFileSync7, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname as dirname4, join as join4 } from "node:path";
+import { dirname as dirname4, join as join5 } from "node:path";
 import { promisify } from "node:util";
+
+// src/verify/scratch-gc.ts
+import { existsSync as existsSync3, readdirSync, lstatSync, statSync as statSync2, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { join as join4 } from "node:path";
+var SCRATCH_PREFIX = "codex-";
+var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
+var SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
+var STAMP_NAME = ".gc-stamp";
+function selectStaleScratch(entries, nowMs, floorMs) {
+  return entries.filter((e) => e.isDir && e.name.startsWith(SCRATCH_PREFIX) && e.mtimeMs <= nowMs && nowMs - e.mtimeMs >= floorMs).map((e) => e.name);
+}
+function shouldSweep(stampMtimeMs, nowMs, intervalMs) {
+  if (stampMtimeMs === null) return true;
+  if (stampMtimeMs > nowMs) return true;
+  return nowMs - stampMtimeMs >= intervalMs;
+}
+function sweepScratchRoot(root, nowMs = Date.now()) {
+  try {
+    if (!existsSync3(root)) return;
+    const stampPath = join4(root, STAMP_NAME);
+    let stampMtimeMs = null;
+    try {
+      stampMtimeMs = statSync2(stampPath).mtimeMs;
+    } catch {
+      stampMtimeMs = null;
+    }
+    if (!shouldSweep(stampMtimeMs, nowMs, SWEEP_INTERVAL_MS)) return;
+    const entries = [];
+    for (const d of readdirSync(root, { withFileTypes: true })) {
+      if (!d.name.startsWith(SCRATCH_PREFIX)) continue;
+      try {
+        const st = lstatSync(join4(root, d.name));
+        entries.push({ name: d.name, isDir: st.isDirectory(), mtimeMs: st.mtimeMs });
+      } catch {
+      }
+    }
+    for (const name of selectStaleScratch(entries, nowMs, FLOOR_MS)) {
+      try {
+        rmSync2(join4(root, name), { recursive: true, force: true });
+      } catch {
+      }
+    }
+    try {
+      writeFileSync4(stampPath, "");
+    } catch {
+    }
+  } catch {
+  }
+}
+
+// src/verify/codex.ts
 var execFileAsync = promisify(execFile);
 function buildCodexExecArgs(outFile, opts = {}) {
   const args = ["exec", "--skip-git-repo-check", "-s", "read-only", "--ephemeral", "-o", outFile];
@@ -22290,7 +22341,7 @@ function interpretWhereOutput(platform, whereOutput, exists) {
     const lower = line.toLowerCase();
     if (lower.endsWith(".exe")) return { file: line, argsPrefix: [] };
     if (lower.endsWith(".cmd") || lower.endsWith(".bat")) {
-      const js = join4(dirname4(line), "node_modules", "@openai", "codex", "bin", "codex.js");
+      const js = join5(dirname4(line), "node_modules", "@openai", "codex", "bin", "codex.js");
       if (exists(js)) return { file: process.execPath, argsPrefix: [js] };
     }
   }
@@ -22309,7 +22360,7 @@ async function resolveCodexInvocation() {
   let inv = null;
   try {
     const { stdout } = await execFileAsync("where", ["codex"], { timeout: 1e4 });
-    inv = interpretWhereOutput("win32", stdout ?? "", existsSync3);
+    inv = interpretWhereOutput("win32", stdout ?? "", existsSync4);
   } catch {
     inv = null;
   }
@@ -22418,12 +22469,14 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
-    const scratchRoot = join4(tmpdir(), "helix");
+    const scratchRoot = join5(tmpdir(), "helix");
     mkdirSync6(scratchRoot, { recursive: true });
-    const dir = mkdtempSync(join4(scratchRoot, "codex-"));
-    const outFile = join4(dir, "out.txt");
+    sweepScratchRoot(scratchRoot);
+    const dir = mkdtempSync(join5(scratchRoot, "codex-"));
+    const outFile = join5(dir, "out.txt");
     try {
-      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, opts.timeoutMs ?? 12e4);
+      const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
+      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, timeoutMs);
       if (code !== 0) {
         return { ok: false, error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ""}` };
       }
@@ -22437,7 +22490,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
       return { ok: false, error: e.message };
     } finally {
       try {
-        rmSync2(dir, { recursive: true, force: true });
+        rmSync3(dir, { recursive: true, force: true });
       } catch {
       }
     }
@@ -22448,14 +22501,14 @@ var realCodexRunner = createCodexRunner();
 // src/server/helix-server.ts
 function buildServer(store2, dualDeps) {
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
-  const home2 = process.env.HELIX_HOME ?? join5(homedir2(), ".helix");
+  const home2 = process.env.HELIX_HOME ?? join6(homedir2(), ".helix");
   const dv = dualDeps ?? {
-    config: loadConfig({ globalPath: join5(home2, "config.json") }),
+    config: loadConfig({ globalPath: join6(home2, "config.json") }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
     echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-    auditPath: join5(home2, "audit.jsonl"),
-    codexLogPath: join5(home2, "codex-log.jsonl")
+    auditPath: join6(home2, "audit.jsonl"),
+    codexLogPath: join6(home2, "codex-log.jsonl")
   };
   const codexStatusDeps = {
     inspect: () => checkCodexStatus(),
@@ -22512,20 +22565,20 @@ function buildServer(store2, dualDeps) {
 }
 
 // src/server/index.ts
-var home = process.env.HELIX_HOME ?? join6(homedir3(), ".helix");
-var globalLedger = process.env.HELIX_LEDGER ?? join6(home, "memory.jsonl");
+var home = process.env.HELIX_HOME ?? join7(homedir3(), ".helix");
+var globalLedger = process.env.HELIX_LEDGER ?? join7(home, "memory.jsonl");
 var projectRoot = process.cwd();
-var projectLedger = join6(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync4(join6(projectRoot, ".helix")) && resolve2(projectLedger) !== resolve2(globalLedger);
+var projectLedger = join7(projectRoot, ".helix", "memory.jsonl");
+var projectActive = existsSync5(join7(projectRoot, ".helix")) && resolve2(projectLedger) !== resolve2(globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
 var store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? "cli", project });
 var server = buildServer(store, {
-  config: loadConfig({ globalPath: join6(home, "config.json") }),
+  config: loadConfig({ globalPath: join7(home, "config.json") }),
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
   echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-  auditPath: join6(home, "audit.jsonl"),
-  codexLogPath: join6(home, "codex-log.jsonl")
+  auditPath: join7(home, "audit.jsonl"),
+  codexLogPath: join7(home, "codex-log.jsonl")
 });
 var transport = new StdioServerTransport();
 await server.connect(transport);

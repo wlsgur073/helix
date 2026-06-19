@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { MAX_TIMEOUT_MS } from '../config.js';
+import { sweepScratchRoot } from './scratch-gc.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -215,12 +217,14 @@ export function createCodexRunner(
     // below loses a race to a Windows file lock — then collect in one easily-purged place.
     const scratchRoot = join(tmpdir(), 'helix');
     mkdirSync(scratchRoot, { recursive: true });
+    sweepScratchRoot(scratchRoot); // best-effort GC of leaked sibling scratch dirs (never throws)
     const dir = mkdtempSync(join(scratchRoot, 'codex-'));
     const outFile = join(dir, 'out.txt');
     try {
-      // The timeout is configurable (dualVerify.timeoutMs flows in via opts); the old hardcoded
-      // 120s capped heavy prompts. 120_000 stays as the fallback for direct callers.
-      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, opts.timeoutMs ?? 120_000);
+      // timeout is configurable (dualVerify.timeoutMs via opts), hard-clamped to MAX_TIMEOUT_MS so the
+      // scratch-gc floor stays safe even for direct callers. 120s is the fallback default.
+      const timeoutMs = Math.min(opts.timeoutMs ?? 120_000, MAX_TIMEOUT_MS);
+      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, timeoutMs);
       if (code !== 0) {
         return { ok: false, error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ''}` };
       }
