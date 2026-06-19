@@ -22263,7 +22263,7 @@ function loadConfig(opts = {}) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync3, mkdtempSync, readFileSync as readFileSync7, rmSync as rmSync2 } from "node:fs";
+import { existsSync as existsSync3, mkdirSync as mkdirSync6, mkdtempSync, readFileSync as readFileSync7, rmSync as rmSync2 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname as dirname4, join as join4 } from "node:path";
 import { promisify } from "node:util";
@@ -22417,7 +22417,9 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
-    const dir = mkdtempSync(join4(tmpdir(), "helix-codex-"));
+    const scratchRoot = join4(tmpdir(), "helix");
+    mkdirSync6(scratchRoot, { recursive: true });
+    const dir = mkdtempSync(join4(scratchRoot, "codex-"));
     const outFile = join4(dir, "out.txt");
     try {
       const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, opts.timeoutMs ?? 12e4);

@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { basename, dirname } from 'node:path';
+import { existsSync } from 'node:fs';
 import { buildCodexExecArgs, createCodexRunner, interpretPreflight, interpretStatus, interpretWhereOutput, treeKillSpec } from '../../src/verify/codex.js';
 
 describe('buildCodexExecArgs (prompt-via-stdin contract)', () => {
@@ -44,6 +46,22 @@ describe('createCodexRunner (configurable timeout)', () => {
     await runner('q', { timeoutMs: 250000 });
     await runner('q');
     expect(seen).toEqual([250000, 120000]);
+  });
+});
+
+describe('createCodexRunner (scratch dir corralled under <temp>/helix)', () => {
+  const inv = { file: 'codex', argsPrefix: [] };
+  it('creates its per-run scratch under <temp>/helix/codex-* and cleans it up', async () => {
+    let outFile = '';
+    const fakeRun = async (
+      _inv: { file: string; argsPrefix: string[] }, args: string[], _input: string | null, _t: number,
+    ) => { outFile = args[args.indexOf('-o') + 1] ?? ''; return { code: 0, stdout: '', stderr: '' }; };
+    const runner = createCodexRunner(async () => inv, fakeRun);
+    await runner('q');
+    const scratch = dirname(outFile);                 // <temp>/helix/codex-XXXXXX
+    expect(basename(dirname(scratch))).toBe('helix');  // grouped under one helix/ folder, not loose in temp root
+    expect(basename(scratch)).toMatch(/^codex-/);      // per-run subdir (was "helix-codex-*" at temp root)
+    expect(existsSync(scratch)).toBe(false);           // finally{} still removes the per-run dir
   });
 });
 

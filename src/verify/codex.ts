@@ -1,5 +1,5 @@
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -210,7 +210,12 @@ export function createCodexRunner(
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: 'codex launcher not found on PATH (npm .cmd shim unresolvable)' };
-    const dir = mkdtempSync(join(tmpdir(), 'helix-codex-'));
+    // Corral all scratch under a single <temp>/helix/ folder (instead of scattering
+    // helix-codex-* across the temp root). Leaked dirs — when the finally{} cleanup
+    // below loses a race to a Windows file lock — then collect in one easily-purged place.
+    const scratchRoot = join(tmpdir(), 'helix');
+    mkdirSync(scratchRoot, { recursive: true });
+    const dir = mkdtempSync(join(scratchRoot, 'codex-'));
     const outFile = join(dir, 'out.txt');
     try {
       // The timeout is configurable (dualVerify.timeoutMs flows in via opts); the old hardcoded
