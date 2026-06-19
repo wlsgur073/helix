@@ -3,6 +3,21 @@
 All notable changes to Helix are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- `dualVerify.timeoutMs` is now clamped to a 1-hour maximum. A valid integer ≥ 1s is accepted
+  and capped at 1h; previously a value above Node's `setTimeout` 32-bit ceiling fell back to the
+  default. The Codex runner also hard-clamps the timeout at its boundary, so no run can exceed 1h.
+- Codex dual-verify scratch directories are now created under a single `<temp>/helix/` folder
+  instead of `helix-codex-*` scattered across the temp root, so scratch left behind by a cleanup
+  race collects in one easily-purged place.
+
+### Added
+- Best-effort garbage collection of leaked Codex scratch directories: an age-based sweep
+  (3-day floor, directories only, rate-limited to once a day) runs at runner start and never
+  throws into the verify path.
+
 ## [0.1.0] — 2026-06-18
 
 First public release.
@@ -28,4 +43,5 @@ First public release.
 - Provenance firewall: agreement from an external model never promotes to `Verified`.
 - Content-free audit log; the Codex content log is opt-in, `0o600`, and capped.
 
+[Unreleased]: https://github.com/wlsgur073/helix/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/wlsgur073/helix/releases/tag/v0.1.0
