@@ -98,13 +98,18 @@ describe('loadConfig: dualVerify.timeoutMs (configurable Codex runner cap)', () 
   it('rejects out-of-band / non-integer timeoutMs, keeping the default (fail-safe)', () => {
     const dir = tmpDir();
     const def = DEFAULT_CONFIG.dualVerify.timeoutMs;
-    // 0/-5/'soon' (non-positive, non-number), NaN/Infinity (non-finite), 0.5 (fractional),
-    // 999 (< 1s floor), and 2_147_483_648 (> Node setTimeout 32-bit ceiling -> Node would clamp
-    // the real delay to 1ms, an instant timeout). All must fall back to the default.
-    for (const bad of [0, -5, 'soon', NaN, Infinity, -Infinity, 0.5, 999, 2_147_483_648] as unknown[]) {
+    // 0/-5/'soon' (non-positive / non-number), NaN/±Infinity (non-finite), 0.5 (fractional),
+    // 999 (< 1s floor). All must fall back to the default. (Values > 1h are CLAMPED, not rejected —
+    // see the clamp test below.)
+    for (const bad of [0, -5, 'soon', NaN, Infinity, -Infinity, 0.5, 999] as unknown[]) {
       const p = join(dir, `t${String(bad)}.json`); writeFileSync(p, JSON.stringify({ dualVerify: { timeoutMs: bad } }));
       expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.timeoutMs).toBe(def);
     }
+  });
+  it('clamps an over-cap timeoutMs (> 1h) down to the 1h maximum', () => {
+    const dir = tmpDir();
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { timeoutMs: 7_200_000 } })); // 2h
+    expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.timeoutMs).toBe(3_600_000);
   });
 });
 

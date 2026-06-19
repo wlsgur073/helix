@@ -22204,6 +22204,7 @@ import { homedir } from "node:os";
 import { join as join3 } from "node:path";
 var EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
 var MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
+var MAX_TIMEOUT_MS = 36e5;
 var DEFAULT_CONFIG = {
   dualVerify: {
     enabled: false,
@@ -22251,8 +22252,8 @@ function loadConfig(opts = {}) {
         merged.dualVerify.effort = dv.effort;
       }
       const t = dv.timeoutMs;
-      if (typeof t === "number" && Number.isInteger(t) && t >= 1e3 && t <= 2147483647) {
-        merged.dualVerify.timeoutMs = t;
+      if (typeof t === "number" && Number.isInteger(t) && t >= 1e3) {
+        merged.dualVerify.timeoutMs = Math.min(t, MAX_TIMEOUT_MS);
       }
       if (dv.memoryEgress === "block" || dv.memoryEgress === "allow") merged.dualVerify.memoryEgress = dv.memoryEgress;
       if (typeof dv.logContent === "boolean") merged.dualVerify.logContent = dv.logContent;

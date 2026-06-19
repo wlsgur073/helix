@@ -9,6 +9,10 @@ export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 const EFFORTS: readonly ReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh'];
 const MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/; // argv-safe model token: no leading dash, no shell/space chars
 
+/** Effective Codex run-timeout ceiling (ms). A value above this is clamped, not rejected, so the
+ *  scratch-gc floor can assume no run outlives it. Shared with the runner hard-clamp in codex.ts. */
+export const MAX_TIMEOUT_MS = 3_600_000; // 1 hour
+
 export interface HelixConfig {
   dualVerify: {
     enabled: boolean;
@@ -19,8 +23,8 @@ export interface HelixConfig {
     /** Reasoning effort. `null` (default) => omit -c so codex uses its config.toml effort. */
     effort: ReasoningEffort | null;
     /** Codex run timeout in ms. Heavy dual-verify prompts exceed the old hardcoded 120s,
-     *  so this is configurable. Must be an integer in [1000, 2_147_483_647]; anything else
-     *  (non-integer, < 1s, > Node's setTimeout ceiling, NaN, ∞) falls back to the default. */
+     *  so this is configurable. A valid integer >= 1000 is accepted, clamped to MAX_TIMEOUT_MS (1h);
+     *  anything else (non-integer, < 1s, NaN, ∞) falls back to the default. */
     timeoutMs: number;
     /** Egress policy for non-secret legs (memory-echo / PII). User-edited only; default 'block'.
      *  Secrets block regardless. Read once at startup (a mid-session flip needs a restart). */
@@ -82,12 +86,12 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
       if (dv.effort === null || (typeof dv.effort === 'string' && EFFORTS.includes(dv.effort as ReasoningEffort))) {
         merged.dualVerify.effort = dv.effort as ReasoningEffort | null;
       }
-      // Integer ms within a sane band: >= 1s (a real Codex call never completes faster) and
-      // <= the Node setTimeout 32-bit ceiling — above it Node clamps the delay to 1ms, silently
-      // inverting intent (asked-for-longer => instant timeout). Anything else keeps the default.
+      // Valid integer >= 1s is accepted, clamped to MAX_TIMEOUT_MS (1h). Above 1h was an artifact of
+      // Node's setTimeout 32-bit ceiling, not a real use case; clamping (vs reject->default) keeps a
+      // "run long" intent at the max we allow instead of silently dropping to the 5-min default.
       const t = dv.timeoutMs;
-      if (typeof t === 'number' && Number.isInteger(t) && t >= 1_000 && t <= 2_147_483_647) {
-        merged.dualVerify.timeoutMs = t;
+      if (typeof t === 'number' && Number.isInteger(t) && t >= 1_000) {
+        merged.dualVerify.timeoutMs = Math.min(t, MAX_TIMEOUT_MS);
       }
       if (dv.memoryEgress === 'block' || dv.memoryEgress === 'allow') merged.dualVerify.memoryEgress = dv.memoryEgress;
       if (typeof dv.logContent === 'boolean') merged.dualVerify.logContent = dv.logContent;
