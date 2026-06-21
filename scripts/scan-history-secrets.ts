@@ -14,14 +14,18 @@ const KNOWN_SAFE = /AKIAIOSFODNN7EXAMPLE/;
 //  - test/**            : the detector's own test fixtures (example secret shapes)
 //  - the detector source: its pattern/keyword string literals self-match
 //  - bin/**             : built bundles, derived from the (scanned) src/ tree
-// Limitation: a real secret hard-coded directly into a detector source file or a
-// test fixture would be allowlisted. Those files are reviewed by hand; a purpose-built
-// secret scanner with a broader ruleset is recommended as a CI fast-follow.
+//  - smoke-secret-probe : a diagnostic that hardcodes a prose "pass:" string to
+//                         demonstrate the secret-assignment false positive
+// Limitation: a real secret hard-coded directly into a detector source file, a test
+// fixture, or the smoke probe would be allowlisted — the WHOLE matching blob is skipped
+// (before scanning), not just the benign span. Those files are reviewed by hand; a
+// purpose-built secret scanner with a broader ruleset is recommended as a CI fast-follow.
 const ALLOWLIST_PATHS: RegExp[] = [
   /^test\//,
   /^src\/memory\/secret-scan\.ts$/,
   /^src\/risk\/trifecta\.ts$/,
   /^bin\//,
+  /^scripts\/smoke-secret-probe\.ts$/,
 ];
 
 function listObjects(): Map<string, string> {
