@@ -13365,25 +13365,27 @@ function compactLedger(path, opts) {
 }
 
 // src/memory/secret-scan.ts
+var TIER_RANK = { named: 2, heuristic: 1, entropy: 0 };
 var PATTERNS = [
-  { kind: "pem-private-key", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
-  { kind: "aws-access-key", re: /\bAKIA[0-9A-Z]{16}\b/ },
-  { kind: "github-token", re: /\bgh[posru]_[A-Za-z0-9]{30,}\b/ },
-  { kind: "github-token", re: /\bgithub_pat_[A-Za-z0-9_]{20,}/ },
-  { kind: "anthropic-key", re: /\bsk-ant-[A-Za-z0-9_-]{20,}/ },
-  { kind: "openai-key", re: /\bsk-[A-Za-z0-9_-]{20,}/ },
-  { kind: "slack-token", re: /\bxox[baprs]-[A-Za-z0-9-]{10,}/ },
-  { kind: "google-api-key", re: /\bAIza[0-9A-Za-z_-]{30,}/ },
-  { kind: "npm-token", re: /\bnpm_[A-Za-z0-9]{30,}\b/ },
-  { kind: "jwt", re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/ },
-  { kind: "bearer-token", re: /\b[Bb]earer\s+[A-Za-z0-9._\-]{20,}\b/ },
+  { kind: "pem-private-key", tier: "named", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+  { kind: "aws-access-key", tier: "named", re: /\bAKIA[0-9A-Z]{16}\b/ },
+  { kind: "github-token", tier: "named", re: /\bgh[posru]_[A-Za-z0-9]{30,}\b/ },
+  { kind: "github-token", tier: "named", re: /\bgithub_pat_[A-Za-z0-9_]{20,}/ },
+  { kind: "anthropic-key", tier: "named", re: /\bsk-ant-[A-Za-z0-9_-]{20,}/ },
+  { kind: "openai-key", tier: "named", re: /\bsk-[A-Za-z0-9_-]{20,}/ },
+  { kind: "slack-token", tier: "named", re: /\bxox[baprs]-[A-Za-z0-9-]{10,}/ },
+  { kind: "google-api-key", tier: "named", re: /\bAIza[0-9A-Za-z_-]{30,}/ },
+  { kind: "npm-token", tier: "named", re: /\bnpm_[A-Za-z0-9]{30,}\b/ },
+  { kind: "jwt", tier: "named", re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/ },
+  { kind: "bearer-token", tier: "named", re: /\b[Bb]earer\s+[A-Za-z0-9._\-]{20,}\b/ },
   // No leading \b: real keys are often prefixed (db_password=...), and a secret
   // scanner should err toward over-flagging rather than miss a credential.
-  // Known limitation: this also flags prose like "pass: install" as a secret (and, via the egress
-  // guard, override-proof-blocks it). A naive value-shape tighten regressed recall (missed
-  // alpha-only secrets) and still mis-fired on punctuated prose, so the broad form is kept until a
-  // precision-preserving fix lands.
-  { kind: "secret-assignment", re: /(pass(word)?|secret|api[_-]?key)\s*[=:]\s*\S{6,}/i }
+  // Known limitation: this also flags prose like "pass: install" as a secret. It is therefore
+  // demoted to the low-confidence 'heuristic' tier: it STILL redacts on the write path, but the
+  // egress guard treats a heuristic-only hit as policy-overridable (see EH-1). A naive value-shape
+  // tighten regressed recall (missed alpha-only secrets) and still mis-fired on punctuated prose,
+  // so the broad form is kept and the tier — not the regex — carries the confidence signal.
+  { kind: "secret-assignment", tier: "heuristic", re: /(pass(word)?|secret|api[_-]?key)\s*[=:]\s*\S{6,}/i }
 ];
 function entropy(s) {
   const freq = /* @__PURE__ */ new Map();
@@ -13405,8 +13407,8 @@ function mergeSpans(spans) {
     const last = out[out.length - 1];
     if (last && s.start < last.end) {
       last.end = Math.max(last.end, s.end);
-      if (last.tier !== "named" && s.tier === "named") {
-        last.tier = "named";
+      if (TIER_RANK[s.tier] > TIER_RANK[last.tier]) {
+        last.tier = s.tier;
         last.kind = s.kind;
       }
     } else {
@@ -13417,10 +13419,10 @@ function mergeSpans(spans) {
 }
 function findSecrets(content) {
   const spans = [];
-  for (const { kind, re } of PATTERNS) {
+  for (const { kind, tier, re } of PATTERNS) {
     const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
     for (let m = g.exec(content); m !== null; m = g.exec(content)) {
-      spans.push({ start: m.index, end: m.index + m[0].length, kind, tier: "named" });
+      spans.push({ start: m.index, end: m.index + m[0].length, kind, tier });
       if (g.lastIndex === m.index) g.lastIndex++;
     }
   }
@@ -21921,7 +21923,7 @@ function classifyEgress(input) {
   const text = input.texts.join("\n");
   const secretSpans = findSecrets(text);
   const secretHit = secretSpans.length > 0;
-  const secretNamed = secretSpans.some((s) => s.tier === "named");
+  const secretNamed = secretSpans.some((s) => s.tier === "named" || s.tier === "heuristic");
   const piiHits = detectPII(text);
   const piiKinds = [...new Set(piiHits.map((h) => h.kind))];
   const highPii = piiHits.some((h) => h.severity === "high");

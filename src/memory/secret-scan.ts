@@ -1,4 +1,6 @@
-export type SecretTier = 'named' | 'entropy';
+export type SecretTier = 'named' | 'heuristic' | 'entropy';
+
+const TIER_RANK: Record<SecretTier, number> = { named: 2, heuristic: 1, entropy: 0 };
 
 export interface SecretHit {
   hit: boolean;
@@ -10,33 +12,36 @@ export interface SecretSpan {
   end: number;
   kind: string;
   /** Confidence tier: 'named' = a specific provider pattern (high confidence — egress blocks it
-   *  override-proof); 'entropy' = the catch-all entropy net (low confidence, e.g. a git SHA —
-   *  egress-gated but policy-overridable). */
+   *  override-proof); 'heuristic' = the broad secret-assignment keyword match (low confidence —
+   *  still redacted on the write path, but the egress guard treats it as policy-overridable);
+   *  'entropy' = the catch-all entropy net (low confidence, e.g. a git SHA — egress-gated but
+   *  policy-overridable). */
   tier: SecretTier;
 }
 
 // Named patterns run before the entropy net so redactions carry a precise kind
 // (audit lines say WHAT was redacted). Specific prefixes precede generic ones
 // (sk-ant- before sk-), and lengths are floors, not exact — over-flagging bias.
-const PATTERNS: ReadonlyArray<{ kind: string; re: RegExp }> = [
-  { kind: 'pem-private-key', re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
-  { kind: 'aws-access-key', re: /\bAKIA[0-9A-Z]{16}\b/ },
-  { kind: 'github-token', re: /\bgh[posru]_[A-Za-z0-9]{30,}\b/ },
-  { kind: 'github-token', re: /\bgithub_pat_[A-Za-z0-9_]{20,}/ },
-  { kind: 'anthropic-key', re: /\bsk-ant-[A-Za-z0-9_-]{20,}/ },
-  { kind: 'openai-key', re: /\bsk-[A-Za-z0-9_-]{20,}/ },
-  { kind: 'slack-token', re: /\bxox[baprs]-[A-Za-z0-9-]{10,}/ },
-  { kind: 'google-api-key', re: /\bAIza[0-9A-Za-z_-]{30,}/ },
-  { kind: 'npm-token', re: /\bnpm_[A-Za-z0-9]{30,}\b/ },
-  { kind: 'jwt', re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/ },
-  { kind: 'bearer-token', re: /\b[Bb]earer\s+[A-Za-z0-9._\-]{20,}\b/ },
+const PATTERNS: ReadonlyArray<{ kind: string; tier: SecretTier; re: RegExp }> = [
+  { kind: 'pem-private-key', tier: 'named', re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+  { kind: 'aws-access-key', tier: 'named', re: /\bAKIA[0-9A-Z]{16}\b/ },
+  { kind: 'github-token', tier: 'named', re: /\bgh[posru]_[A-Za-z0-9]{30,}\b/ },
+  { kind: 'github-token', tier: 'named', re: /\bgithub_pat_[A-Za-z0-9_]{20,}/ },
+  { kind: 'anthropic-key', tier: 'named', re: /\bsk-ant-[A-Za-z0-9_-]{20,}/ },
+  { kind: 'openai-key', tier: 'named', re: /\bsk-[A-Za-z0-9_-]{20,}/ },
+  { kind: 'slack-token', tier: 'named', re: /\bxox[baprs]-[A-Za-z0-9-]{10,}/ },
+  { kind: 'google-api-key', tier: 'named', re: /\bAIza[0-9A-Za-z_-]{30,}/ },
+  { kind: 'npm-token', tier: 'named', re: /\bnpm_[A-Za-z0-9]{30,}\b/ },
+  { kind: 'jwt', tier: 'named', re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/ },
+  { kind: 'bearer-token', tier: 'named', re: /\b[Bb]earer\s+[A-Za-z0-9._\-]{20,}\b/ },
   // No leading \b: real keys are often prefixed (db_password=...), and a secret
   // scanner should err toward over-flagging rather than miss a credential.
-  // Known limitation: this also flags prose like "pass: install" as a secret (and, via the egress
-  // guard, override-proof-blocks it). A naive value-shape tighten regressed recall (missed
-  // alpha-only secrets) and still mis-fired on punctuated prose, so the broad form is kept until a
-  // precision-preserving fix lands.
-  { kind: 'secret-assignment', re: /(pass(word)?|secret|api[_-]?key)\s*[=:]\s*\S{6,}/i },
+  // Known limitation: this also flags prose like "pass: install" as a secret. It is therefore
+  // demoted to the low-confidence 'heuristic' tier: it STILL redacts on the write path, but the
+  // egress guard treats a heuristic-only hit as policy-overridable (see EH-1). A naive value-shape
+  // tighten regressed recall (missed alpha-only secrets) and still mis-fired on punctuated prose,
+  // so the broad form is kept and the tier — not the regex — carries the confidence signal.
+  { kind: 'secret-assignment', tier: 'heuristic', re: /(pass(word)?|secret|api[_-]?key)\s*[=:]\s*\S{6,}/i },
 ];
 
 /** Shannon entropy (bits/char) of a string. */
@@ -57,7 +62,8 @@ function isHighEntropyToken(tok: string): boolean {
 }
 
 /** Merge overlapping spans into non-overlapping ones (required for safe in-place redaction).
- *  A merged span is 'named' if ANY overlapping member was named (high confidence wins). */
+ *  A merged span takes the highest-rank tier among its overlapping members (named > heuristic >
+ *  entropy via TIER_RANK), and the kind of that highest-rank member. */
 function mergeSpans(spans: SecretSpan[]): SecretSpan[] {
   const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
   const out: SecretSpan[] = [];
@@ -65,7 +71,7 @@ function mergeSpans(spans: SecretSpan[]): SecretSpan[] {
     const last = out[out.length - 1];
     if (last && s.start < last.end) {
       last.end = Math.max(last.end, s.end);
-      if (last.tier !== 'named' && s.tier === 'named') { last.tier = 'named'; last.kind = s.kind; }
+      if (TIER_RANK[s.tier] > TIER_RANK[last.tier]) { last.tier = s.tier; last.kind = s.kind; }
     } else {
       out.push({ ...s });
     }
@@ -80,10 +86,10 @@ function mergeSpans(spans: SecretSpan[]): SecretSpan[] {
  */
 export function findSecrets(content: string): SecretSpan[] {
   const spans: SecretSpan[] = [];
-  for (const { kind, re } of PATTERNS) {
+  for (const { kind, tier, re } of PATTERNS) {
     const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
     for (let m = g.exec(content); m !== null; m = g.exec(content)) {
-      spans.push({ start: m.index, end: m.index + m[0].length, kind, tier: 'named' });
+      spans.push({ start: m.index, end: m.index + m[0].length, kind, tier });
       if (g.lastIndex === m.index) g.lastIndex++; // guard against a zero-width match looping
     }
   }
@@ -96,12 +102,12 @@ export function findSecrets(content: string): SecretSpan[] {
   return mergeSpans(spans);
 }
 
-/** Backward-compatible single verdict: hit + the highest-confidence kind (named precedence). */
+/** Backward-compatible single verdict: hit + the highest-confidence kind (highest-rank tier wins). */
 export function detectSecret(content: string): SecretHit {
   const spans = findSecrets(content);
   if (spans.length === 0) return { hit: false };
-  const named = spans.find((s) => s.tier === 'named');
-  return { hit: true, kind: (named ?? spans[0]!).kind };
+  const best = [...spans].sort((a, b) => TIER_RANK[b.tier] - TIER_RANK[a.tier])[0]!;
+  return { hit: true, kind: best.kind };
 }
 
 export interface Redaction {

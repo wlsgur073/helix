@@ -54,4 +54,29 @@ describe('secret scanner', () => {
     expect(r.content).not.toContain('AKIAIOSFODNN7EXAMPLE');
     expect(r.kinds).toContain('aws-access-key');
   });
+
+  // EH-1 Task 1: confidence-tier split. The secret-assignment keyword heuristic is now its own
+  // low-confidence 'heuristic' tier (still redacted on the write path); provider patterns stay
+  // 'named'; the entropy catch-all stays 'entropy'. Rank-based precedence on overlap.
+  it('tags secret-assignment as the heuristic tier (not named)', () => {
+    const spans = findSecrets('db_password=Sup3rS3cretValue!');
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.tier).toBe('heuristic');
+    expect(spans[0]!.kind).toBe('secret-assignment');
+  });
+  it('tags provider patterns as the named tier', () => {
+    expect(findSecrets('AKIAIOSFODNN7EXAMPLE')[0]!.tier).toBe('named');
+  });
+  it('tags the high-entropy catch-all as the entropy tier', () => {
+    expect(findSecrets('token n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf').some((s) => s.tier === 'entropy')).toBe(true);
+  });
+  it('mergeSpans precedence: an overlapping provider+heuristic span resolves to named', () => {
+    const spans = findSecrets('api_key=AKIAIOSFODNN7EXAMPLE');
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.tier).toBe('named');
+  });
+  it('redaction still covers a heuristic-tier span (recall parity)', () => {
+    const r = redactSecrets('db_password=Sup3rS3cretValue!', findSecrets('db_password=Sup3rS3cretValue!'));
+    expect(r.content).not.toContain('Sup3rS3cretValue');
+  });
 });

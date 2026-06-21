@@ -100,7 +100,10 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   // --- run every detector first; record everything for audit ---
   const secretSpans = findSecrets(text);
   const secretHit = secretSpans.length > 0;
-  const secretNamed = secretSpans.some((s) => s.tier === 'named'); // high-confidence provider pattern
+  // TEMP (EH-1 Task 1): heuristic stays override-proof until Task 2 wires its per-leg knob.
+  // Removed in Task 2 and replaced by gate('secretHeuristic'). Without this line, splitting the
+  // tier would silently demote the heuristic to overridable before its knob exists.
+  const secretNamed = secretSpans.some((s) => s.tier === 'named' || s.tier === 'heuristic');
 
   const piiHits = detectPII(text);
   const piiKinds: PiiKind[] = [...new Set(piiHits.map((h) => h.kind))];

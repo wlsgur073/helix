@@ -143,6 +143,12 @@ describe('classifyEgress', () => {
     expect(v.piiKinds).toContain('credit_card');
     expect(v.echoMemoryIds).toEqual(['m_1']);
   });
+
+  it('Task 1: a heuristic keyword hit stays override-proof (baseline parity)', () => {
+    const texts = ['first-impression pass: install steps here'];
+    expect(classifyEgress(clean({ texts, policy: 'block' })).decision).toBe('blocked');
+    expect(classifyEgress(clean({ texts, policy: 'allow' })).decision).toBe('blocked'); // override-proof, same as before
+  });
 });
 
 describe('classifyEmission', () => {
