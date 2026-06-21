@@ -106,7 +106,8 @@ export function findSecrets(content: string): SecretSpan[] {
 export function detectSecret(content: string): SecretHit {
   const spans = findSecrets(content);
   if (spans.length === 0) return { hit: false };
-  const best = [...spans].sort((a, b) => TIER_RANK[b.tier] - TIER_RANK[a.tier])[0]!;
+  // Highest-rank tier wins; ties break by earliest span (explicit, not relying on sort stability).
+  const best = [...spans].sort((a, b) => TIER_RANK[b.tier] - TIER_RANK[a.tier] || a.start - b.start)[0]!;
   return { hit: true, kind: best.kind };
 }
 
