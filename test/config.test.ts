@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -64,22 +64,38 @@ describe('loadConfig', () => {
     expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.model).toBeNull();
   });
 
-  it('defaults memoryEgress to block (fail-closed)', () => {
+  it('defaults every egressPolicy leg to block (fail-closed)', () => {
     const cfg = loadConfig({ projectPath: join(tmpDir(), 'n.json'), globalPath: join(tmpDir(), 'n.json') });
-    expect(cfg.dualVerify.memoryEgress).toBe('block');
-    expect(DEFAULT_CONFIG.dualVerify.memoryEgress).toBe('block');
+    expect(cfg.dualVerify.egressPolicy).toEqual({ memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' });
+    expect(DEFAULT_CONFIG.dualVerify.egressPolicy.secretHeuristic).toBe('block');
   });
 
-  it('reads a valid memoryEgress override (allow)', () => {
+  it('reads a valid per-leg override (secretHeuristic: allow); other legs stay block', () => {
     const dir = tmpDir();
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { egressPolicy: { secretHeuristic: 'allow' } } }));
+    const ep = loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.egressPolicy;
+    expect(ep.secretHeuristic).toBe('allow'); expect(ep.piiHigh).toBe('block');
+  });
+
+  it('an invalid leg value falls back to block (fail-closed) and warns', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { egressPolicy: { piiHigh: 'maybe' } } }));
+    expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json'), warn }).dualVerify.egressPolicy.piiHigh).toBe('block');
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('warns on an unknown egressPolicy key (a typo is not silently applied)', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { egressPolicy: { secretHuristic: 'allow' } } }));
+    loadConfig({ projectPath: p, globalPath: join(dir, 'g.json'), warn });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('secretHuristic'));
+  });
+
+  it('warns that the removed memoryEgress key is ignored', () => {
+    const dir = tmpDir(); const warn = vi.fn();
     const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { memoryEgress: 'allow' } }));
-    expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.memoryEgress).toBe('allow');
-  });
-
-  it('falls back to block on an unrecognized memoryEgress value (invalid config fails closed)', () => {
-    const dir = tmpDir();
-    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { memoryEgress: 'yes-please' } }));
-    expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.memoryEgress).toBe('block');
+    loadConfig({ projectPath: p, globalPath: join(dir, 'g.json'), warn });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('memoryEgress'));
   });
 });
 

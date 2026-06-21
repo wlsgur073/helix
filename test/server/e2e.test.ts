@@ -12,7 +12,7 @@ async function connectedClient(): Promise<Client> {
   const server = buildServer(store, {
     // Hermetic dual-verify deps: disabled + a runner that must never be called,
     // so the e2e suite never touches real Codex regardless of any on-disk config.
-    config: { dualVerify: { enabled: false, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high', timeoutMs: 120_000, memoryEgress: 'block', logContent: false } },
+    config: { dualVerify: { enabled: false, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' }, logContent: false } },
     runner: async () => ({ ok: false, error: 'should-not-run-in-tests' }),
     checkAvailable: async () => ({ available: false, reason: 'test' }),
     echo: { mode: 'disabled' },

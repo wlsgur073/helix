@@ -21923,7 +21923,9 @@ function classifyEgress(input) {
   const text = input.texts.join("\n");
   const secretSpans = findSecrets(text);
   const secretHit = secretSpans.length > 0;
-  const secretNamed = secretSpans.some((s) => s.tier === "named" || s.tier === "heuristic");
+  const secretNamed = secretSpans.some((s) => s.tier === "named");
+  const secretHeuristic = secretSpans.some((s) => s.tier === "heuristic");
+  const secretEntropy = secretSpans.some((s) => s.tier === "entropy");
   const piiHits = detectPII(text);
   const piiKinds = [...new Set(piiHits.map((h) => h.kind))];
   const highPii = piiHits.some((h) => h.severity === "high");
@@ -21936,45 +21938,29 @@ function classifyEgress(input) {
   if (secretHit) legs.push("secret");
   if (piiHits.length > 0) legs.push("pii");
   if (echoHit) legs.push("memory_echo");
-  const gated = input.policy === "allow" ? "allowed_override" : "blocked";
+  const gate = (leg) => input.policy[leg] === "allow" ? "allowed_override" : "blocked";
   if (secretNamed) {
     return { decision: "blocked", legs, piiKinds, echoMemoryIds, reason: "blocked: secret token (override-proof)" };
   }
   if (echoHit) {
-    return {
-      decision: gated,
-      legs,
-      piiKinds,
-      echoMemoryIds,
-      reason: `${gated === "blocked" ? "blocked" : "allowed_override"}: memory-echo (${echoMemoryIds.length} items)`
-    };
+    const d = gate("memoryEcho");
+    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: memory-echo (${echoMemoryIds.length} items)` };
   }
   if (highPii) {
-    return {
-      decision: gated,
-      legs,
-      piiKinds,
-      echoMemoryIds,
-      reason: `${gated === "blocked" ? "blocked" : "allowed_override"}: high-severity PII (${piiKinds.length} kinds)`
-    };
+    const d = gate("piiHigh");
+    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: high-severity PII (${piiKinds.length} kinds)` };
   }
-  if (secretHit) {
-    return {
-      decision: gated,
-      legs,
-      piiKinds,
-      echoMemoryIds,
-      reason: `${gated === "blocked" ? "blocked" : "allowed_override"}: high-entropy token (low-confidence)`
-    };
+  if (secretHeuristic) {
+    const d = gate("secretHeuristic");
+    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: secret keyword-assignment (low-confidence)` };
+  }
+  if (secretEntropy) {
+    const d = gate("secretEntropy");
+    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: high-entropy token (low-confidence)` };
   }
   if (bulkLowPii) {
-    return {
-      decision: gated,
-      legs,
-      piiKinds,
-      echoMemoryIds,
-      reason: `${gated === "blocked" ? "blocked" : "allowed_override"}: bulk low-severity PII (${lowPiiCount} hits)`
-    };
+    const d = gate("piiBulk");
+    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: bulk low-severity PII (${lowPiiCount} hits)` };
   }
   if (piiHits.length > 0) {
     return { decision: "pass", legs, piiKinds, echoMemoryIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)` };
@@ -22015,7 +22001,7 @@ async function dualVerify(params, deps) {
   const verdict = classifyEgress({
     texts: [params.question, params.helixAnswer],
     ledger,
-    policy: deps.config.dualVerify.memoryEgress
+    policy: deps.config.dualVerify.egressPolicy
   });
   if (verdict.decision === "blocked") {
     return { ran: false, attempted: false, outcome: "refused", reason: verdict.reason, egress: verdict };
@@ -22204,6 +22190,7 @@ async function handleDualVerify(args, deps) {
 import { readFileSync as readFileSync6 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join3 } from "node:path";
+var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
 var EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
 var MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
 var MAX_TIMEOUT_MS = 36e5;
@@ -22220,9 +22207,10 @@ var DEFAULT_CONFIG = {
     // Codex run timeout (ms). 5 min gives heavy prompts headroom (the old 120s cap timed them out);
     // the process is tree-killed on timeout so a higher ceiling does not leak a hung run.
     timeoutMs: 3e5,
-    // Block memory-derived / PII egress to the external Codex model by default. User opts into risk
-    // by editing this to 'allow' (a human edit, outside model control). Invalid value => 'block'.
-    memoryEgress: "block",
+    // Block every non-named egress leg to the external Codex model by default. User opts into risk
+    // per-leg (a human edit, outside model control). Invalid/unknown => 'block'. Named secrets are
+    // override-proof regardless of this map.
+    egressPolicy: { memoryEcho: "block", piiHigh: "block", piiBulk: "block", secretHeuristic: "block", secretEntropy: "block" },
     // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
     logContent: false
   }
@@ -22238,6 +22226,13 @@ function loadConfig(opts = {}) {
   const projectPath = opts.projectPath ?? join3(process.cwd(), ".helix", "config.json");
   const globalPath = opts.globalPath ?? join3(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
+  const seen = /* @__PURE__ */ new Set();
+  const warn = (msg) => {
+    if (!seen.has(msg)) {
+      seen.add(msg);
+      (opts.warn ?? ((m) => process.stderr.write(m + "\n")))(msg);
+    }
+  };
   for (const path of [globalPath, projectPath]) {
     const raw = readJson(path);
     const dv = raw?.dualVerify;
@@ -22257,7 +22252,20 @@ function loadConfig(opts = {}) {
       if (typeof t === "number" && Number.isInteger(t) && t >= 1e3) {
         merged.dualVerify.timeoutMs = Math.min(t, MAX_TIMEOUT_MS);
       }
-      if (dv.memoryEgress === "block" || dv.memoryEgress === "allow") merged.dualVerify.memoryEgress = dv.memoryEgress;
+      const ep = dv.egressPolicy;
+      if (ep && typeof ep === "object") {
+        for (const [key, val] of Object.entries(ep)) {
+          if (!EGRESS_LEGS.includes(key)) {
+            warn(`helix: ignoring unknown dualVerify.egressPolicy key "${key}"`);
+            continue;
+          }
+          if (val === "allow") merged.dualVerify.egressPolicy[key] = "allow";
+          else if (val !== "block") warn(`helix: invalid dualVerify.egressPolicy.${key} "${String(val)}" -> block`);
+        }
+      }
+      if (dv.memoryEgress !== void 0) {
+        warn("helix: dualVerify.memoryEgress was removed; use dualVerify.egressPolicy { memoryEcho, piiHigh, piiBulk, secretHeuristic, secretEntropy }");
+      }
       if (typeof dv.logContent === "boolean") merged.dualVerify.logContent = dv.logContent;
     }
   }

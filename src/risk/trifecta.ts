@@ -5,6 +5,7 @@
 
 import { findSecrets } from '../memory/secret-scan.js';
 import { detectPII, type PiiKind } from '../memory/pii-scan.js';
+import type { EgressPolicy, EgressLeg } from '../config.js';
 
 export interface LedgerItem {
   id: string;
@@ -74,7 +75,7 @@ export type Leg = 'secret' | 'pii' | 'memory_echo';
 export interface EgressInput {
   texts: string[];                 // [question, helixAnswer]
   ledger: LedgerItem[] | null;     // null = echo leg explicitly disabled (EchoSource 'disabled')
-  policy: 'block' | 'allow';       // dualVerify.memoryEgress
+  policy: EgressPolicy;            // dualVerify.egressPolicy (per-leg block/allow; named secrets ignore it)
 }
 
 export interface EgressVerdict {
@@ -91,8 +92,10 @@ const BULK_PII_N = 3;
 /**
  * S1 egress classifier. Runs secret -> PII -> echo, then applies the §6 decision table in
  * precedence order (first match wins the decision; all detected legs/kinds/ids are still recorded
- * for audit). `reason` is content-free. The secret tier is override-proof (policy='allow' does NOT
- * release secrets). When `ledger` is null the echo leg is skipped (explicit EchoSource:'disabled').
+ * for audit). `reason` is content-free. Only the NAMED secret tier is override-proof (deny-dominant):
+ * no egressPolicy leg can release it. The heuristic/entropy secret tiers and the PII/echo legs are
+ * each gated by their own egressPolicy key. When `ledger` is null the echo leg is skipped (explicit
+ * EchoSource:'disabled').
  */
 export function classifyEgress(input: EgressInput): EgressVerdict {
   const text = input.texts.join('\n');
@@ -100,10 +103,12 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   // --- run every detector first; record everything for audit ---
   const secretSpans = findSecrets(text);
   const secretHit = secretSpans.length > 0;
-  // TEMP (EH-1 Task 1): heuristic stays override-proof until Task 2 wires its per-leg knob.
-  // Removed in Task 2 and replaced by gate('secretHeuristic'). Without this line, splitting the
-  // tier would silently demote the heuristic to overridable before its knob exists.
-  const secretNamed = secretSpans.some((s) => s.tier === 'named' || s.tier === 'heuristic');
+  // Per-tier secret signals (EH-1 Task 2). 'named' is override-proof (deny-dominant); 'heuristic'
+  // and 'entropy' are low-confidence and policy-gated by their own legs. An overlapping
+  // provider+heuristic span merges to tier='named' (secret-scan.mergeSpans), so secretNamed wins it.
+  const secretNamed = secretSpans.some((s) => s.tier === 'named');
+  const secretHeuristic = secretSpans.some((s) => s.tier === 'heuristic');
+  const secretEntropy = secretSpans.some((s) => s.tier === 'entropy');
 
   const piiHits = detectPII(text);
   const piiKinds: PiiKind[] = [...new Set(piiHits.map((h) => h.kind))];
@@ -120,39 +125,37 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   if (piiHits.length > 0) legs.push('pii');
   if (echoHit) legs.push('memory_echo');
 
-  const gated = input.policy === 'allow' ? 'allowed_override' : 'blocked';
+  // Per-leg gate: a leg set to 'allow' releases its hit (allowed_override); otherwise it blocks.
+  // Named secrets never reach a gate — they are deny-dominant (handled above the gates).
+  const gate = (leg: EgressLeg): 'allowed_override' | 'blocked' => (input.policy[leg] === 'allow' ? 'allowed_override' : 'blocked');
 
   // --- precedence-ordered decision (§6); first match wins ---
-  // A NAMED secret (provider pattern, high confidence) is override-proof: policy='allow' cannot
-  // release it. A high-entropy-ONLY hit (low confidence, e.g. a git SHA) is gated like high PII —
-  // blocked by default but policy-overridable — so a false positive cannot permanently wedge dual-verify.
+  // Precedence: named > echo > piiHigh > heuristic > entropy > piiBulk > standalone-low-pii.
+  // A NAMED secret (provider pattern, high confidence) is override-proof: no leg can release it.
+  // Every other leg is low/medium confidence and gated by its own egressPolicy key, so a false
+  // positive cannot permanently wedge dual-verify.
   if (secretNamed) {
     return { decision: 'blocked', legs, piiKinds, echoMemoryIds, reason: 'blocked: secret token (override-proof)' };
   }
   if (echoHit) {
-    return {
-      decision: gated, legs, piiKinds, echoMemoryIds,
-      reason: `${gated === 'blocked' ? 'blocked' : 'allowed_override'}: memory-echo (${echoMemoryIds.length} items)`,
-    };
+    const d = gate('memoryEcho');
+    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: memory-echo (${echoMemoryIds.length} items)` };
   }
   if (highPii) {
-    return {
-      decision: gated, legs, piiKinds, echoMemoryIds,
-      reason: `${gated === 'blocked' ? 'blocked' : 'allowed_override'}: high-severity PII (${piiKinds.length} kinds)`,
-    };
+    const d = gate('piiHigh');
+    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: high-severity PII (${piiKinds.length} kinds)` };
   }
-  if (secretHit) {
-    // entropy-only secret (no named pattern matched): low-confidence, so policy-overridable.
-    return {
-      decision: gated, legs, piiKinds, echoMemoryIds,
-      reason: `${gated === 'blocked' ? 'blocked' : 'allowed_override'}: high-entropy token (low-confidence)`,
-    };
+  if (secretHeuristic) {
+    const d = gate('secretHeuristic');
+    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: secret keyword-assignment (low-confidence)` };
+  }
+  if (secretEntropy) {
+    const d = gate('secretEntropy');
+    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: high-entropy token (low-confidence)` };
   }
   if (bulkLowPii) {
-    return {
-      decision: gated, legs, piiKinds, echoMemoryIds,
-      reason: `${gated === 'blocked' ? 'blocked' : 'allowed_override'}: bulk low-severity PII (${lowPiiCount} hits)`,
-    };
+    const d = gate('piiBulk');
+    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: bulk low-severity PII (${lowPiiCount} hits)` };
   }
   if (piiHits.length > 0) {
     // single low-severity standalone PII (< N, no other leg) -> audit-only pass.

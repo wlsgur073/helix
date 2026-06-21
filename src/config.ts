@@ -6,6 +6,11 @@ export type DualVerifyMode = 'compare' | 'critique';
 export type StakesFloor = 'low' | 'medium' | 'high';
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
+export type EgressLegPolicy = 'block' | 'allow';
+export type EgressLeg = 'memoryEcho' | 'piiHigh' | 'piiBulk' | 'secretHeuristic' | 'secretEntropy';
+export type EgressPolicy = Record<EgressLeg, EgressLegPolicy>;
+const EGRESS_LEGS: readonly EgressLeg[] = ['memoryEcho', 'piiHigh', 'piiBulk', 'secretHeuristic', 'secretEntropy'];
+
 const EFFORTS: readonly ReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh'];
 const MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/; // argv-safe model token: no leading dash, no shell/space chars
 
@@ -26,9 +31,10 @@ export interface HelixConfig {
      *  so this is configurable. A valid integer >= 1000 is accepted, clamped to MAX_TIMEOUT_MS (1h);
      *  anything else (non-integer, < 1s, NaN, ∞) falls back to the default. */
     timeoutMs: number;
-    /** Egress policy for non-secret legs (memory-echo / PII). User-edited only; default 'block'.
-     *  Secrets block regardless. Read once at startup (a mid-session flip needs a restart). */
-    memoryEgress: 'block' | 'allow';
+    /** Per-leg egress policy (memory-echo / high-PII / bulk-PII / heuristic-secret / entropy-secret).
+     *  User-edited only; every leg defaults to 'block'. A NAMED provider secret blocks regardless of
+     *  policy (deny-dominant, override-proof). Read once at startup (a mid-session flip needs a restart). */
+    egressPolicy: EgressPolicy;
     /** Opt-in: persist the exact Codex prompt+response to ~/.helix/codex-log.jsonl. Default false
      *  (OFF). audit.jsonl still records decision metadata regardless of this flag. */
     logContent: boolean;
@@ -48,9 +54,10 @@ export const DEFAULT_CONFIG: HelixConfig = {
     // Codex run timeout (ms). 5 min gives heavy prompts headroom (the old 120s cap timed them out);
     // the process is tree-killed on timeout so a higher ceiling does not leak a hung run.
     timeoutMs: 300_000,
-    // Block memory-derived / PII egress to the external Codex model by default. User opts into risk
-    // by editing this to 'allow' (a human edit, outside model control). Invalid value => 'block'.
-    memoryEgress: 'block',
+    // Block every non-named egress leg to the external Codex model by default. User opts into risk
+    // per-leg (a human edit, outside model control). Invalid/unknown => 'block'. Named secrets are
+    // override-proof regardless of this map.
+    egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' },
     // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
     logContent: false,
   },
@@ -59,6 +66,7 @@ export const DEFAULT_CONFIG: HelixConfig = {
 export interface LoadConfigOptions {
   projectPath?: string; // default .helix/config.json under cwd
   globalPath?: string;  // default ~/.helix/config.json
+  warn?: (msg: string) => void; // one-time diagnostics sink (default stderr; injectable for tests)
 }
 
 function readJson(path: string): Record<string, unknown> | null {
@@ -71,9 +79,11 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
   const projectPath = opts.projectPath ?? join(process.cwd(), '.helix', 'config.json');
   const globalPath = opts.globalPath ?? join(homedir(), '.helix', 'config.json');
   const merged: HelixConfig = structuredClone(DEFAULT_CONFIG);
+  const seen = new Set<string>();
+  const warn = (msg: string): void => { if (!seen.has(msg)) { seen.add(msg); (opts.warn ?? ((m) => process.stderr.write(m + '\n')))(msg); } };
   for (const path of [globalPath, projectPath]) {
     const raw = readJson(path);
-    const dv = raw?.dualVerify as Partial<HelixConfig['dualVerify']> | undefined;
+    const dv = raw?.dualVerify as (Partial<HelixConfig['dualVerify']> & Record<string, unknown>) | undefined;
     if (dv) {
       if (typeof dv.enabled === 'boolean') merged.dualVerify.enabled = dv.enabled;
       if (dv.mode === 'compare' || dv.mode === 'critique') merged.dualVerify.mode = dv.mode;
@@ -93,7 +103,17 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
       if (typeof t === 'number' && Number.isInteger(t) && t >= 1_000) {
         merged.dualVerify.timeoutMs = Math.min(t, MAX_TIMEOUT_MS);
       }
-      if (dv.memoryEgress === 'block' || dv.memoryEgress === 'allow') merged.dualVerify.memoryEgress = dv.memoryEgress;
+      const ep = dv.egressPolicy as Record<string, unknown> | undefined;
+      if (ep && typeof ep === 'object') {
+        for (const [key, val] of Object.entries(ep)) {
+          if (!EGRESS_LEGS.includes(key as EgressLeg)) { warn(`helix: ignoring unknown dualVerify.egressPolicy key "${key}"`); continue; }
+          if (val === 'allow') merged.dualVerify.egressPolicy[key as EgressLeg] = 'allow';
+          else if (val !== 'block') warn(`helix: invalid dualVerify.egressPolicy.${key} "${String(val)}" -> block`);
+        }
+      }
+      if (dv.memoryEgress !== undefined) {
+        warn('helix: dualVerify.memoryEgress was removed; use dualVerify.egressPolicy { memoryEcho, piiHigh, piiBulk, secretHeuristic, secretEntropy }');
+      }
       if (typeof dv.logContent === 'boolean') merged.dualVerify.logContent = dv.logContent;
     }
   }

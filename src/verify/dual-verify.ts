@@ -91,13 +91,13 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
   }
 
   // Outbound egress firewall (S1): classifyEgress subsumes the old secret-only test and adds PII +
-  // memory-echo legs. Secrets block regardless of policy; non-secret legs are gated by
-  // dualVerify.memoryEgress. Free, local, pre-spawn.
+  // memory-echo legs. A NAMED secret blocks regardless of policy (deny-dominant); every other leg is
+  // gated per-leg by dualVerify.egressPolicy. Free, local, pre-spawn.
   const ledger = deps.echo.mode === 'enforce' ? deps.echo.ledgerTexts() : null;
   const verdict = classifyEgress({
     texts: [params.question, params.helixAnswer],
     ledger,
-    policy: deps.config.dualVerify.memoryEgress,
+    policy: deps.config.dualVerify.egressPolicy,
   });
   if (verdict.decision === 'blocked') {
     return { ran: false, attempted: false, outcome: 'refused', reason: verdict.reason, egress: verdict };

@@ -3,6 +3,7 @@ import {
   detectEcho, classifyEgress, classifyEmission,
   type LedgerItem, type EgressInput, type EgressVerdict, type EmissionFlag,
 } from '../../src/risk/trifecta.js';
+import type { EgressPolicy } from '../../src/config.js';
 
 const item = (id: string, content: string): LedgerItem => ({ id, content });
 
@@ -57,24 +58,26 @@ describe('detectEcho', () => {
   });
 });
 
+const ALL = (v: 'block' | 'allow'): EgressPolicy => ({ memoryEcho: v, piiHigh: v, piiBulk: v, secretHeuristic: v, secretEntropy: v });
+
 describe('classifyEgress', () => {
   const clean = (over: Partial<EgressInput>): EgressInput => ({
     texts: ['what is the capital of France?'],
     ledger: [],
-    policy: 'block',
+    policy: ALL('block'),
     ...over,
   });
 
   it('passes clean content under both policies with no legs', () => {
-    expect(classifyEgress(clean({ policy: 'block' })).decision).toBe('pass');
-    expect(classifyEgress(clean({ policy: 'allow' })).decision).toBe('pass');
+    expect(classifyEgress(clean({ policy: ALL('block') })).decision).toBe('pass');
+    expect(classifyEgress(clean({ policy: ALL('allow') })).decision).toBe('pass');
     expect(classifyEgress(clean({})).legs).toEqual([]);
   });
 
   it('blocks a secret under BOTH policies (override-proof)', () => {
     const texts = ['is this key live? key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34'];
-    expect(classifyEgress(clean({ texts, policy: 'block' })).decision).toBe('blocked');
-    const allow = classifyEgress(clean({ texts, policy: 'allow' }));
+    expect(classifyEgress(clean({ texts, policy: ALL('block') })).decision).toBe('blocked');
+    const allow = classifyEgress(clean({ texts, policy: ALL('allow') }));
     expect(allow.decision).toBe('blocked'); // 'allow' does NOT release secrets
     expect(allow.legs).toContain('secret');
   });
@@ -82,18 +85,18 @@ describe('classifyEgress', () => {
   it('blocks a memory echo under policy=block, allowed_override under policy=allow', () => {
     const ledger: LedgerItem[] = [{ id: 'm_1', content: 'the deploy uses the blue cluster in us-east-1' }];
     const texts = ['the deploy uses the blue cluster in us-east-1'];
-    const blocked = classifyEgress(clean({ texts, ledger, policy: 'block' }));
+    const blocked = classifyEgress(clean({ texts, ledger, policy: ALL('block') }));
     expect(blocked.decision).toBe('blocked');
     expect(blocked.legs).toEqual(['memory_echo']);
     expect(blocked.echoMemoryIds).toEqual(['m_1']);
-    const over = classifyEgress(clean({ texts, ledger, policy: 'allow' }));
+    const over = classifyEgress(clean({ texts, ledger, policy: ALL('allow') }));
     expect(over.decision).toBe('allowed_override');
     expect(over.echoMemoryIds).toEqual(['m_1']);
   });
 
   it('skips the echo leg when ledger is null (EchoSource disabled) but still runs secret + PII', () => {
     const texts = ['card 4111 1111 1111 1111 on file'];
-    const v = classifyEgress(clean({ texts, ledger: null, policy: 'block' }));
+    const v = classifyEgress(clean({ texts, ledger: null, policy: ALL('block') }));
     expect(v.decision).toBe('blocked'); // PII still fires
     expect(v.legs).toEqual(['pii']);
     expect(v.echoMemoryIds).toEqual([]);
@@ -101,8 +104,8 @@ describe('classifyEgress', () => {
 
   it('blocks high-severity PII (card) under block, allowed_override under allow', () => {
     const texts = ['card 4111 1111 1111 1111 on file'];
-    expect(classifyEgress(clean({ texts, policy: 'block' })).decision).toBe('blocked');
-    const over = classifyEgress(clean({ texts, policy: 'allow' }));
+    expect(classifyEgress(clean({ texts, policy: ALL('block') })).decision).toBe('blocked');
+    const over = classifyEgress(clean({ texts, policy: ALL('allow') }));
     expect(over.decision).toBe('allowed_override');
     expect(over.legs).toEqual(['pii']);
     expect(over.piiKinds).toContain('credit_card');
@@ -110,14 +113,14 @@ describe('classifyEgress', () => {
 
   it('blocks bulk low-severity PII (>=N=3 emails) under block, allowed_override under allow', () => {
     const texts = ['a@x.com, b@x.com, c@x.com'];
-    expect(classifyEgress(clean({ texts, policy: 'block' })).decision).toBe('blocked');
-    expect(classifyEgress(clean({ texts, policy: 'allow' })).decision).toBe('allowed_override');
-    expect(classifyEgress(clean({ texts, policy: 'block' })).legs).toEqual(['pii']);
+    expect(classifyEgress(clean({ texts, policy: ALL('block') })).decision).toBe('blocked');
+    expect(classifyEgress(clean({ texts, policy: ALL('allow') })).decision).toBe('allowed_override');
+    expect(classifyEgress(clean({ texts, policy: ALL('block') })).legs).toEqual(['pii']);
   });
 
   it('passes a single low-severity standalone PII (<N) as audit-only with piiKinds populated', () => {
     const texts = ['ping me at kim@example.com'];
-    const v = classifyEgress(clean({ texts, policy: 'block' }));
+    const v = classifyEgress(clean({ texts, policy: ALL('block') }));
     expect(v.decision).toBe('pass');          // audit-only, not blocked
     expect(v.legs).toEqual(['pii']);
     expect(v.piiKinds).toEqual(['email']);
@@ -126,7 +129,7 @@ describe('classifyEgress', () => {
   it('reason is content-free (counts/labels only, never the matched span)', () => {
     const ledger: LedgerItem[] = [{ id: 'm_1', content: 'the deploy uses the blue cluster in us-east-1' }];
     const texts = ['the deploy uses the blue cluster in us-east-1 and email kim@example.com'];
-    const v = classifyEgress(clean({ texts, ledger, policy: 'block' }));
+    const v = classifyEgress(clean({ texts, ledger, policy: ALL('block') }));
     expect(v.reason).not.toContain('blue cluster');
     expect(v.reason).not.toContain('kim@example.com');
     expect(v.reason).not.toContain('us-east-1');
@@ -136,7 +139,7 @@ describe('classifyEgress', () => {
   it('records all detected legs/kinds/ids even when a higher-precedence leg decides', () => {
     const ledger: LedgerItem[] = [{ id: 'm_1', content: 'card 4111 1111 1111 1111 on file always' }];
     const texts = ['card 4111 1111 1111 1111 on file always'];
-    const v = classifyEgress(clean({ texts, ledger, policy: 'block' }));
+    const v = classifyEgress(clean({ texts, ledger, policy: ALL('block') }));
     expect(v.decision).toBe('blocked');
     // echo wins precedence over high-sev PII, but PII kinds are still recorded for audit.
     expect(v.legs).toContain('memory_echo');
@@ -144,10 +147,39 @@ describe('classifyEgress', () => {
     expect(v.echoMemoryIds).toEqual(['m_1']);
   });
 
-  it('Task 1: a heuristic keyword hit stays override-proof (baseline parity)', () => {
+  it('Task 2: a heuristic keyword hit is now overridable (demoted from the Task-1 override-proof state)', () => {
     const texts = ['first-impression pass: install steps here'];
-    expect(classifyEgress(clean({ texts, policy: 'block' })).decision).toBe('blocked');
-    expect(classifyEgress(clean({ texts, policy: 'allow' })).decision).toBe('blocked'); // override-proof, same as before
+    expect(classifyEgress(clean({ texts, policy: ALL('block') })).decision).toBe('blocked');
+    // EH-1 Task 2 demotes the heuristic: ALL('allow') sets secretHeuristic:'allow', so the FP releases.
+    expect(classifyEgress(clean({ texts, policy: ALL('allow') })).decision).toBe('allowed_override');
+  });
+
+  it('releases a heuristic keyword FP via secretHeuristic:allow while echo/PII stay blocked', () => {
+    const texts = ['first-impression pass: install steps here'];
+    expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), secretHeuristic: 'allow' } })).decision).toBe('allowed_override');
+    expect(classifyEgress(clean({ texts, policy: ALL('block') })).decision).toBe('blocked');
+  });
+
+  it('a provider secret stays blocked under ALL legs allow (deny-dominant)', () => {
+    const texts = ['key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34'];
+    expect(classifyEgress(clean({ texts, policy: ALL('allow') })).decision).toBe('blocked');
+  });
+
+  it('deny-dominant overlap: a provider+heuristic span stays blocked under secretHeuristic:allow', () => {
+    const texts = ['api_key=AKIAIOSFODNN7EXAMPLE'];
+    expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), secretHeuristic: 'allow' } })).decision).toBe('blocked');
+  });
+
+  it('releases an entropy-only hit via secretEntropy:allow only', () => {
+    const texts = ['token n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf'];
+    expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), secretEntropy: 'allow' } })).decision).toBe('allowed_override');
+    expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), secretHeuristic: 'allow' } })).decision).toBe('blocked');
+  });
+
+  it('piiHigh releases card PII independently of piiBulk', () => {
+    const texts = ['card 4111 1111 1111 1111 on file'];
+    expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), piiHigh: 'allow' } })).decision).toBe('allowed_override');
+    expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), piiBulk: 'allow' } })).decision).toBe('blocked');
   });
 });
 
