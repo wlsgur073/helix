@@ -12,6 +12,13 @@ All notable changes to Helix are documented here. This project follows
 - Codex dual-verify scratch directories are now created under a single `<temp>/helix/` folder
   instead of `helix-codex-*` scattered across the temp root, so scratch left behind by a cleanup
   race collects in one easily-purged place.
+- Secret detection gains a `heuristic` confidence tier: the broad keyword-assignment matcher
+  (`pass:`/`secret:`/`api_key:` + value) is no longer override-proof at the dual-verify egress
+  guard — it still redacts on the write path, but its egress block is now policy-overridable.
+- **Breaking config replacement:** `dualVerify.memoryEgress` (single `block`/`allow`) is replaced
+  by `dualVerify.egressPolicy`, a per-leg map (`memoryEcho` / `piiHigh` / `piiBulk` /
+  `secretHeuristic` / `secretEntropy`), each defaulting to `block`. Provider-format secrets stay
+  override-proof. A leftover `memoryEgress` key is ignored with a startup warning.
 
 ### Added
 - Best-effort garbage collection of leaked Codex scratch directories: an age-based sweep
