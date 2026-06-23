@@ -22276,7 +22276,7 @@ function loadConfig(opts = {}) {
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync as existsSync4, mkdirSync as mkdirSync6, mkdtempSync, readFileSync as readFileSync7, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname as dirname4, join as join5 } from "node:path";
+import { join as join5, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
@@ -22351,7 +22351,7 @@ function interpretWhereOutput(platform, whereOutput, exists) {
     const lower = line.toLowerCase();
     if (lower.endsWith(".exe")) return { file: line, argsPrefix: [] };
     if (lower.endsWith(".cmd") || lower.endsWith(".bat")) {
-      const js = join5(dirname4(line), "node_modules", "@openai", "codex", "bin", "codex.js");
+      const js = winPath.join(winPath.dirname(line), "node_modules", "@openai", "codex", "bin", "codex.js");
       if (exists(js)) return { file: process.execPath, argsPrefix: [js] };
     }
   }

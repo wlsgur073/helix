@@ -1,7 +1,7 @@
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, win32 as winPath } from 'node:path';
 import { promisify } from 'node:util';
 import { MAX_TIMEOUT_MS } from '../config.js';
 import { sweepScratchRoot } from './scratch-gc.js';
@@ -64,7 +64,10 @@ export function interpretWhereOutput(
     const lower = line.toLowerCase();
     if (lower.endsWith('.exe')) return { file: line, argsPrefix: [] };
     if (lower.endsWith('.cmd') || lower.endsWith('.bat')) {
-      const js = join(dirname(line), 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+      // win32 path math regardless of host: this branch only runs for win32 input (prod calls
+      // it only when process.platform==='win32'; tests exercise it cross-platform), so the
+      // shim path must be split/joined with backslash semantics even when the host is POSIX.
+      const js = winPath.join(winPath.dirname(line), 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
       if (exists(js)) return { file: process.execPath, argsPrefix: [js] };
     }
   }
