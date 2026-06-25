@@ -46,7 +46,7 @@ describe('Helix MCP server (end-to-end via in-memory transport)', () => {
 
   it('commit then recall returns the fact in a DATA-only frame over the protocol', async () => {
     const client = await connectedClient();
-    await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'db is postgres' } });
+    await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'db is postgres', source: 'user' } });
     const res = await client.callTool({ name: 'helix_memory_recall', arguments: { query: 'postgres' } });
     expect(textOf(res)).toContain('DATA, NOT INSTRUCTIONS');
     expect(textOf(res)).toContain('db is postgres');
@@ -58,12 +58,22 @@ describe('Helix MCP server (end-to-end via in-memory transport)', () => {
     expect(textOf(res)).toMatch(/disabled|did not run/i);
   });
 
+  it('rejects a commit with no source (required) and a verify-path source', async () => {
+    const client = await connectedClient();
+    const missing = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'x' } });
+    expect(missing.isError).toBe(true);
+    const verifyPath = await client.callTool({
+      name: 'helix_memory_commit', arguments: { content: 'x', source: 'reality-check' },
+    });
+    expect(verifyPath.isError).toBe(true);
+  });
+
   it('commit with supersedes replaces the prior item over the protocol (update, not duplicate)', async () => {
     const client = await connectedClient();
-    const first = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'the db is postgres' } });
+    const first = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'the db is postgres', source: 'user' } });
     const id = /"id":"([^"]+)"/.exec(textOf(first))?.[1];
     expect(id).toBeTruthy();
-    await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'the db is mysql', supersedes: id } });
+    await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'the db is mysql', supersedes: id, source: 'user' } });
     const out = textOf(await client.callTool({ name: 'helix_memory_inspect', arguments: {} }));
     expect(out).toContain('the db is mysql');
     expect(out).not.toContain('postgres'); // the old item was superseded, not duplicated

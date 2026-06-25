@@ -23,7 +23,7 @@ export interface MemoryStoreOptions {
 
 export interface CommitInput {
   content: string;
-  source?: ProvenanceSource;       // default 'user'
+  source: ProvenanceSource;        // required: the caller MUST declare provenance
   blastRadius?: BlastRadius | null;
   classification?: Classification; // default 'normal'
   validFrom?: string;
@@ -57,7 +57,7 @@ export class MemoryStore {
 
   commit(input: CommitInput): MemoryRecord {
     if (input.content.trim() === '') throw new Error('commit: content must be non-empty');
-    const source: ProvenanceSource = input.source ?? 'user';
+    const source: ProvenanceSource = input.source;
     if (!canCommit({ provenance: { source, sessionId: this.session() } })) {
       throw new Error('commit: missing provenance');
     }

@@ -63,12 +63,12 @@ describe('project-ledger e2e (over bin/)', () => {
     // (a) commit to project scope
     await client.callTool({
       name: 'helix_memory_commit',
-      arguments: { content: 'repo uses esbuild', scope: 'project' },
+      arguments: { content: 'repo uses esbuild', scope: 'project', source: 'user' },
     });
     // (b) commit to global scope
     await client.callTool({
       name: 'helix_memory_commit',
-      arguments: { content: 'user prefers concise output', scope: 'global' },
+      arguments: { content: 'user prefers concise output', scope: 'global', source: 'user' },
     });
 
     // (c) recall both
@@ -135,11 +135,11 @@ describe('project-ledger e2e (over bin/)', () => {
 
     await client.callTool({
       name: 'helix_memory_commit',
-      arguments: { content: 'project-side fact', scope: 'project' },
+      arguments: { content: 'project-side fact', scope: 'project', source: 'user' },
     });
     await client.callTool({
       name: 'helix_memory_commit',
-      arguments: { content: 'global-side fact', scope: 'global' },
+      arguments: { content: 'global-side fact', scope: 'global', source: 'user' },
     });
 
     // Verify physical separation: project fact only in project ledger, global fact only in global ledger.
@@ -160,11 +160,11 @@ describe('project-ledger e2e (over bin/)', () => {
 
     await client.callTool({
       name: 'helix_memory_commit',
-      arguments: { content: 'arch decision: microservices', scope: 'project' },
+      arguments: { content: 'arch decision: microservices', scope: 'project', source: 'user' },
     });
     await client.callTool({
       name: 'helix_memory_commit',
-      arguments: { content: 'user timezone: UTC+9', scope: 'global' },
+      arguments: { content: 'user timezone: UTC+9', scope: 'global', source: 'user' },
     });
 
     const out = text(await client.callTool({ name: 'helix_memory_inspect', arguments: {} }));

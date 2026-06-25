@@ -31,7 +31,7 @@ function mrec(id: string, content: string, state: MemoryState = 'Fresh'): Memory
 describe('J3 audit — secret-scan FP no longer causes whole-record data loss (J2-6 FIXED)', () => {
   it('a memory whose only "secret" is a git SHA keeps its surrounding text (span-level redaction)', () => {
     const { store, ledger } = tmpStore();
-    store.commit({ content: 'deployed commit da39a3ee5e6b4b0d3255bfef95601890afd80709 to prod' });
+    store.commit({ content: 'deployed commit da39a3ee5e6b4b0d3255bfef95601890afd80709 to prod', source: 'user' });
     const onDisk = parseLedger(ledger)[0]!;
     expect(onDisk.classification).toBe('secret-redacted');
     expect(onDisk.content).toContain('[redacted:high-entropy]'); // only the SHA is masked
@@ -80,16 +80,16 @@ describe('J3 audit — phraseScore substring-in-word FP (J3-3)', () => {
 describe('J3 audit — supersede/update path now wired (J3-4 FIXED)', () => {
   it('commit with supersedes replaces the old item (update), not a duplicate', () => {
     const { store } = tmpStore();
-    const a = store.commit({ content: 'the prod db is postgres' });
-    store.commit({ content: 'the prod db is mysql', supersedes: a.id });
+    const a = store.commit({ content: 'the prod db is postgres', source: 'user' });
+    store.commit({ content: 'the prod db is mysql', supersedes: a.id, source: 'user' });
     const live = store.inspect();
     expect(live).toHaveLength(1);
     expect(live[0]!.record.content).toBe('the prod db is mysql');
   });
   it('plain re-commit (no supersedes) still adds a separate item — update is explicit/opt-in', () => {
     const { store } = tmpStore();
-    store.commit({ content: 'the prod db is postgres' });
-    store.commit({ content: 'the prod db is mysql' });
+    store.commit({ content: 'the prod db is postgres', source: 'user' });
+    store.commit({ content: 'the prod db is mysql', source: 'user' });
     expect(store.inspect()).toHaveLength(2);
   });
 });

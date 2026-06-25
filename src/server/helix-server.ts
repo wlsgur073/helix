@@ -34,7 +34,14 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     description: 'Store a fact in Helix memory (secret-scanned; provenance recorded). Pass supersedes=<id> to update (replace) an existing item instead of adding a duplicate.',
     inputSchema: {
       content: z.string(),
-      source: z.enum(['user', 'reality-check', 'codex-agree']).optional(),
+      source: z
+        .enum(['user', 'user-relayed', 'agent-inference'])
+        .describe(
+          "Provenance (required). 'user' = a fact the user stated as their own knowledge/preference/instruction. " +
+          "'user-relayed' = content the user pasted/forwarded from a third party (web page, email, README, tool output) " +
+          '— use this whenever the user is relaying, not authoring. ' +
+          "'agent-inference' = a conclusion you derived this session, not yet confirmed against reality.",
+        ),
       blastRadius: z.enum(['read-only', 'local-reversible', 'hard-to-reverse', 'external']).optional(),
       classification: z.enum(['normal', 'personal']).optional(),
       supersedes: z.string().optional(),

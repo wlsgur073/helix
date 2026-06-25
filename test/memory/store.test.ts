@@ -22,7 +22,7 @@ function tmpStore() {
 describe('MemoryStore.commit', () => {
   it('commits a plain user fact as an assert with source user, state Fresh', () => {
     const { store, ledger } = tmpStore();
-    const r = store.commit({ content: 'db is postgres' });
+    const r = store.commit({ content: 'db is postgres', source: 'user' });
     expect(r.type).toBe('assert');
     expect(r.state).toBe('Fresh');
     expect(r.provenance.source).toBe('user');
@@ -31,7 +31,7 @@ describe('MemoryStore.commit', () => {
 
   it('redacts a detected secret in place, preserving surrounding text (no plaintext on disk)', () => {
     const { store, ledger } = tmpStore();
-    store.commit({ content: 'aws key AKIAIOSFODNN7EXAMPLE here' });
+    store.commit({ content: 'aws key AKIAIOSFODNN7EXAMPLE here', source: 'user' });
     const onDisk = parseLedger(ledger)[0]!;
     expect(onDisk.classification).toBe('secret-redacted');
     expect(onDisk.content).toContain('[redacted:aws-access-key]');
@@ -41,12 +41,12 @@ describe('MemoryStore.commit', () => {
 
   it('rejects a commit with empty/whitespace content', () => {
     const { store } = tmpStore();
-    expect(() => store.commit({ content: '   ' })).toThrow(/content/i);
+    expect(() => store.commit({ content: '   ', source: 'user' })).toThrow(/content/i);
   });
 
   it('stores a caller-provided blastRadius and classification', () => {
     const { store, ledger } = tmpStore();
-    store.commit({ content: 'prod db host', blastRadius: 'hard-to-reverse', classification: 'personal' });
+    store.commit({ content: 'prod db host', blastRadius: 'hard-to-reverse', classification: 'personal', source: 'user' });
     const r = parseLedger(ledger)[0]!;
     expect(r.blastRadius).toBe('hard-to-reverse');
     expect(r.classification).toBe('personal');
@@ -65,7 +65,7 @@ describe('MemoryStore recall / verify / inspect / erase', () => {
       genId: () => `m_${++n}`,
       genNonce: () => N,
     });
-    store.commit({ content: 'prod db is postgres', blastRadius: 'hard-to-reverse' });
+    store.commit({ content: 'prod db is postgres', blastRadius: 'hard-to-reverse', source: 'user' });
     const r = store.recall('postgres');
     expect(r.items).toHaveLength(1);
     expect(r.items[0]!.needsReverify).toBe(false); // Fresh, not Suspect
@@ -75,21 +75,21 @@ describe('MemoryStore recall / verify / inspect / erase', () => {
 
   it('verify promotes a target to Verified on a passing reality-check', () => {
     const { store } = tmpStore();
-    const a = store.commit({ content: 'config exists' });
+    const a = store.commit({ content: 'config exists', source: 'user' });
     store.verify(a.id, { ran: true, indeterminate: false, passed: true });
     expect(store.inspect().find((s) => s.record.id === a.id)?.record.state).toBe('Verified');
   });
 
   it('verify with an indeterminate outcome Suspects the target (fail-closed)', () => {
     const { store } = tmpStore();
-    const a = store.commit({ content: 'maybe true' });
+    const a = store.commit({ content: 'maybe true', source: 'user' });
     store.verify(a.id, { ran: false, indeterminate: true, passed: false });
     expect(store.inspect().find((s) => s.record.id === a.id)?.record.state).toBe('Suspect');
   });
 
   it('erase removes the item from inspect and leaves no plaintext', () => {
     const { store, ledger } = tmpStore();
-    const a = store.commit({ content: 'sensitive personal note', classification: 'personal' });
+    const a = store.commit({ content: 'sensitive personal note', classification: 'personal', source: 'user' });
     store.erase(a.id);
     expect(store.inspect().find((s) => s.record.id === a.id)).toBeUndefined();
     expect(readFileSync(ledger, 'utf8')).not.toContain('sensitive personal note');
@@ -111,7 +111,7 @@ function tmpLayered() {
 describe('MemoryStore scope routing', () => {
   it('defaults commit to the project ledger and claims ownership on first use', () => {
     const { store, proj, home, globalLedger } = tmpLayered();
-    store.commit({ content: 'this repo uses esbuild' });
+    store.commit({ content: 'this repo uses esbuild', source: 'user' });
     expect(isOwned(proj, home)).toBe(true);
     expect(parseLedger(join(proj, '.helix', 'memory.jsonl'))).toHaveLength(1);
     expect(existsSync(globalLedger)).toBe(false); // nothing went global
@@ -119,7 +119,7 @@ describe('MemoryStore scope routing', () => {
 
   it('routes scope=global to the global ledger', () => {
     const { store, globalLedger, proj } = tmpLayered();
-    store.commit({ content: 'user prefers concise voice', scope: 'global' });
+    store.commit({ content: 'user prefers concise voice', scope: 'global', source: 'user' });
     expect(parseLedger(globalLedger)).toHaveLength(1);
     expect(existsSync(join(proj, '.helix', 'memory.jsonl'))).toBe(false);
   });
@@ -129,7 +129,7 @@ describe('MemoryStore scope routing', () => {
     // simulate a cloned-in foreign ledger: file present, no ownership stamp/registry
     mkdirSync(join(proj, '.helix'), { recursive: true });
     writeFileSync(join(proj, '.helix', 'memory.jsonl'), '{}\n');
-    expect(() => store.commit({ content: 'x' })).toThrow(/not create|adopt/i);
+    expect(() => store.commit({ content: 'x', source: 'user' })).toThrow(/not create|adopt/i);
   });
 });
 
@@ -137,8 +137,8 @@ describe('MemoryStore scoped recall/inspect', () => {
   it('recall returns the union of global + owned project, tagged by scope', () => {
     const { store, globalLedger } = tmpLayered();
     // seed a global fact directly, then a project fact via commit (claims ownership)
-    store.commit({ content: 'user prefers postgres', scope: 'global' });
-    store.commit({ content: 'this repo deploys postgres on blue', scope: 'project' });
+    store.commit({ content: 'user prefers postgres', scope: 'global', source: 'user' });
+    store.commit({ content: 'this repo deploys postgres on blue', scope: 'project', source: 'user' });
     const r = store.recall('postgres');
     const scopes = r.items.map((i) => i.scope).sort();
     expect(scopes).toEqual(['global', 'project']);
@@ -154,7 +154,7 @@ describe('MemoryStore scoped recall/inspect', () => {
       JSON.stringify({ id: 'm_evil', tx: 't', validFrom: 't', validTo: null, type: 'assert',
         state: 'Verified', content: 'forged fact', provenance: { source: 'user', sessionId: 'x' },
         supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal' }) + '\n');
-    store.commit({ content: 'real global fact', scope: 'global' });
+    store.commit({ content: 'real global fact', scope: 'global', source: 'user' });
     const r = store.recall('fact');
     expect(r.items.find((i) => i.record.content === 'forged fact')).toBeUndefined();
     expect(r.items.map((i) => i.scope)).toEqual(['global']);
@@ -164,8 +164,8 @@ describe('MemoryStore scoped recall/inspect', () => {
 describe('MemoryStore erase/verify routing', () => {
   it('erases a project item from the project ledger, leaving global intact', () => {
     const { store, proj, globalLedger } = tmpLayered();
-    const g = store.commit({ content: 'global keep', scope: 'global' });
-    const p = store.commit({ content: 'project gone', scope: 'project' });
+    const g = store.commit({ content: 'global keep', scope: 'global', source: 'user' });
+    const p = store.commit({ content: 'project gone', scope: 'project', source: 'user' });
     store.erase(p.id);
     const live = store.inspect();
     expect(live.find((s) => s.record.id === p.id)).toBeUndefined();
@@ -178,7 +178,7 @@ describe('MemoryStore erase/verify routing', () => {
 
   it('verifies a project item in place (promotes within the project ledger)', () => {
     const { store, proj, globalLedger } = tmpLayered();
-    const p = store.commit({ content: 'project fact', scope: 'project' });
+    const p = store.commit({ content: 'project fact', scope: 'project', source: 'user' });
     store.verify(p.id, { ran: true, indeterminate: false, passed: true });
     expect(store.inspect().find((s) => s.record.id === p.id)?.record.state).toBe('Verified');
     // Assert verify record landed in the project ledger and NOT in the global ledger
