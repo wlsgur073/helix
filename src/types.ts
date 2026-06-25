@@ -13,8 +13,11 @@ export type MemoryState = 'Fresh' | 'Verified' | 'Suspect';
 /** Ledger event kinds (spec §7.4). */
 export type RecordType = 'assert' | 'verify' | 'supersede' | 'invalidate' | 'erase';
 
-/** Where a record's authority comes from. Only `user` + `reality-check` can verify. */
-export type ProvenanceSource = 'user' | 'reality-check' | 'codex-agree';
+/** Where a record's authority comes from. Only `user` + `reality-check` are *verifying*
+ *  (may ever reach Verified); the rest are non-authoritative. Classified by set membership
+ *  (firewall.isVerifyingSource), so unknown/legacy values fall non-authoritative (fail-closed). */
+export const PROVENANCE_SOURCES = ['user', 'user-relayed', 'agent-inference', 'reality-check', 'codex-agree'] as const;
+export type ProvenanceSource = typeof PROVENANCE_SOURCES[number];
 
 /** Content classification for the erasure/secret paths (spec §7.4). */
 export type Classification = 'normal' | 'secret-redacted' | 'personal';

@@ -10,6 +10,11 @@ export interface VerifyOutcome {
 /** Sources that may ever promote an item to Verified. codex-agree is excluded by design. */
 const VERIFYING_SOURCES: ReadonlySet<ProvenanceSource> = new Set<ProvenanceSource>(['user', 'reality-check']);
 
+/** True iff `s` may ever verify (reach Verified). Unknown/legacy values are non-authoritative. */
+export function isVerifyingSource(s: ProvenanceSource): boolean {
+  return VERIFYING_SOURCES.has(s);
+}
+
 /** A write requires *some* provenance source. */
 export function canCommit(record: { provenance?: Provenance }): boolean {
   return Boolean(record.provenance && record.provenance.source);
