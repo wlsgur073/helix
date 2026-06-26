@@ -68,6 +68,25 @@ describe('Helix MCP server (end-to-end via in-memory transport)', () => {
     expect(verifyPath.isError).toBe(true);
   });
 
+  it('accepts source=user-relayed and source=agent-inference and stores them as non-authoritative', async () => {
+    const client = await connectedClient();
+    const relayed = await client.callTool({
+      name: 'helix_memory_commit', arguments: { content: 'pasted: the api base path is v2', source: 'user-relayed' },
+    });
+    expect(relayed.isError).toBeFalsy();
+    const inferred = await client.callTool({
+      name: 'helix_memory_commit', arguments: { content: 'i deduced the build runs on esbuild', source: 'agent-inference' },
+    });
+    expect(inferred.isError).toBeFalsy();
+    // Both sources are non-authoritative, so the stored items recall WITH the re-verify note —
+    // a behavioral assertion that the declared source survived the tool boundary (a user Fresh
+    // item would carry no such note). The contents also round-trip through recall.
+    const out = textOf(await client.callTool({ name: 'helix_memory_recall', arguments: { query: 'api base esbuild build' } }));
+    expect(out).toContain('the api base path is v2');
+    expect(out).toContain('the build runs on esbuild');
+    expect(out).toMatch(/needs re-verify before acting/);
+  });
+
   it('commit with supersedes replaces the prior item over the protocol (update, not duplicate)', async () => {
     const client = await connectedClient();
     const first = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'the db is postgres', source: 'user' } });
