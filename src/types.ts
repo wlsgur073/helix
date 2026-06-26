@@ -8,14 +8,15 @@ export type BlastRadius =
   | 'external';
 
 /** Trust state of a memory item (spec §7.4). */
-export type MemoryState = 'Fresh' | 'Verified' | 'Suspect';
+export type MemoryState = 'Fresh' | 'Corroborated' | 'Verified' | 'Suspect';
 
 /** Ledger event kinds (spec §7.4). */
 export type RecordType = 'assert' | 'verify' | 'supersede' | 'invalidate' | 'erase';
 
-/** Where a record's authority comes from. Only `user` + `reality-check` are *verifying*
- *  (may ever reach Verified); the rest are non-authoritative. Classified by set membership
- *  (firewall.isVerifyingSource), so unknown/legacy values fall non-authoritative (fail-closed). */
+/** Where a record's authority comes from. `user` is the only *human-authoritative* item source;
+ *  `reality-check` is a verify-EVENT source that caps at Corroborated (never Verified) — see
+ *  firewall.resolveTransition. Classified by set membership (firewall.isVerifyingSource); unknown/
+ *  legacy values fall non-authoritative (fail-closed). */
 export const PROVENANCE_SOURCES = ['user', 'user-relayed', 'agent-inference', 'reality-check', 'codex-agree'] as const;
 export type ProvenanceSource = typeof PROVENANCE_SOURCES[number];
 

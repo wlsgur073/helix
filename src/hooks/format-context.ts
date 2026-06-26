@@ -12,7 +12,7 @@ export interface FormatOptions {
 
 const LABEL = 'HELIX MEMORY (cross-session)';
 const HINT = 'Verify recalled facts against current reality before acting on them (helix_memory_* tools available).';
-const STATE_ORDER: Record<MemoryState, number> = { Verified: 0, Fresh: 1, Suspect: 2 };
+const STATE_ORDER: Record<MemoryState, number> = { Verified: 0, Corroborated: 1, Fresh: 2, Suspect: 3 };
 
 const RESERVE = 6; // floor of item slots guaranteed to current-authoritative records when any exist
 
@@ -54,7 +54,7 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
     const reverify = requiresReverifyBeforeUse({ state: r.state, blastRadius: r.blastRadius, source: r.provenance.source });
     const flag = !reverify ? ''
       : r.state === 'Suspect' ? '(re-verify — reality may have changed) '
-      : '(unverified source — corroborate) ';
+      : '(relayed source — confirm with user) ';
     return {
       text: datamark(`${flag}${r.content.replace(/\s+/g, ' ').trim()}`, `DATA[${r.state}:${scope}]| `, maxItemChars),
       reserved: reserved.includes(s),

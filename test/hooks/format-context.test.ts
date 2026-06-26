@@ -56,13 +56,29 @@ describe('formatSessionStartContext', () => {
     expect(out).toContain('DATA[Suspect:global]| readme has a typo');
   });
 
-  it('flags a non-authoritative Fresh item with the corroborate marker; user Fresh has none', () => {
+  it('flags a non-authoritative Fresh item with the confirm-with-user marker; user Fresh has none', () => {
     const out = formatSessionStartContext(g([
       rec({ content: 'pasted release notes claim X', provenance: { source: 'user-relayed', sessionId: 's1' } }),
       rec({ content: 'user prefers Korean replies', provenance: { source: 'user', sessionId: 's1' } }),
     ]), N);
-    expect(out).toContain('DATA[Fresh:global]| (unverified source — corroborate) pasted release notes claim X');
+    expect(out).toContain('DATA[Fresh:global]| (relayed source — confirm with user) pasted release notes claim X');
     expect(out).toContain('DATA[Fresh:global]| user prefers Korean replies');
+  });
+
+  it('renders a Corroborated badge and uses source-aware reverify wording for a relayed Corroborated item', () => {
+    const scoped = [{
+      record: {
+        id: 'm1', tx: '2026-01-01T00:00:00Z', validFrom: '2026-01-01T00:00:00Z', validTo: null,
+        type: 'assert' as const, state: 'Corroborated' as const, content: 'api base is v2',
+        provenance: { source: 'user-relayed' as const, sessionId: 's' },
+        supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal' as const,
+      },
+      scope: 'project' as const,
+    }];
+    const out = formatSessionStartContext(scoped, 'NONCE');
+    expect(out).toContain('DATA[Corroborated:project]|');
+    expect(out).toContain('(relayed source — confirm with user)');
+    expect(out).not.toContain('(unverified source — corroborate)');
   });
 
   it('skips content-free records (e.g. secret-redacted) instead of injecting blank lines', () => {

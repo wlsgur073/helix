@@ -162,7 +162,7 @@ export function bm25Score(id: string, qTerms: string[], idx: Bm25Index): number 
 const W_PHRASE = 0.5;
 const W_COVERAGE = 0.4;
 const W_BM25 = 0.1;
-const TRUST_PENALTY: Record<MemoryState, number> = { Verified: 0, Fresh: 0.02, Suspect: 0.1 };
+const TRUST_PENALTY: Record<MemoryState, number> = { Verified: 0, Corroborated: 0.01, Fresh: 0.02, Suspect: 0.1 };
 // A non-authoritative source ranks just below an equally-relevant authoritative Fresh fact.
 // A nudge, not a barrier: stronger relevance can still win (intended — recall must stay useful).
 const NONAUTH_PENALTY = 0.03;

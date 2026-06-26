@@ -163,6 +163,17 @@ describe('rankRecords', () => {
     const ranked = rankRecords([relayedRec, userRec], 'postgres is the db');
     expect(ranked.map((r) => r.id)).toEqual(['m_user', 'm_relay']);
   });
+  it('ranks Corroborated between Verified and Fresh; a non-user Corroborated does not outrank an equally-relevant user Fresh', () => {
+    const rec = (id: string, state: 'Fresh' | 'Corroborated', source: 'user' | 'user-relayed'): MemoryRecord => ({
+      id, tx: `2026-01-0${id}T00:00:00Z`, validFrom: '2026-01-01T00:00:00Z', validTo: null,
+      type: 'assert', state, content: 'the db is postgres', provenance: { source, sessionId: 's' },
+      supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+    });
+    const userFresh = rec('1', 'Fresh', 'user');
+    const relayedCorroborated = rec('2', 'Corroborated', 'user-relayed');
+    const ranked = rankRecords([relayedCorroborated, userFresh], 'postgres db');
+    expect(ranked[0]!.id).toBe('1'); // user Fresh (0.02) beats relayed Corroborated (0.01+0.03=0.04)
+  });
 });
 
 describe('golden queries (spec 2026-06-13 §10)', () => {
