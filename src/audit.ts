@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-export interface AuditEvent {
+export interface DualVerifyAudit {
   kind: 'dual-verify';
   ts: string;
   enabled: boolean;
@@ -17,6 +17,19 @@ export interface AuditEvent {
   piiKinds?: Array<'email' | 'phone' | 'credit_card' | 'national_id'>; // labels, never values
   echoMemoryIds?: string[];                                            // ledger IDs, never text
 }
+
+/** Erase audit (F1): EVERY helix_memory_erase is recorded so a poisoned/erroneous erase that
+ *  suppresses an authoritative fact is detectable in audit.jsonl. The MCP tool is soft-only
+ *  (`soft: true`); `soft: false` marks the out-of-band permanent/compaction path. Content-free
+ *  by design — only the id is recorded, never the erased text. */
+export interface EraseAudit {
+  kind: 'erase';
+  ts: string;
+  id: string;
+  soft: boolean; // true = tombstone-only (recoverable); false = physical compaction (right-to-erasure)
+}
+
+export type AuditEvent = DualVerifyAudit | EraseAudit;
 
 /** Append one audit event as a JSONL line. Creates parent dirs as needed. */
 export function appendAudit(path: string, event: AuditEvent): void {

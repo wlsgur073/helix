@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -35,11 +35,25 @@ describe('tool handlers', () => {
     expect(text(handleInspect(s, {}))).toContain('one fact');
   });
 
-  it('handleErase removes an item', () => {
+  it('handleErase removes an item (soft) and records the erase in the audit log', () => {
     const s = store();
+    const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');
     const rec = s.commit({ content: 'gone soon', source: 'user' });
-    handleErase(s, { id: rec.id });
+    handleErase(s, { id: rec.id }, { auditPath, now: () => '2026-06-09T00:00:00.000Z' });
     expect(s.inspect()).toHaveLength(0); // ScopedRecord[]
+    // Every tool-driven erase is audited (soft), so a poisoned/erroneous erase is detectable.
+    const audit = JSON.parse(readFileSync(auditPath, 'utf8').trim()) as { kind: string; id: string; soft: boolean };
+    expect(audit.kind).toBe('erase');
+    expect(audit.id).toBe(rec.id);
+    expect(audit.soft).toBe(true);
+  });
+
+  it('handleRecall surfaces the re-verify note for a relayed (non-authoritative) item', () => {
+    const s = store();
+    const rec = s.commit({ content: 'pasted note claims prod is down', source: 'user-relayed' });
+    const out = text(handleRecall(s, { query: 'prod' }));
+    expect(out).toContain('needs re-verify before acting');
+    expect(out).toContain(rec.id);
   });
 
   it('handleRecall appends an out-of-band egress-shaped note listing flagged ids', () => {

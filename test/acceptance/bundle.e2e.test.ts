@@ -116,7 +116,7 @@ describe('helix bundle e2e (hermetic)', () => {
       arguments: { content: 'personal note: kim lives in seoul', classification: 'personal', source: 'user' },
     }));
     const id = (JSON.parse(committed.replace(/^committed /, '')) as { id: string }).id;
-    await client.callTool({ name: 'helix_memory_erase', arguments: { id } }); // soft (default)
+    await client.callTool({ name: 'helix_memory_erase', arguments: { id } }); // soft-only tool
     // Gone from the live projection a model would ever see...
     const live = text(await client.callTool({ name: 'helix_memory_inspect', arguments: {} }));
     expect(live).not.toContain('kim lives in seoul');
@@ -124,20 +124,23 @@ describe('helix bundle e2e (hermetic)', () => {
     const raw = readFileSync(join(home, 'memory.jsonl'), 'utf8');
     expect(raw).toContain('kim lives in seoul');
     expect(raw).toContain('"erase"');
+    // ...and the erase is recorded in the audit log (a poisoned suppression is detectable).
+    const eraseEntry = readFileSync(join(home, 'audit.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l) as { kind: string; id: string; soft: boolean })
+      .find((e) => e.kind === 'erase' && e.id === id);
+    expect(eraseEntry).toBeDefined();
+    expect(eraseEntry!.soft).toBe(true);
   }, 30_000);
 
-  it('permanent erase physically removes content and leaves a content-free tombstone (right-to-erasure)', async () => {
+  // The MCP erase tool is SOFT-ONLY: it has no `permanent` flag, so an agent can never force
+  // physical destruction of authoritative facts. Right-to-erasure (compaction) is covered at the
+  // store level (test/memory/store.test.ts: "permanent erase physically removes the content").
+  it('the erase tool exposes no permanent flag (soft-only; cannot physically destroy)', async () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-acc-'));
     const client = await connect(home);
-    const committed = text(await client.callTool({
-      name: 'helix_memory_commit',
-      arguments: { content: 'personal note: kim lives in seoul', classification: 'personal', source: 'user' },
-    }));
-    const id = (JSON.parse(committed.replace(/^committed /, '')) as { id: string }).id;
-    await client.callTool({ name: 'helix_memory_erase', arguments: { id, permanent: true } });
-    const raw = readFileSync(join(home, 'memory.jsonl'), 'utf8');
-    expect(raw).not.toContain('kim lives in seoul');
-    expect(raw).toContain('"erase"');
+    const { tools } = await client.listTools();
+    const erase = tools.find((t) => t.name === 'helix_memory_erase')!;
+    expect(Object.keys((erase.inputSchema.properties ?? {}) as Record<string, unknown>)).toEqual(['id']);
   }, 30_000);
 
   it('dual-verify fails closed in a fresh home (no config => disabled, nothing fabricated)', async () => {

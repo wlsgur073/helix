@@ -39,8 +39,19 @@ export function handleInspect(store: MemoryStore, _args: Record<string, never>):
   return ok(rows.length ? rows.join('\n') : '(memory is empty)');
 }
 
-export function handleErase(store: MemoryStore, args: { id: string; permanent?: boolean }): ToolResult {
-  store.erase(args.id, { permanent: args.permanent });
+export interface EraseDeps {
+  auditPath: string;
+  now?: () => string;
+}
+
+/** Soft-only erase: the MCP tool tombstones the item (it leaves the live recall/inspect view)
+ *  but NEVER physically destroys content — so an erroneous or poisoned erase stays recoverable on
+ *  disk and is recorded in audit.jsonl. Physical destruction (right-to-erasure) is the store-level
+ *  `erase(id, { permanent: true })` path, deliberately kept off the agent tool surface. */
+export function handleErase(store: MemoryStore, args: { id: string }, deps: EraseDeps): ToolResult {
+  store.erase(args.id); // soft (default): tombstone only, no compaction
+  const ts = (deps.now ?? (() => new Date().toISOString()))();
+  appendAudit(deps.auditPath, { kind: 'erase', ts, id: args.id, soft: true });
   return ok(`erased ${args.id}`);
 }
 

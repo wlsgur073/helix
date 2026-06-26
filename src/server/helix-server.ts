@@ -63,9 +63,9 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   server.registerTool('helix_memory_erase', {
     title: 'Erase memory',
-    description: 'Erase a memory item by id. Soft by default: the item is removed from the live view (recall/inspect) but remains recoverable on disk (no compaction), so an erroneous or poisoned erase can be undone. Pass permanent=true to physically destroy the content now (compaction) — required to satisfy a genuine right-to-erasure request.',
-    inputSchema: { id: z.string(), permanent: z.boolean().optional().describe('physically destroy now (right-to-erasure); default soft/recoverable') },
-  }, async (args) => handleErase(store, args));
+    description: 'Erase a memory item by id. Soft-only: the item is removed from the live view (recall/inspect) but remains recoverable on disk (no compaction) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool cannot physically destroy content — genuine right-to-erasure (compaction) is handled outside the agent tool surface.',
+    inputSchema: { id: z.string() },
+  }, async (args) => handleErase(store, args, { auditPath: dv.auditPath, now: dv.now }));
 
   server.registerTool('helix_dual_verify', {
     title: 'Dual-verify with Codex',
