@@ -27,9 +27,9 @@ describe('J2 audit — blast-radius / reverify design (characterization)', () =>
     // and an unconditional write -> local-reversible means a Suspect item used to guide a
     // destructive overwrite is not forced to re-verify (if its stored blastRadius is write-level).
     expect(classifyAction({ kind: 'write', target: '~/.bashrc' })).toBe('local-reversible');
-    expect(requiresReverifyBeforeUse({ state: 'Suspect', blastRadius: 'local-reversible' })).toBe(false);
+    expect(requiresReverifyBeforeUse({ state: 'Suspect', blastRadius: 'local-reversible', source: 'user' })).toBe(false);
   });
   it('J2-2: a Fresh (never-verified) item skips re-verify even on a hard-to-reverse path', () => {
-    expect(requiresReverifyBeforeUse({ state: 'Fresh', blastRadius: 'hard-to-reverse' })).toBe(false);
+    expect(requiresReverifyBeforeUse({ state: 'Fresh', blastRadius: 'hard-to-reverse', source: 'user' })).toBe(false);
   });
 });
