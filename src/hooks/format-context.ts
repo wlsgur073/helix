@@ -2,6 +2,7 @@ import type { MemoryState, ScopedRecord } from '../types.js';
 import { requiresReverifyBeforeUse } from '../memory/state-machine.js';
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS } from '../memory/content-frame.js';
 import { classifyEmission } from '../risk/trifecta.js';
+import { isVerifyingSource } from '../memory/firewall.js';
 
 export interface FormatOptions {
   maxItems?: number;
@@ -12,6 +13,8 @@ export interface FormatOptions {
 const LABEL = 'HELIX MEMORY (cross-session)';
 const HINT = 'Verify recalled facts against current reality before acting on them (helix_memory_* tools available).';
 const STATE_ORDER: Record<MemoryState, number> = { Verified: 0, Fresh: 1, Suspect: 2 };
+
+const RESERVE = 6; // floor of item slots guaranteed to current-authoritative records when any exist
 
 /**
  * Render the live projection as a SessionStart context block: nonce-delimited, semantics-headed,
@@ -28,20 +31,35 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
     .sort((a, b) => STATE_ORDER[a.record.state] - STATE_ORDER[b.record.state] || b.record.tx.localeCompare(a.record.tx));
   if (usable.length === 0) return '';
 
-  const lines = usable.slice(0, maxItems).map(({ record: r, scope }) => {
+  // Crowd-out protection: guarantee up to RESERVE current-authoritative (verifying source, not
+  // Suspect) records survive the item cap, even if newer non-authoritative records would fill every
+  // slot. A floor, not an authority-first reorder — the sort order above is otherwise preserved.
+  const top = usable.slice(0, maxItems);
+  const reserved = usable
+    .filter((s) => isVerifyingSource(s.record.provenance.source) && s.record.state !== 'Suspect')
+    .slice(0, RESERVE);
+  const missing = reserved.filter((s) => !top.includes(s));
+  let selected = top;
+  if (missing.length > 0) {
+    const base = top.slice(0, Math.max(0, maxItems - missing.length));
+    const keep = new Set<ScopedRecord>([...base, ...missing]);
+    selected = usable.filter((s) => keep.has(s)); // re-filter from usable to preserve sort order
+  }
+
+  const lines = selected.map((s) => {
+    const { record: r, scope } = s;
     const reverify = requiresReverifyBeforeUse({ state: r.state, blastRadius: r.blastRadius, source: r.provenance.source });
     const flag = !reverify ? ''
       : r.state === 'Suspect' ? '(re-verify — reality may have changed) '
       : '(unverified source — corroborate) ';
-    // Route per-line marking + normalization through the shared datamark() helper (content-frame
-    // invariant: untrusted text is framed via the shared helpers, not re-implemented). Content is
-    // pre-collapsed to one line so the mark stays one-per-record.
-    return datamark(`${flag}${r.content.replace(/\s+/g, ' ').trim()}`, `DATA[${r.state}:${scope}]| `, maxItemChars);
+    return {
+      text: datamark(`${flag}${r.content.replace(/\s+/g, ' ').trim()}`, `DATA[${r.state}:${scope}]| `, maxItemChars),
+      reserved: reserved.includes(s),
+    };
   });
   let dropped = usable.length - lines.length;
 
-  const renderedRecords = usable.slice(0, maxItems);
-  const egressFlags = renderedRecords
+  const egressFlags = selected
     .filter(({ record }) => classifyEmission(record.content).flagged)
     .map(({ record }) => record.id);
   const egressNote = egressFlags.length
@@ -51,7 +69,7 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
   const assemble = (): string => [
     frameOpen(LABEL, nonce),
     DATA_SEMANTICS,
-    ...lines,
+    ...lines.map((l) => l.text),
     ...(dropped > 0 ? [`(+${dropped} more — use helix_memory_recall)`] : []),
     ...(egressNote ? [egressNote] : []),
     HINT,
@@ -59,10 +77,12 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
   ].join('\n');
 
   let out = assemble();
-  // Drop down to zero content lines if needed (DATA_SEMANTICS is fixed overhead ~283 chars; a tight
-  // budget must still be respected — better to show "(+N more)" than to overrun the injection budget).
   while (out.length > maxChars && lines.length > 0) {
-    lines.pop();
+    // drop the lowest-ranked NON-reserved line first; sacrifice a reserved line only if none else remain
+    let idx = -1;
+    for (let i = lines.length - 1; i >= 0; i--) { if (!lines[i]?.reserved) { idx = i; break; } }
+    if (idx === -1) idx = lines.length - 1;
+    lines.splice(idx, 1);
     dropped += 1;
     out = assemble();
   }

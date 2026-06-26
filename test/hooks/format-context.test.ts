@@ -80,6 +80,16 @@ describe('formatSessionStartContext', () => {
     expect(out).toContain('(+5 more — use helix_memory_recall)');
   });
 
+  it('reserves slots for authoritative items so a relayed burst cannot fully crowd them out', () => {
+    const relayed = Array.from({ length: 30 }, (_, i) =>
+      rec({ content: `relayed item ${i}`, id: `m_r${i}`, tx: `2026-06-20T00:00:${String(i).padStart(2, '0')}.000Z`,
+            provenance: { source: 'user-relayed', sessionId: 's1' } }));
+    const userFact = rec({ content: 'user prefers Korean replies', id: 'm_user',
+                           tx: '2026-06-01T00:00:00.000Z', provenance: { source: 'user', sessionId: 's1' } });
+    const out = formatSessionStartContext(g([...relayed, userFact]), N, { maxItems: 30 });
+    expect(out).toContain('user prefers Korean replies'); // survives despite 30 newer relayed items
+  });
+
   it('caps a single oversized record so injection cost stays bounded (the 200KB-record bug)', () => {
     const out = formatSessionStartContext(g([rec({ content: 'x'.repeat(200_000) })]), N, { maxChars: 4000 });
     expect(out.length).toBeLessThanOrEqual(4000);
