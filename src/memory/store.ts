@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, ProvenanceSource, ScopedRecord } from '../types.js';
 import { appendRecord, parseLedger, compactLedger, type LedgerPath } from './ledger.js';
 import { findSecrets, redactSecrets } from './secret-scan.js';
-import { canCommit, promotionFor, type VerifyOutcome } from './firewall.js';
+import { canCommit, isVerifyingSource, promotionFor, type VerifyOutcome } from './firewall.js';
 import { buildProjection, type RecallOptions } from './projection.js';
 import { rankRecords } from './retrieval.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
@@ -60,6 +60,18 @@ export class MemoryStore {
     const source: ProvenanceSource = input.source;
     if (!canCommit({ provenance: { source, sessionId: this.session() } })) {
       throw new Error('commit: missing provenance');
+    }
+    if (input.supersedes) {
+      const targetLedger = this.ledgerOf(input.supersedes);
+      const target = buildProjection(parseLedger(targetLedger)).get(input.supersedes);
+      if (!target) throw new Error('commit: supersedes target not found (dead or unknown id)');
+      const targetIsAuthoritative = isVerifyingSource(target.provenance.source) || target.state === 'Verified';
+      if (targetIsAuthoritative && !isVerifyingSource(source)) {
+        throw new Error(
+          'commit: cannot supersede an authoritative fact with a non-authoritative source ' +
+          '(user-relayed / agent-inference). Commit as source=user if you are authoring this, or reconcile via recall.',
+        );
+      }
     }
     const ts = this.now();
     let content = input.content;

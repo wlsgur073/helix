@@ -188,3 +188,21 @@ describe('MemoryStore erase/verify routing', () => {
     expect(parseLedger(globalLedger).some(isVerify)).toBe(false);
   });
 });
+
+describe('MemoryStore eviction protection', () => {
+  it('refuses a non-authoritative supersede of a user fact; allows additive + user supersede', () => {
+    const { store } = tmpStore();
+    const a = store.commit({ content: 'prod deploys require approval', source: 'user' });
+    expect(() => store.commit({ content: 'approval is obsolete', supersedes: a.id, source: 'user-relayed' }))
+      .toThrow(/authoritative/i);
+    // additive (no supersedes) is fine — both facts coexist
+    expect(() => store.commit({ content: 'approval is obsolete', source: 'user-relayed' })).not.toThrow();
+    // a user supersede of a user fact is fine
+    expect(() => store.commit({ content: 'prod deploys require two approvals', supersedes: a.id, source: 'user' })).not.toThrow();
+  });
+
+  it('refuses a supersede of an unknown/dead target id', () => {
+    const { store } = tmpStore();
+    expect(() => store.commit({ content: 'x', supersedes: 'm_nonexistent', source: 'user' })).toThrow(/target/i);
+  });
+});
