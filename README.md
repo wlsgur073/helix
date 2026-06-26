@@ -25,13 +25,15 @@ Restart Claude Code, then confirm the server is live with `/mcp` (you should see
 
 ## What you get
 
-Seven MCP tools:
+Nine MCP tools:
 
 | Tool | Purpose |
 |------|---------|
 | `helix_memory_commit` | Store a fact (secret-scanned, provenance recorded) |
 | `helix_memory_recall` | Retrieve relevant memory as a quarantined DATA block |
 | `helix_memory_inspect` | List current memory items with their trust state |
+| `helix_memory_recheck` | Re-check a fact against reality (content-bound file check) → `Corroborated` (machine-checked, never `Verified`) |
+| `helix_memory_confirm` | Promote a fact to `Verified` because you explicitly vouched for it (requires your approval; never self-confirm) |
 | `helix_memory_erase` | Physically erase an item (right-to-erasure) |
 | `helix_memory_adopt` | Trust the current project's pre-existing memory file (for a recognized/team-shared ledger; default-deny) |
 | `helix_dual_verify` | Cross-check an answer with Codex (off by default) |
@@ -78,7 +80,9 @@ Helix keeps two ledgers that it always reads together:
 
 ## How it works
 
-- **Trust states.** Every memory item is `Fresh`, `Verified`, or `Suspect`. Only you or a reality-check can promote an item to `Verified` — agreement from an external model never can (a provenance firewall, fail-closed).
+- **Trust states.** Every memory item is `Fresh`, `Corroborated`, `Verified`, or `Suspect`. A mechanical reality-check (`helix_memory_recheck`) can raise a fact to `Corroborated` (machine-checked at one moment in time); only you (`helix_memory_confirm`) can promote it to `Verified` — agreement from an external model never can (a provenance firewall, fail-closed).
+
+  > **Honest, not cryptographic.** `Corroborated` and `Verified` are good-faith grades on the tool surface, **not adversary-proof**: an agent with filesystem/ledger write can forge either by appending to the ledger. Do **not** add `helix_memory_confirm` to `permissions.allow` — it must prompt for your explicit approval. Cryptographic ledger integrity is future work.
 - **Re-verify before use.** A `Suspect` item on a high-blast-radius path must be re-checked before it is acted on.
 - **Content quarantine.** Recalled memory and external-model output are framed as labeled DATA; forged frame markers are neutralized so stored text can never act as an instruction.
 - **Secret hygiene.** Common credential formats and high-entropy tokens are redacted before anything is written, and dual-verify refuses to send a payload containing a secret to the external model.
@@ -105,8 +109,8 @@ Helix is local-first. Installing it lets Claude Code run code on your machine �
 
 Helix is a defense kit for **memory & context poisoning** (OWASP Agentic Top 10 — ASI06). Its guarantees:
 
-- **Provenance firewall (fail-closed):** only you or a reality-check can promote a memory to `Verified`; external agreement never can.
-- **Trust states & re-verify:** `Fresh / Verified / Suspect`, with re-verification required before a `Suspect` item is used on a high-blast-radius path.
+- **Provenance firewall (fail-closed):** a reality-check raises a fact only to `Corroborated`; only you can promote it to `Verified`; external agreement never can. These are honest grades, not tamper-proof.
+- **Trust states & re-verify:** `Fresh / Corroborated / Verified / Suspect`, with re-verification required before a `Suspect` item is used on a high-blast-radius path.
 - **Quarantine:** untrusted text is normalized and datamarked inside a nonce-framed DATA block, so it cannot act as an instruction.
 - **Egress guard:** the only outbound path (dual-verify) is gated for secrets / PII / memory echo.
 

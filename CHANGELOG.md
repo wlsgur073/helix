@@ -5,6 +5,13 @@ All notable changes to Helix are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+- Two-tier memory trust labels on the tool path: machine-corroborated **Corroborated**
+  (`helix_memory_recheck`, a content-bound mechanical file check) and best-effort human-attested
+  **Verified** (`helix_memory_confirm`). These are honest grading signals, **NOT adversary-proof**:
+  a compromised agent with filesystem/ledger write can forge them by appending to the ledger. Do
+  **not** allow-list `helix_memory_confirm`. Cryptographic ledger integrity is future work.
+
 ### Changed
 - `dualVerify.timeoutMs` is now clamped to a 1-hour maximum. A valid integer ≥ 1s is accepted
   and capped at 1h; previously a value above Node's `setTimeout` 32-bit ceiling fell back to the
