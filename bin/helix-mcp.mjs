@@ -13019,6 +13019,24 @@ import { existsSync } from "node:fs";
 import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
+// src/memory/firewall.ts
+var VERIFYING_SOURCES = /* @__PURE__ */ new Set(["user", "reality-check"]);
+function isVerifyingSource(s) {
+  return VERIFYING_SOURCES.has(s);
+}
+function canCommit(record2) {
+  return Boolean(record2.provenance && record2.provenance.source);
+}
+function promotionFor(provenance, outcome) {
+  if (!VERIFYING_SOURCES.has(provenance.source)) {
+    return "Fresh";
+  }
+  if (outcome.ran && !outcome.indeterminate && outcome.passed) {
+    return "Verified";
+  }
+  return "Suspect";
+}
+
 // src/memory/retrieval.ts
 var CJK = /[\p{Script=Hangul}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
 var ALNUM = /[\p{L}\p{N}]/u;
@@ -13212,6 +13230,7 @@ var W_PHRASE = 0.5;
 var W_COVERAGE = 0.4;
 var W_BM25 = 0.1;
 var TRUST_PENALTY = { Verified: 0, Fresh: 0.02, Suspect: 0.1 };
+var NONAUTH_PENALTY = 0.03;
 function rankRecords(records, query, opts = {}) {
   const qMeaning = [...new Set(meaningfulTokens(tokenize(query)))];
   if (qMeaning.length === 0 || records.length === 0) return [];
@@ -13225,7 +13244,8 @@ function rankRecords(records, query, opts = {}) {
   const bm25norm = (id) => max === min ? 0 : (rawBm.get(id) - min) / (max - min);
   const scored = docs.map((d) => {
     const relevance = W_PHRASE * phraseScore(query, d.rec.content) + W_COVERAGE * coverageScore(qMeaning, d.tokens) + W_BM25 * bm25norm(d.rec.id);
-    return { rec: d.rec, relevance, final: relevance - TRUST_PENALTY[d.rec.state] };
+    const trust = TRUST_PENALTY[d.rec.state] + (isVerifyingSource(d.rec.provenance.source) ? 0 : NONAUTH_PENALTY);
+    return { rec: d.rec, relevance, final: relevance - trust };
   }).filter((s) => s.relevance > 0);
   scored.sort((a, b) => b.final - a.final || b.rec.tx.localeCompare(a.rec.tx));
   return scored.slice(0, opts.maxItems ?? 20).map((s) => s.rec);
@@ -13442,24 +13462,10 @@ function redactSecrets(content, spans) {
   return { content: out, classification: "secret-redacted", kinds: [...new Set(spans.map((s) => s.kind))] };
 }
 
-// src/memory/firewall.ts
-var VERIFYING_SOURCES = /* @__PURE__ */ new Set(["user", "reality-check"]);
-function canCommit(record2) {
-  return Boolean(record2.provenance && record2.provenance.source);
-}
-function promotionFor(provenance, outcome) {
-  if (!VERIFYING_SOURCES.has(provenance.source)) {
-    return "Fresh";
-  }
-  if (outcome.ran && !outcome.indeterminate && outcome.passed) {
-    return "Verified";
-  }
-  return "Suspect";
-}
-
 // src/memory/state-machine.ts
 var LOW_BLAST = /* @__PURE__ */ new Set(["read-only", "local-reversible"]);
 function requiresReverifyBeforeUse(item) {
+  if (!isVerifyingSource(item.source)) return true;
   if (item.state !== "Suspect") return false;
   if (item.blastRadius === null) return true;
   return !LOW_BLAST.has(item.blastRadius);
@@ -13568,9 +13574,20 @@ var MemoryStore = class {
   }
   commit(input) {
     if (input.content.trim() === "") throw new Error("commit: content must be non-empty");
-    const source = input.source ?? "user";
+    const source = input.source;
     if (!canCommit({ provenance: { source, sessionId: this.session() } })) {
       throw new Error("commit: missing provenance");
+    }
+    if (input.supersedes) {
+      const targetLedger = this.ledgerOf(input.supersedes);
+      const target = buildProjection(parseLedger(targetLedger)).get(input.supersedes);
+      if (!target) throw new Error("commit: supersedes target not found (dead or unknown id)");
+      const targetIsAuthoritative = isVerifyingSource(target.provenance.source) || target.state === "Verified";
+      if (targetIsAuthoritative && !isVerifyingSource(source)) {
+        throw new Error(
+          "commit: cannot supersede an authoritative fact with a non-authoritative source (user-relayed / agent-inference). Commit as source=user if you are authoring this, or reconcile via recall."
+        );
+      }
     }
     const ts = this.now();
     let content = input.content;
@@ -13632,7 +13649,7 @@ var MemoryStore = class {
     const items = hits.map((record2) => ({
       record: record2,
       scope: scopeById.get(record2.id) ?? "global",
-      needsReverify: requiresReverifyBeforeUse({ state: record2.state, blastRadius: record2.blastRadius })
+      needsReverify: requiresReverifyBeforeUse({ state: record2.state, blastRadius: record2.blastRadius, source: record2.provenance.source })
     }));
     return { items, framed: frameAsData(items.map(({ record: record2, scope }) => ({ record: record2, scope })), this.nonce()) };
   }
@@ -13673,7 +13690,10 @@ var MemoryStore = class {
     if (!p) throw new Error("adopt: no project scope is active");
     stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
   }
-  erase(id) {
+  /** Remove an item from the live projection. Soft by default (tombstone only — recoverable until
+   *  compaction, so an erroneous/poisoned erase can be undone). `permanent` compacts immediately for
+   *  genuine right-to-erasure. */
+  erase(id, opts = {}) {
     const ts = this.now();
     const ledger = this.ledgerOf(id);
     appendRecord(ledger, {
@@ -13690,7 +13710,7 @@ var MemoryStore = class {
       reverifyTrigger: null,
       classification: "normal"
     });
-    compactLedger(ledger, { erasedIds: /* @__PURE__ */ new Set([id]) });
+    if (opts.permanent) compactLedger(ledger, { erasedIds: /* @__PURE__ */ new Set([id]) });
   }
 };
 
@@ -22084,7 +22104,7 @@ function handleInspect(store2, _args) {
   return ok(rows.length ? rows.join("\n") : "(memory is empty)");
 }
 function handleErase(store2, args) {
-  store2.erase(args.id);
+  store2.erase(args.id, { permanent: args.permanent });
   return ok(`erased ${args.id}`);
 }
 function handleAdopt(store2, _args) {
@@ -22530,7 +22550,9 @@ function buildServer(store2, dualDeps) {
     description: "Store a fact in Helix memory (secret-scanned; provenance recorded). Pass supersedes=<id> to update (replace) an existing item instead of adding a duplicate.",
     inputSchema: {
       content: external_exports.string(),
-      source: external_exports.enum(["user", "reality-check", "codex-agree"]).optional(),
+      source: external_exports.enum(["user", "user-relayed", "agent-inference"]).describe(
+        "Provenance (required). 'user' = a fact the user stated as their own knowledge/preference/instruction. 'user-relayed' = content the user pasted/forwarded from a third party (web page, email, README, tool output) \u2014 use this whenever the user is relaying, not authoring. 'agent-inference' = a conclusion you derived this session, not yet confirmed against reality."
+      ),
       blastRadius: external_exports.enum(["read-only", "local-reversible", "hard-to-reverse", "external"]).optional(),
       classification: external_exports.enum(["normal", "personal"]).optional(),
       supersedes: external_exports.string().optional(),
@@ -22549,8 +22571,8 @@ function buildServer(store2, dualDeps) {
   }, async () => handleInspect(store2, {}));
   server2.registerTool("helix_memory_erase", {
     title: "Erase memory",
-    description: "Physically erase a memory item by id (compaction; satisfies right-to-erasure).",
-    inputSchema: { id: external_exports.string() }
+    description: "Erase a memory item by id. Soft by default: the item is removed from the live view (recall/inspect) but remains recoverable on disk (no compaction), so an erroneous or poisoned erase can be undone. Pass permanent=true to physically destroy the content now (compaction) \u2014 required to satisfy a genuine right-to-erasure request.",
+    inputSchema: { id: external_exports.string(), permanent: external_exports.boolean().optional().describe("physically destroy now (right-to-erasure); default soft/recoverable") }
   }, async (args) => handleErase(store2, args));
   server2.registerTool("helix_dual_verify", {
     title: "Dual-verify with Codex",
