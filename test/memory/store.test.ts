@@ -16,7 +16,7 @@ function tmpStore() {
     now: () => '2026-06-09T00:00:00.000Z',
     genId: () => `m_${++n}`,
   });
-  return { store, ledger };
+  return { store, ledger, dir };
 }
 
 describe('MemoryStore.commit', () => {
@@ -81,18 +81,68 @@ describe('MemoryStore recall / verify / inspect / erase', () => {
     expect(r.items[0]!.needsReverify).toBe(true); // non-authoritative source => always flagged
   });
 
-  it('verify promotes a target to Verified on a passing reality-check', () => {
-    const { store } = tmpStore();
-    const a = store.commit({ content: 'config exists', source: 'user' });
-    store.verify(a.id, { ran: true, indeterminate: false, passed: true });
-    expect(store.inspect().find((s) => s.record.id === a.id)?.record.state).toBe('Verified');
+  // recheck fixture tests reference the file by a SHORT RELATIVE path inside `dir` so the path token
+  // embedded in the item content stays < 24 chars; an absolute temp path token (length >= 24, plus a
+  // digit from mkdtemp's random suffix ~65% of the time) trips the entropy secret-scanner, which
+  // redacts the path out of the stored content and breaks checkBinding. We chdir into `dir` (restored
+  // in finally) so the relative path resolves for runRealityCheck's existsSync.
+  it('recheck PASS on a bound check promotes a relayed item to Corroborated', () => {
+    const { store, dir } = tmpStore();
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      writeFileSync(join(dir, 'app.json'), 'base /v2/users');         // bound file actually contains the pattern
+      const a = store.commit({ content: 'api base /v2/users in app.json', source: 'user-relayed' });
+      const r = store.recheck(a.id, { kind: 'file-contains', path: 'app.json', pattern: '/v2/users' });
+      expect(r.result).toEqual({ kind: 'state', state: 'Corroborated' });
+      expect(store.inspect().find((s) => s.record.id === a.id)!.record.state).toBe('Corroborated');
+    } finally {
+      process.chdir(cwd);
+    }
   });
 
-  it('verify with an indeterminate outcome Suspects the target (fail-closed)', () => {
+  it('recheck rejects an unbound check (hard reject) and writes no record', () => {
+    const { store, ledger } = tmpStore();
+    const a = store.commit({ content: 'unrelated note', source: 'user-relayed' });
+    const before = parseLedger(ledger).length;
+    expect(() => store.recheck(a.id, { kind: 'file-contains', path: '/etc/hosts', pattern: 'root' })).toThrow(/not present in the item content/);
+    expect(parseLedger(ledger).length).toBe(before);
+  });
+
+  it('recheck indeterminate (missing file) writes NO ledger record and leaves state unchanged', () => {
+    const { store, ledger, dir } = tmpStore();
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const a = store.commit({ content: 'api base /v2/users in gone.json', source: 'user-relayed' });
+      const before = parseLedger(ledger).length;
+      const r = store.recheck(a.id, { kind: 'file-contains', path: 'gone.json', pattern: '/v2/users' });
+      expect(r.result).toEqual({ kind: 'no-change' });
+      expect(r.record).toBeNull();
+      expect(parseLedger(ledger).length).toBe(before);
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it('recheck determinate FAIL on a user item is contested (no write, state stays)', () => {
+    const { store, dir } = tmpStore();
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      writeFileSync(join(dir, 'app.json'), 'base /v1/users');         // file present but pattern absent
+      const a = store.commit({ content: 'api base /v2/users in app.json', source: 'user' });
+      const r = store.recheck(a.id, { kind: 'file-contains', path: 'app.json', pattern: '/v2/users' });
+      expect(r.result).toEqual({ kind: 'contested' });
+      expect(store.inspect().find((s) => s.record.id === a.id)!.record.state).toBe('Fresh');
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it('recheck throws on an unknown target id', () => {
     const { store } = tmpStore();
-    const a = store.commit({ content: 'maybe true', source: 'user' });
-    store.verify(a.id, { ran: false, indeterminate: true, passed: false });
-    expect(store.inspect().find((s) => s.record.id === a.id)?.record.state).toBe('Suspect');
+    expect(() => store.recheck('nope', { kind: 'file-contains', path: 'a', pattern: 'abc' })).toThrow(/target not found/);
   });
 
   it('soft-erase removes from inspect but keeps the record recoverable until compaction', () => {
@@ -192,16 +242,24 @@ describe('MemoryStore erase/verify routing', () => {
     expect(parseLedger(globalLedger).some(isErase)).toBe(false);
   });
 
-  it('verifies a project item in place (promotes within the project ledger)', () => {
+  it('corroborates a project item in place (verify event routes within the project ledger)', () => {
     const { store, proj, globalLedger } = tmpLayered();
-    const p = store.commit({ content: 'project fact', scope: 'project', source: 'user' });
-    store.verify(p.id, { ran: true, indeterminate: false, passed: true });
-    expect(store.inspect().find((s) => s.record.id === p.id)?.record.state).toBe('Verified');
-    // Assert verify record landed in the project ledger and NOT in the global ledger
-    const projLedger = join(proj, '.helix', 'memory.jsonl');
-    const isVerify = (r: MemoryRecord) => r.type === 'verify' && r.supersedes === p.id;
-    expect(parseLedger(projLedger).some(isVerify)).toBe(true);
-    expect(parseLedger(globalLedger).some(isVerify)).toBe(false);
+    const cwd = process.cwd();
+    process.chdir(proj);
+    try {
+      // Short RELATIVE fixture path (see note on the recheck tests): an absolute temp path token in the
+      // item content would intermittently trip the entropy secret-scanner and break checkBinding.
+      writeFileSync(join(proj, 'fact.txt'), 'project fact present');
+      const p = store.commit({ content: 'see fact.txt for the project fact', scope: 'project', source: 'user' });
+      store.recheck(p.id, { kind: 'file-contains', path: 'fact.txt', pattern: 'project fact' });
+      expect(store.inspect().find((s) => s.record.id === p.id)?.record.state).toBe('Corroborated');
+      const projLedger = join(proj, '.helix', 'memory.jsonl');
+      const isVerify = (r: MemoryRecord) => r.type === 'verify' && r.supersedes === p.id;
+      expect(parseLedger(projLedger).some(isVerify)).toBe(true);
+      expect(parseLedger(globalLedger).some(isVerify)).toBe(false);
+    } finally {
+      process.chdir(cwd);
+    }
   });
 });
 

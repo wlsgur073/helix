@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import type { BlastRadius, Classification, MemoryRecord, MemoryScope, ProvenanceSource, ScopedRecord } from '../types.js';
+import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord } from '../types.js';
 import { appendRecord, parseLedger, compactLedger, type LedgerPath } from './ledger.js';
 import { findSecrets, redactSecrets } from './secret-scan.js';
-import { canCommit, isVerifyingSource, promotionFor, type VerifyOutcome } from './firewall.js';
+import { canCommit, isVerifyingSource, resolveTransition, type TransitionResult, type VerifyOutcome } from './firewall.js';
+import { runRealityCheck, checkBinding, type RealityCheck } from './reality-check.js';
 import { buildProjection, type RecallOptions } from './projection.js';
 import { rankRecords } from './retrieval.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
@@ -44,6 +45,12 @@ export interface RecalledItem {
 export interface RecallResult {
   items: RecalledItem[];
   framed: string; // DATA-quarantined block for prompt injection
+}
+
+export interface RecheckResult {
+  outcome: VerifyOutcome;
+  result: TransitionResult;
+  record: MemoryRecord | null;
 }
 
 /** Orchestrates the deterministic core modules over a real JSONL ledger file. */
@@ -154,17 +161,38 @@ export class MemoryStore {
     return this.global;
   }
 
-  verify(targetId: string, outcome: VerifyOutcome, source: ProvenanceSource = 'reality-check', verifier?: string): MemoryRecord {
+  /** Live projected record for `id` across scopes, or throw. */
+  private liveTarget(id: string): MemoryRecord {
+    const found = this.scopedProjection().find((s) => s.record.id === id);
+    if (!found) throw new Error('target not found (dead or unknown id)');
+    return found.record;
+  }
+
+  /** Append a verify event conferring `state` on `targetId` (routed to the target's ledger). */
+  private writeVerify(targetId: string, state: MemoryState, source: ProvenanceSource): MemoryRecord {
     const ts = this.now();
-    const state = promotionFor({ source, sessionId: this.session(), verifier }, outcome);
     const record: MemoryRecord = {
       id: this.id(), tx: ts, validFrom: ts, validTo: null,
       type: 'verify', state, content: '',
-      provenance: { source, sessionId: this.session(), verifier },
+      provenance: { source, sessionId: this.session() },
       supersedes: targetId, blastRadius: null, reverifyTrigger: null, classification: 'normal',
     };
     appendRecord(this.ledgerOf(targetId), record);
     return record;
+  }
+
+  /** Content-bound mechanical reality-check. Mints at most Corroborated; never Verified. */
+  recheck(id: string, check: RealityCheck): RecheckResult {
+    const target = this.liveTarget(id);
+    const binding = checkBinding(target.content, check);
+    if (!binding.bound) throw new Error(`recheck: ${binding.reason}`);
+    const outcome = runRealityCheck(check);
+    const result = resolveTransition({
+      targetSource: target.provenance.source, targetState: target.state,
+      evidenceSource: 'reality-check', outcome,
+    });
+    const record = result.kind === 'state' ? this.writeVerify(id, result.state, 'reality-check') : null;
+    return { outcome, result, record };
   }
 
   inspect(): ScopedRecord[] {
