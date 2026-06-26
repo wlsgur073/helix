@@ -29,9 +29,10 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
   if (usable.length === 0) return '';
 
   const lines = usable.slice(0, maxItems).map(({ record: r, scope }) => {
-    const flag = requiresReverifyBeforeUse({ state: r.state, blastRadius: r.blastRadius })
-      ? '(re-verify before use) '
-      : '';
+    const reverify = requiresReverifyBeforeUse({ state: r.state, blastRadius: r.blastRadius, source: r.provenance.source });
+    const flag = !reverify ? ''
+      : r.state === 'Suspect' ? '(re-verify — reality may have changed) '
+      : '(unverified source — corroborate) ';
     // Route per-line marking + normalization through the shared datamark() helper (content-frame
     // invariant: untrusted text is framed via the shared helpers, not re-implemented). Content is
     // pre-collapsed to one line so the mark stays one-per-record.

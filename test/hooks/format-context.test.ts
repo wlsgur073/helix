@@ -52,8 +52,17 @@ describe('formatSessionStartContext', () => {
       rec({ content: 'deploy uses the blue cluster', state: 'Suspect', blastRadius: 'external' }),
       rec({ content: 'readme has a typo', state: 'Suspect', blastRadius: 'read-only' }),
     ]), N);
-    expect(out).toContain('DATA[Suspect:global]| (re-verify before use) deploy uses the blue cluster');
+    expect(out).toContain('DATA[Suspect:global]| (re-verify — reality may have changed) deploy uses the blue cluster');
     expect(out).toContain('DATA[Suspect:global]| readme has a typo');
+  });
+
+  it('flags a non-authoritative Fresh item with the corroborate marker; user Fresh has none', () => {
+    const out = formatSessionStartContext(g([
+      rec({ content: 'pasted release notes claim X', provenance: { source: 'user-relayed', sessionId: 's1' } }),
+      rec({ content: 'user prefers Korean replies', provenance: { source: 'user', sessionId: 's1' } }),
+    ]), N);
+    expect(out).toContain('DATA[Fresh:global]| (unverified source — corroborate) pasted release notes claim X');
+    expect(out).toContain('DATA[Fresh:global]| user prefers Korean replies');
   });
 
   it('skips content-free records (e.g. secret-redacted) instead of injecting blank lines', () => {

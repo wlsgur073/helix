@@ -120,7 +120,7 @@ export class MemoryStore {
     const items: RecalledItem[] = hits.map((record) => ({
       record,
       scope: scopeById.get(record.id) ?? 'global',
-      needsReverify: requiresReverifyBeforeUse({ state: record.state, blastRadius: record.blastRadius }),
+      needsReverify: requiresReverifyBeforeUse({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source }),
     }));
     return { items, framed: frameAsData(items.map(({ record, scope }) => ({ record, scope })), this.nonce()) };
   }
