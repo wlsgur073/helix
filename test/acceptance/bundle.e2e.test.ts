@@ -47,13 +47,14 @@ const text = (r: unknown): string =>
     .map((c) => c.text ?? '').join('');
 
 describe('helix bundle e2e (hermetic)', () => {
-  it('exposes the seven helix tools', async () => {
+  it('exposes the nine helix tools', async () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-acc-'));
     const client = await connect(home);
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'helix_codex_status', 'helix_dual_verify', 'helix_memory_adopt', 'helix_memory_commit',
-      'helix_memory_erase', 'helix_memory_inspect', 'helix_memory_recall',
+      'helix_memory_confirm', 'helix_memory_erase', 'helix_memory_inspect', 'helix_memory_recall',
+      'helix_memory_recheck',
     ]);
   }, 30_000);
 
