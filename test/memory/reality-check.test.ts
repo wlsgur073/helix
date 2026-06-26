@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runRealityCheck } from '../../src/memory/reality-check.js';
+import { runRealityCheck, checkBinding } from '../../src/memory/reality-check.js';
 
 function tmpFile(content: string): string {
   const p = join(mkdtempSync(join(tmpdir(), 'helix-rc-')), 'f.txt');
@@ -38,5 +38,31 @@ describe('runRealityCheck', () => {
   it('fail-closed: a malformed trigger is indeterminate, never passed', () => {
     const bad = runRealityCheck({ kind: 'file-exists' } as never);
     expect(bad).toEqual({ ran: false, indeterminate: true, passed: false });
+  });
+});
+
+describe('checkBinding (content-bound promotion gate)', () => {
+  const content = 'the api base path is /v2/users in config app.json';
+  it('binds when BOTH path and pattern appear in the item content', () => {
+    expect(checkBinding(content, { kind: 'file-contains', path: 'app.json', pattern: '/v2/users' }).bound).toBe(true);
+  });
+  it('rejects when the path is not in the item content (launders an unrelated file)', () => {
+    expect(checkBinding(content, { kind: 'file-contains', path: '/etc/hosts', pattern: '/v2/users' }).bound).toBe(false);
+  });
+  it('rejects when the pattern is not in the item content', () => {
+    expect(checkBinding(content, { kind: 'file-contains', path: 'app.json', pattern: 'SECRET' }).bound).toBe(false);
+  });
+  it('rejects a trivial (<3 non-ws char) pattern', () => {
+    expect(checkBinding('x y', { kind: 'file-contains', path: 'y', pattern: 'x' }).bound).toBe(false);
+  });
+  it('rejects a non-file-contains check (file-exists is non-promoting)', () => {
+    expect(checkBinding(content, { kind: 'file-exists', path: 'app.json' }).bound).toBe(false);
+  });
+});
+
+describe('runRealityCheck FAIL narrowing', () => {
+  it('a MISSING file is indeterminate (not a determinate FAIL) — denies delete->demote', () => {
+    const r = runRealityCheck({ kind: 'file-contains', path: '/no/such/file/here.xyz', pattern: 'anything' });
+    expect(r).toEqual({ ran: false, indeterminate: true, passed: false });
   });
 });

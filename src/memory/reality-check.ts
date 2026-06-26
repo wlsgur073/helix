@@ -24,7 +24,7 @@ export function runRealityCheck(check: RealityCheck): VerifyOutcome {
       }
       case 'file-contains': {
         if (typeof check.path !== 'string' || typeof check.pattern !== 'string') return INDETERMINATE;
-        if (!existsSync(check.path)) return { ran: true, indeterminate: false, passed: false };
+        if (!existsSync(check.path)) return INDETERMINATE; // missing -> can't check (denies delete->demote)
         if (statSync(check.path).size > MAX_FILE_BYTES) return INDETERMINATE; // oversized -> can't verify safely
         const text = readFileSync(check.path, 'utf8');
         return { ran: true, indeterminate: false, passed: text.includes(check.pattern) };
@@ -35,4 +35,18 @@ export function runRealityCheck(check: RealityCheck): VerifyOutcome {
   } catch {
     return INDETERMINATE; // any I/O error -> fail closed
   }
+}
+
+const MIN_PATTERN_CHARS = 3;
+/**
+ * Does this check actually exercise what the item claims? (spec §4) Promotion requires BOTH the
+ * `path` AND the `pattern` to be RAW substrings of the item content (byte-for-byte, matching
+ * runRealityCheck's raw includes), and a non-trivial pattern. Only `file-contains` may promote.
+ */
+export function checkBinding(content: string, check: RealityCheck): { bound: boolean; reason?: string } {
+  if (check.kind !== 'file-contains') return { bound: false, reason: 'only file-contains may promote (file-exists is non-promoting)' };
+  if (check.pattern.replace(/\s/g, '').length < MIN_PATTERN_CHARS) return { bound: false, reason: 'pattern too trivial (need >=3 non-whitespace chars)' };
+  if (!content.includes(check.path)) return { bound: false, reason: 'check.path is not present in the item content' };
+  if (!content.includes(check.pattern)) return { bound: false, reason: 'check.pattern is not present in the item content' };
+  return { bound: true };
 }
