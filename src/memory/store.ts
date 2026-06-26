@@ -170,7 +170,10 @@ export class MemoryStore {
     stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
   }
 
-  erase(id: string): void {
+  /** Remove an item from the live projection. Soft by default (tombstone only — recoverable until
+   *  compaction, so an erroneous/poisoned erase can be undone). `permanent` compacts immediately for
+   *  genuine right-to-erasure. */
+  erase(id: string, opts: { permanent?: boolean } = {}): void {
     const ts = this.now();
     const ledger = this.ledgerOf(id);
     appendRecord(ledger, {
@@ -179,6 +182,6 @@ export class MemoryStore {
       provenance: { source: 'user', sessionId: this.session() },
       supersedes: id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
     });
-    compactLedger(ledger, { erasedIds: new Set([id]) });
+    if (opts.permanent) compactLedger(ledger, { erasedIds: new Set([id]) });
   }
 }

@@ -39,8 +39,8 @@ export function handleInspect(store: MemoryStore, _args: Record<string, never>):
   return ok(rows.length ? rows.join('\n') : '(memory is empty)');
 }
 
-export function handleErase(store: MemoryStore, args: { id: string }): ToolResult {
-  store.erase(args.id);
+export function handleErase(store: MemoryStore, args: { id: string; permanent?: boolean }): ToolResult {
+  store.erase(args.id, { permanent: args.permanent });
   return ok(`erased ${args.id}`);
 }
 

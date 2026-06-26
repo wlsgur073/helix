@@ -64,7 +64,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   server.registerTool('helix_memory_erase', {
     title: 'Erase memory',
     description: 'Physically erase a memory item by id (compaction; satisfies right-to-erasure).',
-    inputSchema: { id: z.string() },
+    inputSchema: { id: z.string(), permanent: z.boolean().optional().describe('physically destroy now (right-to-erasure); default soft/recoverable') },
   }, async (args) => handleErase(store, args));
 
   server.registerTool('helix_dual_verify', {

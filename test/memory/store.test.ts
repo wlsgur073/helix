@@ -87,10 +87,18 @@ describe('MemoryStore recall / verify / inspect / erase', () => {
     expect(store.inspect().find((s) => s.record.id === a.id)?.record.state).toBe('Suspect');
   });
 
-  it('erase removes the item from inspect and leaves no plaintext', () => {
+  it('soft-erase removes from inspect but keeps the record recoverable until compaction', () => {
+    const { store, ledger } = tmpStore();
+    const a = store.commit({ content: 'maybe-erroneously erased fact', source: 'user' });
+    store.erase(a.id);                                   // soft (default)
+    expect(store.inspect().find((s) => s.record.id === a.id)).toBeUndefined();  // gone from live view
+    expect(readFileSync(ledger, 'utf8')).toContain('maybe-erroneously erased fact'); // still on disk (recoverable)
+  });
+
+  it('permanent erase physically removes the content (right-to-erasure)', () => {
     const { store, ledger } = tmpStore();
     const a = store.commit({ content: 'sensitive personal note', classification: 'personal', source: 'user' });
-    store.erase(a.id);
+    store.erase(a.id, { permanent: true });
     expect(store.inspect().find((s) => s.record.id === a.id)).toBeUndefined();
     expect(readFileSync(ledger, 'utf8')).not.toContain('sensitive personal note');
   });
@@ -166,7 +174,7 @@ describe('MemoryStore erase/verify routing', () => {
     const { store, proj, globalLedger } = tmpLayered();
     const g = store.commit({ content: 'global keep', scope: 'global', source: 'user' });
     const p = store.commit({ content: 'project gone', scope: 'project', source: 'user' });
-    store.erase(p.id);
+    store.erase(p.id, { permanent: true });
     const live = store.inspect();
     expect(live.find((s) => s.record.id === p.id)).toBeUndefined();
     expect(live.find((s) => s.record.id === g.id)).toBeDefined();
