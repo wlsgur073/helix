@@ -17,9 +17,12 @@ acknowledgement within a few days.
 
 ## Trust model (what Helix guarantees)
 
-- **Provenance firewall (fail-closed):** only `user` or `reality-check` evidence
-  promotes a memory item to `Verified`; agreement from an external model never does.
-- **Trust states:** `Fresh / Verified / Suspect`, with re-verify-before-use on
+- **Provenance firewall (fail-closed):** a mechanical reality-check (`helix_memory_recheck`)
+  raises a fact only to `Corroborated`; only you (`helix_memory_confirm`) can promote it to
+  `Verified`; agreement from an external model never does. These are honest grades, **not
+  adversary-proof** — an agent with filesystem/ledger write can forge either, so do **not**
+  allow-list `helix_memory_confirm`.
+- **Trust states:** `Fresh / Corroborated / Verified / Suspect`, with re-verify-before-use on
   high-blast-radius paths.
 - **Secret handling:** memory is secret-scanned and redacted before it is persisted;
   the dual-verify egress guard hard-blocks credential tokens (override-proof — a
