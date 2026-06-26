@@ -7,7 +7,9 @@ export interface VerifyOutcome {
   passed: boolean;        // ran, determinate, and confirmed
 }
 
-/** Sources that may ever promote an item to Verified. codex-agree is excluded by design. */
+/** Item sources that are *human-authoritative* on the read side (recall ranking / reverify-skip /
+ *  RESERVE floor). `reality-check` is listed because a verify EVENT may carry it, but no live ITEM
+ *  ever does (it is never a commit source). Promotion policy lives in resolveTransition, not here. */
 const VERIFYING_SOURCES: ReadonlySet<ProvenanceSource> = new Set<ProvenanceSource>(['user', 'reality-check']);
 
 /** True iff `s` may ever verify (reach Verified). Unknown/legacy values are non-authoritative. */
@@ -18,22 +20,6 @@ export function isVerifyingSource(s: ProvenanceSource): boolean {
 /** A write requires *some* provenance source. */
 export function canCommit(record: { provenance?: Provenance }): boolean {
   return Boolean(record.provenance && record.provenance.source);
-}
-
-/**
- * The resulting trust state for an item given its verification provenance + outcome.
- * - Verified only when a verifying source produced a determinate PASS.
- * - codex-agree never verifies (agreement is a hypothesis signal) -> stays Fresh.
- * - Fail-closed: indeterminate / did-not-run / failed -> Suspect, never Verified.
- */
-export function promotionFor(provenance: Provenance, outcome: VerifyOutcome): MemoryState {
-  if (!VERIFYING_SOURCES.has(provenance.source)) {
-    return 'Fresh'; // e.g. codex-agree: weigh it elsewhere, but it cannot verify
-  }
-  if (outcome.ran && !outcome.indeterminate && outcome.passed) {
-    return 'Verified';
-  }
-  return 'Suspect'; // unverifiable => unproven, never trust
 }
 
 export type TransitionResult =

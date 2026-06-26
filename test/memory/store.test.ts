@@ -214,6 +214,23 @@ describe('MemoryStore.confirm', () => {
       process.chdir(cwd);
     }
   });
+
+  it('INVARIANT: no live projected item ever carries a verify-event source (reality-check/codex-agree)', () => {
+    const { store, dir } = tmpStore();
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      writeFileSync(join(dir, 'app.json'), 'base /v2/users');
+      const a = store.commit({ content: 'api base /v2/users in app.json', source: 'user' });
+      store.recheck(a.id, { kind: 'file-contains', path: 'app.json', pattern: '/v2/users' });
+      store.confirm(a.id);
+      for (const { record } of store.inspect()) {
+        expect(['reality-check', 'codex-agree']).not.toContain(record.provenance.source);
+      }
+    } finally {
+      process.chdir(cwd);
+    }
+  });
 });
 
 function tmpLayered() {
