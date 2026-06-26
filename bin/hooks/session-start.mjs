@@ -106,7 +106,7 @@ function classifyEmission(content) {
 // src/hooks/format-context.ts
 var LABEL = "HELIX MEMORY (cross-session)";
 var HINT = "Verify recalled facts against current reality before acting on them (helix_memory_* tools available).";
-var STATE_ORDER = { Verified: 0, Fresh: 1, Suspect: 2 };
+var STATE_ORDER = { Verified: 0, Corroborated: 1, Fresh: 2, Suspect: 3 };
 var RESERVE = 6;
 function formatSessionStartContext(records, nonce, opts = {}) {
   const maxItems = opts.maxItems ?? 30;
@@ -125,7 +125,7 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   const lines = selected.map((s) => {
     const { record: r, scope } = s;
     const reverify = requiresReverifyBeforeUse({ state: r.state, blastRadius: r.blastRadius, source: r.provenance.source });
-    const flag = !reverify ? "" : r.state === "Suspect" ? "(re-verify \u2014 reality may have changed) " : "(unverified source \u2014 corroborate) ";
+    const flag = !reverify ? "" : r.state === "Suspect" ? "(re-verify \u2014 reality may have changed) " : "(relayed source \u2014 confirm with user) ";
     return {
       text: datamark(`${flag}${r.content.replace(/\s+/g, " ").trim()}`, `DATA[${r.state}:${scope}]| `, maxItemChars),
       reserved: reserved.includes(s)

@@ -6888,7 +6888,7 @@ var require_dist = __commonJS({
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
 import { join as join7, resolve as resolve2 } from "node:path";
-import { existsSync as existsSync5 } from "node:fs";
+import { existsSync as existsSync6 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -13013,7 +13013,7 @@ var StdioServerTransport = class {
 
 // src/memory/store.ts
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync as existsSync2 } from "node:fs";
 
 // src/memory/ledger.ts
 import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
@@ -13027,14 +13027,17 @@ function isVerifyingSource(s) {
 function canCommit(record2) {
   return Boolean(record2.provenance && record2.provenance.source);
 }
-function promotionFor(provenance, outcome) {
-  if (!VERIFYING_SOURCES.has(provenance.source)) {
-    return "Fresh";
+function resolveTransition(input) {
+  const { targetSource, targetState, evidenceSource, outcome } = input;
+  if (evidenceSource === "user") return { kind: "state", state: "Verified" };
+  if (evidenceSource !== "reality-check") return { kind: "no-change" };
+  if (!outcome.ran || outcome.indeterminate) return { kind: "no-change" };
+  if (outcome.passed) {
+    return targetState === "Verified" || targetState === "Corroborated" ? { kind: "no-change" } : { kind: "state", state: "Corroborated" };
   }
-  if (outcome.ran && !outcome.indeterminate && outcome.passed) {
-    return "Verified";
-  }
-  return "Suspect";
+  if (targetState === "Verified" || targetSource === "user") return { kind: "contested" };
+  if (targetState === "Suspect") return { kind: "no-change" };
+  return { kind: "state", state: "Suspect" };
 }
 
 // src/memory/retrieval.ts
@@ -13229,7 +13232,7 @@ function bm25Score(id, qTerms, idx) {
 var W_PHRASE = 0.5;
 var W_COVERAGE = 0.4;
 var W_BM25 = 0.1;
-var TRUST_PENALTY = { Verified: 0, Fresh: 0.02, Suspect: 0.1 };
+var TRUST_PENALTY = { Verified: 0, Corroborated: 0.01, Fresh: 0.02, Suspect: 0.1 };
 var NONAUTH_PENALTY = 0.03;
 function rankRecords(records, query, opts = {}) {
   const qMeaning = [...new Set(meaningfulTokens(tokenize(query)))];
@@ -13462,6 +13465,40 @@ function redactSecrets(content, spans) {
   return { content: out, classification: "secret-redacted", kinds: [...new Set(spans.map((s) => s.kind))] };
 }
 
+// src/memory/reality-check.ts
+import { existsSync, readFileSync as readFileSync3, statSync as statSync2 } from "node:fs";
+var INDETERMINATE = { ran: false, indeterminate: true, passed: false };
+var MAX_FILE_BYTES = 5e6;
+function runRealityCheck(check2) {
+  try {
+    switch (check2.kind) {
+      case "file-exists": {
+        if (typeof check2.path !== "string") return INDETERMINATE;
+        return { ran: true, indeterminate: false, passed: existsSync(check2.path) };
+      }
+      case "file-contains": {
+        if (typeof check2.path !== "string" || typeof check2.pattern !== "string") return INDETERMINATE;
+        if (!existsSync(check2.path)) return INDETERMINATE;
+        if (statSync2(check2.path).size > MAX_FILE_BYTES) return INDETERMINATE;
+        const text = readFileSync3(check2.path, "utf8");
+        return { ran: true, indeterminate: false, passed: text.includes(check2.pattern) };
+      }
+      default:
+        return INDETERMINATE;
+    }
+  } catch {
+    return INDETERMINATE;
+  }
+}
+var MIN_PATTERN_CHARS = 3;
+function checkBinding(content, check2) {
+  if (check2.kind !== "file-contains") return { bound: false, reason: "only file-contains may promote (file-exists is non-promoting)" };
+  if (check2.pattern.replace(/\s/g, "").length < MIN_PATTERN_CHARS) return { bound: false, reason: "pattern too trivial (need >=3 non-whitespace chars)" };
+  if (!content.includes(check2.path)) return { bound: false, reason: "check.path is not present in the item content" };
+  if (!content.includes(check2.pattern)) return { bound: false, reason: "check.pattern is not present in the item content" };
+  return { bound: true };
+}
+
 // src/memory/state-machine.ts
 var LOW_BLAST = /* @__PURE__ */ new Set(["read-only", "local-reversible"]);
 function requiresReverifyBeforeUse(item) {
@@ -13513,7 +13550,7 @@ function frameAsData(scoped, nonce) {
 
 // src/memory/ownership.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
-import { mkdirSync as mkdirSync3, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join2, resolve } from "node:path";
 function registryPath(home2) {
   return join2(home2, "projects.json");
@@ -13523,14 +13560,14 @@ function ownerFile(projectRoot2) {
 }
 function readRegistry(home2) {
   try {
-    return JSON.parse(readFileSync3(registryPath(home2), "utf8"));
+    return JSON.parse(readFileSync4(registryPath(home2), "utf8"));
   } catch {
     return {};
   }
 }
 function readOwner(projectRoot2) {
   try {
-    return readFileSync3(ownerFile(projectRoot2), "utf8").trim();
+    return readFileSync4(ownerFile(projectRoot2), "utf8").trim();
   } catch {
     return null;
   }
@@ -13627,7 +13664,7 @@ var MemoryStore = class {
     const p = this.opts.project;
     if (scope === "global" || !p) return this.global;
     if (!isOwned(p.root, p.home)) {
-      if (existsSync(p.ledger)) {
+      if (existsSync2(p.ledger)) {
         throw new Error(
           "commit: a project memory file exists here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it"
         );
@@ -13664,9 +13701,15 @@ var MemoryStore = class {
     if (p && isOwned(p.root, p.home) && buildProjection(parseLedger(p.ledger)).has(id)) return p.ledger;
     return this.global;
   }
-  verify(targetId, outcome, source = "reality-check", verifier) {
+  /** Live projected record for `id` across scopes, or throw. */
+  liveTarget(id) {
+    const found = this.scopedProjection().find((s) => s.record.id === id);
+    if (!found) throw new Error("target not found (dead or unknown id)");
+    return found.record;
+  }
+  /** Append a verify event conferring `state` on `targetId` (routed to the target's ledger). */
+  writeVerify(targetId, state, source) {
     const ts = this.now();
-    const state = promotionFor({ source, sessionId: this.session(), verifier }, outcome);
     const record2 = {
       id: this.id(),
       tx: ts,
@@ -13675,7 +13718,7 @@ var MemoryStore = class {
       type: "verify",
       state,
       content: "",
-      provenance: { source, sessionId: this.session(), verifier },
+      provenance: { source, sessionId: this.session() },
       supersedes: targetId,
       blastRadius: null,
       reverifyTrigger: null,
@@ -13683,6 +13726,36 @@ var MemoryStore = class {
     };
     appendRecord(this.ledgerOf(targetId), record2);
     return record2;
+  }
+  /** Content-bound mechanical reality-check. Mints at most Corroborated; never Verified. */
+  recheck(id, check2) {
+    const target = this.liveTarget(id);
+    const binding = checkBinding(target.content, check2);
+    if (!binding.bound) throw new Error(`recheck: ${binding.reason}`);
+    const outcome = runRealityCheck(check2);
+    const result = resolveTransition({
+      targetSource: target.provenance.source,
+      targetState: target.state,
+      evidenceSource: "reality-check",
+      outcome
+    });
+    const record2 = result.kind === "state" ? this.writeVerify(id, result.state, "reality-check") : null;
+    return { outcome, result, record: record2 };
+  }
+  /** Human out-of-band vouch → Verified. Target-gated: only a source=user item is eligible. */
+  confirm(id) {
+    const target = this.liveTarget(id);
+    if (target.provenance.source !== "user") {
+      throw new Error("confirm: only a source=user item is eligible (re-commit as source=user to take authorship first)");
+    }
+    const result = resolveTransition({
+      targetSource: "user",
+      targetState: target.state,
+      evidenceSource: "user",
+      outcome: { ran: true, indeterminate: false, passed: true }
+    });
+    const state = result.kind === "state" ? result.state : "Verified";
+    return { record: this.writeVerify(id, state, "user") };
   }
   inspect() {
     return this.scopedProjection();
@@ -13717,6 +13790,15 @@ var MemoryStore = class {
     if (opts.permanent) compactLedger(ledger, { erasedIds: /* @__PURE__ */ new Set([id]) });
   }
 };
+
+// src/memory/legacy-scan.ts
+function scanLegacyElevated(records) {
+  const offenders = [];
+  for (const r of records) {
+    if (r.type === "verify" || r.state === "Verified" || r.state === "Corroborated") offenders.push(r.id);
+  }
+  return { ok: offenders.length === 0, offenders };
+}
 
 // src/server/helix-server.ts
 import { join as join6 } from "node:path";
@@ -22060,15 +22142,15 @@ function appendAudit(path, event) {
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync5 } from "node:fs";
+import { readFileSync as readFileSync6 } from "node:fs";
 
 // src/codex-log.ts
-import { appendFileSync as appendFileSync3, chmodSync, existsSync as existsSync2, mkdirSync as mkdirSync5, readFileSync as readFileSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import { appendFileSync as appendFileSync3, chmodSync, existsSync as existsSync3, mkdirSync as mkdirSync5, readFileSync as readFileSync5, writeFileSync as writeFileSync3 } from "node:fs";
 import { dirname as dirname3 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
   try {
-    const fresh = !existsSync2(path);
+    const fresh = !existsSync3(path);
     mkdirSync5(dirname3(path), { recursive: true });
     appendFileSync3(path, JSON.stringify(entry) + "\n");
     if (fresh) {
@@ -22077,7 +22159,7 @@ function appendCodexLog(path, entry) {
       } catch {
       }
     }
-    const lines = readFileSync4(path, "utf8").split("\n").filter((l) => l !== "");
+    const lines = readFileSync5(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
       writeFileSync3(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
@@ -22117,9 +22199,32 @@ function handleAdopt(store2, _args) {
   store2.adopt();
   return ok("adopted: this project ledger is now trusted by this Helix install");
 }
+function handleRecheck(store2, args, deps) {
+  const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
+  try {
+    const { outcome, result } = store2.recheck(args.id, args.check);
+    const resultState = result.kind === "state" ? result.state : result.kind;
+    appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "reality-check", checkKind: args.check.kind, outcome, resultState, bound: true });
+    return ok(`recheck ${args.id}: ${resultState}`);
+  } catch (e) {
+    appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "reality-check", checkKind: args.check.kind, resultState: "rejected", bound: false });
+    throw e;
+  }
+}
+function handleConfirm(store2, args, deps) {
+  const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
+  try {
+    store2.confirm(args.id);
+    appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "user", resultState: "Verified" });
+    return ok(`confirmed ${args.id}: Verified`);
+  } catch (e) {
+    appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "user", resultState: "rejected" });
+    throw e;
+  }
+}
 function codexLogCount(path) {
   try {
-    return readFileSync5(path, "utf8").split("\n").filter((l) => l !== "").length;
+    return readFileSync6(path, "utf8").split("\n").filter((l) => l !== "").length;
   } catch {
     return 0;
   }
@@ -22213,7 +22318,7 @@ async function handleDualVerify(args, deps) {
 }
 
 // src/config.ts
-import { readFileSync as readFileSync6 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join3 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
@@ -22243,7 +22348,7 @@ var DEFAULT_CONFIG = {
 };
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync6(path, "utf8"));
+    return JSON.parse(readFileSync7(path, "utf8"));
   } catch {
     return null;
   }
@@ -22300,13 +22405,13 @@ function loadConfig(opts = {}) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync4, mkdirSync as mkdirSync6, mkdtempSync, readFileSync as readFileSync7, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync5, mkdirSync as mkdirSync6, mkdtempSync, readFileSync as readFileSync8, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join5, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync3, readdirSync, lstatSync, statSync as statSync2, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync4, readdirSync, lstatSync, statSync as statSync3, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join4 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
@@ -22322,11 +22427,11 @@ function shouldSweep(stampMtimeMs, nowMs, intervalMs) {
 }
 function sweepScratchRoot(root, nowMs = Date.now()) {
   try {
-    if (!existsSync3(root)) return;
+    if (!existsSync4(root)) return;
     const stampPath = join4(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
-      stampMtimeMs = statSync2(stampPath).mtimeMs;
+      stampMtimeMs = statSync3(stampPath).mtimeMs;
     } catch {
       stampMtimeMs = null;
     }
@@ -22396,7 +22501,7 @@ async function resolveCodexInvocation() {
   let inv = null;
   try {
     const { stdout } = await execFileAsync("where", ["codex"], { timeout: 1e4 });
-    inv = interpretWhereOutput("win32", stdout ?? "", existsSync4);
+    inv = interpretWhereOutput("win32", stdout ?? "", existsSync5);
   } catch {
     inv = null;
   }
@@ -22518,7 +22623,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
       }
       let answer = "";
       try {
-        answer = readFileSync7(outFile, "utf8").trim();
+        answer = readFileSync8(outFile, "utf8").trim();
       } catch {
       }
       return answer ? { ok: true, answer } : { ok: false, error: "codex produced no output" };
@@ -22580,6 +22685,19 @@ function buildServer(store2, dualDeps) {
     description: "Erase a memory item by id. Soft-only: the item is removed from the live view (recall/inspect) but remains recoverable on disk (no compaction) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool cannot physically destroy content \u2014 genuine right-to-erasure (compaction) is handled outside the agent tool surface.",
     inputSchema: { id: external_exports.string() }
   }, async (args) => handleErase(store2, args, { auditPath: dv.auditPath, now: dv.now }));
+  server2.registerTool("helix_memory_recheck", {
+    title: "Recheck memory against reality",
+    description: "Run a content-bound mechanical reality-check on a memory item. A pass yields the Corroborated trust state (machine-checked, NOT human-verified \u2014 it can NEVER reach Verified). The check is file-contains and BOTH path and pattern MUST appear in the item content, or the call is rejected (prevents laundering an unrelated passing check into trust). Use for objective, checkable facts.",
+    inputSchema: {
+      id: external_exports.string(),
+      check: external_exports.object({ kind: external_exports.literal("file-contains"), path: external_exports.string(), pattern: external_exports.string() })
+    }
+  }, async (args) => handleRecheck(store2, args, { auditPath: dv.auditPath, now: dv.now }));
+  server2.registerTool("helix_memory_confirm", {
+    title: "Confirm memory (user-vouched)",
+    description: "Promote a memory item to the Verified state because THE USER explicitly vouched for it this turn. Requires explicit user approval; never self-confirm \u2014 call ONLY when the user directly confirmed the fact, never to confirm your own inference or a relayed claim. Only items committed with source=user are eligible (re-commit a relayed/inferred fact as source=user first). The user, not Helix, is the authority \u2014 do not allow-list this tool.",
+    inputSchema: { id: external_exports.string() }
+  }, async (args) => handleConfirm(store2, args, { auditPath: dv.auditPath, now: dv.now }));
   server2.registerTool("helix_dual_verify", {
     title: "Dual-verify with Codex",
     description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor.",
@@ -22637,9 +22755,17 @@ var home = process.env.HELIX_HOME ?? join7(homedir3(), ".helix");
 var globalLedger = process.env.HELIX_LEDGER ?? join7(home, "memory.jsonl");
 var projectRoot = process.cwd();
 var projectLedger = join7(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync5(join7(projectRoot, ".helix")) && resolve2(projectLedger) !== resolve2(globalLedger);
+var projectActive = existsSync6(join7(projectRoot, ".helix")) && resolve2(projectLedger) !== resolve2(globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
 var store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? "cli", project });
+for (const ledger of [globalLedger, ...project ? [project.ledger] : []]) {
+  try {
+    const scan = scanLegacyElevated(parseLedger(ledger));
+    if (!scan.ok) process.stderr.write(`helix: WARNING - ${scan.offenders.length} pre-existing elevated/verify record(s) in ${ledger}; trust states there are not tool-minted
+`);
+  } catch {
+  }
+}
 var server = buildServer(store, {
   config: loadConfig({ globalPath: join7(home, "config.json") }),
   runner: realCodexRunner,
