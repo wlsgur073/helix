@@ -3,10 +3,11 @@ import type { HelixConfig } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type EchoSource } from '../verify/dual-verify.js';
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS, newNonce } from '../memory/content-frame.js';
-import { appendAudit } from '../audit.js';
+import { appendAudit, type VerifyAudit } from '../audit.js';
 import { readFileSync } from 'node:fs';
 import { classifyEmission, type EgressVerdict, type Leg } from '../risk/trifecta.js';
 import { appendCodexLog } from '../codex-log.js';
+import type { RealityCheck } from '../memory/reality-check.js';
 
 export interface ToolResult {
   content: Array<{ type: 'text'; text: string }>;
@@ -58,6 +59,43 @@ export function handleErase(store: MemoryStore, args: { id: string }, deps: Eras
 export function handleAdopt(store: MemoryStore, _args: Record<string, never>): ToolResult {
   store.adopt();
   return ok('adopted: this project ledger is now trusted by this Helix install');
+}
+
+export interface RecheckConfirmDeps {
+  auditPath: string;
+  now?: () => string;
+}
+
+/** Mechanical reality-check (two-tier ladder): caps at Corroborated, never Verified. EVERY outcome
+ *  is audited content-free — including the reject path (an unbound/bad check throws but is still
+ *  recorded as `rejected`/`bound:false` then re-thrown) and the contested path. */
+export function handleRecheck(store: MemoryStore, args: { id: string; check: RealityCheck }, deps: RecheckConfirmDeps): ToolResult {
+  const ts = (deps.now ?? (() => new Date().toISOString()))();
+  try {
+    const { outcome, result } = store.recheck(args.id, args.check);
+    // A reality-check 'state' result is provably only Corroborated/Suspect (the firewall caps it,
+    // never Fresh/Verified), so narrowing MemoryState to the audit's verify-result union is safe.
+    const resultState = (result.kind === 'state' ? result.state : result.kind) as VerifyAudit['resultState']; // 'no-change' | 'contested'
+    appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'reality-check', checkKind: args.check.kind, outcome, resultState, bound: true });
+    return ok(`recheck ${args.id}: ${resultState}`);
+  } catch (e) {
+    appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'reality-check', checkKind: args.check.kind, resultState: 'rejected', bound: false });
+    throw e; // re-throw — MCP must still surface the error
+  }
+}
+
+/** Human out-of-band vouch -> Verified. Target-gated in the store (source=user only). The Verified
+ *  promotion and any rejection are both audited content-free. */
+export function handleConfirm(store: MemoryStore, args: { id: string }, deps: RecheckConfirmDeps): ToolResult {
+  const ts = (deps.now ?? (() => new Date().toISOString()))();
+  try {
+    store.confirm(args.id);
+    appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'Verified' });
+    return ok(`confirmed ${args.id}: Verified`);
+  } catch (e) {
+    appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'rejected' });
+    throw e;
+  }
 }
 
 export interface CodexStatusDeps {

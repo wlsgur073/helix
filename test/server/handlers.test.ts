@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
-import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt } from '../../src/server/handlers.js';
+import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleRecheck, handleConfirm } from '../../src/server/handlers.js';
 import { isOwned } from '../../src/memory/ownership.js';
 
 function store() {
@@ -86,6 +86,45 @@ function layeredStore() {
   });
   return { store: s, home, proj };
 }
+
+describe('recheck + confirm handlers', () => {
+  it('handleRecheck audits the resultState and returns it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const auditPath = join(dir, 'audit.jsonl');
+    let n = 0;
+    const s = new MemoryStore(join(dir, 'm.jsonl'), { sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}` });
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      writeFileSync(join(dir, 'app.json'), 'base /v2/users');
+      const a = s.commit({ content: 'api base /v2/users in app.json', source: 'user-relayed' });
+      const res = handleRecheck(s, { id: a.id, check: { kind: 'file-contains', path: 'app.json', pattern: '/v2/users' } }, { auditPath });
+      expect(text(res)).toMatch(/Corroborated/);
+      const row = JSON.parse(readFileSync(auditPath, 'utf8').trim());
+      expect(row).toMatchObject({ kind: 'verify', source: 'reality-check', resultState: 'Corroborated', bound: true });
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it('handleRecheck audits a rejected (unbound) call and rethrows', () => {
+    const s = store();
+    const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');
+    const a = s.commit({ content: 'note', source: 'user-relayed' });
+    expect(() => handleRecheck(s, { id: a.id, check: { kind: 'file-contains', path: '/etc/x', pattern: 'rootroot' } }, { auditPath })).toThrow();
+    const row = JSON.parse(readFileSync(auditPath, 'utf8').trim());
+    expect(row).toMatchObject({ kind: 'verify', resultState: 'rejected', bound: false });
+  });
+
+  it('handleConfirm audits Verified', () => {
+    const s = store();
+    const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');
+    const a = s.commit({ content: 'pref', source: 'user' });
+    expect(text(handleConfirm(s, { id: a.id }, { auditPath }))).toMatch(/Verified/);
+    const row = JSON.parse(readFileSync(auditPath, 'utf8').trim());
+    expect(row).toMatchObject({ kind: 'verify', source: 'user', resultState: 'Verified' });
+  });
+});
 
 describe('scope + adopt handlers', () => {
   it('handleCommit honors scope=global', () => {
