@@ -162,6 +162,60 @@ describe('MemoryStore recall / verify / inspect / erase', () => {
   });
 });
 
+describe('MemoryStore.confirm', () => {
+  it('confirm promotes a source=user item to Verified', () => {
+    const { store } = tmpStore();
+    const a = store.commit({ content: 'user prefers postgres', source: 'user' });
+    store.confirm(a.id);
+    expect(store.inspect().find((s) => s.record.id === a.id)!.record.state).toBe('Verified');
+  });
+
+  it('confirm records source=user end-to-end on the verify event', () => {
+    const { store } = tmpStore();
+    const a = store.commit({ content: 'user prefers postgres', source: 'user' });
+    const { record } = store.confirm(a.id);
+    expect(record.provenance.source).toBe('user');
+  });
+
+  it.each(['user-relayed', 'agent-inference'] as const)('confirm rejects a non-user (%s) target', (src) => {
+    const { store } = tmpStore();
+    const a = store.commit({ content: 'relayed claim', source: src });
+    expect(() => store.confirm(a.id)).toThrow(/only a source=user item|eligible/i);
+    expect(store.inspect().find((s) => s.record.id === a.id)!.record.state).toBe('Fresh');
+  });
+
+  it('confirm lifts an already-Corroborated user item to Verified (reachable progression)', () => {
+    const { store, dir } = tmpStore();
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      writeFileSync(join(dir, 'app.json'), 'base /v2/users');
+      const a = store.commit({ content: 'api base /v2/users in app.json', source: 'user' });
+      store.recheck(a.id, { kind: 'file-contains', path: 'app.json', pattern: '/v2/users' }); // -> Corroborated
+      store.confirm(a.id);                                                                      // -> Verified
+      expect(store.inspect().find((s) => s.record.id === a.id)!.record.state).toBe('Verified');
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+  // (Suspect -> Verified recovery is proven at the resolveTransition unit level in Task 2; a user item
+  //  cannot reach Suspect via recheck since a determinate FAIL on a user target is contested, not a demote.)
+
+  it('INVARIANT: only confirm yields Verified — recheck never does', () => {
+    const { store, dir } = tmpStore();
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      writeFileSync(join(dir, 'app.json'), 'base /v2/users');
+      const a = store.commit({ content: 'api base /v2/users in app.json', source: 'user' });
+      store.recheck(a.id, { kind: 'file-contains', path: 'app.json', pattern: '/v2/users' });
+      expect(store.inspect().find((s) => s.record.id === a.id)!.record.state).toBe('Corroborated'); // NOT Verified
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+});
+
 function tmpLayered() {
   const home = mkdtempSync(join(tmpdir(), 'helix-home-'));
   const proj = mkdtempSync(join(tmpdir(), 'helix-proj-'));

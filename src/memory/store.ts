@@ -195,6 +195,21 @@ export class MemoryStore {
     return { outcome, result, record };
   }
 
+  /** Human out-of-band vouch → Verified. Target-gated: only a source=user item is eligible. */
+  confirm(id: string): { record: MemoryRecord } {
+    const target = this.liveTarget(id);
+    if (target.provenance.source !== 'user') {
+      throw new Error('confirm: only a source=user item is eligible (re-commit as source=user to take authorship first)');
+    }
+    const result = resolveTransition({
+      targetSource: 'user', targetState: target.state,
+      evidenceSource: 'user', outcome: { ran: true, indeterminate: false, passed: true },
+    });
+    // resolveTransition guarantees { kind:'state', state:'Verified' } for evidenceSource 'user'
+    const state = result.kind === 'state' ? result.state : 'Verified';
+    return { record: this.writeVerify(id, state, 'user') };
+  }
+
   inspect(): ScopedRecord[] {
     return this.scopedProjection();
   }
