@@ -35,3 +35,32 @@ export function promotionFor(provenance: Provenance, outcome: VerifyOutcome): Me
   }
   return 'Suspect'; // unverifiable => unproven, never trust
 }
+
+export type TransitionResult =
+  | { kind: 'state'; state: MemoryState }
+  | { kind: 'no-change' }
+  | { kind: 'contested' };
+
+/**
+ * The single write-side trust-transition authority (spec §5). A reality-check may mint at most
+ * Corroborated; only a user vouch mints Verified. Fail-closed; never downgrades a human-Verified
+ * item; a determinate fail against a user-source or Verified target is 'contested' (no write).
+ */
+export function resolveTransition(input: {
+  targetSource: ProvenanceSource; targetState: MemoryState;
+  evidenceSource: ProvenanceSource; outcome: VerifyOutcome;
+}): TransitionResult {
+  const { targetSource, targetState, evidenceSource, outcome } = input;
+  if (evidenceSource === 'user') return { kind: 'state', state: 'Verified' }; // confirm: human vouch
+  if (evidenceSource !== 'reality-check') return { kind: 'no-change' };        // nothing else may transition
+  if (!outcome.ran || outcome.indeterminate) return { kind: 'no-change' };     // can't check → no change
+  if (outcome.passed) {
+    // already >= Corroborated stays put; Fresh/Suspect rise to Corroborated (recovery)
+    return targetState === 'Verified' || targetState === 'Corroborated'
+      ? { kind: 'no-change' } : { kind: 'state', state: 'Corroborated' };
+  }
+  // determinate FAIL
+  if (targetState === 'Verified' || targetSource === 'user') return { kind: 'contested' }; // guard
+  if (targetState === 'Suspect') return { kind: 'no-change' };
+  return { kind: 'state', state: 'Suspect' };
+}
