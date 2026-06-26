@@ -73,6 +73,14 @@ describe('MemoryStore recall / verify / inspect / erase', () => {
     expect(r.framed).toContain('DATA[Fresh:global]| prod db is postgres');
   });
 
+  it('recall flags a relayed (non-authoritative) item as needsReverify (MINJA mitigation, spec §12.1)', () => {
+    const { store } = tmpStore();
+    store.commit({ content: 'pasted release notes claim the api base is v2', source: 'user-relayed' });
+    const r = store.recall('release notes api');
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]!.needsReverify).toBe(true); // non-authoritative source => always flagged
+  });
+
   it('verify promotes a target to Verified on a passing reality-check', () => {
     const { store } = tmpStore();
     const a = store.commit({ content: 'config exists', source: 'user' });
@@ -212,5 +220,21 @@ describe('MemoryStore eviction protection', () => {
   it('refuses a supersede of an unknown/dead target id', () => {
     const { store } = tmpStore();
     expect(() => store.commit({ content: 'x', supersedes: 'm_nonexistent', source: 'user' })).toThrow(/target/i);
+  });
+});
+
+describe('MemoryStore cross-scope supersede', () => {
+  it('rejects a project-scope supersede of a global id without creating a duplicate', () => {
+    const { store } = tmpLayered();
+    const g = store.commit({ content: 'global db is postgres', scope: 'global', source: 'user' });
+    // The supersede record would be written to the PROJECT ledger while the global target stays
+    // live (projection is per-ledger) — a duplicate that never evicts the stale fact. Reject it.
+    expect(() => store.commit({ content: 'project says mysql', supersedes: g.id, scope: 'project', source: 'user' }))
+      .toThrow(/cannot supersede across scopes/i);
+    const live = store.inspect();
+    // The throw happened before any write: no stray project record, the global target stays singular.
+    expect(live.filter((s) => s.record.content.includes('mysql'))).toHaveLength(0);
+    expect(live.filter((s) => s.record.id === g.id)).toHaveLength(1);
+    expect(live.filter((s) => s.record.content === 'global db is postgres')).toHaveLength(1);
   });
 });

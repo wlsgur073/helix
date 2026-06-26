@@ -65,6 +65,15 @@ export class MemoryStore {
       const targetLedger = this.ledgerOf(input.supersedes);
       const target = buildProjection(parseLedger(targetLedger)).get(input.supersedes);
       if (!target) throw new Error('commit: supersedes target not found (dead or unknown id)');
+      // Cross-scope guard (spec §15): the supersede record is written to the ledger for input.scope,
+      // but projection is per-ledger. If the target lives in a different ledger than the write, the
+      // supersede would NOT evict it — both stay live (a duplicate, stale fact never removed). Reject
+      // the scope mismatch. (Side-effect-free write-ledger resolution: mirrors targetLedger() routing
+      // WITHOUT its ownership-claim side effect, so a rejected commit never stamps/creates a ledger.)
+      const writeLedger = input.scope === 'global' || !this.opts.project ? this.global : this.opts.project.ledger;
+      if (targetLedger !== writeLedger) {
+        throw new Error('commit: cannot supersede across scopes (target lives in a different ledger)');
+      }
       const targetIsAuthoritative = isVerifyingSource(target.provenance.source) || target.state === 'Verified';
       if (targetIsAuthoritative && !isVerifyingSource(source)) {
         throw new Error(
