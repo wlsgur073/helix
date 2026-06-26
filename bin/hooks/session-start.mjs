@@ -116,13 +116,12 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   if (usable.length === 0) return "";
   const top = usable.slice(0, maxItems);
   const reserved = usable.filter((s) => isVerifyingSource(s.record.provenance.source) && s.record.state !== "Suspect").slice(0, RESERVE);
-  const missing = reserved.filter((s) => !top.includes(s));
-  let selected = top;
-  if (missing.length > 0) {
-    const base = top.slice(0, Math.max(0, maxItems - missing.length));
-    const keep = /* @__PURE__ */ new Set([...base, ...missing]);
-    selected = usable.filter((s) => keep.has(s));
+  const keep = new Set(reserved.slice(0, maxItems));
+  for (const s of top) {
+    if (keep.size >= maxItems) break;
+    keep.add(s);
   }
+  const selected = usable.filter((s) => keep.has(s));
   const lines = selected.map((s) => {
     const { record: r, scope } = s;
     const reverify = requiresReverifyBeforeUse({ state: r.state, blastRadius: r.blastRadius, source: r.provenance.source });

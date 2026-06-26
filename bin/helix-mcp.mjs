@@ -13582,6 +13582,10 @@ var MemoryStore = class {
       const targetLedger = this.ledgerOf(input.supersedes);
       const target = buildProjection(parseLedger(targetLedger)).get(input.supersedes);
       if (!target) throw new Error("commit: supersedes target not found (dead or unknown id)");
+      const writeLedger = input.scope === "global" || !this.opts.project ? this.global : this.opts.project.ledger;
+      if (targetLedger !== writeLedger) {
+        throw new Error("commit: cannot supersede across scopes (target lives in a different ledger)");
+      }
       const targetIsAuthoritative = isVerifyingSource(target.provenance.source) || target.state === "Verified";
       if (targetIsAuthoritative && !isVerifyingSource(source)) {
         throw new Error(
@@ -22103,8 +22107,10 @@ function handleInspect(store2, _args) {
   const rows = store2.inspect().map(({ record: record2, scope }) => `- ${record2.id} [${record2.state}:${scope}] ${record2.content}`);
   return ok(rows.length ? rows.join("\n") : "(memory is empty)");
 }
-function handleErase(store2, args) {
-  store2.erase(args.id, { permanent: args.permanent });
+function handleErase(store2, args, deps) {
+  store2.erase(args.id);
+  const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
+  appendAudit(deps.auditPath, { kind: "erase", ts, id: args.id, soft: true });
   return ok(`erased ${args.id}`);
 }
 function handleAdopt(store2, _args) {
@@ -22571,9 +22577,9 @@ function buildServer(store2, dualDeps) {
   }, async () => handleInspect(store2, {}));
   server2.registerTool("helix_memory_erase", {
     title: "Erase memory",
-    description: "Erase a memory item by id. Soft by default: the item is removed from the live view (recall/inspect) but remains recoverable on disk (no compaction), so an erroneous or poisoned erase can be undone. Pass permanent=true to physically destroy the content now (compaction) \u2014 required to satisfy a genuine right-to-erasure request.",
-    inputSchema: { id: external_exports.string(), permanent: external_exports.boolean().optional().describe("physically destroy now (right-to-erasure); default soft/recoverable") }
-  }, async (args) => handleErase(store2, args));
+    description: "Erase a memory item by id. Soft-only: the item is removed from the live view (recall/inspect) but remains recoverable on disk (no compaction) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool cannot physically destroy content \u2014 genuine right-to-erasure (compaction) is handled outside the agent tool surface.",
+    inputSchema: { id: external_exports.string() }
+  }, async (args) => handleErase(store2, args, { auditPath: dv.auditPath, now: dv.now }));
   server2.registerTool("helix_dual_verify", {
     title: "Dual-verify with Codex",
     description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor.",
