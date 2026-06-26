@@ -22602,6 +22602,36 @@ function buildServer(store2, dualDeps) {
   return server2;
 }
 
+// src/server/lifecycle.ts
+function installSelfTermination(deps) {
+  const fallbackMs = deps.fallbackMs ?? 500;
+  let shuttingDown = false;
+  const shutdown = (reason) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    deps.log?.(`helix: self-terminating (${reason})`);
+    let exited = false;
+    const finish = () => {
+      if (exited) return;
+      exited = true;
+      deps.exit(0);
+    };
+    deps.setTimer(finish, fallbackMs).unref();
+    Promise.resolve().then(() => deps.closeServer()).then(finish, finish);
+  };
+  deps.stdin.on("end", () => shutdown("stdin-end"));
+  deps.stdin.on("close", () => shutdown("stdin-close"));
+  if (deps.stdin.readableEnded || deps.stdin.destroyed) shutdown("stdin-already-ended");
+  const prevOnclose = deps.transport.onclose;
+  deps.transport.onclose = () => {
+    prevOnclose?.();
+    shutdown("transport-close");
+  };
+  deps.stdout.on("error", () => shutdown("stdout-error"));
+  deps.onSignal("SIGTERM", () => shutdown("SIGTERM"));
+  deps.onSignal("SIGINT", () => shutdown("SIGINT"));
+}
+
 // src/server/index.ts
 var home = process.env.HELIX_HOME ?? join7(homedir3(), ".helix");
 var globalLedger = process.env.HELIX_LEDGER ?? join7(home, "memory.jsonl");
@@ -22620,3 +22650,18 @@ var server = buildServer(store, {
 });
 var transport = new StdioServerTransport();
 await server.connect(transport);
+installSelfTermination({
+  stdin: process.stdin,
+  stdout: process.stdout,
+  transport,
+  closeServer: () => server.close(),
+  onSignal: (sig, handler) => {
+    process.on(sig, handler);
+  },
+  exit: (code) => process.exit(code),
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  log: (msg) => {
+    process.stderr.write(msg + "\n");
+  }
+  // ASCII only
+});

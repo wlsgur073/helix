@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { MemoryStore } from '../memory/store.js';
 import { buildServer } from './helix-server.js';
+import { installSelfTermination } from './lifecycle.js';
 import { loadConfig } from '../config.js';
 import { realCodexRunner, checkCodexAvailable } from '../verify/codex.js';
 
@@ -32,3 +33,13 @@ const server = buildServer(store, {
 });
 const transport = new StdioServerTransport();
 await server.connect(transport);
+installSelfTermination({
+  stdin: process.stdin,
+  stdout: process.stdout,
+  transport,
+  closeServer: () => server.close(),
+  onSignal: (sig, handler) => { process.on(sig, handler); },
+  exit: (code) => process.exit(code),
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  log: (msg) => { process.stderr.write(msg + '\n'); }, // ASCII only
+});
