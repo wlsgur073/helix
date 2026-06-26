@@ -108,7 +108,7 @@ describe('helix bundle e2e (hermetic)', () => {
     expect(raw).not.toContain('Sup3rS3cretValue123');
   }, 30_000);
 
-  it('erasure physically removes content from the ledger and leaves a content-free tombstone', async () => {
+  it('soft-erase (default) drops the item from the live view but keeps it recoverable on disk', async () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-acc-'));
     const client = await connect(home);
     const committed = text(await client.callTool({
@@ -116,7 +116,25 @@ describe('helix bundle e2e (hermetic)', () => {
       arguments: { content: 'personal note: kim lives in seoul', classification: 'personal', source: 'user' },
     }));
     const id = (JSON.parse(committed.replace(/^committed /, '')) as { id: string }).id;
-    await client.callTool({ name: 'helix_memory_erase', arguments: { id } });
+    await client.callTool({ name: 'helix_memory_erase', arguments: { id } }); // soft (default)
+    // Gone from the live projection a model would ever see...
+    const live = text(await client.callTool({ name: 'helix_memory_inspect', arguments: {} }));
+    expect(live).not.toContain('kim lives in seoul');
+    // ...but still on disk behind an "erase" tombstone, so an erroneous/poisoned erase is recoverable.
+    const raw = readFileSync(join(home, 'memory.jsonl'), 'utf8');
+    expect(raw).toContain('kim lives in seoul');
+    expect(raw).toContain('"erase"');
+  }, 30_000);
+
+  it('permanent erase physically removes content and leaves a content-free tombstone (right-to-erasure)', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-acc-'));
+    const client = await connect(home);
+    const committed = text(await client.callTool({
+      name: 'helix_memory_commit',
+      arguments: { content: 'personal note: kim lives in seoul', classification: 'personal', source: 'user' },
+    }));
+    const id = (JSON.parse(committed.replace(/^committed /, '')) as { id: string }).id;
+    await client.callTool({ name: 'helix_memory_erase', arguments: { id, permanent: true } });
     const raw = readFileSync(join(home, 'memory.jsonl'), 'utf8');
     expect(raw).not.toContain('kim lives in seoul');
     expect(raw).toContain('"erase"');
