@@ -38,13 +38,16 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
   const reserved = usable
     .filter((s) => isVerifyingSource(s.record.provenance.source) && s.record.state !== 'Suspect')
     .slice(0, RESERVE);
-  const missing = reserved.filter((s) => !top.includes(s));
-  let selected = top;
-  if (missing.length > 0) {
-    const base = top.slice(0, Math.max(0, maxItems - missing.length));
-    const keep = new Set<ScopedRecord>([...base, ...missing]);
-    selected = usable.filter((s) => keep.has(s)); // re-filter from usable to preserve sort order
+  // Build the kept set from the reserved (freshest authoritative) items FIRST, then backfill from
+  // top in sort order up to maxItems. This guarantees every reserved item survives — including a
+  // fresh authoritative item that straddles top's trimmed tail (the prior base/missing split dropped
+  // it: it was in neither base nor missing) — while keeping |selected| bounded to maxItems.
+  const keep = new Set<ScopedRecord>(reserved.slice(0, maxItems));
+  for (const s of top) {
+    if (keep.size >= maxItems) break;
+    keep.add(s);
   }
+  const selected = usable.filter((s) => keep.has(s)); // re-filter from usable to preserve sort order
 
   const lines = selected.map((s) => {
     const { record: r, scope } = s;

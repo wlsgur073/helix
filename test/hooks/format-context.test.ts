@@ -90,6 +90,30 @@ describe('formatSessionStartContext', () => {
     expect(out).toContain('user prefers Korean replies'); // survives despite 30 newer relayed items
   });
 
+  it('keeps the freshest authoritative items when they straddle the item cap (reservation backfill)', () => {
+    // Recency-sorted layout (freshest first); u = authoritative user Fresh, r = relayed Fresh.
+    // Six authoritative items STRADDLE the maxItems=10 cap: positions 1,4,8 sit inside the cap
+    // (one — pos 8 — in its trimmed tail) and 10,12,14 sit beyond it. The old base/missing
+    // selection dropped the in-tail authoritative item (pos 8) while force-keeping older ones.
+    const layout: Array<'u' | 'r'> =
+      ['r', 'u', 'r', 'r', 'u', 'r', 'r', 'r', 'u', 'r', 'u', 'r', 'u', 'r', 'u'];
+    const recs = layout.map((kind, pos) =>
+      rec({
+        content: kind === 'u' ? `USER-AUTH fact ${pos}` : `relayed burst ${pos}`,
+        id: `m_${kind}${pos}`,
+        tx: `2026-06-20T00:00:${String(59 - pos).padStart(2, '0')}.000Z`,
+        provenance: { source: kind === 'u' ? 'user' : 'user-relayed', sessionId: 's1' },
+      }));
+    const out = formatSessionStartContext(g(recs), N, { maxItems: 10 });
+    // The three freshest authoritative items survive — including pos 8, the straddle victim.
+    expect(out).toContain('USER-AUTH fact 1');
+    expect(out).toContain('USER-AUTH fact 4');
+    expect(out).toContain('USER-AUTH fact 8');
+    // At least min(RESERVE=6, #authoritative=6) authoritative items render.
+    const authRendered = recs.filter((r) => r.provenance.source === 'user' && out.includes(r.content)).length;
+    expect(authRendered).toBeGreaterThanOrEqual(6);
+  });
+
   it('caps a single oversized record so injection cost stays bounded (the 200KB-record bug)', () => {
     const out = formatSessionStartContext(g([rec({ content: 'x'.repeat(200_000) })]), N, { maxChars: 4000 });
     expect(out.length).toBeLessThanOrEqual(4000);
