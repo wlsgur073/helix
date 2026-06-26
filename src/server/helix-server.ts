@@ -3,7 +3,8 @@ import { homedir } from 'node:os';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { MemoryStore } from '../memory/store.js';
-import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
+import type { RealityCheck } from '../memory/reality-check.js';
+import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus } from '../verify/codex.js';
 
@@ -66,6 +67,30 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     description: 'Erase a memory item by id. Soft-only: the item is removed from the live view (recall/inspect) but remains recoverable on disk (no compaction) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool cannot physically destroy content — genuine right-to-erasure (compaction) is handled outside the agent tool surface.',
     inputSchema: { id: z.string() },
   }, async (args) => handleErase(store, args, { auditPath: dv.auditPath, now: dv.now }));
+
+  server.registerTool('helix_memory_recheck', {
+    title: 'Recheck memory against reality',
+    description:
+      'Run a content-bound mechanical reality-check on a memory item. A pass yields the Corroborated ' +
+      'trust state (machine-checked, NOT human-verified — it can NEVER reach Verified). The check is ' +
+      'file-contains and BOTH path and pattern MUST appear in the item content, or the call is rejected ' +
+      '(prevents laundering an unrelated passing check into trust). Use for objective, checkable facts.',
+    inputSchema: {
+      id: z.string(),
+      check: z.object({ kind: z.literal('file-contains'), path: z.string(), pattern: z.string() }),
+    },
+  }, async (args) => handleRecheck(store, args as { id: string; check: RealityCheck }, { auditPath: dv.auditPath, now: dv.now }));
+
+  server.registerTool('helix_memory_confirm', {
+    title: 'Confirm memory (user-vouched)',
+    description:
+      'Promote a memory item to the Verified state because THE USER explicitly vouched for it this turn. ' +
+      'Requires explicit user approval; never self-confirm — call ONLY when the user directly confirmed the ' +
+      'fact, never to confirm your own inference or a relayed claim. Only items committed with source=user ' +
+      'are eligible (re-commit a relayed/inferred fact as source=user first). The user, not Helix, is the ' +
+      'authority — do not allow-list this tool.',
+    inputSchema: { id: z.string() },
+  }, async (args) => handleConfirm(store, args, { auditPath: dv.auditPath, now: dv.now }));
 
   server.registerTool('helix_dual_verify', {
     title: 'Dual-verify with Codex',

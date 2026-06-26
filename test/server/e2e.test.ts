@@ -30,7 +30,7 @@ const textOf = (res: unknown): string =>
   ((res as { content?: Array<{ text?: string }> }).content ?? []).map((c) => c.text ?? '').join('');
 
 describe('Helix MCP server (end-to-end via in-memory transport)', () => {
-  it('lists all seven helix tools over the protocol', async () => {
+  it('lists all nine helix tools over the protocol', async () => {
     const client = await connectedClient();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
@@ -38,10 +38,31 @@ describe('Helix MCP server (end-to-end via in-memory transport)', () => {
       'helix_dual_verify',
       'helix_memory_adopt',
       'helix_memory_commit',
+      'helix_memory_confirm',
       'helix_memory_erase',
       'helix_memory_inspect',
       'helix_memory_recall',
+      'helix_memory_recheck',
     ]);
+  });
+
+  it('helix_memory_confirm description states it requires explicit user approval', async () => {
+    const client = await connectedClient();
+    const { tools } = await client.listTools();
+    const confirm = tools.find((t) => t.name === 'helix_memory_confirm')!;
+    expect(confirm.description).toMatch(/requires explicit user approval/i);
+    expect(confirm.description).toMatch(/never self-confirm|do not self-confirm/i);
+  });
+
+  it('confirm promotes a source=user item to Verified over the protocol', async () => {
+    const client = await connectedClient();
+    const committed = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'deploy target is fly.io', source: 'user' } });
+    const id = /"id":"(m_[^"]+)"/.exec(textOf(committed))?.[1];
+    expect(id).toBeTruthy();
+    const confirmed = await client.callTool({ name: 'helix_memory_confirm', arguments: { id } });
+    expect(textOf(confirmed)).toMatch(/Verified/);
+    const inspected = textOf(await client.callTool({ name: 'helix_memory_inspect', arguments: {} }));
+    expect(inspected).toContain('[Verified:');
   });
 
   it('commit then recall returns the fact in a DATA-only frame over the protocol', async () => {
