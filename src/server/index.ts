@@ -4,6 +4,8 @@ import { join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { MemoryStore } from '../memory/store.js';
+import { parseLedger } from '../memory/ledger.js';
+import { scanLegacyElevated } from '../memory/legacy-scan.js';
 import { buildServer } from './helix-server.js';
 import { installSelfTermination } from './lifecycle.js';
 import { loadConfig } from '../config.js';
@@ -23,6 +25,18 @@ const projectActive = existsSync(join(projectRoot, '.helix'))
 const project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : undefined;
 
 const store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? 'cli', project });
+
+// One-time integrity scan (spec §7): a record above Fresh or any `verify` event predates this
+// feature (store.verify was unwired), so it is a legacy/forged elevation pure replay would surface
+// as legitimately-Verified. Warn the operator. ADVISORY only — wrapped so a malformed/unreadable
+// ledger (parseLedger rethrows non-ENOENT I/O errors) degrades to no-warning, never blocks startup.
+for (const ledger of [globalLedger, ...(project ? [project.ledger] : [])]) {
+  try {
+    const scan = scanLegacyElevated(parseLedger(ledger));
+    if (!scan.ok) process.stderr.write(`helix: WARNING - ${scan.offenders.length} pre-existing elevated/verify record(s) in ${ledger}; trust states there are not tool-minted\n`); // ASCII only
+  } catch { /* advisory: never block startup */ }
+}
+
 const server = buildServer(store, {
   config: loadConfig({ globalPath: join(home, 'config.json') }),
   runner: realCodexRunner,
