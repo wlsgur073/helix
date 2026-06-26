@@ -29,7 +29,23 @@ export interface EraseAudit {
   soft: boolean; // true = tombstone-only (recoverable); false = physical compaction (right-to-erasure)
 }
 
-export type AuditEvent = DualVerifyAudit | EraseAudit;
+/** Verify audit (two-tier trust ladder): EVERY trust transition attempt (recheck / confirm) is
+ *  recorded — including rejected and contested outcomes — so a poisoned/erroneous promotion or a
+ *  silently-dropped corroboration is detectable in audit.jsonl. Content-free by design: ids /
+ *  enums / booleans ONLY, NEVER a matched span, file path, or check pattern. `outcome` is an INLINE
+ *  shape (not firewall's VerifyOutcome) to keep audit decoupled from the check engine. */
+export interface VerifyAudit {
+  kind: 'verify';
+  ts: string;
+  id: string;
+  source: 'reality-check' | 'user';
+  resultState: 'Corroborated' | 'Verified' | 'Suspect' | 'no-change' | 'contested' | 'rejected';
+  checkKind?: 'file-contains' | 'file-exists';
+  bound?: boolean;
+  outcome?: { ran: boolean; indeterminate: boolean; passed: boolean };
+}
+
+export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit;
 
 /** Append one audit event as a JSONL line. Creates parent dirs as needed. */
 export function appendAudit(path: string, event: AuditEvent): void {

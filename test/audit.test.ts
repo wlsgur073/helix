@@ -43,4 +43,18 @@ describe('appendAudit', () => {
     appendAudit(p, e);
     expect(JSON.parse(readFileSync(p, 'utf8').trim()).egressDecision).toBe('allowed_override');
   });
+
+  it('appends a content-free verify audit row (no path/pattern)', () => {
+    const p = tmpAudit();
+    const e: AuditEvent = {
+      kind: 'verify', ts: '2026-01-01T00:00:00Z', id: 'm1', source: 'reality-check',
+      checkKind: 'file-contains', resultState: 'Corroborated', bound: true,
+      outcome: { ran: true, indeterminate: false, passed: true },
+    };
+    appendAudit(p, e);
+    const row = JSON.parse(readFileSync(p, 'utf8').trim());
+    expect(row.kind).toBe('verify');
+    expect(row.resultState).toBe('Corroborated');
+    expect(JSON.stringify(row)).not.toMatch(/path|pattern/); // content-free
+  });
 });
