@@ -63,7 +63,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   server.registerTool('helix_memory_erase', {
     title: 'Erase memory',
-    description: 'Physically erase a memory item by id (compaction; satisfies right-to-erasure).',
+    description: 'Erase a memory item by id. Soft by default: the item is removed from the live view (recall/inspect) but remains recoverable on disk (no compaction), so an erroneous or poisoned erase can be undone. Pass permanent=true to physically destroy the content now (compaction) — required to satisfy a genuine right-to-erasure request.',
     inputSchema: { id: z.string(), permanent: z.boolean().optional().describe('physically destroy now (right-to-erasure); default soft/recoverable') },
   }, async (args) => handleErase(store, args));
 
