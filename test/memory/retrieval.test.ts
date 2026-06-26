@@ -157,6 +157,12 @@ describe('rankRecords', () => {
     const out = rankRecords([mrec('a', 'authentication flow'), mrec('b', 'something else')], 'auth');
     expect(out.map((r) => r.id)).toEqual(['a']);
   });
+  it('ranks a non-authoritative Fresh item below a user Fresh item at equal relevance', () => {
+    const userRec = { ...mrec('m_user', 'postgres is the db'), provenance: { source: 'user' as const, sessionId: 's' } };
+    const relayedRec = { ...mrec('m_relay', 'postgres is the db'), provenance: { source: 'user-relayed' as const, sessionId: 's' } };
+    const ranked = rankRecords([relayedRec, userRec], 'postgres is the db');
+    expect(ranked.map((r) => r.id)).toEqual(['m_user', 'm_relay']);
+  });
 });
 
 describe('golden queries (spec 2026-06-13 §10)', () => {

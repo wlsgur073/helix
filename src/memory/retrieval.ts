@@ -2,6 +2,7 @@
 // No IO. Scores live projection records for a query.
 
 import type { MemoryRecord, MemoryState } from '../types.js';
+import { isVerifyingSource } from './firewall.js';
 
 const CJK = /[\p{Script=Hangul}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
 const ALNUM = /[\p{L}\p{N}]/u;
@@ -162,6 +163,9 @@ const W_PHRASE = 0.5;
 const W_COVERAGE = 0.4;
 const W_BM25 = 0.1;
 const TRUST_PENALTY: Record<MemoryState, number> = { Verified: 0, Fresh: 0.02, Suspect: 0.1 };
+// A non-authoritative source ranks just below an equally-relevant authoritative Fresh fact.
+// A nudge, not a barrier: stronger relevance can still win (intended — recall must stay useful).
+const NONAUTH_PENALTY = 0.03;
 
 export interface RankOptions { maxItems?: number }
 
@@ -186,7 +190,8 @@ export function rankRecords(records: MemoryRecord[], query: string, opts: RankOp
         W_PHRASE * phraseScore(query, d.rec.content) +
         W_COVERAGE * coverageScore(qMeaning, d.tokens) +
         W_BM25 * bm25norm(d.rec.id);
-      return { rec: d.rec, relevance, final: relevance - TRUST_PENALTY[d.rec.state] };
+      const trust = TRUST_PENALTY[d.rec.state] + (isVerifyingSource(d.rec.provenance.source) ? 0 : NONAUTH_PENALTY);
+      return { rec: d.rec, relevance, final: relevance - trust };
     })
     .filter((s) => s.relevance > 0);
 
