@@ -19,9 +19,11 @@ acknowledgement within a few days.
 
 - **Provenance firewall (fail-closed):** a mechanical reality-check (`helix_memory_recheck`)
   raises a fact only to `Corroborated`; only you (`helix_memory_confirm`) can promote it to
-  `Verified`; agreement from an external model never does. These are honest grades, **not
-  adversary-proof** — an agent with filesystem/ledger write can forge either, so do **not**
-  allow-list `helix_memory_confirm`.
+  `Verified`; agreement from an external model never does. `Corroborated`/`Verified` are now
+  **tamper-evident at the file surface** (see *Ledger integrity* below): a forged or hand-edited
+  ledger record replays as `Fresh`. The grade is still **not** an enforceable human-approval
+  signal at the *tool* surface, so do **not** allow-list `helix_memory_confirm` — it must prompt
+  for your explicit approval.
 - **Trust states:** `Fresh / Corroborated / Verified / Suspect`, with re-verify-before-use on
   high-blast-radius paths.
 - **Secret handling:** memory is secret-scanned and redacted before it is persisted;
@@ -32,6 +34,38 @@ acknowledgement within a few days.
   per-call nonce frame.
 - **Local-first:** no telemetry; the only outbound path is the opt-in `helix_dual_verify`
   call, which is off by default and egress-gated.
+
+## Ledger integrity (file surface)
+
+`Corroborated` and `Verified` are conferred **only** by a `verify` record, and every `verify`
+record is HMAC-SHA256-authenticated with a key held **only** in `~/.helix` (a 32-byte master,
+mode `0600`, never written into the repo ledger; each project signs with its own HKDF subkey).
+On replay an elevated grade is honored only if its `verify` record's MAC validates under the
+locally-held key, so:
+
+- A forged or hand-edited `verify` record (no MAC, or a MAC that no longer matches) is **ignored**,
+  and a forged elevated `assert` is clamped to `Fresh` — minting a top grade by appending raw JSON
+  to `.helix/memory.jsonl` no longer works.
+- Against an adversary that can write `.helix/memory.jsonl` but **cannot read `~/.helix`**,
+  `Corroborated`/`Verified` are **unforgeable at the file/append surface**. This is the same trust
+  boundary the ownership registry already relies on.
+
+**This authenticates the file surface, not the tool surface.** A legitimate `helix_memory_confirm`
+call still carries no enforceable human-approval signal, so the guidance above stands: do **not**
+allow-list `helix_memory_confirm`.
+
+**Residual bounds (documented, not defended):**
+
+- **Arbitrary home-read is irreducible.** An adversary that can read `~/.helix` obtains the key
+  and can mint valid MACs; no locally-held key is safe from it. A readable home key (broad
+  permissions, a shared host) is a **security downgrade equivalent to that out-of-model adversary**:
+  the file-surface guarantee is then void and all grades become forgeable.
+- **Rollback-by-suppression is not detected.** Deleting or truncating a later legitimate `verify`
+  to preserve a stale elevated grade is invisible to a per-record MAC. A home-side per-target
+  high-water counter that would close this is a registered follow-on.
+- **Trust is machine-local.** The signing key never leaves `~/.helix`, so a `Verified` grade does
+  not transfer to another machine (e.g. a Windows vs. WSL clone) — elevations signed elsewhere
+  replay as `Fresh` until you re-`confirm` on that machine.
 
 ## Scope / non-goals
 

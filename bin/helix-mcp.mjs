@@ -97,7 +97,7 @@ var require_code = __commonJS({
     }
     exports._ = _;
     var plus = new _Code("+");
-    function str(strs, ...args) {
+    function str2(strs, ...args) {
       const expr = [safeStringify(strs[0])];
       let i = 0;
       while (i < args.length) {
@@ -108,7 +108,7 @@ var require_code = __commonJS({
       optimize(expr);
       return new _Code(expr);
     }
-    exports.str = str;
+    exports.str = str2;
     function addCodeArg(code, arg) {
       if (arg instanceof _Code)
         code.push(...arg._items);
@@ -151,7 +151,7 @@ var require_code = __commonJS({
       return;
     }
     function strConcat(c1, c2) {
-      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str`${c1}${c2}`;
+      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str2`${c1}${c2}`;
     }
     exports.strConcat = strConcat;
     function interpolate(x) {
@@ -1113,22 +1113,22 @@ var require_util = __commonJS({
       return (0, codegen_1._)`${topSchemaRef}${schemaPath}${(0, codegen_1.getProperty)(keyword)}`;
     }
     exports.schemaRefOrVal = schemaRefOrVal;
-    function unescapeFragment(str) {
-      return unescapeJsonPointer(decodeURIComponent(str));
+    function unescapeFragment(str2) {
+      return unescapeJsonPointer(decodeURIComponent(str2));
     }
     exports.unescapeFragment = unescapeFragment;
-    function escapeFragment(str) {
-      return encodeURIComponent(escapeJsonPointer(str));
+    function escapeFragment(str2) {
+      return encodeURIComponent(escapeJsonPointer(str2));
     }
     exports.escapeFragment = escapeFragment;
-    function escapeJsonPointer(str) {
-      if (typeof str == "number")
-        return `${str}`;
-      return str.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPointer(str2) {
+      if (typeof str2 == "number")
+        return `${str2}`;
+      return str2.replace(/~/g, "~0").replace(/\//g, "~1");
     }
     exports.escapeJsonPointer = escapeJsonPointer;
-    function unescapeJsonPointer(str) {
-      return str.replace(/~1/g, "/").replace(/~0/g, "~");
+    function unescapeJsonPointer(str2) {
+      return str2.replace(/~1/g, "/").replace(/~0/g, "~");
     }
     exports.unescapeJsonPointer = unescapeJsonPointer;
     function eachItem(xs, f) {
@@ -2153,8 +2153,8 @@ var require_json_schema_traverse = __commonJS({
         post(schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
       }
     }
-    function escapeJsonPtr(str) {
-      return str.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPtr(str2) {
+      return str2.replace(/~/g, "~0").replace(/\//g, "~1");
     }
   }
 });
@@ -3218,10 +3218,10 @@ var require_utils = __commonJS({
         return { host, isIPV6: false };
       }
     }
-    function findToken(str, token) {
+    function findToken(str2, token) {
       let ind = 0;
-      for (let i = 0; i < str.length; i++) {
-        if (str[i] === token) ind++;
+      for (let i = 0; i < str2.length; i++) {
+        if (str2[i] === token) ind++;
       }
       return ind;
     }
@@ -3958,7 +3958,7 @@ var require_core = __commonJS({
     var util_1 = require_util();
     var $dataRefSchema = require_data();
     var uri_1 = require_uri();
-    var defaultRegExp = (str, flags) => new RegExp(str, flags);
+    var defaultRegExp = (str2, flags) => new RegExp(str2, flags);
     defaultRegExp.code = "new RegExp";
     var META_IGNORE_OPTIONS = ["removeAdditional", "useDefaults", "coerceTypes"];
     var EXT_SCOPE_NAMES = /* @__PURE__ */ new Set([
@@ -4753,16 +4753,16 @@ var require_ucs2length = __commonJS({
   "node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    function ucs2length(str) {
-      const len = str.length;
+    function ucs2length(str2) {
+      const len = str2.length;
       let length = 0;
       let pos = 0;
       let value;
       while (pos < len) {
         length++;
-        value = str.charCodeAt(pos++);
+        value = str2.charCodeAt(pos++);
         if (value >= 55296 && value <= 56319 && pos < len) {
-          value = str.charCodeAt(pos);
+          value = str2.charCodeAt(pos);
           if ((value & 64512) === 56320)
             pos++;
         }
@@ -6645,8 +6645,8 @@ var require_formats = __commonJS({
     }
     var DATE = /^(\d\d\d\d)-(\d\d)-(\d\d)$/;
     var DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    function date3(str) {
-      const matches = DATE.exec(str);
+    function date3(str2) {
+      const matches = DATE.exec(str2);
       if (!matches)
         return false;
       const year = +matches[1];
@@ -6665,8 +6665,8 @@ var require_formats = __commonJS({
     }
     var TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
     function getTime(strictTimeZone) {
-      return function time3(str) {
-        const matches = TIME.exec(str);
+      return function time3(str2) {
+        const matches = TIME.exec(str2);
         if (!matches)
           return false;
         const hr = +matches[1];
@@ -6712,8 +6712,8 @@ var require_formats = __commonJS({
     var DATE_TIME_SEPARATOR = /t|\s/i;
     function getDateTime(strictTimeZone) {
       const time3 = getTime(strictTimeZone);
-      return function date_time(str) {
-        const dateTime = str.split(DATE_TIME_SEPARATOR);
+      return function date_time(str2) {
+        const dateTime = str2.split(DATE_TIME_SEPARATOR);
         return dateTime.length === 2 && date3(dateTime[0]) && time3(dateTime[1]);
       };
     }
@@ -6738,13 +6738,13 @@ var require_formats = __commonJS({
     }
     var NOT_URI_FRAGMENT = /\/|:/;
     var URI = /^(?:[a-z][a-z0-9+\-.]*:)(?:\/?\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:]|%[0-9a-f]{2})*@)?(?:\[(?:(?:(?:(?:[0-9a-f]{1,4}:){6}|::(?:[0-9a-f]{1,4}:){5}|(?:[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){4}|(?:(?:[0-9a-f]{1,4}:){0,1}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){3}|(?:(?:[0-9a-f]{1,4}:){0,2}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){2}|(?:(?:[0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4})?::[0-9a-f]{1,4}:|(?:(?:[0-9a-f]{1,4}:){0,4}[0-9a-f]{1,4})?::)(?:[0-9a-f]{1,4}:[0-9a-f]{1,4}|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?))|(?:(?:[0-9a-f]{1,4}:){0,5}[0-9a-f]{1,4})?::[0-9a-f]{1,4}|(?:(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4})?::)|[Vv][0-9a-f]+\.[a-z0-9\-._~!$&'()*+,;=:]+)\]|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-z0-9\-._~!$&'()*+,;=]|%[0-9a-f]{2})*)(?::\d*)?(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*|\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)?|(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)(?:\?(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?(?:#(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?$/i;
-    function uri(str) {
-      return NOT_URI_FRAGMENT.test(str) && URI.test(str);
+    function uri(str2) {
+      return NOT_URI_FRAGMENT.test(str2) && URI.test(str2);
     }
     var BYTE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/gm;
-    function byte(str) {
+    function byte(str2) {
       BYTE.lastIndex = 0;
-      return BYTE.test(str);
+      return BYTE.test(str2);
     }
     var MIN_INT32 = -(2 ** 31);
     var MAX_INT32 = 2 ** 31 - 1;
@@ -6758,11 +6758,11 @@ var require_formats = __commonJS({
       return true;
     }
     var Z_ANCHOR = /[^\\]\\Z/;
-    function regex(str) {
-      if (Z_ANCHOR.test(str))
+    function regex(str2) {
+      if (Z_ANCHOR.test(str2))
         return false;
       try {
-        new RegExp(str);
+        new RegExp(str2);
         return true;
       } catch (e) {
         return false;
@@ -6887,7 +6887,7 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join7, resolve as resolve2 } from "node:path";
+import { join as join8, resolve as resolve2 } from "node:path";
 import { existsSync as existsSync6 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
@@ -7106,14 +7106,14 @@ function promiseAllObject(promisesObj) {
 }
 function randomString(length = 10) {
   const chars = "abcdefghijklmnopqrstuvwxyz";
-  let str = "";
+  let str2 = "";
   for (let i = 0; i < length; i++) {
-    str += chars[Math.floor(Math.random() * chars.length)];
+    str2 += chars[Math.floor(Math.random() * chars.length)];
   }
-  return str;
+  return str2;
 }
-function esc(str) {
-  return JSON.stringify(str);
+function esc(str2) {
+  return JSON.stringify(str2);
 }
 var captureStackTrace = Error.captureStackTrace ? Error.captureStackTrace : (..._args) => {
 };
@@ -7201,8 +7201,8 @@ var getParsedType = (data) => {
 };
 var propertyKeyTypes = /* @__PURE__ */ new Set(["string", "number", "symbol"]);
 var primitiveTypes = /* @__PURE__ */ new Set(["string", "number", "bigint", "boolean", "symbol", "undefined"]);
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function escapeRegex(str2) {
+  return str2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function clone(inst, def, params) {
   const cl = new inst._zod.constr(def ?? inst._zod.def);
@@ -8637,10 +8637,10 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
     const shape = def.shape;
     const propValues = {};
     for (const key in shape) {
-      const field = shape[key]._zod;
-      if (field.values) {
+      const field2 = shape[key]._zod;
+      if (field2.values) {
         propValues[key] ?? (propValues[key] = /* @__PURE__ */ new Set());
-        for (const v of field.values)
+        for (const v of field2.values)
           propValues[key].add(v);
       }
     }
@@ -13012,10 +13012,12 @@ var StdioServerTransport = class {
 };
 
 // src/memory/store.ts
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import { existsSync as existsSync2 } from "node:fs";
+import { dirname as dirname3 } from "node:path";
 
 // src/memory/ledger.ts
+import { randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -13341,9 +13343,13 @@ function withFileLock(target, fn, opts = {}) {
 }
 
 // src/memory/ledger.ts
+function appendRecordUnlocked(path, record2) {
+  mkdirSync2(dirname(path), { recursive: true });
+  appendFileSync(path, JSON.stringify(record2) + "\n");
+}
 function appendRecord(path, record2) {
   mkdirSync2(dirname(path), { recursive: true });
-  withFileLock(path, () => appendFileSync(path, JSON.stringify(record2) + "\n"));
+  withFileLock(path, () => appendRecordUnlocked(path, record2));
 }
 function parseLedger(path) {
   let text;
@@ -13368,12 +13374,39 @@ function compactLedger(path, opts) {
   withFileLock(path, () => {
     const records = parseLedger(path);
     const live = buildProjection(records);
+    const hmacAware = opts.keepValidVerify !== void 0;
     const kept = [];
     for (const r of live.values()) {
-      if (!opts.erasedIds.has(r.id)) kept.push(r);
+      if (opts.erasedIds.has(r.id)) continue;
+      kept.push(hmacAware ? { ...r, state: "Fresh" } : r);
     }
     for (const r of records) {
       if (r.type === "erase") kept.push({ ...r, content: "" });
+    }
+    if (opts.keepValidVerify) {
+      let droppedForged = 0;
+      for (const r of records) {
+        if (r.type !== "verify" || !r.supersedes || !live.has(r.supersedes)) continue;
+        if (opts.keepValidVerify(r)) kept.push(r);
+        else droppedForged++;
+      }
+      if (droppedForged > 0) {
+        const ts = (/* @__PURE__ */ new Date()).toISOString();
+        kept.push({
+          id: `integrity_${randomUUID()}`,
+          tx: ts,
+          validFrom: ts,
+          validTo: null,
+          type: "verify",
+          state: "Suspect",
+          content: "",
+          provenance: { source: "user", sessionId: "compaction" },
+          supersedes: null,
+          blastRadius: null,
+          reverifyTrigger: null,
+          classification: "normal"
+        });
+      }
     }
     const tmp = `${path}.${process.pid}.tmp`;
     const fd = openSync(tmp, "w");
@@ -13552,6 +13585,7 @@ function frameAsData(scoped, nonce) {
 import { randomBytes as randomBytes3 } from "node:crypto";
 import { mkdirSync as mkdirSync3, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join2, resolve } from "node:path";
+var GLOBAL_KEY = "@global";
 function registryPath(home2) {
   return join2(home2, "projects.json");
 }
@@ -13579,14 +13613,166 @@ function isOwned(projectRoot2, home2) {
   return stamp !== null && stamp === entry.stamp;
 }
 function stampOwnership(projectRoot2, home2, opts = {}) {
-  const stamp = (opts.genStamp ?? (() => randomBytes3(16).toString("hex")))();
+  const gen = opts.genStamp ?? (() => randomBytes3(16).toString("hex"));
+  const stamp = gen();
+  const macNonce = gen();
   const adoptedAt = (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   mkdirSync3(join2(projectRoot2, ".helix"), { recursive: true });
   writeFileSync2(ownerFile(projectRoot2), stamp);
   const reg = readRegistry(home2);
-  reg[resolve(projectRoot2)] = { stamp, adoptedAt };
+  reg[resolve(projectRoot2)] = { stamp, adoptedAt, macNonce };
   mkdirSync3(home2, { recursive: true });
   writeFileSync2(registryPath(home2), JSON.stringify(reg, null, 2));
+}
+function scopeNonce(projectRoot2, home2) {
+  const entry = readRegistry(home2)[resolve(projectRoot2)];
+  return entry?.macNonce ?? null;
+}
+function globalScopeNonce(home2) {
+  const reg = readRegistry(home2);
+  const existing = reg[GLOBAL_KEY]?.macNonce;
+  if (existing) return existing;
+  const macNonce = randomBytes3(16).toString("hex");
+  reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
+  mkdirSync3(home2, { recursive: true });
+  writeFileSync2(registryPath(home2), JSON.stringify(reg, null, 2));
+  return macNonce;
+}
+
+// src/memory/ledger-mac.ts
+import { createHash, createHmac, hkdfSync, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
+import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync5, renameSync as renameSync2, statSync as statSync3, chmodSync, mkdirSync as mkdirSync4 } from "node:fs";
+import { join as join3 } from "node:path";
+var MAC_VERSION = 1;
+function digestContent(content) {
+  return createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex");
+}
+var LedgerMacError = class extends Error {
+};
+var MASTER_LEN = 32;
+function masterPath(home2) {
+  return join3(home2, "ledger-mac-master.key");
+}
+function ensureMaster(home2) {
+  const path = masterPath(home2);
+  const existing = tryReadMasterStrict(path);
+  if (existing) return existing;
+  mkdirSync4(home2, { recursive: true });
+  return withFileLock(path, () => {
+    const again = tryReadMasterStrict(path);
+    if (again) return again;
+    const key = randomBytes4(MASTER_LEN);
+    const tmp = `${path}.${process.pid}.tmp`;
+    const fd = openSync2(tmp, "wx", 384);
+    try {
+      writeSync2(fd, key);
+      fsyncSync2(fd);
+    } finally {
+      closeSync2(fd);
+    }
+    renameSync2(tmp, path);
+    return key;
+  });
+}
+function tryReadMasterStrict(path) {
+  let buf;
+  try {
+    buf = readFileSync5(path);
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+  if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
+  try {
+    if ((statSync3(path).mode & 63) !== 0) chmodSync(path, 384);
+  } catch {
+  }
+  return buf;
+}
+function tryReadMaster(home2) {
+  return tryReadMasterStrict(masterPath(home2));
+}
+function deriveSubkey(master, nonce) {
+  return Buffer.from(hkdfSync("sha256", master, Buffer.from(nonce, "utf8"), Buffer.from("helix-ledger-mac-v1", "utf8"), 32));
+}
+function keyIdOf(subkey) {
+  return createHash("sha256").update(Buffer.concat([Buffer.from("keyid"), subkey])).digest().subarray(0, 8).toString("hex");
+}
+var DOMAIN = Buffer.from("helix-ledger-mac");
+function field(buf) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(buf.length, 0);
+  return Buffer.concat([Buffer.from([1]), len, buf]);
+}
+var NULL_FIELD = Buffer.from([0, 0, 0, 0, 0]);
+var str = (s) => s === null ? NULL_FIELD : field(Buffer.from(s, "utf8"));
+var int2 = (n) => {
+  const b = Buffer.alloc(8);
+  b.writeBigUInt64BE(BigInt(n));
+  return field(b);
+};
+function macInput(r, keyId) {
+  return Buffer.concat([
+    DOMAIN,
+    Buffer.from([MAC_VERSION]),
+    field(Buffer.from(keyId, "hex")),
+    str(r.type),
+    str(r.id),
+    str(r.supersedes),
+    str(r.state),
+    int2(r.gen ?? 0),
+    str(r.targetDigest ?? null)
+  ]);
+}
+function signVerify(record2, subkey) {
+  const keyId = keyIdOf(subkey);
+  const mac = createHmac("sha256", subkey).update(macInput(record2, keyId)).digest("hex");
+  return { ...record2, mac, keyId, macVersion: MAC_VERSION };
+}
+function verifyVerify(record2, subkey) {
+  if (record2.macVersion !== MAC_VERSION || !record2.mac || !record2.keyId) return false;
+  if (record2.keyId !== keyIdOf(subkey)) return false;
+  const want = createHmac("sha256", subkey).update(macInput(record2, record2.keyId)).digest();
+  let got;
+  try {
+    got = Buffer.from(record2.mac, "hex");
+  } catch {
+    return false;
+  }
+  return got.length === want.length && timingSafeEqual(got, want);
+}
+
+// src/memory/verified-projection.ts
+var isPromotion = (s) => s === "Verified" || s === "Corroborated";
+function buildVerifiedProjection(records, opts) {
+  const nonVerify = records.filter((r) => r.type !== "verify");
+  const live = /* @__PURE__ */ new Map();
+  for (const [id, rec] of buildProjection(nonVerify)) live.set(id, { ...rec, state: "Fresh" });
+  const compromised = /* @__PURE__ */ new Set();
+  if (!opts.keyAvailable) return { live, compromised, keyAvailable: false };
+  const byTarget = /* @__PURE__ */ new Map();
+  for (const r of records) {
+    if (r.type !== "verify" || !r.supersedes || !opts.verify(r)) continue;
+    (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)).push(r);
+  }
+  for (const [target, verifies] of byTarget) {
+    const item = live.get(target);
+    if (!item) continue;
+    const liveDigest = digestContent(item.content);
+    const sorted = [...verifies].sort((a, b) => (a.gen ?? 0) - (b.gen ?? 0));
+    let winner = null;
+    for (const v of sorted) {
+      if (winner && (v.gen ?? 0) === (winner.gen ?? 0) && v.state !== winner.state) {
+        compromised.add(target);
+        winner = null;
+        break;
+      }
+      const applicable = !isPromotion(v.state) || v.targetDigest === liveDigest;
+      if (applicable) winner = v;
+    }
+    if (winner) live.set(target, { ...item, state: winner.state });
+  }
+  return { live, compromised, keyAvailable: true };
 }
 
 // src/memory/store.ts
@@ -13601,13 +13787,36 @@ var MemoryStore = class {
     return (this.opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   }
   id() {
-    return (this.opts.genId ?? (() => `m_${randomUUID()}`))();
+    return (this.opts.genId ?? (() => `m_${randomUUID2()}`))();
   }
   nonce() {
     return (this.opts.genNonce ?? newNonce)();
   }
   session() {
     return this.opts.sessionId ?? "unknown";
+  }
+  /** Where the ledger-MAC master key + scope-nonce registry live (defaults next to the global ledger). */
+  homeDir() {
+    return this.opts.home ?? dirname3(this.global);
+  }
+  /** Subkey that signs/verifies records for one ledger, or null if no master exists yet OR the
+   *  scope nonce is unresolvable (project not owned). Read path tolerates null (key-absent mode);
+   *  the write path mints the master first via ensureMaster. */
+  subkeyForLedger(ledger) {
+    const master = tryReadMaster(this.homeDir());
+    if (!master) return null;
+    const p = this.opts.project;
+    const nonce = p && ledger === p.ledger ? scopeNonce(p.root, p.home) : globalScopeNonce(this.homeDir());
+    return nonce ? deriveSubkey(master, nonce) : null;
+  }
+  /** Verifying projection for one ledger (R1 clamp / R2 MAC gate / R3 content binding). When no
+   *  subkey is available every state is clamped to Fresh and keyAvailable is false. */
+  verifiedOf(ledger) {
+    const subkey = this.subkeyForLedger(ledger);
+    return buildVerifiedProjection(parseLedger(ledger), {
+      verify: (r) => subkey ? verifyVerify(r, subkey) : false,
+      keyAvailable: subkey !== null
+    });
   }
   commit(input) {
     if (input.content.trim() === "") throw new Error("commit: content must be non-empty");
@@ -13617,7 +13826,7 @@ var MemoryStore = class {
     }
     if (input.supersedes) {
       const targetLedger = this.ledgerOf(input.supersedes);
-      const target = buildProjection(parseLedger(targetLedger)).get(input.supersedes);
+      const target = this.verifiedOf(targetLedger).live.get(input.supersedes);
       if (!target) throw new Error("commit: supersedes target not found (dead or unknown id)");
       const writeLedger = input.scope === "global" || !this.opts.project ? this.global : this.opts.project.ledger;
       if (targetLedger !== writeLedger) {
@@ -13673,32 +13882,48 @@ var MemoryStore = class {
     }
     return p.ledger;
   }
+  /** Verified live records from global + (project iff owned), each tagged with scope + integrity,
+   *  plus whether a master key was available for EVERY scope read (integrityAvailable). */
+  scopedVerified() {
+    const out = [];
+    let available = true;
+    const add = (ledger, scope) => {
+      const v = this.verifiedOf(ledger);
+      if (!v.keyAvailable) available = false;
+      for (const r of v.live.values()) {
+        out.push({ record: r, scope, integrity: v.compromised.has(r.id) ? "compromised" : "ok" });
+      }
+    };
+    add(this.global, "global");
+    const p = this.opts.project;
+    if (p && isOwned(p.root, p.home)) add(p.ledger, "project");
+    return { records: out, available };
+  }
   /** Live records from global + (project iff owned), each tagged with its scope. */
   scopedProjection() {
-    const out = [];
-    for (const r of buildProjection(parseLedger(this.global)).values()) out.push({ record: r, scope: "global" });
-    const p = this.opts.project;
-    if (p && isOwned(p.root, p.home)) {
-      for (const r of buildProjection(parseLedger(p.ledger)).values()) out.push({ record: r, scope: "project" });
-    }
-    return out;
+    return this.scopedVerified().records;
   }
   recall(query, opts = {}) {
-    const scoped = this.scopedProjection();
-    const scopeById = new Map(scoped.map((s) => [s.record.id, s.scope]));
+    const { records: scoped, available } = this.scopedVerified();
+    const byId = new Map(scoped.map((s) => [s.record.id, s]));
     const hits = rankRecords(scoped.map((s) => s.record), query, opts);
     const items = hits.map((record2) => ({
       record: record2,
-      scope: scopeById.get(record2.id) ?? "global",
-      needsReverify: requiresReverifyBeforeUse({ state: record2.state, blastRadius: record2.blastRadius, source: record2.provenance.source })
+      scope: byId.get(record2.id)?.scope ?? "global",
+      needsReverify: requiresReverifyBeforeUse({ state: record2.state, blastRadius: record2.blastRadius, source: record2.provenance.source }),
+      integrity: byId.get(record2.id)?.integrity ?? "ok"
     }));
-    return { items, framed: frameAsData(items.map(({ record: record2, scope }) => ({ record: record2, scope })), this.nonce()) };
+    return {
+      items,
+      framed: frameAsData(items.map(({ record: record2, scope }) => ({ record: record2, scope })), this.nonce()),
+      integrityAvailable: available
+    };
   }
   /** Which ledger currently holds `id` (project iff owned and present); defaults to global. */
   ledgerOf(id) {
-    if (buildProjection(parseLedger(this.global)).has(id)) return this.global;
+    if (this.verifiedOf(this.global).live.has(id)) return this.global;
     const p = this.opts.project;
-    if (p && isOwned(p.root, p.home) && buildProjection(parseLedger(p.ledger)).has(id)) return p.ledger;
+    if (p && isOwned(p.root, p.home) && this.verifiedOf(p.ledger).live.has(id)) return p.ledger;
     return this.global;
   }
   /** Live projected record for `id` across scopes, or throw. */
@@ -13707,25 +13932,44 @@ var MemoryStore = class {
     if (!found) throw new Error("target not found (dead or unknown id)");
     return found.record;
   }
-  /** Append a verify event conferring `state` on `targetId` (routed to the target's ledger). */
+  /** Append a SIGNED verify event conferring `state` on `targetId` (routed to the target's ledger).
+   *  Reads the verified projection, computes the next per-target generation and the content digest,
+   *  signs, and appends — all under ONE ledger lock so a concurrent writer can't race the gen. */
   writeVerify(targetId, state, source) {
-    const ts = this.now();
-    const record2 = {
-      id: this.id(),
-      tx: ts,
-      validFrom: ts,
-      validTo: null,
-      type: "verify",
-      state,
-      content: "",
-      provenance: { source, sessionId: this.session() },
-      supersedes: targetId,
-      blastRadius: null,
-      reverifyTrigger: null,
-      classification: "normal"
-    };
-    appendRecord(this.ledgerOf(targetId), record2);
-    return record2;
+    const ledger = this.ledgerOf(targetId);
+    return withFileLock(ledger, () => {
+      ensureMaster(this.homeDir());
+      const subkey = this.subkeyForLedger(ledger);
+      if (!subkey) throw new Error("writeVerify: cannot resolve signing subkey (project not owned?)");
+      const records = parseLedger(ledger);
+      const v = buildVerifiedProjection(records, { verify: (r) => verifyVerify(r, subkey), keyAvailable: true });
+      const target = v.live.get(targetId);
+      if (!target) throw new Error("writeVerify: target not live");
+      const maxGen = records.reduce(
+        (m, r) => r.type === "verify" && r.supersedes === targetId && verifyVerify(r, subkey) ? Math.max(m, r.gen ?? 0) : m,
+        0
+      );
+      const ts = this.now();
+      const unsigned = {
+        id: this.id(),
+        tx: ts,
+        validFrom: ts,
+        validTo: null,
+        type: "verify",
+        state,
+        content: "",
+        provenance: { source, sessionId: this.session() },
+        supersedes: targetId,
+        blastRadius: null,
+        reverifyTrigger: null,
+        classification: "normal",
+        gen: maxGen + 1,
+        targetDigest: digestContent(target.content)
+      };
+      const signed = signVerify(unsigned, subkey);
+      appendRecordUnlocked(ledger, signed);
+      return signed;
+    });
   }
   /** Content-bound mechanical reality-check. Mints at most Corroborated; never Verified. */
   recheck(id, check2) {
@@ -13766,6 +14010,7 @@ var MemoryStore = class {
     const p = this.opts.project;
     if (!p) throw new Error("adopt: no project scope is active");
     stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
+    ensureMaster(this.homeDir());
   }
   /** Remove an item from the live projection. Soft by default (tombstone only — recoverable until
    *  compaction, so an erroneous/poisoned erase can be undone). `permanent` compacts immediately for
@@ -13787,7 +14032,13 @@ var MemoryStore = class {
       reverifyTrigger: null,
       classification: "normal"
     });
-    if (opts.permanent) compactLedger(ledger, { erasedIds: /* @__PURE__ */ new Set([id]) });
+    if (opts.permanent) {
+      const sk = this.subkeyForLedger(ledger);
+      compactLedger(ledger, {
+        erasedIds: /* @__PURE__ */ new Set([id]),
+        keepValidVerify: sk ? (r) => verifyVerify(r, sk) : () => true
+      });
+    }
   }
 };
 
@@ -13801,7 +14052,7 @@ function scanLegacyElevated(records) {
 }
 
 // src/server/helix-server.ts
-import { join as join6 } from "node:path";
+import { join as join7 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // node_modules/zod/v3/external.js
@@ -21370,11 +21621,11 @@ var McpServer = class {
       return EMPTY_COMPLETION_RESULT;
     }
     const promptShape = getObjectShape(prompt.argsSchema);
-    const field = promptShape?.[request.params.argument.name];
-    if (!isCompletable(field)) {
+    const field2 = promptShape?.[request.params.argument.name];
+    if (!isCompletable(field2)) {
       return EMPTY_COMPLETION_RESULT;
     }
-    const completer = getCompleter(field);
+    const completer = getCompleter(field2);
     if (!completer) {
       return EMPTY_COMPLETION_RESULT;
     }
@@ -21647,8 +21898,8 @@ var McpServer = class {
     };
     this._registeredPrompts[name] = registeredPrompt;
     if (argsSchema) {
-      const hasCompletable = Object.values(argsSchema).some((field) => {
-        const inner = field instanceof ZodOptional2 ? field._def?.innerType : field;
+      const hasCompletable = Object.values(argsSchema).some((field2) => {
+        const inner = field2 instanceof ZodOptional2 ? field2._def?.innerType : field2;
         return isCompletable(inner);
       });
       if (hasCompletable) {
@@ -21857,9 +22108,9 @@ function promptArgumentsFromSchema(schema) {
   const shape = getObjectShape(schema);
   if (!shape)
     return [];
-  return Object.entries(shape).map(([name, field]) => {
-    const description = getSchemaDescription(field);
-    const isOptional = isSchemaOptional(field);
+  return Object.entries(shape).map(([name, field2]) => {
+    const description = getSchemaDescription(field2);
+    const isOptional = isSchemaOptional(field2);
     return {
       name,
       description,
@@ -22134,32 +22385,32 @@ async function dualVerify(params, deps) {
 }
 
 // src/audit.ts
-import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync4 } from "node:fs";
-import { dirname as dirname2 } from "node:path";
+import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync5 } from "node:fs";
+import { dirname as dirname4 } from "node:path";
 function appendAudit(path, event) {
-  mkdirSync4(dirname2(path), { recursive: true });
+  mkdirSync5(dirname4(path), { recursive: true });
   appendFileSync2(path, JSON.stringify(event) + "\n");
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync6 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 
 // src/codex-log.ts
-import { appendFileSync as appendFileSync3, chmodSync, existsSync as existsSync3, mkdirSync as mkdirSync5, readFileSync as readFileSync5, writeFileSync as writeFileSync3 } from "node:fs";
-import { dirname as dirname3 } from "node:path";
+import { appendFileSync as appendFileSync3, chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync3 } from "node:fs";
+import { dirname as dirname5 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
   try {
     const fresh = !existsSync3(path);
-    mkdirSync5(dirname3(path), { recursive: true });
+    mkdirSync6(dirname5(path), { recursive: true });
     appendFileSync3(path, JSON.stringify(entry) + "\n");
     if (fresh) {
       try {
-        chmodSync(path, 384);
+        chmodSync2(path, 384);
       } catch {
       }
     }
-    const lines = readFileSync5(path, "utf8").split("\n").filter((l) => l !== "");
+    const lines = readFileSync6(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
       writeFileSync3(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
@@ -22224,7 +22475,7 @@ function handleConfirm(store2, args, deps) {
 }
 function codexLogCount(path) {
   try {
-    return readFileSync6(path, "utf8").split("\n").filter((l) => l !== "").length;
+    return readFileSync7(path, "utf8").split("\n").filter((l) => l !== "").length;
   } catch {
     return 0;
   }
@@ -22318,9 +22569,9 @@ async function handleDualVerify(args, deps) {
 }
 
 // src/config.ts
-import { readFileSync as readFileSync7 } from "node:fs";
+import { readFileSync as readFileSync8 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
 var EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
 var MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
@@ -22348,14 +22599,14 @@ var DEFAULT_CONFIG = {
 };
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync7(path, "utf8"));
+    return JSON.parse(readFileSync8(path, "utf8"));
   } catch {
     return null;
   }
 }
 function loadConfig(opts = {}) {
-  const projectPath = opts.projectPath ?? join3(process.cwd(), ".helix", "config.json");
-  const globalPath = opts.globalPath ?? join3(homedir(), ".helix", "config.json");
+  const projectPath = opts.projectPath ?? join4(process.cwd(), ".helix", "config.json");
+  const globalPath = opts.globalPath ?? join4(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
   const seen = /* @__PURE__ */ new Set();
   const warn = (msg) => {
@@ -22405,14 +22656,14 @@ function loadConfig(opts = {}) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync5, mkdirSync as mkdirSync6, mkdtempSync, readFileSync as readFileSync8, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync5, mkdirSync as mkdirSync7, mkdtempSync, readFileSync as readFileSync9, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join5, win32 as winPath } from "node:path";
+import { join as join6, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync4, readdirSync, lstatSync, statSync as statSync3, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
-import { join as join4 } from "node:path";
+import { existsSync as existsSync4, readdirSync, lstatSync, statSync as statSync4, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { join as join5 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
 var SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
@@ -22428,10 +22679,10 @@ function shouldSweep(stampMtimeMs, nowMs, intervalMs) {
 function sweepScratchRoot(root, nowMs = Date.now()) {
   try {
     if (!existsSync4(root)) return;
-    const stampPath = join4(root, STAMP_NAME);
+    const stampPath = join5(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
-      stampMtimeMs = statSync3(stampPath).mtimeMs;
+      stampMtimeMs = statSync4(stampPath).mtimeMs;
     } catch {
       stampMtimeMs = null;
     }
@@ -22440,14 +22691,14 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     for (const d of readdirSync(root, { withFileTypes: true })) {
       if (!d.name.startsWith(SCRATCH_PREFIX)) continue;
       try {
-        const st = lstatSync(join4(root, d.name));
+        const st = lstatSync(join5(root, d.name));
         entries.push({ name: d.name, isDir: st.isDirectory(), mtimeMs: st.mtimeMs });
       } catch {
       }
     }
     for (const name of selectStaleScratch(entries, nowMs, FLOOR_MS)) {
       try {
-        rmSync2(join4(root, name), { recursive: true, force: true });
+        rmSync2(join5(root, name), { recursive: true, force: true });
       } catch {
       }
     }
@@ -22610,11 +22861,11 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
-    const scratchRoot = join5(tmpdir(), "helix");
-    mkdirSync6(scratchRoot, { recursive: true });
+    const scratchRoot = join6(tmpdir(), "helix");
+    mkdirSync7(scratchRoot, { recursive: true });
     sweepScratchRoot(scratchRoot);
-    const dir = mkdtempSync(join5(scratchRoot, "codex-"));
-    const outFile = join5(dir, "out.txt");
+    const dir = mkdtempSync(join6(scratchRoot, "codex-"));
+    const outFile = join6(dir, "out.txt");
     try {
       const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
       const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, timeoutMs);
@@ -22623,7 +22874,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
       }
       let answer = "";
       try {
-        answer = readFileSync8(outFile, "utf8").trim();
+        answer = readFileSync9(outFile, "utf8").trim();
       } catch {
       }
       return answer ? { ok: true, answer } : { ok: false, error: "codex produced no output" };
@@ -22642,14 +22893,14 @@ var realCodexRunner = createCodexRunner();
 // src/server/helix-server.ts
 function buildServer(store2, dualDeps) {
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
-  const home2 = process.env.HELIX_HOME ?? join6(homedir2(), ".helix");
+  const home2 = process.env.HELIX_HOME ?? join7(homedir2(), ".helix");
   const dv = dualDeps ?? {
-    config: loadConfig({ globalPath: join6(home2, "config.json") }),
+    config: loadConfig({ globalPath: join7(home2, "config.json") }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
     echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-    auditPath: join6(home2, "audit.jsonl"),
-    codexLogPath: join6(home2, "codex-log.jsonl")
+    auditPath: join7(home2, "audit.jsonl"),
+    codexLogPath: join7(home2, "codex-log.jsonl")
   };
   const codexStatusDeps = {
     inspect: () => checkCodexStatus(),
@@ -22751,11 +23002,11 @@ function installSelfTermination(deps) {
 }
 
 // src/server/index.ts
-var home = process.env.HELIX_HOME ?? join7(homedir3(), ".helix");
-var globalLedger = process.env.HELIX_LEDGER ?? join7(home, "memory.jsonl");
+var home = process.env.HELIX_HOME ?? join8(homedir3(), ".helix");
+var globalLedger = process.env.HELIX_LEDGER ?? join8(home, "memory.jsonl");
 var projectRoot = process.cwd();
-var projectLedger = join7(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync6(join7(projectRoot, ".helix")) && resolve2(projectLedger) !== resolve2(globalLedger);
+var projectLedger = join8(projectRoot, ".helix", "memory.jsonl");
+var projectActive = existsSync6(join8(projectRoot, ".helix")) && resolve2(projectLedger) !== resolve2(globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
 var store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? "cli", project });
 for (const ledger of [globalLedger, ...project ? [project.ledger] : []]) {
@@ -22767,12 +23018,12 @@ for (const ledger of [globalLedger, ...project ? [project.ledger] : []]) {
   }
 }
 var server = buildServer(store, {
-  config: loadConfig({ globalPath: join7(home, "config.json") }),
+  config: loadConfig({ globalPath: join8(home, "config.json") }),
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
   echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-  auditPath: join7(home, "audit.jsonl"),
-  codexLogPath: join7(home, "codex-log.jsonl")
+  auditPath: join8(home, "audit.jsonl"),
+  codexLogPath: join8(home, "codex-log.jsonl")
 });
 var transport = new StdioServerTransport();
 await server.connect(transport);

@@ -82,7 +82,7 @@ Helix keeps two ledgers that it always reads together:
 
 - **Trust states.** Every memory item is `Fresh`, `Corroborated`, `Verified`, or `Suspect`. A mechanical reality-check (`helix_memory_recheck`) can raise a fact to `Corroborated` (machine-checked at one moment in time); only you (`helix_memory_confirm`) can promote it to `Verified` — agreement from an external model never can (a provenance firewall, fail-closed).
 
-  > **Honest, not cryptographic.** `Corroborated` and `Verified` are good-faith grades on the tool surface, **not adversary-proof**: an agent with filesystem/ledger write can forge either by appending to the ledger. Do **not** add `helix_memory_confirm` to `permissions.allow` — it must prompt for your explicit approval. Cryptographic ledger integrity is future work.
+  > **Tamper-evident at the file surface.** Trust is conferred only by `verify` records, each HMAC-SHA256-authenticated with a key held only in `~/.helix` (never written to the repo ledger). A forged or hand-edited ledger record replays as `Fresh`, so `Corroborated`/`Verified` are **unforgeable at the file surface against an adversary that cannot read `~/.helix`** — minting a grade by appending raw JSON to the ledger no longer works. This is *not* the tool surface: a `helix_memory_confirm` call still carries no enforceable human-approval signal, so do **not** add `helix_memory_confirm` to `permissions.allow` — it must prompt for your explicit approval. (Residuals: an adversary that can read `~/.helix` can mint valid MACs; rollback-by-suppression is undetected; trust is machine-local. See [SECURITY.md](./SECURITY.md).)
 - **Re-verify before use.** A `Suspect` item on a high-blast-radius path must be re-checked before it is acted on.
 - **Content quarantine.** Recalled memory and external-model output are framed as labeled DATA; forged frame markers are neutralized so stored text can never act as an instruction.
 - **Secret hygiene.** Common credential formats and high-entropy tokens are redacted before anything is written, and dual-verify refuses to send a payload containing a secret to the external model.
@@ -109,7 +109,7 @@ Helix is local-first. Installing it lets Claude Code run code on your machine �
 
 Helix is a defense kit for **memory & context poisoning** (OWASP Agentic Top 10 — ASI06). Its guarantees:
 
-- **Provenance firewall (fail-closed):** a reality-check raises a fact only to `Corroborated`; only you can promote it to `Verified`; external agreement never can. These are honest grades, not tamper-proof.
+- **Provenance firewall (fail-closed):** a reality-check raises a fact only to `Corroborated`; only you can promote it to `Verified`; external agreement never can. `Corroborated`/`Verified` are tamper-evident at the file surface — conferred only by HMAC-authenticated `verify` records (key held only in `~/.helix`), so a forged or edited ledger record replays as `Fresh`. Unforgeable at the file surface against an adversary that cannot read `~/.helix`; still not an enforceable tool-surface approval (do **not** allow-list `helix_memory_confirm`).
 - **Trust states & re-verify:** `Fresh / Corroborated / Verified / Suspect`, with re-verification required before a `Suspect` item is used on a high-blast-radius path.
 - **Quarantine:** untrusted text is normalized and datamarked inside a nonce-framed DATA block, so it cannot act as an instruction.
 - **Egress guard:** the only outbound path (dual-verify) is gated for secrets / PII / memory echo.

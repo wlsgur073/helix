@@ -8,9 +8,17 @@ All notable changes to Helix are documented here. This project follows
 ### Added
 - Two-tier memory trust labels on the tool path: machine-corroborated **Corroborated**
   (`helix_memory_recheck`, a content-bound mechanical file check) and best-effort human-attested
-  **Verified** (`helix_memory_confirm`). These are honest grading signals, **NOT adversary-proof**:
-  a compromised agent with filesystem/ledger write can forge them by appending to the ledger. Do
-  **not** allow-list `helix_memory_confirm`. Cryptographic ledger integrity is future work.
+  **Verified** (`helix_memory_confirm`).
+- Ledger HMAC: `Corroborated`/`Verified` are now **tamper-evident at the file surface**. Trust is
+  conferred only by `verify` records, each HMAC-SHA256-authenticated with a key held only in
+  `~/.helix` (per-project HKDF subkey; never written to the repo ledger). A forged or edited ledger
+  record replays as `Fresh`, so minting an elevated grade by appending raw JSON to the ledger no
+  longer works — **unforgeable at the file surface against an adversary that cannot read `~/.helix`**.
+  Still **not** the tool surface: a `helix_memory_confirm` call carries no enforceable human-approval
+  signal, so do **not** allow-list it. Documented residuals: an adversary that can read `~/.helix`
+  can mint valid MACs (irreducible; a readable home key voids the guarantee); rollback-by-suppression
+  (deleting a later `verify`) is undetected (home high-water counter is a follow-on); and trust is
+  machine-local (a `Verified` grade does not transfer to another machine).
 - Best-effort garbage collection of leaked Codex scratch directories: an age-based sweep
   (3-day floor, directories only, rate-limited to once a day) runs at runner start and never
   throws into the verify path.
