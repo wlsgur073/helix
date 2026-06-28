@@ -88,7 +88,14 @@ export class MemoryStore {
   /** Subkey that signs/verifies records for one ledger, or null if no master exists yet OR the
    *  scope nonce is unresolvable (project not owned). Read path tolerates null (key-absent mode);
    *  the write path mints the master first via ensureMaster. Delegates to the shared verified-read
-   *  helper so the hook and the store resolve subkeys identically (one source of truth). */
+   *  helper so the hook and the store resolve subkeys identically (one source of truth).
+   *
+   *  INVARIANT: the helper uses a SINGLE home for both the master read AND the project scope nonce,
+   *  whereas the pre-refactor code read the project nonce from project.home. These are the same dir —
+   *  the server wiring always sets opts.home === project.home (and the default homeDir() is
+   *  dirname(global), with project.home === that). They differ only under a hand-built store that
+   *  relocates HELIX_LEDGER outside HELIX_HOME with an active project — where reads still clamp Fresh
+   *  (fail-safe) and a project writeVerify would throw rather than mis-sign. */
   private subkeyForLedger(ledger: LedgerPath): Buffer | null {
     return subkeyForScope(this.homeDir(), this.scopeRootOf(ledger));
   }

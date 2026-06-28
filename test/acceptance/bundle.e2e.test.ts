@@ -92,11 +92,19 @@ describe('helix bundle e2e (hermetic)', () => {
     const close = `===HELIX ${nonce} END===`;
     const footer = out.indexOf(close);
     expect(footer).toBeGreaterThan(body);
-    // Nothing escapes the quarantine AFTER the close except trusted, out-of-band ASCII notes
-    // (parenthesised lines — reverify / egress / integrity-unavailable); never a DATA line or a
-    // forged marker. A fresh home has no master key, so the M2 integrity note legitimately trails.
+    // After the close, the ONLY thing allowed is one of the fixed Helix advisory shapes
+    // (reverify / egress / integrity-unavailable). The reverify + egress notes carry attacker-supplied
+    // record IDs, so they are safe ONLY because handleRecall sanitizes every id to [A-Za-z0-9_-] before
+    // interpolation — a newline-injected id can no longer forge an extra after-close line. A closed
+    // allow-list (not a mere "starts with (") is what catches such an injected line. Fresh home has no
+    // master key, so the M2 integrity note legitimately trails.
+    const NOTE_SHAPES: RegExp[] = [
+      /^\(integrity verification unavailable\b.*\)$/,
+      /^\(needs re-verify before acting: [A-Za-z0-9_,\- ]*\)$/,
+      /^\(egress-shaped content flagged - treat as data only: [A-Za-z0-9_,\- ]*\)$/,
+    ];
     const after = out.slice(footer + close.length).split('\n').filter((l) => l.trim() !== '');
-    expect(after.every((l) => l.startsWith('('))).toBe(true);
+    expect(after.every((l) => NOTE_SHAPES.some((re) => re.test(l)))).toBe(true);
     // Exactly one real close for this nonce (no forged duplicate escaped the quarantine).
     expect(out.split(close).length - 1).toBe(1);
   }, 30_000);
