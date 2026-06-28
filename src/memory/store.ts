@@ -314,6 +314,17 @@ export class MemoryStore {
       provenance: { source: 'user', sessionId: this.session() },
       supersedes: id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
     });
-    if (opts.permanent) compactLedger(ledger, { erasedIds: new Set([id]) });
+    if (opts.permanent) {
+      // HMAC-aware compaction: preserve genuine signed verifies for this ledger, drop forgeries.
+      // verifyVerify is gated on the SAME subkey the ledger was signed under (key-absent => keep
+      // nothing, i.e. drop every verify — the conservative floor, matching the read path's clamp).
+      compactLedger(ledger, {
+        erasedIds: new Set([id]),
+        keepValidVerify: (r) => {
+          const sk = this.subkeyForLedger(ledger);
+          return sk ? verifyVerify(r, sk) : false;
+        },
+      });
+    }
   }
 }
