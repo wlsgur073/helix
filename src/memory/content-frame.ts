@@ -61,6 +61,17 @@ export function makeDataFrame(opts: {
   return [frameOpen(opts.label, opts.nonce), DATA_SEMANTICS, ...body, frameClose(opts.nonce)].join('\n');
 }
 
+/**
+ * Sanitize an attacker-controllable record id before it is interpolated into ANY trusted,
+ * out-of-band advisory line — the recall reverify/egress/integrity notes, the SessionStart egress
+ * note, and the inspect rows. A forged record in an owned ledger carries an id of the adversary's
+ * choosing, and parseLedger is a raw JSON.parse so the id can embed a newline / paren / space. An
+ * unsanitized id like "m_x\n(injected advisory" would forge a second line masquerading as a trusted
+ * Helix advisory or a labelled DATA row. Ids are opaque `m_<uuid>` tokens, so clamping to
+ * [A-Za-z0-9_-] loses nothing legitimate and removes any byte that could break out of the line.
+ */
+export const safeId = (id: string): string => id.replace(/[^A-Za-z0-9_-]/g, '');
+
 /** Memory-recall frame: datamarks each record with its trust state and scope. */
 export function frameAsData(scoped: ScopedRecord[], nonce: string): string {
   return makeDataFrame({

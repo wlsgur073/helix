@@ -29,15 +29,28 @@ export interface GatherInput {
   cwd?: string;
 }
 
+export interface GatherResult {
+  records: ScopedRecord[];
+  /** False when ANY scope was read key-absent (master key missing/unresolvable) — every grade was
+   *  then conservatively clamped to Fresh and none can be trusted. Mirrors recall's integrityAvailable
+   *  signal so the hook can tell the agent the grades shown are unverified (spec §8 honest-signaling). */
+  integrityAvailable: boolean;
+}
+
 /**
  * Pure, testable: gather the VERIFIED live records from the global ledger + (the in-repo project
- * ledger iff owned), each scope-tagged. Routes every read through verifiedLive so a forged/edited
- * record clamps to Fresh — the same trust grades recall/inspect show. No stdin, no process state,
- * no I/O beyond reading the ledger/registry/master under `home`.
+ * ledger iff owned), each scope-tagged, plus whether EVERY scope read had a key available. Routes
+ * every read through verifiedLive so a forged/edited record clamps to Fresh — the same trust grades
+ * recall/inspect show. No stdin, no process state, no I/O beyond reading the ledger/registry/master
+ * under `home`.
  */
-export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): ScopedRecord[] {
-  const scoped: ScopedRecord[] = [];
-  for (const r of verifiedLive(globalLedger, home).live.values()) scoped.push({ record: r, scope: 'global' });
+export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): GatherResult {
+  const records: ScopedRecord[] = [];
+  let integrityAvailable = true;
+
+  const global = verifiedLive(globalLedger, home);
+  if (!global.keyAvailable) integrityAvailable = false;
+  for (const r of global.live.values()) records.push({ record: r, scope: 'global' });
 
   // Project root comes ONLY from the hook's stdin cwd (canonical). No process.cwd() fallback —
   // a hook's own cwd is unreliable. No cwd -> global only.
@@ -47,12 +60,14 @@ export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): S
         const projLedger = projectLedgerPath(cwd);
         // guard: never read the global ledger as a "project" layer (cwd == ~ collision)
         if (resolve(projLedger) !== resolve(globalLedger)) {
-          for (const r of verifiedLive(projLedger, home, cwd).live.values()) scoped.push({ record: r, scope: 'project' });
+          const project = verifiedLive(projLedger, home, cwd);
+          if (!project.keyAvailable) integrityAvailable = false;
+          for (const r of project.live.values()) records.push({ record: r, scope: 'project' });
         }
       }
     } catch { /* unreadable/foreign project ledger → global only */ }
   }
-  return scoped;
+  return { records, integrityAvailable };
 }
 
 async function main(): Promise<void> {
@@ -66,8 +81,8 @@ async function main(): Promise<void> {
       if (typeof j.cwd === 'string') cwd = j.cwd;
     } catch { /* no/garbage stdin -> global only */ }
 
-    const scoped = gatherScopedRecords({ home, globalLedger, cwd });
-    const text = formatSessionStartContext(scoped, newNonce());
+    const { records, integrityAvailable } = gatherScopedRecords({ home, globalLedger, cwd });
+    const text = formatSessionStartContext(records, newNonce(), { integrityAvailable });
     // Synchronous write to fd 1: process exit must not drop a buffered async pipe write on
     // Windows (which would inject an unterminated DATA block). No explicit exit() needed —
     // natural exit yields code 0 and there are no open handles to keep the loop alive.

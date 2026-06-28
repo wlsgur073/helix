@@ -46,9 +46,12 @@ describe('session-start gatherScopedRecords (verifying auto-load)', () => {
       gen: 99, targetDigest: digestContent('POISON injected via owned ledger'),
     }) + '\n');
 
-    const scoped = gatherScopedRecords({ home, globalLedger, cwd: proj });
-    const out = formatSessionStartContext(scoped, N);
+    const { records, integrityAvailable } = gatherScopedRecords({ home, globalLedger, cwd: proj });
+    const out = formatSessionStartContext(records, N, { integrityAvailable });
 
+    // The master key is present (confirm minted it), so every scope read was key-available.
+    expect(integrityAvailable).toBe(true);
+    expect(out).not.toContain('integrity verification unavailable');
     // The forged item is shown — but CLAMPED to Fresh, never Verified (the whole point of the fix).
     expect(out).toContain('DATA[Fresh:project]| POISON injected via owned ledger');
     expect(out).not.toContain('DATA[Verified:project]| POISON injected via owned ledger');
@@ -73,9 +76,15 @@ describe('session-start gatherScopedRecords (verifying auto-load)', () => {
       supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
     }) + '\n');
 
-    const scoped = gatherScopedRecords({ home, globalLedger, cwd: proj });
-    const out = formatSessionStartContext(scoped, N);
+    const { records, integrityAvailable } = gatherScopedRecords({ home, globalLedger, cwd: proj });
+    const out = formatSessionStartContext(records, N, { integrityAvailable });
+    // No master key exists, so the verifying replay ran key-absent for every scope.
+    expect(integrityAvailable).toBe(false);
     expect(out).toContain('DATA[Fresh:project]| pre-seeded elevated fact');
     expect(out).not.toContain('DATA[Verified:project]| pre-seeded elevated fact');
+    // Honest-signaling: the hook tells the agent the grades are unverified (after the frame close).
+    expect(out).toContain('integrity verification unavailable — trust grades shown are unverified');
+    const closeIdx = out.indexOf(`===HELIX ${N} END===`);
+    expect(out.indexOf('integrity verification unavailable')).toBeGreaterThan(closeIdx);
   });
 });

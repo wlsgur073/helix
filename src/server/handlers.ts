@@ -2,7 +2,7 @@ import type { MemoryStore, CommitInput } from '../memory/store.js';
 import type { HelixConfig } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type EchoSource } from '../verify/dual-verify.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, newNonce } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, newNonce, safeId } from '../memory/content-frame.js';
 import { appendAudit, type VerifyAudit } from '../audit.js';
 import { readFileSync } from 'node:fs';
 import { classifyEmission, type EgressVerdict, type Leg } from '../risk/trifecta.js';
@@ -16,14 +16,6 @@ export interface ToolResult {
   [key: string]: unknown;
 }
 const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] });
-
-// Record ids are attacker-controllable (a forged record in an owned ledger carries an id of the
-// adversary's choosing, and parseLedger is a raw JSON.parse so the id can embed a newline / paren /
-// space). The reverify + egress advisories interpolate ids into trusted, out-of-band lines AFTER the
-// DATA quarantine close — an unsanitized id like "m_x\n(injected advisory" would forge a second
-// after-close line masquerading as a Helix advisory. Ids are opaque `m_<uuid>` tokens, so clamping to
-// [A-Za-z0-9_-] loses nothing legitimate and removes any byte that could break out of the note line.
-const safeId = (id: string): string => id.replace(/[^A-Za-z0-9_-]/g, '');
 
 export function handleCommit(store: MemoryStore, args: CommitInput): ToolResult {
   const rec = store.commit(args);
@@ -46,12 +38,38 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
   const integrityNote = integrityAvailable
     ? ''
     : '\n\n(integrity verification unavailable — trust grades shown are unverified)';
-  return ok(framed + reverifyNote + egressNote + integrityNote);
+  // Spec §8 / Unit U1: buildVerifiedProjection flags an item `compromised` when it sees an
+  // equal-generation MAC conflict (two valid verifies of the same target+gen disagreeing on state) —
+  // a tampering signal, distinct from the key-absent unavailable case. The item is already clamped to
+  // Fresh; surface the conflict by id in a trusted, out-of-band note so the agent does not silently
+  // trust a target whose verify history is contradictory.
+  const conflictIds = items.filter((i) => i.integrity === 'compromised').map((i) => safeId(i.record.id));
+  const conflictNote = conflictIds.length
+    ? `\n\n(integrity conflict — equal-generation verify mismatch: ${conflictIds.join(', ')})`
+    : '';
+  return ok(framed + reverifyNote + egressNote + integrityNote + conflictNote);
 }
 
+/** Inspect is a READ surface: both id and content of every row are attacker-controllable (a forged
+ *  record in an owned ledger, parsed by a raw JSON.parse, can embed newlines). Route the rows through
+ *  the SAME DATA quarantine recall/SessionStart use — nonce frame + per-line datamark/normalizeUntrusted
+ *  on the content — with the id sanitized and the known-enum state/scope in the (trusted) datamark, so
+ *  no single record can forge an extra labelled line or break out of the frame. */
 export function handleInspect(store: MemoryStore, _args: Record<string, never>): ToolResult {
-  const rows = store.inspect().map(({ record, scope }) => `- ${record.id} [${record.state}:${scope}] ${record.content}`);
-  return ok(rows.length ? rows.join('\n') : '(memory is empty)');
+  const rows = store.inspect();
+  if (rows.length === 0) return ok('(memory is empty)');
+  return ok(makeDataFrame({
+    label: 'CURRENT MEMORY',
+    nonce: newNonce(),
+    lines: rows.map(({ record, scope }) => ({
+      // The mark is the SAME known-enum `DATA[state:scope]| ` label recall/SessionStart use (mirrored
+      // byte-for-byte, not reinvented). The SANITIZED id is prepended to the datamarked content so
+      // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
+      // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
+      text: `${safeId(record.id)} ${record.content}`,
+      mark: `DATA[${record.state}:${scope}]| `,
+    })),
+  }));
 }
 
 export interface EraseDeps {
