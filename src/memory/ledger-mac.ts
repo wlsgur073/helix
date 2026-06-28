@@ -16,6 +16,16 @@ export class LedgerMacError extends Error {}
 const MASTER_LEN = 32;
 function masterPath(home: string): string { return join(home, 'ledger-mac-master.key'); }
 
+/** Best-effort fsync of a directory fd so a create/rename is durably persisted. Pure durability
+ *  nit: on Windows (and some FS) a directory cannot be opened/fsync'd — ignore it, never a
+ *  correctness issue (a lost master just makes elevations replay Fresh). */
+function fsyncDir(dir: string): void {
+  let dfd: number;
+  try { dfd = openSync(dir, 'r'); } catch { return; }   // Windows EISDIR/EPERM/EACCES -> skip
+  try { fsyncSync(dfd); } catch { /* EINVAL/EISDIR on some FS for a dir fd — durability only */ }
+  finally { closeSync(dfd); }
+}
+
 /** Atomic, idempotent: return the 32-byte master, creating it (mode 0600) under a lock on first use. */
 export function ensureMaster(home: string): Buffer {
   const path = masterPath(home);
@@ -29,7 +39,8 @@ export function ensureMaster(home: string): Buffer {
     const tmp = `${path}.${process.pid}.tmp`;
     const fd = openSync(tmp, 'wx', 0o600);
     try { writeSync(fd, key); fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(tmp, path); // atomic on the same filesystem
+    renameSync(tmp, path);   // atomic on the same filesystem
+    fsyncDir(dirname(path)); // persist the new directory entry too (spec §7: fsync file AND dir)
     return key;
   });
 }
@@ -65,7 +76,16 @@ const NULL_FIELD = Buffer.from([0x00, 0, 0, 0, 0]);
 const str = (s: string | null): Buffer => (s === null ? NULL_FIELD : field(Buffer.from(s, 'utf8')));
 const int = (n: number): Buffer => { const b = Buffer.alloc(8); b.writeBigUInt64BE(BigInt(n)); return field(b); };
 
-/** The exact bytes the MAC covers — fixed field order, length-prefixed, no JSON. */
+/** The exact bytes the MAC covers — fixed field order, length-prefixed, no JSON.
+ *
+ *  Authenticated: DOMAIN, MAC_VERSION, keyId, type, id, supersedes, state, gen, targetDigest.
+ *  Intentionally UNAUTHENTICATED (not bound by the MAC): tx, validFrom, validTo, provenance,
+ *  blastRadius, reverifyTrigger, classification. This is benign ONLY because of a load-bearing
+ *  INVARIANT: none of these unauthenticated fields may EVER be consulted for a trust decision or
+ *  for gen ordering on replay. gen is the sole ordering key; the asset's own tx is used only as a
+ *  display tiebreaker on records that are not MAC-protected. A future change that starts trusting
+ *  any of them (e.g. a tx tiebreaker for equal-gen records) MUST first add that field to the
+ *  authenticated set above — otherwise it becomes attacker-forgeable. */
 function macInput(r: MemoryRecord, keyId: string): Buffer {
   return Buffer.concat([
     DOMAIN, Buffer.from([MAC_VERSION]), field(Buffer.from(keyId, 'hex')),

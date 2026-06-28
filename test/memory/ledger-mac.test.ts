@@ -39,6 +39,14 @@ describe('ensureMaster', () => {
     const m = ensureMaster(home);
     expect(tryReadMaster(home)!.equals(m)).toBe(true);
   });
+  it('creates a valid master with the dir fsync in place and stays idempotent', () => {
+    const home = tmpHome();
+    const a = ensureMaster(home);
+    expect(a).toHaveLength(32);
+    expect(tryReadMaster(home)!.equals(a)).toBe(true);
+    expect(statSync(join(home, 'ledger-mac-master.key')).mode & 0o777).toBe(0o600);
+    expect(ensureMaster(home).equals(a)).toBe(true);
+  });
 });
 
 describe('deriveSubkey / keyIdOf', () => {
