@@ -2,6 +2,7 @@ import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from '
 import { openSync, writeSync, fsyncSync, closeSync, readFileSync, renameSync, statSync, chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { withFileLock } from './lock.js';
+import type { MemoryRecord } from '../types.js';
 
 export const MAC_VERSION = 1;
 
@@ -52,4 +53,38 @@ export function deriveSubkey(master: Buffer, nonce: string): Buffer {
 
 export function keyIdOf(subkey: Buffer): string {
   return createHash('sha256').update(Buffer.concat([Buffer.from('keyid'), subkey])).digest().subarray(0, 8).toString('hex');
+}
+
+const DOMAIN = Buffer.from('helix-ledger-mac');
+
+function field(buf: Buffer): Buffer {
+  const len = Buffer.alloc(4); len.writeUInt32BE(buf.length, 0);
+  return Buffer.concat([Buffer.from([0x01]), len, buf]); // 0x01 = present
+}
+const NULL_FIELD = Buffer.from([0x00, 0, 0, 0, 0]);
+const str = (s: string | null): Buffer => (s === null ? NULL_FIELD : field(Buffer.from(s, 'utf8')));
+const int = (n: number): Buffer => { const b = Buffer.alloc(8); b.writeBigUInt64BE(BigInt(n)); return field(b); };
+
+/** The exact bytes the MAC covers — fixed field order, length-prefixed, no JSON. */
+function macInput(r: MemoryRecord, keyId: string): Buffer {
+  return Buffer.concat([
+    DOMAIN, Buffer.from([MAC_VERSION]), field(Buffer.from(keyId, 'hex')),
+    str(r.type), str(r.id), str(r.supersedes), str(r.state),
+    int(r.gen ?? 0), str(r.targetDigest ?? null),
+  ]);
+}
+
+export function signVerify(record: MemoryRecord, subkey: Buffer): MemoryRecord {
+  const keyId = keyIdOf(subkey);
+  const mac = createHmac('sha256', subkey).update(macInput(record, keyId)).digest('hex');
+  return { ...record, mac, keyId, macVersion: MAC_VERSION };
+}
+
+export function verifyVerify(record: MemoryRecord, subkey: Buffer): boolean {
+  if (record.macVersion !== MAC_VERSION || !record.mac || !record.keyId) return false;
+  if (record.keyId !== keyIdOf(subkey)) return false;
+  const want = createHmac('sha256', subkey).update(macInput(record, record.keyId)).digest();
+  let got: Buffer;
+  try { got = Buffer.from(record.mac, 'hex'); } catch { return false; }
+  return got.length === want.length && timingSafeEqual(got, want);
 }

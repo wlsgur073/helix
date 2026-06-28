@@ -56,3 +56,44 @@ describe('deriveSubkey / keyIdOf', () => {
     expect(keyIdOf(deriveSubkey(m, 'nonce-b'))).not.toBe(id);
   });
 });
+
+import { signVerify, verifyVerify, digestContent as dc } from '../../src/memory/ledger-mac.js';
+import type { MemoryRecord } from '../../src/types.js';
+
+function verifyRec(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
+  return {
+    id: 'v1', tx: '2026-06-09T00:00:00.000Z', validFrom: '2026-06-09T00:00:00.000Z', validTo: null,
+    type: 'verify', state: 'Verified', content: '', provenance: { source: 'user', sessionId: 's' },
+    supersedes: 'target1', blastRadius: null, reverifyTrigger: null, classification: 'normal',
+    gen: 1, targetDigest: dc('the fact'), ...overrides,
+  };
+}
+
+describe('signVerify / verifyVerify', () => {
+  it('a freshly signed record verifies under the same subkey', () => {
+    const k = deriveSubkey(Buffer.alloc(32, 9), 'proj');
+    const signed = signVerify(verifyRec(), k);
+    expect(signed.macVersion).toBe(1);
+    expect(signed.keyId).toBe(keyIdOf(k));
+    expect(verifyVerify(signed, k)).toBe(true);
+  });
+  it('fails under a different subkey (project binding)', () => {
+    const signed = signVerify(verifyRec(), deriveSubkey(Buffer.alloc(32, 9), 'proj-A'));
+    expect(verifyVerify(signed, deriveSubkey(Buffer.alloc(32, 9), 'proj-B'))).toBe(false);
+  });
+  it('fails when any covered field is tampered (grade, target, gen, targetDigest)', () => {
+    const k = deriveSubkey(Buffer.alloc(32, 9), 'proj');
+    const signed = signVerify(verifyRec(), k);
+    expect(verifyVerify({ ...signed, state: 'Corroborated' }, k)).toBe(false);
+    expect(verifyVerify({ ...signed, supersedes: 'target2' }, k)).toBe(false);
+    expect(verifyVerify({ ...signed, gen: 2 }, k)).toBe(false);
+    expect(verifyVerify({ ...signed, targetDigest: dc('other') }, k)).toBe(false);
+  });
+  it('fails for an unsigned record or a length-collision attempt', () => {
+    const k = deriveSubkey(Buffer.alloc(32, 9), 'proj');
+    expect(verifyVerify(verifyRec(), k)).toBe(false); // no mac
+    // length-prefix integrity: moving a char across the id/target boundary must not re-validate
+    const a = signVerify(verifyRec({ id: 'ab', supersedes: 'c' }), k);
+    expect(verifyVerify({ ...a, id: 'a', supersedes: 'bc' }, k)).toBe(false);
+  });
+});
