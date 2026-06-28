@@ -1,15 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord } from '../types.js';
-import { appendRecord, parseLedger, compactLedger, type LedgerPath } from './ledger.js';
+import { appendRecord, appendRecordUnlocked, parseLedger, compactLedger, type LedgerPath } from './ledger.js';
 import { findSecrets, redactSecrets } from './secret-scan.js';
 import { canCommit, isVerifyingSource, resolveTransition, type TransitionResult, type VerifyOutcome } from './firewall.js';
 import { runRealityCheck, checkBinding, type RealityCheck } from './reality-check.js';
-import { buildProjection, type RecallOptions } from './projection.js';
+import { type RecallOptions } from './projection.js';
 import { rankRecords } from './retrieval.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce } from './content-frame.js';
-import { isOwned, stampOwnership } from './ownership.js';
+import { isOwned, stampOwnership, scopeNonce, globalScopeNonce } from './ownership.js';
+import { ensureMaster, tryReadMaster, deriveSubkey, signVerify, verifyVerify, digestContent } from './ledger-mac.js';
+import { buildVerifiedProjection, type VerifiedProjection } from './verified-projection.js';
+import { withFileLock } from './lock.js';
 
 export interface MemoryStoreOptions {
   sessionId?: string;
@@ -20,6 +24,8 @@ export interface MemoryStoreOptions {
   project?: { ledger: string; root: string; home: string };
   /** Injectable ownership stamp source (default crypto). */
   genStamp?: () => string;
+  /** Where the ledger-MAC master key + scope-nonce registry live. Defaults to dirname(global). */
+  home?: string;
 }
 
 export interface CommitInput {
@@ -40,11 +46,18 @@ export interface RecalledItem {
   record: MemoryRecord;
   scope: MemoryScope;
   needsReverify: boolean;
+  /** 'compromised' iff the verifying replay saw an equal-generation MAC conflict for this target
+   *  (R-conflict). 'ok' otherwise — including a forged elevation that was simply ignored (it shows
+   *  its honest clamped state, no conflict). */
+  integrity: 'ok' | 'compromised';
 }
 
 export interface RecallResult {
   items: RecalledItem[];
   framed: string; // DATA-quarantined block for prompt injection
+  /** False when no master key is available — every state is conservatively clamped to Fresh and
+   *  no elevation can be trusted (the verifying replay ran in key-absent mode). */
+  integrityAvailable: boolean;
 }
 
 export interface RecheckResult {
@@ -62,6 +75,30 @@ export class MemoryStore {
   private nonce(): string { return (this.opts.genNonce ?? newNonce)(); }
   private session(): string { return this.opts.sessionId ?? 'unknown'; }
 
+  /** Where the ledger-MAC master key + scope-nonce registry live (defaults next to the global ledger). */
+  private homeDir(): string { return this.opts.home ?? dirname(this.global); }
+
+  /** Subkey that signs/verifies records for one ledger, or null if no master exists yet OR the
+   *  scope nonce is unresolvable (project not owned). Read path tolerates null (key-absent mode);
+   *  the write path mints the master first via ensureMaster. */
+  private subkeyForLedger(ledger: LedgerPath): Buffer | null {
+    const master = tryReadMaster(this.homeDir());
+    if (!master) return null;
+    const p = this.opts.project;
+    const nonce = (p && ledger === p.ledger) ? scopeNonce(p.root, p.home) : globalScopeNonce(this.homeDir());
+    return nonce ? deriveSubkey(master, nonce) : null;
+  }
+
+  /** Verifying projection for one ledger (R1 clamp / R2 MAC gate / R3 content binding). When no
+   *  subkey is available every state is clamped to Fresh and keyAvailable is false. */
+  private verifiedOf(ledger: LedgerPath): VerifiedProjection {
+    const subkey = this.subkeyForLedger(ledger);
+    return buildVerifiedProjection(parseLedger(ledger), {
+      verify: (r) => (subkey ? verifyVerify(r, subkey) : false),
+      keyAvailable: subkey !== null,
+    });
+  }
+
   commit(input: CommitInput): MemoryRecord {
     if (input.content.trim() === '') throw new Error('commit: content must be non-empty');
     const source: ProvenanceSource = input.source;
@@ -70,7 +107,7 @@ export class MemoryStore {
     }
     if (input.supersedes) {
       const targetLedger = this.ledgerOf(input.supersedes);
-      const target = buildProjection(parseLedger(targetLedger)).get(input.supersedes);
+      const target = this.verifiedOf(targetLedger).live.get(input.supersedes);
       if (!target) throw new Error('commit: supersedes target not found (dead or unknown id)');
       // Cross-scope guard (spec §15): the supersede record is written to the ledger for input.scope,
       // but projection is per-ledger. If the target lives in a different ledger than the write, the
@@ -130,34 +167,51 @@ export class MemoryStore {
     return p.ledger;
   }
 
+  /** Verified live records from global + (project iff owned), each tagged with scope + integrity,
+   *  plus whether a master key was available for EVERY scope read (integrityAvailable). */
+  private scopedVerified(): { records: ScopedRecord[]; available: boolean } {
+    const out: ScopedRecord[] = [];
+    let available = true;
+    const add = (ledger: LedgerPath, scope: MemoryScope) => {
+      const v = this.verifiedOf(ledger);
+      if (!v.keyAvailable) available = false;
+      for (const r of v.live.values()) {
+        out.push({ record: r, scope, integrity: v.compromised.has(r.id) ? 'compromised' : 'ok' });
+      }
+    };
+    add(this.global, 'global');
+    const p = this.opts.project;
+    if (p && isOwned(p.root, p.home)) add(p.ledger, 'project');
+    return { records: out, available };
+  }
+
   /** Live records from global + (project iff owned), each tagged with its scope. */
   private scopedProjection(): ScopedRecord[] {
-    const out: ScopedRecord[] = [];
-    for (const r of buildProjection(parseLedger(this.global)).values()) out.push({ record: r, scope: 'global' });
-    const p = this.opts.project;
-    if (p && isOwned(p.root, p.home)) {
-      for (const r of buildProjection(parseLedger(p.ledger)).values()) out.push({ record: r, scope: 'project' });
-    }
-    return out;
+    return this.scopedVerified().records;
   }
 
   recall(query: string, opts: RecallOptions = {}): RecallResult {
-    const scoped = this.scopedProjection();
-    const scopeById = new Map(scoped.map((s) => [s.record.id, s.scope]));
+    const { records: scoped, available } = this.scopedVerified();
+    const byId = new Map(scoped.map((s) => [s.record.id, s]));
     const hits = rankRecords(scoped.map((s) => s.record), query, opts);
     const items: RecalledItem[] = hits.map((record) => ({
       record,
-      scope: scopeById.get(record.id) ?? 'global',
+      scope: byId.get(record.id)?.scope ?? 'global',
       needsReverify: requiresReverifyBeforeUse({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source }),
+      integrity: byId.get(record.id)?.integrity ?? 'ok',
     }));
-    return { items, framed: frameAsData(items.map(({ record, scope }) => ({ record, scope })), this.nonce()) };
+    return {
+      items,
+      framed: frameAsData(items.map(({ record, scope }) => ({ record, scope })), this.nonce()),
+      integrityAvailable: available,
+    };
   }
 
   /** Which ledger currently holds `id` (project iff owned and present); defaults to global. */
   private ledgerOf(id: string): LedgerPath {
-    if (buildProjection(parseLedger(this.global)).has(id)) return this.global;
+    if (this.verifiedOf(this.global).live.has(id)) return this.global;
     const p = this.opts.project;
-    if (p && isOwned(p.root, p.home) && buildProjection(parseLedger(p.ledger)).has(id)) return p.ledger;
+    if (p && isOwned(p.root, p.home) && this.verifiedOf(p.ledger).live.has(id)) return p.ledger;
     return this.global;
   }
 
@@ -168,17 +222,38 @@ export class MemoryStore {
     return found.record;
   }
 
-  /** Append a verify event conferring `state` on `targetId` (routed to the target's ledger). */
+  /** Append a SIGNED verify event conferring `state` on `targetId` (routed to the target's ledger).
+   *  Reads the verified projection, computes the next per-target generation and the content digest,
+   *  signs, and appends — all under ONE ledger lock so a concurrent writer can't race the gen. */
   private writeVerify(targetId: string, state: MemoryState, source: ProvenanceSource): MemoryRecord {
-    const ts = this.now();
-    const record: MemoryRecord = {
-      id: this.id(), tx: ts, validFrom: ts, validTo: null,
-      type: 'verify', state, content: '',
-      provenance: { source, sessionId: this.session() },
-      supersedes: targetId, blastRadius: null, reverifyTrigger: null, classification: 'normal',
-    };
-    appendRecord(this.ledgerOf(targetId), record);
-    return record;
+    const ledger = this.ledgerOf(targetId);
+    return withFileLock(ledger, () => {
+      ensureMaster(this.homeDir());                 // mint the master on first sign (different lock)
+      const subkey = this.subkeyForLedger(ledger);
+      if (!subkey) throw new Error('writeVerify: cannot resolve signing subkey (project not owned?)');
+      const records = parseLedger(ledger);
+      // Trust only VALID verifies for the live target + the running generation, so a forged record
+      // (state or gen) can never raise the floor we sign above.
+      const v = buildVerifiedProjection(records, { verify: (r) => verifyVerify(r, subkey), keyAvailable: true });
+      const target = v.live.get(targetId);
+      if (!target) throw new Error('writeVerify: target not live');
+      const maxGen = records.reduce(
+        (m, r) => (r.type === 'verify' && r.supersedes === targetId && verifyVerify(r, subkey) ? Math.max(m, r.gen ?? 0) : m),
+        0,
+      );
+      const ts = this.now();
+      // gen + targetDigest MUST be set before signVerify (it silently signs gen=0/digest=null otherwise).
+      const unsigned: MemoryRecord = {
+        id: this.id(), tx: ts, validFrom: ts, validTo: null,
+        type: 'verify', state, content: '',
+        provenance: { source, sessionId: this.session() },
+        supersedes: targetId, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+        gen: maxGen + 1, targetDigest: digestContent(target.content),
+      };
+      const signed = signVerify(unsigned, subkey);
+      appendRecordUnlocked(ledger, signed);         // we already hold the ledger lock — non-locking append
+      return signed;
+    });
   }
 
   /** Content-bound mechanical reality-check. Mints at most Corroborated; never Verified. */

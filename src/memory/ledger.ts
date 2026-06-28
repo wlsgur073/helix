@@ -6,11 +6,18 @@ import { withFileLock } from './lock.js';
 
 export type LedgerPath = string;
 
+/** Append one record as a single JSONL line WITHOUT taking the ledger lock. Creates parent dirs
+ *  as needed. For callers that ALREADY hold the ledger lock (withFileLock is not re-entrant), e.g.
+ *  the store's signing writeVerify reads the verified projection and appends under one lock. */
+export function appendRecordUnlocked(path: LedgerPath, record: MemoryRecord): void {
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, JSON.stringify(record) + '\n');
+}
+
 /** Append one record as a single JSONL line. Creates parent dirs as needed.
  *  Locked so a concurrent compaction (rewrite+rename) in another process can't drop it. */
 export function appendRecord(path: LedgerPath, record: MemoryRecord): void {
-  mkdirSync(dirname(path), { recursive: true });
-  withFileLock(path, () => appendFileSync(path, JSON.stringify(record) + '\n'));
+  withFileLock(path, () => appendRecordUnlocked(path, record));
 }
 
 /** Read every record from the ledger, in append order. Missing file -> []. */

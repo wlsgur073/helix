@@ -65,4 +65,8 @@ export type MemoryScope = 'global' | 'project';
 export interface ScopedRecord {
   record: MemoryRecord;
   scope: MemoryScope;
+  /** Verifying-replay integrity verdict for this item. Set by the store's verified projection;
+   *  optional because plain pairings (pre-HMAC callers) may omit it. 'compromised' = equal-gen MAC
+   *  conflict on the target. */
+  integrity?: 'ok' | 'compromised';
 }
