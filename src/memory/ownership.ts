@@ -7,8 +7,11 @@ export function projectLedgerPath(projectRoot: string): string {
   return join(projectRoot, '.helix', 'memory.jsonl');
 }
 
-interface RegistryEntry { stamp: string; adoptedAt: string }
+interface RegistryEntry { stamp: string; adoptedAt: string; macNonce: string }
 type Registry = Record<string, RegistryEntry>;
+
+/** Reserved registry key for the global ledger's project-binding nonce. */
+const GLOBAL_KEY = '@global';
 
 function registryPath(home: string): string { return join(home, 'projects.json'); }
 function ownerFile(projectRoot: string): string { return join(projectRoot, '.helix', '.owner'); }
@@ -38,12 +41,37 @@ export function stampOwnership(
   home: string,
   opts: { now?: () => string; genStamp?: () => string } = {},
 ): void {
-  const stamp = (opts.genStamp ?? (() => randomBytes(16).toString('hex')))();
+  const gen = opts.genStamp ?? (() => randomBytes(16).toString('hex'));
+  const stamp = gen();
+  // Second draw: a home-only per-project salt for the ledger MAC subkey. Bound to the
+  // resolved project path in the home registry, NEVER written to the repo .owner file, so a
+  // record signed for one project cannot be transplanted into another (HKDF salt differs).
+  const macNonce = gen();
   const adoptedAt = (opts.now ?? (() => new Date().toISOString()))();
   mkdirSync(join(projectRoot, '.helix'), { recursive: true });
   writeFileSync(ownerFile(projectRoot), stamp);
   const reg = readRegistry(home);
-  reg[resolve(projectRoot)] = { stamp, adoptedAt };
+  reg[resolve(projectRoot)] = { stamp, adoptedAt, macNonce };
   mkdirSync(home, { recursive: true });
   writeFileSync(registryPath(home), JSON.stringify(reg, null, 2));
+}
+
+/** The project's home-only MAC nonce (project-binding salt for the ledger HMAC subkey).
+ *  Returns null for an unowned project. Lives only in the home registry, never in the repo. */
+export function scopeNonce(projectRoot: string, home: string): string | null {
+  const entry = readRegistry(home)[resolve(projectRoot)];
+  return entry?.macNonce ?? null;
+}
+
+/** A stable, home-stored MAC nonce for the global ledger, kept under a reserved registry key.
+ *  Minted on first read so the global ledger gets the same project-binding treatment. */
+export function globalScopeNonce(home: string): string {
+  const reg = readRegistry(home);
+  const existing = (reg[GLOBAL_KEY] as { macNonce?: string } | undefined)?.macNonce;
+  if (existing) return existing;
+  const macNonce = randomBytes(16).toString('hex');
+  reg[GLOBAL_KEY] = { stamp: '', adoptedAt: new Date().toISOString(), macNonce };
+  mkdirSync(home, { recursive: true });
+  writeFileSync(registryPath(home), JSON.stringify(reg, null, 2));
+  return macNonce;
 }
