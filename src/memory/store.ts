@@ -316,14 +316,21 @@ export class MemoryStore {
     });
     if (opts.permanent) {
       // HMAC-aware compaction: preserve genuine signed verifies for this ledger, drop forgeries.
-      // verifyVerify is gated on the SAME subkey the ledger was signed under (key-absent => keep
-      // nothing, i.e. drop every verify — the conservative floor, matching the read path's clamp).
+      // Resolve the subkey ONCE so the whole compaction makes one atomic keep/drop decision — a
+      // per-record re-resolve could see a valid subkey for one verify and a transient null for the
+      // next, tearing a single rewrite into an inconsistent partial state.
+      //
+      // Key-absent => PRESERVE every live-target verify (`() => true`), do NOT drop. Compaction is
+      // DESTRUCTIVE (unlike the recoverable read-path clamp): if subkeyForLedger returns null — which
+      // a transient registry/master read failure can cause even with the key still on disk — we
+      // cannot tell genuine from forged, so dropping would permanently destroy recoverable
+      // elevations AND demotions. Keeping them is safe: with no key the read path clamps everything
+      // to Fresh regardless, so kept records confer no trust, and the next key-present compaction
+      // purges any forgeries. (Must NOT fall through to the legacy bake-and-drop path here.)
+      const sk = this.subkeyForLedger(ledger);
       compactLedger(ledger, {
         erasedIds: new Set([id]),
-        keepValidVerify: (r) => {
-          const sk = this.subkeyForLedger(ledger);
-          return sk ? verifyVerify(r, sk) : false;
-        },
+        keepValidVerify: sk ? (r) => verifyVerify(r, sk) : () => true,
       });
     }
   }

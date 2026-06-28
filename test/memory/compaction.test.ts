@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, existsSync, readdirSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, appendFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { appendRecord, parseLedger, compactLedger } from '../../src/memory/ledger.js';
@@ -104,5 +104,28 @@ describe('compactLedger HMAC-aware (via store permanent-erase)', () => {
     expect(after.find((r) => r.gen === 5)).toBeUndefined();
     // The genuine signed verify for A is preserved (still carries its MAC, still targets A).
     expect(after.some((r) => r.type === 'verify' && r.supersedes === a.id && !!r.mac)).toBe(true);
+  });
+
+  it('key-absent compaction PRESERVES genuine verifies (non-destructive: cannot tell genuine from forged)', () => {
+    // Compaction is DESTRUCTIVE (unlike the recoverable read-path clamp). When the subkey is
+    // unresolvable (key removed / transient registry-read failure), we cannot distinguish a genuine
+    // verify from a forgery — so we must DROP NOTHING rather than permanently destroy recoverable
+    // elevations. With no key, the read path clamps everything to Fresh anyway, so kept records
+    // confer no trust; the next key-present compaction purges any forgeries.
+    const { store, ledger, home } = tmpStore();
+    const a = store.commit({ content: 'alpha fact', source: 'user' });
+    store.confirm(a.id); // mints the master + signs A's genuine verify
+
+    const masterPath = join(home, 'ledger-mac-master.key');
+    expect(existsSync(masterPath)).toBe(true);
+    rmSync(masterPath); // key now unavailable -> subkeyForLedger returns null at compact time
+
+    const c = store.commit({ content: 'gamma fact', source: 'user' });
+    store.erase(c.id, { permanent: true }); // triggers compaction with a null subkey
+
+    const after = parseLedger(ledger);
+    // A's genuine signed verify MUST still be on disk — key-absent compaction must not destroy it.
+    expect(after.some((r) => r.type === 'verify' && r.supersedes === a.id && !!r.mac)).toBe(true);
+    expect(after.find((r) => r.id === c.id)).toBeUndefined(); // erase still took effect
   });
 });
