@@ -50,6 +50,12 @@ export interface MemoryRecord {
   blastRadius: BlastRadius | null;     // set by the tagger (Task 4)
   reverifyTrigger: ReverifyTrigger | null;
   classification: Classification;
+  // --- ledger-HMAC (optional; populated on signed `verify` records) ---
+  mac?: string;          // hex HMAC-SHA256 over the canonical encoding (Task 3)
+  gen?: number;          // per-target monotonic generation (Task 4)
+  targetDigest?: string; // hex sha-256 of the target content at sign time (Task 3/5)
+  keyId?: string;        // hex id of the subkey that signed this (Task 2)
+  macVersion?: number;   // MAC scheme version (currently 1)
 }
 
 /** In-memory scope tag for a recalled item — derived from its source ledger, never persisted. */
