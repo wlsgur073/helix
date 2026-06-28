@@ -6,6 +6,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { MemoryStore } from '../memory/store.js';
 import { parseLedger } from '../memory/ledger.js';
 import { scanLegacyElevated } from '../memory/legacy-scan.js';
+import { subkeyForScope } from '../memory/verified-read.js';
+import { verifyVerify } from '../memory/ledger-mac.js';
 import { buildServer } from './helix-server.js';
 import { installSelfTermination } from './lifecycle.js';
 import { loadConfig } from '../config.js';
@@ -26,14 +28,23 @@ const project = projectActive ? { ledger: projectLedger, root: projectRoot, home
 
 const store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? 'cli', project });
 
-// One-time integrity scan (spec §7): a record above Fresh or any `verify` event predates this
-// feature (store.verify was unwired), so it is a legacy/forged elevation pure replay would surface
-// as legitimately-Verified. Warn the operator. ADVISORY only — wrapped so a malformed/unreadable
-// ledger (parseLedger rethrows non-ENOENT I/O errors) degrades to no-warning, never blocks startup.
-for (const ledger of [globalLedger, ...(project ? [project.ledger] : [])]) {
+// Verifying integrity scan (spec §7): surface only records the verifying replay would NOT honour —
+// a `verify` whose MAC fails under the scope subkey (forged/legacy-unsigned) or a baked non-Fresh
+// assert/supersede (R1 clamps it to Fresh). A genuine SIGNED verify (which confirm/recheck now mint
+// routinely) is NOT flagged, so the §7 warning stays a forged-elevation detector instead of firing on
+// every legitimately-elevated ledger. Subkey resolution mirrors the store/hook (subkeyForScope) so
+// the scan asks the exact same validity question the live projection does. ADVISORY only — wrapped so
+// a malformed/unreadable ledger (parseLedger rethrows non-ENOENT I/O errors) degrades to no-warning,
+// never blocks startup. Output stays content-free (a count only).
+const scanScopes: Array<{ ledger: string; root?: string }> = [
+  { ledger: globalLedger },
+  ...(project ? [{ ledger: project.ledger, root: project.root }] : []),
+];
+for (const { ledger, root } of scanScopes) {
   try {
-    const scan = scanLegacyElevated(parseLedger(ledger));
-    if (!scan.ok) process.stderr.write(`helix: WARNING - ${scan.offenders.length} pre-existing elevated/verify record(s) in ${ledger}; trust states there are not tool-minted\n`); // ASCII only
+    const subkey = subkeyForScope(home, root);
+    const scan = scanLegacyElevated(parseLedger(ledger), (r) => (subkey ? verifyVerify(r, subkey) : false));
+    if (!scan.ok) process.stderr.write(`helix: WARNING - ${scan.offenders.length} forged/legacy elevated record(s) in ${ledger}; trust states there are not tool-minted\n`); // ASCII only
   } catch { /* advisory: never block startup */ }
 }
 
