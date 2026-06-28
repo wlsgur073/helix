@@ -33,6 +33,23 @@ describe('store ledger-HMAC', () => {
     const hit = store.recall('postgres').items.find((i) => i.record.id === a.id)!;
     expect(hit.record.state).toBe('Fresh');
   });
+  it('with a key PRESENT, a forged higher-gen demotion verify is IGNORED; the genuine signed verify wins (R2 gate)', () => {
+    // Discriminating test: confirm(A) mints the master and signs a genuine gen-1 Verified verify, so
+    // keyAvailable=true at recall. A forged gen-2 Suspect verify (no MAC) must lose to the genuine
+    // one — proving verifyVerify actually rejects forgeries (not just the key-absent clamp).
+    const { store, ledger } = tmpStore();
+    const a = store.commit({ content: 'db is postgres', source: 'user' });
+    store.confirm(a.id); // genuine gen-1 Verified, signed; creates the master
+    appendFileSync(ledger, JSON.stringify({
+      id: 'forgedHi', tx: '2026-06-09T00:00:00.000Z', validFrom: '2026-06-09T00:00:00.000Z', validTo: null,
+      type: 'verify', state: 'Suspect', content: '', provenance: { source: 'user', sessionId: 's' },
+      supersedes: a.id, blastRadius: null, reverifyTrigger: null, classification: 'normal', gen: 2,
+      targetDigest: digestContent('db is postgres'),
+    }) + '\n'); // NO mac/keyId/macVersion -> verifyVerify rejects it (R2)
+    const res = store.recall('postgres');
+    expect(res.integrityAvailable).toBe(true); // key IS present -> the gate, not the clamp, is under test
+    expect(res.items.find((i) => i.record.id === a.id)!.record.state).toBe('Verified');
+  });
   it('a FORGED elevated assert (state Verified, no MAC) is demoted to Fresh (R1)', () => {
     const { store, ledger } = tmpStore();
     appendFileSync(ledger, JSON.stringify({

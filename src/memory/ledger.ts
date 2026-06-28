@@ -15,8 +15,12 @@ export function appendRecordUnlocked(path: LedgerPath, record: MemoryRecord): vo
 }
 
 /** Append one record as a single JSONL line. Creates parent dirs as needed.
- *  Locked so a concurrent compaction (rewrite+rename) in another process can't drop it. */
+ *  Locked so a concurrent compaction (rewrite+rename) in another process can't drop it.
+ *  Parent dir is created BEFORE the lock: withFileLock does a NON-recursive mkdir of `<path>.lock`,
+ *  which throws ENOENT if the parent doesn't exist yet (e.g. a clean-install first global commit
+ *  where neither ensureMaster nor stampOwnership has pre-created the home dir). */
 export function appendRecord(path: LedgerPath, record: MemoryRecord): void {
+  mkdirSync(dirname(path), { recursive: true });
   withFileLock(path, () => appendRecordUnlocked(path, record));
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readFileSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendRecord, parseLedger, type LedgerPath } from '../../src/memory/ledger.js';
@@ -48,5 +48,14 @@ describe('ledger', () => {
     appendFileSync(p, '{not json\n');
     appendRecord(p, rec('m_2'));
     expect(parseLedger(p).map((r) => r.id)).toEqual(['m_1', 'm_2']);
+  });
+
+  it('appendRecord creates missing parent dirs BEFORE locking (clean-install first commit)', () => {
+    // withFileLock mkdirs `<path>.lock` NON-recursively; if appendRecord did not create the parent
+    // first, the lock acquire would throw ENOENT on a path whose ancestors do not yet exist.
+    const p = join(mkdtempSync(join(tmpdir(), 'helix-ledger-')), 'sub', 'that', 'does', 'not', 'exist', 'memory.jsonl');
+    expect(() => appendRecord(p, rec('m_1'))).not.toThrow();
+    expect(existsSync(p)).toBe(true);
+    expect(parseLedger(p).map((r) => r.id)).toEqual(['m_1']);
   });
 });
