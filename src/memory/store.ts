@@ -295,6 +295,11 @@ export class MemoryStore {
     const p = this.opts.project;
     if (!p) throw new Error('adopt: no project scope is active');
     stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
+    // Make signing possible going forward (future confirm/recheck can mint signed verifies), but
+    // do NOT sign or bless any pre-existing record: adoption must never launder an unsigned,
+    // pre-seeded elevated assert into a Verified one. R1's replay clamp already demotes such a
+    // record to Fresh — this only ensures the master exists, it signs nothing that already exists.
+    ensureMaster(this.homeDir());
   }
 
   /** Remove an item from the live projection. Soft by default (tombstone only — recoverable until

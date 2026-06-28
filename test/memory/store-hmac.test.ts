@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, appendFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, appendFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -79,5 +79,24 @@ describe('store ledger-HMAC', () => {
     const res = store.recall('postgres');
     expect(res.integrityAvailable).toBe(false);
     expect(res.items.find((i) => i.record.id === a.id)!.record.state).toBe('Fresh');
+  });
+  it('adopt does NOT bless a pre-seeded Verified record — it stays Fresh until re-confirmed', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-proj-'));
+    const projLedger = join(root, '.helix', 'memory.jsonl');
+    mkdirSync(join(root, '.helix'), { recursive: true });
+    // attacker pre-seeds an unsigned elevated assert before adoption
+    appendFileSync(projLedger, JSON.stringify({
+      id: 'seed', tx: '2026-06-09T00:00:00.000Z', validFrom: '2026-06-09T00:00:00.000Z', validTo: null,
+      type: 'assert', state: 'Verified', content: 'planted', provenance: { source: 'user', sessionId: 's' },
+      supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+    }) + '\n');
+    const store = new MemoryStore(join(home, 'memory.jsonl'), {
+      sessionId: 's', home, now: () => '2026-06-09T00:00:00.000Z', genId: () => 'm_1',
+      project: { ledger: projLedger, root, home },
+    });
+    store.adopt();
+    const hit = store.recall('planted').items.find((i) => i.record.id === 'seed')!;
+    expect(hit.record.state).toBe('Fresh'); // NOT laundered into Verified
   });
 });
