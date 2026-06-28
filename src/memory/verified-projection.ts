@@ -33,13 +33,26 @@ export function buildVerifiedProjection(
   for (const [target, verifies] of byTarget) {
     const item = live.get(target);
     if (!item) continue; // target not live (superseded/erased) — nothing to elevate
+
+    // Phase 1 (order-independent, fail-closed): equal-gen / different-state conflict over ALL valid
+    // verifies, BEFORE R3 applicability filtering. Per-target gen is monotonic, so a duplicate gen is
+    // anomalous; two valid same-gen verifies disagreeing on state is a MAC conflict regardless of
+    // whether one is a non-applicable (digest-mismatched) promotion. Resolve to Fresh + compromised.
+    const stateByGen = new Map<number, MemoryRecord['state']>();
+    let conflict = false;
+    for (const v of verifies) {
+      const g = v.gen ?? 0;
+      const prev = stateByGen.get(g);
+      if (prev === undefined) stateByGen.set(g, v.state);
+      else if (prev !== v.state) { conflict = true; break; }
+    }
+    if (conflict) { compromised.add(target); continue; } // stays Fresh (already clamped in `live`)
+
+    // Phase 2: elevate to the highest-gen APPLICABLE grade (R3).
     const liveDigest = digestContent(item.content);
     const sorted = [...verifies].sort((a, b) => (a.gen ?? 0) - (b.gen ?? 0));
     let winner: MemoryRecord | null = null;
     for (const v of sorted) {
-      if (winner && (v.gen ?? 0) === (winner.gen ?? 0) && v.state !== winner.state) {
-        compromised.add(target); winner = null; break; // equal-gen conflict -> Fresh
-      }
       const applicable = !isPromotion(v.state) || v.targetDigest === liveDigest; // R3
       if (applicable) winner = v;
     }

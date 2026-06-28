@@ -56,6 +56,16 @@ describe('buildVerifiedProjection', () => {
     expect(out.live.get('a')!.state).toBe('Fresh');
     expect(out.compromised.has('a')).toBe(true);
   });
+  it('equal-gen conflict is order-independent even when one verify is a non-applicable promotion', () => {
+    const a = base({ id: 'a', content: 'fact' });
+    const promo = base({ id: 'vp', type: 'verify', supersedes: 'a', state: 'Verified', gen: 1, targetDigest: digestContent('STALE') });
+    const demo = base({ id: 'vd', type: 'verify', supersedes: 'a', state: 'Suspect', gen: 1, targetDigest: digestContent('fact') });
+    for (const order of [[a, promo, demo], [a, demo, promo]]) {
+      const out = buildVerifiedProjection(order, { verify: all, keyAvailable: true });
+      expect(out.live.get('a')!.state).toBe('Fresh');
+      expect(out.compromised.has('a')).toBe(true);
+    }
+  });
   it('keyAvailable=false: every verify ignored, items Fresh, flag set', () => {
     const recs = [
       base({ id: 'a', content: 'fact' }),
