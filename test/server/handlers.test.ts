@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -73,6 +73,24 @@ describe('tool handlers', () => {
     handleCommit(s, { content: 'the deploy uses the blue cluster', source: 'user' });
     const out = text(handleRecall(s, { query: 'deploy' }));
     expect(out).not.toContain('egress-shaped content flagged');
+  });
+
+  it('handleRecall surfaces the integrity-unavailable note when the master key is absent (M2, spec §8)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    let n = 0;
+    const s = new MemoryStore(join(home, 'm.jsonl'), {
+      sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`, home,
+    });
+    const a = s.commit({ content: 'db is postgres', source: 'user' });
+    s.confirm(a.id);                                  // mints the master + a signed Verified verify
+    rmSync(join(home, 'ledger-mac-master.key'));      // key now gone -> verifying replay is key-absent
+    const out = text(handleRecall(s, { query: 'postgres' }));
+    expect(out).toContain('integrity verification unavailable');
+    // and with the key present the note is absent (discriminating)
+    const s2 = store();
+    const b = s2.commit({ content: 'db is postgres', source: 'user' });
+    s2.confirm(b.id);
+    expect(text(handleRecall(s2, { query: 'postgres' }))).not.toContain('integrity verification unavailable');
   });
 });
 

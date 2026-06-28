@@ -10,9 +10,10 @@ import { type RecallOptions } from './projection.js';
 import { rankRecords } from './retrieval.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce } from './content-frame.js';
-import { isOwned, stampOwnership, scopeNonce, globalScopeNonce } from './ownership.js';
-import { ensureMaster, tryReadMaster, deriveSubkey, signVerify, verifyVerify, digestContent } from './ledger-mac.js';
+import { isOwned, stampOwnership } from './ownership.js';
+import { ensureMaster, signVerify, verifyVerify, digestContent } from './ledger-mac.js';
 import { buildVerifiedProjection, type VerifiedProjection } from './verified-projection.js';
+import { subkeyForScope, verifiedLive } from './verified-read.js';
 import { withFileLock } from './lock.js';
 
 export interface MemoryStoreOptions {
@@ -78,25 +79,25 @@ export class MemoryStore {
   /** Where the ledger-MAC master key + scope-nonce registry live (defaults next to the global ledger). */
   private homeDir(): string { return this.opts.home ?? dirname(this.global); }
 
+  /** Which scope (project root, or undefined for global) a ledger path belongs to. */
+  private scopeRootOf(ledger: LedgerPath): string | undefined {
+    const p = this.opts.project;
+    return (p && ledger === p.ledger) ? p.root : undefined;
+  }
+
   /** Subkey that signs/verifies records for one ledger, or null if no master exists yet OR the
    *  scope nonce is unresolvable (project not owned). Read path tolerates null (key-absent mode);
-   *  the write path mints the master first via ensureMaster. */
+   *  the write path mints the master first via ensureMaster. Delegates to the shared verified-read
+   *  helper so the hook and the store resolve subkeys identically (one source of truth). */
   private subkeyForLedger(ledger: LedgerPath): Buffer | null {
-    const master = tryReadMaster(this.homeDir());
-    if (!master) return null;
-    const p = this.opts.project;
-    const nonce = (p && ledger === p.ledger) ? scopeNonce(p.root, p.home) : globalScopeNonce(this.homeDir());
-    return nonce ? deriveSubkey(master, nonce) : null;
+    return subkeyForScope(this.homeDir(), this.scopeRootOf(ledger));
   }
 
   /** Verifying projection for one ledger (R1 clamp / R2 MAC gate / R3 content binding). When no
-   *  subkey is available every state is clamped to Fresh and keyAvailable is false. */
+   *  subkey is available every state is clamped to Fresh and keyAvailable is false. Delegates to the
+   *  shared verified-read helper that the SessionStart hook also uses (provable consistency). */
   private verifiedOf(ledger: LedgerPath): VerifiedProjection {
-    const subkey = this.subkeyForLedger(ledger);
-    return buildVerifiedProjection(parseLedger(ledger), {
-      verify: (r) => (subkey ? verifyVerify(r, subkey) : false),
-      keyAvailable: subkey !== null,
-    });
+    return verifiedLive(ledger, this.homeDir(), this.scopeRootOf(ledger));
   }
 
   commit(input: CommitInput): MemoryRecord {

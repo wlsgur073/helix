@@ -1,60 +1,13 @@
 // src/hooks/session-start.ts
-import { writeSync as writeSync2 } from "node:fs";
+import { writeSync as writeSync3 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join2, resolve as resolve2 } from "node:path";
-
-// src/memory/ledger.ts
-import { appendFileSync, readFileSync, mkdirSync, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
+import { join as join3, resolve as resolve2 } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // src/memory/firewall.ts
 var VERIFYING_SOURCES = /* @__PURE__ */ new Set(["user", "reality-check"]);
 function isVerifyingSource(s) {
   return VERIFYING_SOURCES.has(s);
-}
-
-// src/memory/projection.ts
-function buildProjection(records) {
-  const removed = /* @__PURE__ */ new Set();
-  const live = /* @__PURE__ */ new Map();
-  for (const r of records) {
-    if (r.type === "verify") {
-      const target = r.supersedes;
-      if (target && live.has(target)) {
-        const cur = live.get(target);
-        live.set(target, { ...cur, state: r.state });
-      }
-      continue;
-    }
-    if (r.type === "supersede" || r.type === "invalidate" || r.type === "erase") {
-      if (r.supersedes) removed.add(r.supersedes);
-      if (r.type === "supersede") live.set(r.id, r);
-      continue;
-    }
-    live.set(r.id, r);
-  }
-  for (const id of removed) live.delete(id);
-  return live;
-}
-
-// src/memory/ledger.ts
-function parseLedger(path) {
-  let text;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch (err) {
-    if (err.code === "ENOENT") return [];
-    throw err;
-  }
-  const out = [];
-  for (const line of text.split("\n")) {
-    if (line.trim() === "") continue;
-    try {
-      out.push(JSON.parse(line));
-    } catch {
-      continue;
-    }
-  }
-  return out;
 }
 
 // src/memory/state-machine.ts
@@ -161,11 +114,13 @@ function formatSessionStartContext(records, nonce, opts = {}) {
 }
 
 // src/memory/ownership.ts
-import { mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync } from "node:fs";
+import { randomBytes as randomBytes2 } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 function projectLedgerPath(projectRoot) {
   return join(projectRoot, ".helix", "memory.jsonl");
 }
+var GLOBAL_KEY = "@global";
 function registryPath(home) {
   return join(home, "projects.json");
 }
@@ -174,14 +129,14 @@ function ownerFile(projectRoot) {
 }
 function readRegistry(home) {
   try {
-    return JSON.parse(readFileSync2(registryPath(home), "utf8"));
+    return JSON.parse(readFileSync(registryPath(home), "utf8"));
   } catch {
     return {};
   }
 }
 function readOwner(projectRoot) {
   try {
-    return readFileSync2(ownerFile(projectRoot), "utf8").trim();
+    return readFileSync(ownerFile(projectRoot), "utf8").trim();
   } catch {
     return null;
   }
@@ -192,6 +147,193 @@ function isOwned(projectRoot, home) {
   const stamp = readOwner(projectRoot);
   return stamp !== null && stamp === entry.stamp;
 }
+function scopeNonce(projectRoot, home) {
+  const entry = readRegistry(home)[resolve(projectRoot)];
+  return entry?.macNonce ?? null;
+}
+function globalScopeNonce(home) {
+  const reg = readRegistry(home);
+  const existing = reg[GLOBAL_KEY]?.macNonce;
+  if (existing) return existing;
+  const macNonce = randomBytes2(16).toString("hex");
+  reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
+  mkdirSync(home, { recursive: true });
+  writeFileSync(registryPath(home), JSON.stringify(reg, null, 2));
+  return macNonce;
+}
+
+// src/memory/ledger.ts
+import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
+
+// src/memory/projection.ts
+function buildProjection(records) {
+  const removed = /* @__PURE__ */ new Set();
+  const live = /* @__PURE__ */ new Map();
+  for (const r of records) {
+    if (r.type === "verify") {
+      const target = r.supersedes;
+      if (target && live.has(target)) {
+        const cur = live.get(target);
+        live.set(target, { ...cur, state: r.state });
+      }
+      continue;
+    }
+    if (r.type === "supersede" || r.type === "invalidate" || r.type === "erase") {
+      if (r.supersedes) removed.add(r.supersedes);
+      if (r.type === "supersede") live.set(r.id, r);
+      continue;
+    }
+    live.set(r.id, r);
+  }
+  for (const id of removed) live.delete(id);
+  return live;
+}
+
+// src/memory/ledger.ts
+function parseLedger(path) {
+  let text;
+  try {
+    text = readFileSync2(path, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return [];
+    throw err;
+  }
+  const out = [];
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
+// src/memory/ledger-mac.ts
+import { createHash, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
+import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, renameSync as renameSync2, statSync, chmodSync, mkdirSync as mkdirSync3 } from "node:fs";
+import { join as join2 } from "node:path";
+var MAC_VERSION = 1;
+function digestContent(content) {
+  return createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex");
+}
+var LedgerMacError = class extends Error {
+};
+var MASTER_LEN = 32;
+function masterPath(home) {
+  return join2(home, "ledger-mac-master.key");
+}
+function tryReadMasterStrict(path) {
+  let buf;
+  try {
+    buf = readFileSync3(path);
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+  if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
+  try {
+    if ((statSync(path).mode & 63) !== 0) chmodSync(path, 384);
+  } catch {
+  }
+  return buf;
+}
+function tryReadMaster(home) {
+  return tryReadMasterStrict(masterPath(home));
+}
+function deriveSubkey(master, nonce) {
+  return Buffer.from(hkdfSync("sha256", master, Buffer.from(nonce, "utf8"), Buffer.from("helix-ledger-mac-v1", "utf8"), 32));
+}
+function keyIdOf(subkey) {
+  return createHash("sha256").update(Buffer.concat([Buffer.from("keyid"), subkey])).digest().subarray(0, 8).toString("hex");
+}
+var DOMAIN = Buffer.from("helix-ledger-mac");
+function field(buf) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(buf.length, 0);
+  return Buffer.concat([Buffer.from([1]), len, buf]);
+}
+var NULL_FIELD = Buffer.from([0, 0, 0, 0, 0]);
+var str = (s) => s === null ? NULL_FIELD : field(Buffer.from(s, "utf8"));
+var int = (n) => {
+  const b = Buffer.alloc(8);
+  b.writeBigUInt64BE(BigInt(n));
+  return field(b);
+};
+function macInput(r, keyId) {
+  return Buffer.concat([
+    DOMAIN,
+    Buffer.from([MAC_VERSION]),
+    field(Buffer.from(keyId, "hex")),
+    str(r.type),
+    str(r.id),
+    str(r.supersedes),
+    str(r.state),
+    int(r.gen ?? 0),
+    str(r.targetDigest ?? null)
+  ]);
+}
+function verifyVerify(record, subkey) {
+  if (record.macVersion !== MAC_VERSION || !record.mac || !record.keyId) return false;
+  if (record.keyId !== keyIdOf(subkey)) return false;
+  const want = createHmac("sha256", subkey).update(macInput(record, record.keyId)).digest();
+  let got;
+  try {
+    got = Buffer.from(record.mac, "hex");
+  } catch {
+    return false;
+  }
+  return got.length === want.length && timingSafeEqual(got, want);
+}
+
+// src/memory/verified-projection.ts
+var isPromotion = (s) => s === "Verified" || s === "Corroborated";
+function buildVerifiedProjection(records, opts) {
+  const nonVerify = records.filter((r) => r.type !== "verify");
+  const live = /* @__PURE__ */ new Map();
+  for (const [id, rec] of buildProjection(nonVerify)) live.set(id, { ...rec, state: "Fresh" });
+  const compromised = /* @__PURE__ */ new Set();
+  if (!opts.keyAvailable) return { live, compromised, keyAvailable: false };
+  const byTarget = /* @__PURE__ */ new Map();
+  for (const r of records) {
+    if (r.type !== "verify" || !r.supersedes || !opts.verify(r)) continue;
+    (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)).push(r);
+  }
+  for (const [target, verifies] of byTarget) {
+    const item = live.get(target);
+    if (!item) continue;
+    const liveDigest = digestContent(item.content);
+    const sorted = [...verifies].sort((a, b) => (a.gen ?? 0) - (b.gen ?? 0));
+    let winner = null;
+    for (const v of sorted) {
+      if (winner && (v.gen ?? 0) === (winner.gen ?? 0) && v.state !== winner.state) {
+        compromised.add(target);
+        winner = null;
+        break;
+      }
+      const applicable = !isPromotion(v.state) || v.targetDigest === liveDigest;
+      if (applicable) winner = v;
+    }
+    if (winner) live.set(target, { ...item, state: winner.state });
+  }
+  return { live, compromised, keyAvailable: true };
+}
+
+// src/memory/verified-read.ts
+function subkeyForScope(home, projectRoot) {
+  const master = tryReadMaster(home);
+  if (!master) return null;
+  const nonce = projectRoot ? scopeNonce(projectRoot, home) : globalScopeNonce(home);
+  return nonce ? deriveSubkey(master, nonce) : null;
+}
+function verifiedLive(ledger, home, projectRoot) {
+  const subkey = subkeyForScope(home, projectRoot);
+  return buildVerifiedProjection(parseLedger(ledger), {
+    verify: (r) => subkey ? verifyVerify(r, subkey) : false,
+    keyAvailable: subkey !== null
+  });
+}
 
 // src/hooks/session-start.ts
 async function readStdin() {
@@ -199,29 +341,40 @@ async function readStdin() {
   for await (const chunk of process.stdin) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf8");
 }
-try {
-  const home = process.env.HELIX_HOME ?? join2(homedir(), ".helix");
-  const globalLedger = process.env.HELIX_LEDGER ?? join2(home, "memory.jsonl");
+function gatherScopedRecords({ home, globalLedger, cwd }) {
   const scoped = [];
-  for (const r of buildProjection(parseLedger(globalLedger)).values()) scoped.push({ record: r, scope: "global" });
-  let cwd;
-  try {
-    const j = JSON.parse(await readStdin());
-    if (typeof j.cwd === "string") cwd = j.cwd;
-  } catch {
-  }
+  for (const r of verifiedLive(globalLedger, home).live.values()) scoped.push({ record: r, scope: "global" });
   if (cwd) {
     try {
       if (isOwned(cwd, home)) {
         const projLedger = projectLedgerPath(cwd);
         if (resolve2(projLedger) !== resolve2(globalLedger)) {
-          for (const r of buildProjection(parseLedger(projLedger)).values()) scoped.push({ record: r, scope: "project" });
+          for (const r of verifiedLive(projLedger, home, cwd).live.values()) scoped.push({ record: r, scope: "project" });
         }
       }
     } catch {
     }
   }
-  const text = formatSessionStartContext(scoped, newNonce());
-  if (text !== "") writeSync2(1, text + "\n");
-} catch {
+  return scoped;
 }
+async function main() {
+  try {
+    const home = process.env.HELIX_HOME ?? join3(homedir(), ".helix");
+    const globalLedger = process.env.HELIX_LEDGER ?? join3(home, "memory.jsonl");
+    let cwd;
+    try {
+      const j = JSON.parse(await readStdin());
+      if (typeof j.cwd === "string") cwd = j.cwd;
+    } catch {
+    }
+    const scoped = gatherScopedRecords({ home, globalLedger, cwd });
+    const text = formatSessionStartContext(scoped, newNonce());
+    if (text !== "") writeSync3(1, text + "\n");
+  } catch {
+  }
+}
+var invokedDirectly = process.argv[1] !== void 0 && resolve2(process.argv[1]) === resolve2(fileURLToPath(import.meta.url));
+if (invokedDirectly) void main();
+export {
+  gatherScopedRecords
+};

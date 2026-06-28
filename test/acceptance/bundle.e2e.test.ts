@@ -87,12 +87,16 @@ describe('helix bundle e2e (hermetic)', () => {
     const body = out.indexOf(`DATA[Fresh:global]| ${hostile}`);
     expect(body).toBeGreaterThan(header);
 
-    // (3) The real close uses the SAME nonce as the open and sits at the very end, after the
-    //     hostile body — the attacker cannot guess the nonce to emit an earlier matching close.
+    // (3) The real close uses the SAME nonce as the open and sits after the hostile body — the
+    //     attacker cannot guess the nonce to emit an earlier matching close.
     const close = `===HELIX ${nonce} END===`;
     const footer = out.indexOf(close);
     expect(footer).toBeGreaterThan(body);
-    expect(out.trimEnd().endsWith(close)).toBe(true);
+    // Nothing escapes the quarantine AFTER the close except trusted, out-of-band ASCII notes
+    // (parenthesised lines — reverify / egress / integrity-unavailable); never a DATA line or a
+    // forged marker. A fresh home has no master key, so the M2 integrity note legitimately trails.
+    const after = out.slice(footer + close.length).split('\n').filter((l) => l.trim() !== '');
+    expect(after.every((l) => l.startsWith('('))).toBe(true);
     // Exactly one real close for this nonce (no forged duplicate escaped the quarantine).
     expect(out.split(close).length - 1).toBe(1);
   }, 30_000);
