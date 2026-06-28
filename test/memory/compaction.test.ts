@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, existsSync, readdirSync, appendFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, appendFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { appendRecord, parseLedger, compactLedger } from '../../src/memory/ledger.js';
@@ -127,5 +127,31 @@ describe('compactLedger HMAC-aware (via store permanent-erase)', () => {
     // A's genuine signed verify MUST still be on disk — key-absent compaction must not destroy it.
     expect(after.some((r) => r.type === 'verify' && r.supersedes === a.id && !!r.mac)).toBe(true);
     expect(after.find((r) => r.id === c.id)).toBeUndefined(); // erase still took effect
+  });
+
+  it('preserves a genuine SIGNED demotion (Suspect) across compaction; the item stays Suspect on replay', () => {
+    const { store, ledger } = tmpStore();
+    const probeDir = join(tmpdir(), 'helix-demote-probe');
+    mkdirSync(probeDir, { recursive: true });
+    const probe = join(probeDir, 'probe.txt');
+    writeFileSync(probe, 'placeholder file without the marker');
+    try {
+      const a = store.commit({ content: `deploy note: ${probe} must contain ENABLED_FLAG`, source: 'agent-inference' });
+      const rc = store.recheck(a.id, { kind: 'file-contains', path: probe, pattern: 'ENABLED_FLAG' });
+      expect(rc.record?.type).toBe('verify');
+      expect(rc.record?.state).toBe('Suspect');
+      expect(rc.record?.mac).toBeTruthy();
+      expect(store.recall('deploy').items.find((i) => i.record.id === a.id)!.record.state).toBe('Suspect');
+      const c = store.commit({ content: 'gamma fact', source: 'user' });
+      store.erase(c.id, { permanent: true });
+      const items = store.recall('deploy').items;
+      expect(items.find((i) => i.record.id === a.id)!.record.state).toBe('Suspect');
+      const after = parseLedger(ledger);
+      expect(after.some((r) => r.type === 'verify' && r.supersedes === a.id && r.state === 'Suspect' && !!r.mac)).toBe(true);
+      expect(after.find((r) => r.type === 'verify' && r.content === '' && !r.mac && r.supersedes === null)).toBeUndefined();
+      expect(items.find((i) => i.record.id === c.id)).toBeUndefined();
+    } finally {
+      rmSync(probeDir, { recursive: true, force: true });
+    }
   });
 });
