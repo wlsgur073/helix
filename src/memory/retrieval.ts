@@ -87,6 +87,40 @@ export function coverageScore(qTerms: string[], docTokens: string[]): number {
   return matched / qTerms.length;
 }
 
+// EH-3: semantic recall via precomputed synonym expansion.
+export interface ExpansionEntry { token: string; w: number }
+export type Expansion = ReadonlyMap<string, ReadonlyArray<ExpansionEntry>>;
+export interface SemCoverage { score: number; lexicalMatched: number; semanticWeight: number }
+
+/**
+ * Generalized coverage: a query term is covered lexically (exact OR prefix, weight 1.0) or, failing
+ * that, by its best PRESENT neighbor (weight w<1 from the precomputed expansion table, scaled by
+ * `discount`). The neighbor match ALSO prefix-expands (neighbor `delete` matches record token
+ * `deletes`) — the build-time table stores canonical synonyms while records carry inflections.
+ * Returns the breakdown so the ranker can gate semantic-only rescues. With no `expansion`,
+ * semanticWeight is always 0 => score === coverageScore (exact back-compat).
+ */
+export function semanticCoverage(
+  qTerms: string[], docTokens: string[], expansion?: Expansion, discount = 1,
+): SemCoverage {
+  if (qTerms.length === 0) return { score: 0, lexicalMatched: 0, semanticWeight: 0 };
+  const docSet = new Set(docTokens);
+  const present = (tok: string): boolean =>
+    docSet.has(tok) || (tok.length >= 3 && docTokens.some((d) => d.startsWith(tok)));
+  let lexicalMatched = 0;
+  let semanticWeight = 0;
+  for (const t of qTerms) {
+    if (present(t)) { lexicalMatched += 1; continue; }
+    const neigh = expansion?.get(t);
+    if (neigh) {
+      let best = 0;
+      for (const n of neigh) if (n.w > best && present(n.token)) best = n.w;
+      if (best > 0) semanticWeight += best * discount;
+    }
+  }
+  return { score: (lexicalMatched + semanticWeight) / qTerms.length, lexicalMatched, semanticWeight };
+}
+
 // Prefix-anchored (not full proximity): reordered/co-occurring terms are caught by coverageScore, not here.
 /**
  * Contiguous-match signal in [0,1] on normalized raw text (sidesteps token/bigram overlap).
@@ -167,7 +201,12 @@ const TRUST_PENALTY: Record<MemoryState, number> = { Verified: 0, Corroborated: 
 // A nudge, not a barrier: stronger relevance can still win (intended — recall must stay useful).
 const NONAUTH_PENALTY = 0.03;
 
-export interface RankOptions { maxItems?: number }
+export interface RankOptions {
+  maxItems?: number;
+  expansion?: Expansion;   // EH-3 synonym table (absent => pure lexical, byte-identical to before)
+  semDiscount?: number;    // scales neighbor weights; default 1 (calibration output)
+  semGate?: number;        // min semanticWeight for a semantic-ONLY record to survive; default 0
+}
 
 /** Rank live records for a query: relevance (phrase+coverage+bm25) minus an additive trust margin. */
 export function rankRecords(records: MemoryRecord[], query: string, opts: RankOptions = {}): MemoryRecord[] {
@@ -184,16 +223,21 @@ export function rankRecords(records: MemoryRecord[], query: string, opts: RankOp
   const min = Math.min(...vals);
   const bm25norm = (id: string): number => (max === min ? 0 : (rawBm.get(id)! - min) / (max - min));
 
+  const semGate = opts.semGate ?? 0;
   const scored = docs
     .map((d) => {
-      const relevance =
-        W_PHRASE * phraseScore(query, d.rec.content) +
-        W_COVERAGE * coverageScore(qMeaning, d.tokens) +
-        W_BM25 * bm25norm(d.rec.id);
+      const cov = semanticCoverage(qMeaning, d.tokens, opts.expansion, opts.semDiscount ?? 1);
+      const phrase = phraseScore(query, d.rec.content);
+      const bm = bm25norm(d.rec.id);
+      const relevance = W_PHRASE * phrase + W_COVERAGE * cov.score + W_BM25 * bm;
       const trust = TRUST_PENALTY[d.rec.state] + (isVerifyingSource(d.rec.provenance.source) ? 0 : NONAUTH_PENALTY);
-      return { rec: d.rec, relevance, final: relevance - trust };
+      // A "semantic-only" record has NO lexical signal (no exact/prefix coverage, no phrase, no bm25)
+      // and is rescued purely by neighbors -> it must clear the gate to avoid injecting noise.
+      const semanticOnly = cov.lexicalMatched === 0 && phrase === 0 && bm === 0 && cov.semanticWeight > 0;
+      const keep = relevance > 0 && (!semanticOnly || cov.semanticWeight >= semGate);
+      return { rec: d.rec, relevance, final: relevance - trust, keep };
     })
-    .filter((s) => s.relevance > 0);
+    .filter((s) => s.keep && s.relevance > 0);
 
   scored.sort((a, b) => b.final - a.final || b.rec.tx.localeCompare(a.rec.tx));
   return scored.slice(0, opts.maxItems ?? 20).map((s) => s.rec);
