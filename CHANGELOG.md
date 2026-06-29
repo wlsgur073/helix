@@ -33,6 +33,11 @@ All notable changes to Helix are documented here. This project follows
 - Secret detection gains a `heuristic` confidence tier: the broad keyword-assignment matcher
   (`pass:`/`secret:`/`api_key:` + value) is no longer override-proof at the dual-verify egress
   guard — it still redacts on the write path, but its egress block is now policy-overridable.
+- Secret detection: the `entropy` catch-all no longer **egress-blocks** a pure-hex literal (git SHA,
+  content digest, hex keyId) at the dual-verify guard — it still redacts on the write path, but a bare
+  hex token in security-design prose no longer wedges `helix_dual_verify`. A credential keyword in the
+  same statement (e.g. `secret <hex>`) keeps the block, and rich-alphabet (base62/64) tokens are
+  unaffected. Release the residual via `dualVerify.egressPolicy.secretEntropy: 'allow'` as before.
 - **Breaking config replacement:** `dualVerify.memoryEgress` (single `block`/`allow`) is replaced
   by `dualVerify.egressPolicy`, a per-leg map (`memoryEcho` / `piiHigh` / `piiBulk` /
   `secretHeuristic` / `secretEntropy`), each defaulting to `block`. Provider-format secrets stay

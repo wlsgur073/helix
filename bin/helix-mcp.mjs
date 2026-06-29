@@ -13456,6 +13456,10 @@ function entropy(s) {
 function isHighEntropyToken(tok) {
   return tok.length >= 24 && /[A-Za-z]/.test(tok) && /[0-9]/.test(tok) && entropy(tok) >= 3.5;
 }
+function isHexCore(t) {
+  const core = t.replace(/^[`'"([{<*_~]+/, "").replace(/[`'"’)\]}>*_~.,;:!?]+$/, "");
+  return /^[0-9a-fA-F]{24,}$/.test(core);
+}
 function mergeSpans(spans) {
   const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
   const out = [];
@@ -13485,7 +13489,7 @@ function findSecrets(content) {
   const tok = /\S+/g;
   for (let m = tok.exec(content); m !== null; m = tok.exec(content)) {
     if (isHighEntropyToken(m[0])) {
-      spans.push({ start: m.index, end: m.index + m[0].length, kind: "high-entropy", tier: "entropy" });
+      spans.push({ start: m.index, end: m.index + m[0].length, kind: "high-entropy", tier: "entropy", entropyHex: isHexCore(m[0]) });
     }
   }
   return mergeSpans(spans);
@@ -22327,13 +22331,27 @@ function detectEcho(texts, ledger, opts = {}) {
   return { memoryIds: ids };
 }
 var BULK_PII_N = 3;
+var CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[_-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token)/i;
+var CRED_WINDOW = 24;
+var KW_PAD = 16;
+function nearCredential(text, start, end) {
+  let pre = text.slice(Math.max(0, start - CRED_WINDOW - KW_PAD), start);
+  let post = text.slice(end, Math.min(text.length, end + CRED_WINDOW + KW_PAD));
+  const b = Math.max(pre.lastIndexOf("\n"), pre.lastIndexOf("."), pre.lastIndexOf(";"));
+  if (b >= 0) pre = pre.slice(b + 1);
+  const m = post.search(/[\n.;]/);
+  if (m >= 0) post = post.slice(0, m);
+  return CREDENTIAL_CONTEXT.test(pre) || CREDENTIAL_CONTEXT.test(post);
+}
 function classifyEgress(input) {
   const text = input.texts.join("\n");
   const secretSpans = findSecrets(text);
   const secretHit = secretSpans.length > 0;
   const secretNamed = secretSpans.some((s) => s.tier === "named");
   const secretHeuristic = secretSpans.some((s) => s.tier === "heuristic");
-  const secretEntropy = secretSpans.some((s) => s.tier === "entropy");
+  const secretEntropy = secretSpans.some(
+    (s) => s.tier === "entropy" && (!s.entropyHex || nearCredential(text, s.start, s.end))
+  );
   const piiHits = detectPII(text);
   const piiKinds = [...new Set(piiHits.map((h) => h.kind))];
   const highPii = piiHits.some((h) => h.severity === "high");
@@ -22373,7 +22391,13 @@ function classifyEgress(input) {
   if (piiHits.length > 0) {
     return { decision: "pass", legs, piiKinds, echoMemoryIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)` };
   }
-  return { decision: "pass", legs, piiKinds, echoMemoryIds, reason: "pass: no egress legs" };
+  return {
+    decision: "pass",
+    legs,
+    piiKinds,
+    echoMemoryIds,
+    reason: secretHit ? "pass: hex-literal entropy exempt (audit-only)" : "pass: no egress legs"
+  };
 }
 var EGRESS_VERB = /\b(send|post|upload|email|exfiltrate|transmit|leak|forward|fetch)\b/;
 var SENSITIVE_REF = /(contents of|read\s+~?\/|password|passwords|secret|api[ _-]?key|\b(?:private|ssh|access|signing|encryption)[ _-]?keys?\b|all your\b|credentials?)/;
