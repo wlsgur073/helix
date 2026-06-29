@@ -26,6 +26,9 @@ import {
   rankRecords, coverageScore, phraseScore, tokenize, meaningfulTokens,
 } from '../../src/memory/retrieval.js';
 import type { MemoryRecord } from '../../src/types.js';
+import { loadExpansion, EXP_THETA, EXP_K, SEM_DISCOUNT, SEM_GATE } from '../../src/memory/expansion.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 /** Verbatim record from the dogfood ledger (all Fresh, source=user, real tx for faithful tie-break). */
 function ledgerRec(id: string, content: string, tx: string): MemoryRecord {
@@ -130,5 +133,36 @@ describe('EH-3 watch: recall returns a subset of the oracle', () => {
 
   it('sanity: the frozen ledger is the full 7-record oracle', () => {
     expect(ALL_IDS).toHaveLength(7);
+  });
+});
+
+// EH-3 semantic recall (the new feature) layered on the SAME dogfood ledger. The lexical
+// characterization above is unchanged (it passes no expansion); this block exercises the
+// committed neighbor table. Per this file's contract, any change here is a DELIBERATE scorer change.
+const EXP = loadExpansion(
+  readFileSync(fileURLToPath(new URL('../../data/semantic-neighbors.json', import.meta.url)), 'utf8'),
+  EXP_THETA, EXP_K);
+const semOpts = { expansion: EXP, semDiscount: SEM_DISCOUNT, semGate: SEM_GATE };
+
+describe('EH-3 with semantic expansion (the new feature)', () => {
+  it('MONOTONIC: never drops a record the lexical engine returned (semantic only ADDS recall)', () => {
+    // 7-record ledger < maxItems, so no top-k truncation can displace a lexical hit.
+    const lex = new Set(rankRecords(LEDGER, QUERY_RM_RUN).map((r) => r.id));
+    const sem = new Set(rankRecords(LEDGER, QUERY_RM_RUN, semOpts).map((r) => r.id));
+    for (const id of lex) expect(sem.has(id), `dropped lexical hit ${id}`).toBe(true);
+  });
+  it('still satisfies the promote-trigger invariant (rm task needs verb-first + the throw contract)', () => {
+    const ids = rankRecords(LEDGER, QUERY_RM_RUN, semOpts).map((r) => r.id);
+    expect(ids).toEqual(expect.arrayContaining(['mutator', 'rm', 'verbfirst']));
+  });
+  it('is deterministic: identical inputs -> identical ranking (exact replay)', () => {
+    const a = rankRecords(LEDGER, QUERY_RM_RUN, semOpts).map((r) => r.id);
+    const b = rankRecords(LEDGER, QUERY_RM_RUN, semOpts).map((r) => r.id);
+    expect(a).toEqual(b);
+  });
+  it('FALLBACK: no expansion => byte-identical ranking to the lexical engine', () => {
+    const withUndef = rankRecords(LEDGER, QUERY_RM_RUN, { expansion: undefined }).map((r) => r.id);
+    const plain = rankRecords(LEDGER, QUERY_RM_RUN).map((r) => r.id);
+    expect(withUndef).toEqual(plain);
   });
 });
