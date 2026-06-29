@@ -17,6 +17,10 @@ export interface SecretSpan {
    *  'entropy' = the catch-all entropy net (low confidence, e.g. a git SHA — egress-gated but
    *  policy-overridable). */
   tier: SecretTier;
+  /** EH-4: set on entropy-tier spans only — true iff the token's wrapper-punctuation-stripped core
+   *  is pure hex >= 24 (git SHA / digest / hex id). Read ONLY by the egress gate; never affects
+   *  write-path redaction. */
+  entropyHex?: boolean;
 }
 
 // Named patterns run before the entropy net so redactions carry a precise kind
@@ -61,6 +65,15 @@ function isHighEntropyToken(tok: string): boolean {
   return tok.length >= 24 && /[A-Za-z]/.test(tok) && /[0-9]/.test(tok) && entropy(tok) >= 3.5;
 }
 
+/** EH-4: true iff T's wrapper-punctuation-stripped core is pure hex >= 24 chars (git SHA / digest /
+ *  hex id shape). Strips ONLY a defined wrapper-punctuation set — NEVER letters or digits — so a
+ *  rich-alphabet token whose non-hex chars sit only at the ends (e.g. `g<40 hex>z`) is NOT hex-shaped,
+ *  and every `label=<hex>` / `0x<hex>` form keeps an interior non-hex char and is NOT hex-shaped. */
+export function isHexCore(t: string): boolean {
+  const core = t.replace(/^[`'"([{<*_~]+/, '').replace(/[`'"’)\]}>*_~.,;:!?]+$/, '');
+  return /^[0-9a-fA-F]{24,}$/.test(core);
+}
+
 /** Merge overlapping spans into non-overlapping ones (required for safe in-place redaction).
  *  A merged span takes the highest-rank tier among its overlapping members (named > heuristic >
  *  entropy via TIER_RANK), and the kind of that highest-rank member. */
@@ -96,7 +109,7 @@ export function findSecrets(content: string): SecretSpan[] {
   const tok = /\S+/g;
   for (let m = tok.exec(content); m !== null; m = tok.exec(content)) {
     if (isHighEntropyToken(m[0])) {
-      spans.push({ start: m.index, end: m.index + m[0].length, kind: 'high-entropy', tier: 'entropy' });
+      spans.push({ start: m.index, end: m.index + m[0].length, kind: 'high-entropy', tier: 'entropy', entropyHex: isHexCore(m[0]) });
     }
   }
   return mergeSpans(spans);

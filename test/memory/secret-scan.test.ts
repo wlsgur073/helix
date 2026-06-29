@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectSecret, findSecrets, redactSecrets } from '../../src/memory/secret-scan.js';
+import { detectSecret, findSecrets, redactSecrets, isHexCore } from '../../src/memory/secret-scan.js';
 
 describe('secret scanner', () => {
   it('flags PEM private key blocks', () => {
@@ -78,5 +78,57 @@ describe('secret scanner', () => {
   it('redaction still covers a heuristic-tier span (recall parity)', () => {
     const r = redactSecrets('db_password=Sup3rS3cretValue!', findSecrets('db_password=Sup3rS3cretValue!'));
     expect(r.content).not.toContain('Sup3rS3cretValue');
+  });
+});
+
+describe('EH-4: isHexCore (hex-literal shape for egress exemption)', () => {
+  const SHA = 'da39a3ee5e6b4b0d3255bfef95601890afd80709';                          // 40 hex
+  const D256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'; // 64 hex
+
+  it('is TRUE for clean and punctuation-wrapped pure-hex >= 24', () => {
+    expect(isHexCore(SHA)).toBe(true);
+    expect(isHexCore(SHA + '.')).toBe(true);
+    expect(isHexCore('`' + SHA + '`')).toBe(true);
+    expect(isHexCore('(' + SHA + '),')).toBe(true);
+    expect(isHexCore('[' + SHA + ']')).toBe(true);
+    expect(isHexCore('**' + SHA + '**')).toBe(true);
+    expect(isHexCore(D256)).toBe(true);
+  });
+
+  it('is FALSE for letter-wrapped hex (closes the v1 false-exempt)', () => {
+    expect(isHexCore('g' + SHA + 'z')).toBe(false);
+    expect(isHexCore('Z3f8a1c9e7b2d4068f5a19c3e0d741b6eQ')).toBe(false);
+  });
+
+  it('is FALSE for label=/label: forms and the 0x prefix (interior non-hex)', () => {
+    expect(isHexCore('secret=' + SHA)).toBe(false);
+    expect(isHexCore('x=' + SHA)).toBe(false);
+    expect(isHexCore('z:' + SHA)).toBe(false);
+    expect(isHexCore('0x' + SHA)).toBe(false);
+  });
+
+  it('is FALSE for a rich-alphabet token and a sub-24 hex core', () => {
+    expect(isHexCore('n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf')).toBe(false);
+    expect(isHexCore('`deadbeefdeadbeefdeadbe`')).toBe(false); // 22-hex core < 24
+  });
+});
+
+describe('EH-4: findSecrets tags entropy spans with entropyHex', () => {
+  it('sets entropyHex=true for a pure-hex entropy token', () => {
+    const e = findSecrets('commit da39a3ee5e6b4b0d3255bfef95601890afd80709').find((s) => s.tier === 'entropy');
+    expect(e).toBeDefined();
+    expect(e!.entropyHex).toBe(true);
+  });
+
+  it('sets entropyHex=false for a rich-alphabet entropy token', () => {
+    const e = findSecrets('token n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf').find((s) => s.tier === 'entropy');
+    expect(e).toBeDefined();
+    expect(e!.entropyHex).toBe(false);
+  });
+
+  it('write-path: a pure-hex SHA still redacts to [redacted:high-entropy] (unchanged)', () => {
+    const content = 'deployed commit da39a3ee5e6b4b0d3255bfef95601890afd80709 to prod';
+    const r = redactSecrets(content, findSecrets(content));
+    expect(r.content).toBe('deployed commit [redacted:high-entropy] to prod');
   });
 });
