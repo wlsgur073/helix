@@ -13168,18 +13168,25 @@ function isStopword(w) {
 function meaningfulTokens(tokens) {
   return tokens.filter((t) => !isStopword(t));
 }
-function coverageScore(qTerms, docTokens) {
-  if (qTerms.length === 0) return 0;
+function semanticCoverage(qTerms, docTokens, expansion, discount = 1) {
+  if (qTerms.length === 0) return { score: 0, lexicalMatched: 0, semanticWeight: 0 };
   const docSet = new Set(docTokens);
-  let matched = 0;
+  const present = (tok) => docSet.has(tok) || tok.length >= 3 && docTokens.some((d) => d.startsWith(tok));
+  let lexicalMatched = 0;
+  let semanticWeight = 0;
   for (const t of qTerms) {
-    if (docSet.has(t)) {
-      matched += 1;
+    if (present(t)) {
+      lexicalMatched += 1;
       continue;
     }
-    if (t.length >= 3 && docTokens.some((d) => d.startsWith(t))) matched += 1;
+    const neigh = expansion?.get(t);
+    if (neigh) {
+      let best = 0;
+      for (const n of neigh) if (n.w > best && present(n.token)) best = n.w;
+      if (best > 0) semanticWeight += best * discount;
+    }
   }
-  return matched / qTerms.length;
+  return { score: (lexicalMatched + semanticWeight) / qTerms.length, lexicalMatched, semanticWeight };
 }
 function phraseScore(query, docContent) {
   const d = normalizeText(docContent);
@@ -13247,11 +13254,17 @@ function rankRecords(records, query, opts = {}) {
   const max = Math.max(...vals);
   const min = Math.min(...vals);
   const bm25norm = (id) => max === min ? 0 : (rawBm.get(id) - min) / (max - min);
+  const semGate = opts.semGate ?? 0;
   const scored = docs.map((d) => {
-    const relevance = W_PHRASE * phraseScore(query, d.rec.content) + W_COVERAGE * coverageScore(qMeaning, d.tokens) + W_BM25 * bm25norm(d.rec.id);
+    const cov = semanticCoverage(qMeaning, d.tokens, opts.expansion, opts.semDiscount ?? 1);
+    const phrase = phraseScore(query, d.rec.content);
+    const bm = bm25norm(d.rec.id);
+    const relevance = W_PHRASE * phrase + W_COVERAGE * cov.score + W_BM25 * bm;
     const trust = TRUST_PENALTY[d.rec.state] + (isVerifyingSource(d.rec.provenance.source) ? 0 : NONAUTH_PENALTY);
-    return { rec: d.rec, relevance, final: relevance - trust };
-  }).filter((s) => s.relevance > 0);
+    const semanticOnly = cov.lexicalMatched === 0 && phrase === 0 && bm === 0 && cov.semanticWeight > 0;
+    const keep = relevance > 0 && (!semanticOnly || cov.semanticWeight >= semGate);
+    return { rec: d.rec, relevance, final: relevance - trust, keep };
+  }).filter((s) => s.keep && s.relevance > 0);
   scored.sort((a, b) => b.final - a.final || b.rec.tx.localeCompare(a.rec.tx));
   return scored.slice(0, opts.maxItems ?? 20).map((s) => s.rec);
 }
@@ -13536,6 +13549,56 @@ function checkBinding(content, check2) {
   return { bound: true };
 }
 
+// src/memory/expansion.ts
+import { readFileSync as readFileSync4 } from "node:fs";
+import { fileURLToPath } from "node:url";
+var EXP_THETA = 0.52;
+var EXP_K = 8;
+var SEM_DISCOUNT = 0.8;
+var SEM_GATE = 0.4;
+function loadExpansion(json, theta, k) {
+  const raw = JSON.parse(json);
+  const map = /* @__PURE__ */ new Map();
+  for (const [token, arr] of Object.entries(raw.neighbors)) {
+    const kept = [];
+    for (const [nb, wm] of arr) {
+      if (kept.length >= k) break;
+      const w = wm / 1e3;
+      if (w >= theta) kept.push({ token: nb, w });
+    }
+    if (kept.length) map.set(token, kept);
+  }
+  return map;
+}
+var cached2 = null;
+function defaultExpansion() {
+  if (cached2 !== null) return cached2 ?? void 0;
+  const candidates = [
+    new URL("../../data/semantic-neighbors.json", import.meta.url),
+    // src/memory -> repo/data (source/tests)
+    new URL("../data/semantic-neighbors.json", import.meta.url)
+    // bin/helix-mcp.mjs -> repo/data (bundle)
+  ];
+  let txt;
+  for (const u of candidates) {
+    try {
+      txt = readFileSync4(fileURLToPath(u), "utf8");
+      break;
+    } catch {
+    }
+  }
+  if (txt === void 0) {
+    cached2 = void 0;
+    return void 0;
+  }
+  try {
+    cached2 = loadExpansion(txt, EXP_THETA, EXP_K);
+  } catch {
+    cached2 = void 0;
+  }
+  return cached2 ?? void 0;
+}
+
 // src/memory/state-machine.ts
 var LOW_BLAST = /* @__PURE__ */ new Set(["read-only", "local-reversible"]);
 function requiresReverifyBeforeUse(item) {
@@ -13588,7 +13651,7 @@ function frameAsData(scoped, nonce) {
 
 // src/memory/ownership.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
-import { mkdirSync as mkdirSync3, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync5, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join2, resolve } from "node:path";
 var GLOBAL_KEY = "@global";
 function registryPath(home2) {
@@ -13599,14 +13662,14 @@ function ownerFile(projectRoot2) {
 }
 function readRegistry(home2) {
   try {
-    return JSON.parse(readFileSync4(registryPath(home2), "utf8"));
+    return JSON.parse(readFileSync5(registryPath(home2), "utf8"));
   } catch {
     return {};
   }
 }
 function readOwner(projectRoot2) {
   try {
-    return readFileSync4(ownerFile(projectRoot2), "utf8").trim();
+    return readFileSync5(ownerFile(projectRoot2), "utf8").trim();
   } catch {
     return null;
   }
@@ -13646,7 +13709,7 @@ function globalScopeNonce(home2) {
 
 // src/memory/ledger-mac.ts
 import { createHash, createHmac, hkdfSync, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync5, renameSync as renameSync2, statSync as statSync3, chmodSync, mkdirSync as mkdirSync4 } from "node:fs";
+import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync6, renameSync as renameSync2, statSync as statSync3, chmodSync, mkdirSync as mkdirSync4 } from "node:fs";
 import { dirname as dirname2, join as join3 } from "node:path";
 var MAC_VERSION = 1;
 function digestContent(content) {
@@ -13697,7 +13760,7 @@ function ensureMaster(home2) {
 function tryReadMasterStrict(path) {
   let buf;
   try {
-    buf = readFileSync5(path);
+    buf = readFileSync6(path);
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -13957,7 +14020,12 @@ var MemoryStore = class {
   recall(query, opts = {}) {
     const { records: scoped, available } = this.scopedVerified();
     const byId = new Map(scoped.map((s) => [s.record.id, s]));
-    const hits = rankRecords(scoped.map((s) => s.record), query, opts);
+    const expansion = this.opts.expansion ?? defaultExpansion();
+    const hits = rankRecords(
+      scoped.map((s) => s.record),
+      query,
+      { ...opts, expansion, semDiscount: SEM_DISCOUNT, semGate: SEM_GATE }
+    );
     const items = hits.map((record2) => ({
       record: record2,
       scope: byId.get(record2.id)?.scope ?? "global",
@@ -22468,10 +22536,10 @@ function appendAudit(path, event) {
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync7 } from "node:fs";
+import { readFileSync as readFileSync8 } from "node:fs";
 
 // src/codex-log.ts
-import { appendFileSync as appendFileSync3, chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync6, readFileSync as readFileSync6, writeFileSync as writeFileSync3 } from "node:fs";
+import { appendFileSync as appendFileSync3, chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync6, readFileSync as readFileSync7, writeFileSync as writeFileSync3 } from "node:fs";
 import { dirname as dirname5 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
@@ -22485,7 +22553,7 @@ function appendCodexLog(path, entry) {
       } catch {
       }
     }
-    const lines = readFileSync6(path, "utf8").split("\n").filter((l) => l !== "");
+    const lines = readFileSync7(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
       writeFileSync3(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
@@ -22567,7 +22635,7 @@ function handleConfirm(store2, args, deps) {
 }
 function codexLogCount(path) {
   try {
-    return readFileSync7(path, "utf8").split("\n").filter((l) => l !== "").length;
+    return readFileSync8(path, "utf8").split("\n").filter((l) => l !== "").length;
   } catch {
     return 0;
   }
@@ -22661,7 +22729,7 @@ async function handleDualVerify(args, deps) {
 }
 
 // src/config.ts
-import { readFileSync as readFileSync8 } from "node:fs";
+import { readFileSync as readFileSync9 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join4 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
@@ -22691,7 +22759,7 @@ var DEFAULT_CONFIG = {
 };
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync8(path, "utf8"));
+    return JSON.parse(readFileSync9(path, "utf8"));
   } catch {
     return null;
   }
@@ -22748,7 +22816,7 @@ function loadConfig(opts = {}) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync5, mkdirSync as mkdirSync7, mkdtempSync, readFileSync as readFileSync9, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync5, mkdirSync as mkdirSync7, mkdtempSync, readFileSync as readFileSync10, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join6, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
@@ -22966,7 +23034,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
       }
       let answer = "";
       try {
-        answer = readFileSync9(outFile, "utf8").trim();
+        answer = readFileSync10(outFile, "utf8").trim();
       } catch {
       }
       return answer ? { ok: true, answer } : { ok: false, error: "codex produced no output" };

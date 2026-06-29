@@ -7,7 +7,8 @@ import { findSecrets, redactSecrets } from './secret-scan.js';
 import { canCommit, isVerifyingSource, resolveTransition, type TransitionResult, type VerifyOutcome } from './firewall.js';
 import { runRealityCheck, checkBinding, type RealityCheck } from './reality-check.js';
 import { type RecallOptions } from './projection.js';
-import { rankRecords } from './retrieval.js';
+import { rankRecords, type Expansion } from './retrieval.js';
+import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce } from './content-frame.js';
 import { isOwned, stampOwnership } from './ownership.js';
@@ -27,6 +28,8 @@ export interface MemoryStoreOptions {
   genStamp?: () => string;
   /** Where the ledger-MAC master key + scope-nonce registry live. Defaults to dirname(global). */
   home?: string;
+  /** EH-3: precomputed synonym expansion. Defaults to the committed asset; tests may inject/disable. */
+  expansion?: Expansion;
 }
 
 export interface CommitInput {
@@ -201,7 +204,9 @@ export class MemoryStore {
   recall(query: string, opts: RecallOptions = {}): RecallResult {
     const { records: scoped, available } = this.scopedVerified();
     const byId = new Map(scoped.map((s) => [s.record.id, s]));
-    const hits = rankRecords(scoped.map((s) => s.record), query, opts);
+    const expansion = this.opts.expansion ?? defaultExpansion();
+    const hits = rankRecords(scoped.map((s) => s.record), query,
+      { ...opts, expansion, semDiscount: SEM_DISCOUNT, semGate: SEM_GATE });
     const items: RecalledItem[] = hits.map((record) => ({
       record,
       scope: byId.get(record.id)?.scope ?? 'global',

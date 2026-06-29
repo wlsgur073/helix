@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { loadExpansion, defaultExpansion } from '../../src/memory/expansion.js';
 
 const ASSET = fileURLToPath(new URL('../../data/semantic-neighbors.json', import.meta.url));
 
@@ -31,5 +32,26 @@ describe('semantic-neighbors asset', () => {
     for (const arr of Object.values<[string, number][]>(j.neighbors)) {
       for (const [, wm] of arr) expect(Number.isInteger(wm)).toBe(true);
     }
+  });
+});
+
+describe('loadExpansion', () => {
+  const blob = JSON.stringify({ version: 1, source: 'potion-base-8M', floor: 0.45, k: 8,
+    neighbors: { remove: [['delete', 657], ['erase', 540], ['weak', 300]] } });
+  it('parses, divides weightMilli by 1000, filters by theta, caps k', () => {
+    const exp = loadExpansion(blob, 0.55, 1); // theta=0.55 drops erase(.54)+weak(.30); k=1
+    expect([...exp.get('remove')!]).toEqual([{ token: 'delete', w: 0.657 }]);
+  });
+  it('theta below an entry keeps it', () => {
+    const exp = loadExpansion(blob, 0.50, 8);
+    expect(exp.get('remove')!.map((e) => e.token)).toEqual(['delete', 'erase']);
+  });
+});
+
+describe('defaultExpansion', () => {
+  it('resolves + loads the committed data/ asset', () => {
+    const exp = defaultExpansion();
+    expect(exp).toBeDefined();
+    expect(exp!.get('remove')?.some((e) => e.token === 'delete')).toBe(true);
   });
 });
