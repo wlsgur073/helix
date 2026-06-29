@@ -89,6 +89,25 @@ export interface EgressVerdict {
 /** Bulk low-severity PII threshold: >= N distinct low-sev hits is exfiltration-shaped. */
 const BULK_PII_N = 3;
 
+// EH-4: credential-context guard for the egress entropy hex-exemption. A pure-hex entropy token
+// (git SHA / digest) is normally RELEASED on egress, UNLESS a credential keyword sits in the SAME
+// statement within ~CRED_WINDOW chars — then it keeps blocking (bias toward protection). Locked
+// tunables (spec §6): boundary set \n . ; ; CRED_WINDOW 24 ; KW_PAD 16 ; keyword set below.
+const CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[_-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token)/i;
+const CRED_WINDOW = 24; // proximity cap (chars)
+const KW_PAD = 16;      // longest guard keyword; pad the raw slice so an edge keyword is not truncated
+/** A credential keyword within ~CRED_WINDOW chars of [start,end), restricted to the same statement
+ *  (window clipped at \n / . / ; — comma is intentionally NOT a boundary). */
+function nearCredential(text: string, start: number, end: number): boolean {
+  let pre = text.slice(Math.max(0, start - CRED_WINDOW - KW_PAD), start);
+  let post = text.slice(end, Math.min(text.length, end + CRED_WINDOW + KW_PAD));
+  const b = Math.max(pre.lastIndexOf('\n'), pre.lastIndexOf('.'), pre.lastIndexOf(';'));
+  if (b >= 0) pre = pre.slice(b + 1);
+  const m = post.search(/[\n.;]/);
+  if (m >= 0) post = post.slice(0, m);
+  return CREDENTIAL_CONTEXT.test(pre) || CREDENTIAL_CONTEXT.test(post);
+}
+
 /**
  * S1 egress classifier. Runs secret -> PII -> echo, then applies the §6 decision table in
  * precedence order (first match wins the decision; all detected legs/kinds/ids are still recorded
@@ -108,7 +127,11 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   // provider+heuristic span merges to tier='named' (secret-scan.mergeSpans), so secretNamed wins it.
   const secretNamed = secretSpans.some((s) => s.tier === 'named');
   const secretHeuristic = secretSpans.some((s) => s.tier === 'heuristic');
-  const secretEntropy = secretSpans.some((s) => s.tier === 'entropy');
+  // EH-4: a hex-shaped entropy span (entropyHex) is released on egress UNLESS a credential keyword
+  // is in the same statement. Rich-alphabet entropy spans (!entropyHex) still block.
+  const secretEntropy = secretSpans.some(
+    (s) => s.tier === 'entropy' && (!s.entropyHex || nearCredential(text, s.start, s.end)),
+  );
 
   const piiHits = detectPII(text);
   const piiKinds: PiiKind[] = [...new Set(piiHits.map((h) => h.kind))];
@@ -161,7 +184,15 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
     // single low-severity standalone PII (< N, no other leg) -> audit-only pass.
     return { decision: 'pass', legs, piiKinds, echoMemoryIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)` };
   }
-  return { decision: 'pass', legs, piiKinds, echoMemoryIds, reason: 'pass: no egress legs' };
+  // EH-4: an exempt-hex entropy span is the only secret span that reaches this fallthrough with
+  // secretHit true (named/heuristic/non-hex-entropy all decide earlier), so label the pass honestly.
+  return {
+    decision: 'pass',
+    legs,
+    piiKinds,
+    echoMemoryIds,
+    reason: secretHit ? 'pass: hex-literal entropy exempt (audit-only)' : 'pass: no egress legs',
+  };
 }
 
 export interface EmissionFlag {

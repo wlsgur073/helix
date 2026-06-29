@@ -32,10 +32,10 @@ describe('J1 audit — secret-scan high-entropy FP', () => {
 
 describe('J1 audit — secret egress is now confidence-tiered (J1-11 FIXED)', () => {
   const sha = 'da39a3ee5e6b4b0d3255bfef95601890afd80709';
-  it('a SHA (entropy-only) is policy-overridable: allowed_override under allow, blocked under block', () => {
+  it('EH-4 (J1-1 FIXED at egress): a bare hex literal no longer trips the egress block — passes by default', () => {
     const texts = [`the fix landed in commit ${sha}`];
-    expect(classifyEgress({ texts, ledger: [], policy: ALL('allow') }).decision).toBe('allowed_override');
-    expect(classifyEgress({ texts, ledger: [], policy: ALL('block') }).decision).toBe('blocked'); // conservative default
+    expect(classifyEgress({ texts, ledger: [], policy: ALL('block') }).decision).toBe('pass');
+    expect(classifyEgress({ texts, ledger: [], policy: ALL('allow') }).decision).toBe('pass');
   });
   it('a NAMED secret stays override-proof: blocked even under policy=allow', () => {
     const v = classifyEgress({ texts: ['key sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34'], ledger: [], policy: ALL('allow') });

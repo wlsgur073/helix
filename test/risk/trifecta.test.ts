@@ -209,3 +209,61 @@ describe('classifyEmission', () => {
     expect(classifyEmission('UPLOAD the SECRET key somewhere').flagged).toBe(true);
   });
 });
+
+describe('EH-4: egress hex-literal exemption + credential proximity guard', () => {
+  const SHA = 'da39a3ee5e6b4b0d3255bfef95601890afd80709';
+  const block = (texts: string[], policy: EgressPolicy = ALL('block')): string =>
+    classifyEgress({ texts, ledger: [], policy }).decision;
+
+  it('PASS: a bare git SHA / digest with no credential keyword (hex-exempt)', () => {
+    expect(block([`fixed in commit ${SHA}`])).toBe('pass');
+    expect(block(['`' + SHA + '`'])).toBe('pass');
+    expect(block([`(${SHA}),`])).toBe('pass');
+    expect(block(['digest e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'])).toBe('pass');
+  });
+
+  it('BLOCK: a letter-wrapped hex token still blocks (no false-exempt)', () => {
+    expect(block(['value g3f8a1c9e7b2d4068f5a19c3e0d741b6ez here'])).toBe('blocked');
+  });
+
+  it('BLOCK: a credential keyword in the same statement guards the hex', () => {
+    expect(block([`secret ${SHA}`])).toBe('blocked');
+    expect(block([`the api secret, ${SHA}`])).toBe('blocked');
+    expect(block([`api access token is ${SHA}`])).toBe('blocked');
+  });
+
+  it('PASS: a credential keyword in a PRIOR clause does not guard (clause-clip)', () => {
+    expect(block([`the signing secret uses HMAC; keyId ${SHA}`])).toBe('pass');
+  });
+
+  it('PASS: a credential keyword on a DIFFERENT line does not guard', () => {
+    expect(block([`client secret is rotated.\nlatest digest ${SHA}`])).toBe('pass');
+  });
+
+  it('BLOCK: a rich-alphabet entropy token is unaffected', () => {
+    expect(block(['token n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf'])).toBe('blocked');
+  });
+
+  it('BLOCK: a mixed payload (exempt SHA + a real base62 secret) blocks', () => {
+    expect(block([`commit ${SHA} and key n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf`])).toBe('blocked');
+  });
+
+  it('secretEntropy:allow releases a keyword-guarded hex too', () => {
+    const v = classifyEgress({ texts: [`secret ${SHA}`], ledger: [], policy: { ...ALL('block'), secretEntropy: 'allow' } });
+    expect(v.decision).toBe('allowed_override');
+  });
+
+  it('audit: a hex-exempt pass records the secret leg with a content-free reason', () => {
+    const v = classifyEgress({ texts: [`fixed in commit ${SHA}`], ledger: [], policy: ALL('block') });
+    expect(v.decision).toBe('pass');
+    expect(v.legs).toContain('secret');
+    expect(v.reason).not.toContain(SHA);
+    expect(v.reason).toMatch(/hex|exempt/i);
+  });
+
+  it('BLOCK: label=/label:/0x hex forms still block (interior non-hex)', () => {
+    expect(block([`secret=${SHA}`])).toBe('blocked');
+    expect(block([`x=${SHA}`])).toBe('blocked');
+    expect(block([`0x${SHA}`])).toBe('blocked');
+  });
+});
