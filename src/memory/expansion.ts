@@ -7,7 +7,11 @@ import type { Expansion, ExpansionEntry } from './retrieval.js';
 //  - EXP_K: max neighbors kept per token.
 //  - SEM_DISCOUNT: scales neighbor weights so a semantic match never equals an exact lexical one.
 //  - SEM_GATE: min semanticWeight for a semantic-ONLY record to survive (noise guard).
-export const EXP_THETA = 0.52;
+// Locked by scripts/calibrate-semantic.mjs against the synonym fixture (2/2 positives, 0 negatives).
+// theta=0.50 equals the build floor (gives the marginal failure->error bridge, cos 0.525, honest
+// margin); theta is the primary precision knob. The gate is a secondary multi-term guard (inert
+// for single-neighbor rescues, where semanticWeight >= theta by construction).
+export const EXP_THETA = 0.50;
 export const EXP_K = 8;
 export const SEM_DISCOUNT = 0.8;
 export const SEM_GATE = 0.4;

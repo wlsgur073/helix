@@ -13552,7 +13552,7 @@ function checkBinding(content, check2) {
 // src/memory/expansion.ts
 import { readFileSync as readFileSync4 } from "node:fs";
 import { fileURLToPath } from "node:url";
-var EXP_THETA = 0.52;
+var EXP_THETA = 0.5;
 var EXP_K = 8;
 var SEM_DISCOUNT = 0.8;
 var SEM_GATE = 0.4;
