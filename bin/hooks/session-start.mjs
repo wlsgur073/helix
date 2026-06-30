@@ -345,12 +345,15 @@ function subkeyForScope(home, projectRoot) {
   const nonce = projectRoot ? scopeNonce(projectRoot, home) : globalScopeNonce(home);
   return nonce ? deriveSubkey(master, nonce) : null;
 }
-function verifiedLive(ledger, home, projectRoot) {
+function verifiedLiveOf(records, home, projectRoot) {
   const subkey = subkeyForScope(home, projectRoot);
-  return buildVerifiedProjection(parseLedger(ledger), {
+  return buildVerifiedProjection(records, {
     verify: (r) => subkey ? verifyVerify(r, subkey) : false,
     keyAvailable: subkey !== null
   });
+}
+function verifiedLive(ledger, home, projectRoot) {
+  return verifiedLiveOf(parseLedger(ledger), home, projectRoot);
 }
 
 // src/hooks/session-start.ts

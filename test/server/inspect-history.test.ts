@@ -116,4 +116,18 @@ describe('handleInspect history mode', () => {
     expect(text).toContain('DATA[supersede:global:??..??]');     // txTo='' -> ?? (closed, with sentinel)
     expect(text).not.toContain('DATA[supersede:global:??..]');   // NOT the OPEN (live-looking) form
   });
+
+  it('a forged CLOSED row claiming state=Verified is labeled by its closer verb, never as a grade', () => {
+    const { store, ledger } = tmpStore();
+    // A ledger-write adversary forges a CLOSED fact hand-stamped state:'Verified', then a supersede that
+    // closes it. Closed rows must render the closer verb (closedBy.kind), NEVER the forgeable record.state
+    // — else "Verified" would leak onto the history audit surface for a row that was never signed. This
+    // holds on current code (handlers.ts verb = closedBy ? kind : state); it LOCKS that through the
+    // single-read refactor. A FAILURE is a real grade-leak -- do NOT weaken to go green.
+    appendRaw(ledger, { id: 'm_forge', type: 'assert', state: 'Verified', content: 'forged elevated' });
+    appendRaw(ledger, { id: 'm_close', type: 'supersede', supersedes: 'm_forge', content: 'replacement' });
+    const text = handleInspect(store, { history: true }).content[0]!.text;
+    expect(text).toContain('supersede:global');     // the closed forged row is labeled by its closer
+    expect(text).not.toMatch(/DATA\[Verified:/);    // its forged state never surfaces as a grade
+  });
 });

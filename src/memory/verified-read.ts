@@ -4,6 +4,7 @@
 // ledger record replays as Fresh on EVERY read surface, not just the tool surface.
 import type { LedgerPath } from './ledger.js';
 import { parseLedger } from './ledger.js';
+import type { MemoryRecord } from '../types.js';
 import { tryReadMaster, deriveSubkey, verifyVerify } from './ledger-mac.js';
 import { scopeNonce, globalScopeNonce } from './ownership.js';
 import { buildVerifiedProjection, type VerifiedProjection } from './verified-projection.js';
@@ -26,15 +27,27 @@ export function subkeyForScope(home: string, projectRoot?: string): Buffer | nul
 }
 
 /**
- * The verifying projection for one ledger (R1 clamp / R2 MAC gate / R3 content binding). Mirrors
- * MemoryStore.verifiedOf EXACTLY. A forged or edited record replays as Fresh; only a genuinely
- * signed `verify` for the live, unedited target confers Corroborated/Verified. Key-absent =>
- * keyAvailable false and every state clamps to Fresh (fail-closed — no forged elevation is shown).
+ * The verifying projection over an ALREADY-PARSED record array (R1 clamp / R2 MAC gate / R3 content
+ * binding). This is the records-in CORE of verifiedLive: a caller that already holds the parsed ledger
+ * — notably the store's historyView, which feeds the SAME array to buildHistory — shares ONE parse
+ * across the verified projection and the history partition (no second, unsynchronized read). A forged
+ * or edited record replays as Fresh; only a genuinely signed `verify` for the live, unedited target
+ * confers Corroborated/Verified. Key-absent => keyAvailable false and every state clamps to Fresh
+ * (fail-closed — no forged elevation is shown).
  */
-export function verifiedLive(ledger: LedgerPath, home: string, projectRoot?: string): VerifiedProjection {
+export function verifiedLiveOf(records: MemoryRecord[], home: string, projectRoot?: string): VerifiedProjection {
   const subkey = subkeyForScope(home, projectRoot);
-  return buildVerifiedProjection(parseLedger(ledger), {
+  return buildVerifiedProjection(records, {
     verify: (r) => (subkey ? verifyVerify(r, subkey) : false),
     keyAvailable: subkey !== null,
   });
+}
+
+/**
+ * The verifying projection for one ledger PATH — exactly verifiedLiveOf over its parsed records.
+ * Mirrors MemoryStore.verifiedOf EXACTLY. This is the shared single-source-of-truth the store read
+ * path AND the SessionStart hook both route through, so the trust grades they show can never drift.
+ */
+export function verifiedLive(ledger: LedgerPath, home: string, projectRoot?: string): VerifiedProjection {
+  return verifiedLiveOf(parseLedger(ledger), home, projectRoot);
 }

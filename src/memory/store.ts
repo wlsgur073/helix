@@ -15,7 +15,7 @@ import { frameAsData, newNonce } from './content-frame.js';
 import { isOwned, stampOwnership } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent } from './ledger-mac.js';
 import { buildVerifiedProjection, type VerifiedProjection } from './verified-projection.js';
-import { subkeyForScope, verifiedLive } from './verified-read.js';
+import { subkeyForScope, verifiedLive, verifiedLiveOf } from './verified-read.js';
 import { withFileLock } from './lock.js';
 
 export interface MemoryStoreOptions {
@@ -305,22 +305,32 @@ export class MemoryStore {
 
   /** Live + closed rows across scopes for the bitemporal history view. Live rows come WHOLESALE from
    *  the verified path (graded, total — an unverified live row defaults to Fresh and is never
-   *  dropped); closed rows come from buildHistory over the raw ledger. The live/closed partition is
-   *  overlap-free because buildHistory's liveness (buildProjection) equals the verified path's
-   *  membership. anomalies/truncated are aggregated across scopes. (Spec §4.1/§5.) */
+   *  dropped); closed rows come from buildHistory. The live/closed partition is overlap-free because
+   *  buildHistory's liveness (buildProjection) equals the verified path's membership. anomalies/
+   *  truncated are aggregated across scopes. (Spec §4.1/§5.)
+   *
+   *  ATOMIC per scope: each scope's ledger is parsed ONCE and the single record array feeds BOTH the
+   *  verified (graded-live) projection and buildHistory (closed rows) — there is no second,
+   *  unsynchronized read, so one id can never surface as both live and closed within a render (the
+   *  prior two-read structure could, transiently, under a concurrent cross-process write — spec §10.3,
+   *  Codex code-review #1). verifiedLiveOf is the SAME source-of-truth verifiedLive/verifiedOf use, so
+   *  the graded live rows are byte-identical to the prior scopedVerified()-sourced ones. Atomicity
+   *  here is intra-scope (one snapshot, two projections); it needs no lock — global+project remain two
+   *  independent reads, and a forged cross-scope id stays distinguished by its scope tag. */
   historyView(): { rows: ScopedHistoricalRecord[]; anomalies: Set<string>; truncated: boolean } {
     const rows: ScopedHistoricalRecord[] = [];
     const anomalies = new Set<string>();
     let truncated = false;
 
-    // Live rows (graded) — the membership authority + the LEFT-join enrichment source.
-    for (const s of this.scopedVerified().records) {
-      rows.push({ record: s.record, scope: s.scope, txTo: null, closedBy: null, integrity: s.integrity });
-    }
-
-    // Closed rows per scope from the raw ledger.
-    const addClosed = (ledger: LedgerPath, scope: MemoryScope) => {
-      const h = buildHistory(parseLedger(ledger));
+    const addScope = (ledger: LedgerPath, scope: MemoryScope) => {
+      const records = parseLedger(ledger); // ONE read per scope — shared by both projections below
+      // Live rows (graded) — membership authority + LEFT-join enrichment, identical to verifiedOf.
+      const v = verifiedLiveOf(records, this.homeDir(), this.scopeRootOf(ledger));
+      for (const r of v.live.values()) {
+        rows.push({ record: r, scope, txTo: null, closedBy: null, integrity: v.compromised.has(r.id) ? 'compromised' : 'ok' });
+      }
+      // Closed rows from the SAME record array.
+      const h = buildHistory(records);
       for (const id of h.anomalies) anomalies.add(id);
       if (h.truncated) truncated = true;
       for (const row of h.rows) {
@@ -328,9 +338,9 @@ export class MemoryStore {
         rows.push({ ...row, scope, integrity: 'ok' });
       }
     };
-    addClosed(this.global, 'global');
+    addScope(this.global, 'global');
     const p = this.opts.project;
-    if (p && isOwned(p.root, p.home)) addClosed(p.ledger, 'project');
+    if (p && isOwned(p.root, p.home)) addScope(p.ledger, 'project');
 
     return { rows, anomalies, truncated };
   }
