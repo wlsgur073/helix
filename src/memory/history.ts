@@ -28,7 +28,8 @@ export function buildHistory(records: MemoryRecord[]): History {
   const markersByTarget = new Map<string, Closer[]>();
   records.forEach((r, i) => {
     if (r.type === 'assert' || r.type === 'supersede') {
-      if (!factIndex.has(r.id)) factIndex.set(r.id, i);
+      if (factIndex.has(r.id)) anomalies.add(r.id); // duplicate fact id (forged; randomUUID precludes it)
+      else factIndex.set(r.id, i);
     }
     if (isClosing(r.type) && r.supersedes) {
       const arr = markersByTarget.get(r.supersedes) ?? [];
@@ -52,6 +53,7 @@ export function buildHistory(records: MemoryRecord[]): History {
     const markers = markersByTarget.get(r.id) ?? [];
     const after = markers.filter((m) => m.i > ri).sort((x, y) => x.i - y.i);
     const C = after[0];
+    if (markers.some((m) => m.i < ri)) anomalies.add(r.id); // a before-target marker is always anomalous
 
     let txTo: string;
     let closedBy: HistoricalRecord['closedBy'];
@@ -69,5 +71,13 @@ export function buildHistory(records: MemoryRecord[]): History {
     rows.push({ record, txTo, closedBy });
   }
 
-  return { rows, anomalies, truncated: false };
+  const factIds = new Set(factIndex.keys());
+  const truncated = records.some((r) => {
+    // integrity tombstone (content-free, unsigned, no target) => HMAC-aware compaction ran
+    if (r.type === 'verify' && r.supersedes === null && !r.mac && r.content === '') return true;
+    // orphan erase tombstone (target row no longer present) => permanent-erase compaction ran
+    return r.type === 'erase' && r.supersedes !== null && !factIds.has(r.supersedes);
+  });
+
+  return { rows, anomalies, truncated };
 }

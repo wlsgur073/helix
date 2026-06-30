@@ -82,3 +82,59 @@ describe('buildHistory — core', () => {
     expect(isIsoInstant('nonsense')).toBe(false);
   });
 });
+
+describe('buildHistory — anomaly + truncation signals', () => {
+  it('(c) a closer that appears BEFORE its target: row is closed, clamped, flagged', () => {
+    // marker appended before the target it names (forged). buildProjection removes order-independently.
+    const e = rec({ id: 'e', type: 'erase', supersedes: 'a', content: '', tx: '2026-06-09T00:00:01.000Z' });
+    const a = rec({ id: 'a', content: 'late', tx: '2026-06-09T00:00:02.000Z' });
+    const { rows, anomalies } = buildHistory([e, a]);
+    const ra = rows.find((r) => r.record.id === 'a')!;
+    expect(ra.txTo).toBe('2026-06-09T00:00:02.000Z'); // clamped to R.tx
+    expect(ra.closedBy!.kind).toBe('erase');
+    expect(anomalies.has('a')).toBe(true);
+  });
+
+  it('a before-R marker is flagged even when a valid after-R marker is the closer', () => {
+    const before = rec({ id: 'm0', type: 'invalidate', supersedes: 'a', tx: '2026-06-09T00:00:01.000Z' });
+    const a = rec({ id: 'a', tx: '2026-06-09T00:00:02.000Z' });
+    const after = rec({ id: 'm1', type: 'supersede', supersedes: 'a', tx: '2026-06-09T00:00:03.000Z' });
+    const { rows, anomalies } = buildHistory([before, a, after]);
+    const ra = rows.find((r) => r.record.id === 'a')!;
+    expect(ra.closedBy).toEqual({ kind: 'supersede', markerId: 'm1' }); // after-marker is the closer
+    expect(anomalies.has('a')).toBe(true);                              // before-marker still flagged
+  });
+
+  it('duplicate fact id is flagged and emitted once', () => {
+    const a1 = rec({ id: 'dup', content: 'first', tx: '2026-06-09T00:00:01.000Z' });
+    const a2 = rec({ id: 'dup', content: 'second', tx: '2026-06-09T00:00:02.000Z' });
+    const { rows, anomalies } = buildHistory([a1, a2]);
+    expect(rows.filter((r) => r.record.id === 'dup')).toHaveLength(1);
+    expect(anomalies.has('dup')).toBe(true);
+  });
+
+  it('truncated=false on a soft-erase (target row still present)', () => {
+    const a = rec({ id: 'a', tx: '2026-06-09T00:00:01.000Z' });
+    const e = rec({ id: 'e', type: 'erase', supersedes: 'a', content: '', tx: '2026-06-09T00:00:02.000Z' });
+    expect(buildHistory([a, e]).truncated).toBe(false);
+  });
+
+  it('truncated=true when an erase tombstone has no surviving target (past compaction)', () => {
+    // a permanent-erase compaction drops the fact row, keeps the content-free tombstone.
+    const e = rec({ id: 'e', type: 'erase', supersedes: 'gone', content: '', tx: '2026-06-09T00:00:02.000Z' });
+    expect(buildHistory([e]).truncated).toBe(true);
+  });
+
+  it('truncated=true when an integrity tombstone is present', () => {
+    const t = rec({ id: 'integrity_x', type: 'verify', supersedes: null, content: '', state: 'Suspect' });
+    expect(buildHistory([t]).truncated).toBe(true);
+  });
+
+  it('determinism: same records -> identical rows + anomalies', () => {
+    const input = [
+      rec({ id: 'a', tx: '2026-06-09T00:00:01.000Z' }),
+      rec({ id: 'b', type: 'supersede', supersedes: 'a', tx: '2026-06-09T00:00:02.000Z' }),
+    ];
+    expect(JSON.stringify(buildHistory(input).rows)).toBe(JSON.stringify(buildHistory(input).rows));
+  });
+});
