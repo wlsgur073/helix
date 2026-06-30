@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, existsSync, readdirSync, appendFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { appendRecord, parseLedger, compactLedger } from '../../src/memory/ledger.js';
+import { appendRecord, parseLedger, compactLedger, isHorizonMarker } from '../../src/memory/ledger.js';
+import { buildHistory } from '../../src/memory/history.js';
+import { buildProjection } from '../../src/memory/projection.js';
 import { MemoryStore } from '../../src/memory/store.js';
 import { digestContent } from '../../src/memory/ledger-mac.js';
 import type { MemoryRecord } from '../../src/types.js';
@@ -97,7 +99,7 @@ describe('compactLedger HMAC-aware (via store permanent-erase)', () => {
 
     const after = parseLedger(ledger);
     // Integrity-incident tombstone: a content-free verify, no MAC, no target.
-    const tomb = after.find((r) => r.type === 'verify' && r.content === '' && !r.mac && r.supersedes === null);
+    const tomb = after.find((r) => r.id.startsWith('integrity_'));
     expect(tomb).toBeDefined();
     expect(tomb!.state).toBe('Suspect');
     // The forged B verify (gen 5) is physically gone.
@@ -148,10 +150,61 @@ describe('compactLedger HMAC-aware (via store permanent-erase)', () => {
       expect(items.find((i) => i.record.id === a.id)!.record.state).toBe('Suspect');
       const after = parseLedger(ledger);
       expect(after.some((r) => r.type === 'verify' && r.supersedes === a.id && r.state === 'Suspect' && !!r.mac)).toBe(true);
-      expect(after.find((r) => r.type === 'verify' && r.content === '' && !r.mac && r.supersedes === null)).toBeUndefined();
+      expect(after.find((r) => r.id.startsWith('integrity_'))).toBeUndefined();
       expect(items.find((i) => i.record.id === c.id)).toBeUndefined();
     } finally {
       rmSync(probeDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('compactLedger — horizon marker (spec B)', () => {
+  it('emits exactly one horizon marker when a supersede-closed row is dropped', () => {
+    const p = tmpLedger();
+    appendRecord(p, rec({ id: 'm_1', content: 'old' }));
+    appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
+    compactLedger(p, { erasedIds: new Set() });
+    expect(parseLedger(p).filter(isHorizonMarker)).toHaveLength(1);
+  });
+
+  it('emits a horizon marker for invalidate-closed history', () => {
+    const p = tmpLedger();
+    appendRecord(p, rec({ id: 'm_1', content: 'fact' }));
+    appendRecord(p, rec({ id: 'inv_1', type: 'invalidate', supersedes: 'm_1', content: '' }));
+    compactLedger(p, { erasedIds: new Set() });
+    expect(parseLedger(p).filter(isHorizonMarker)).toHaveLength(1);
+  });
+
+  it('emits a horizon marker for erase-dropped history', () => {
+    const p = tmpLedger();
+    appendRecord(p, rec({ id: 'm_1', content: 'fact' }));
+    appendRecord(p, rec({ id: 'e_1', type: 'erase', supersedes: 'm_1', content: '' }));
+    compactLedger(p, { erasedIds: new Set(['m_1']) });
+    expect(parseLedger(p).filter(isHorizonMarker)).toHaveLength(1);
+  });
+
+  it('emits NO horizon marker when nothing closed is dropped (all-live)', () => {
+    const p = tmpLedger();
+    appendRecord(p, rec({ id: 'm_1', content: 'only live fact' }));
+    compactLedger(p, { erasedIds: new Set() });
+    expect(parseLedger(p).filter(isHorizonMarker)).toHaveLength(0);
+  });
+
+  it('a closed-history-dropping compaction makes the history view truncated (deterministic)', () => {
+    const p = tmpLedger();
+    appendRecord(p, rec({ id: 'm_1', content: 'old' }));
+    appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
+    compactLedger(p, { erasedIds: new Set() });
+    expect(buildHistory(parseLedger(p)).truncated).toBe(true);
+  });
+
+  it('the emitted horizon marker never surfaces as a live fact (no phantom)', () => {
+    const p = tmpLedger();
+    appendRecord(p, rec({ id: 'm_1', content: 'old' }));
+    appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
+    compactLedger(p, { erasedIds: new Set() });
+    const recs = parseLedger(p);
+    const marker = recs.find(isHorizonMarker)!;
+    expect(buildProjection(recs).has(marker.id)).toBe(false);
   });
 });

@@ -13421,6 +13421,23 @@ function compactLedger(path, opts) {
         });
       }
     }
+    if (records.some((r) => (r.type === "assert" || r.type === "supersede") && !live.has(r.id))) {
+      const hts = (/* @__PURE__ */ new Date()).toISOString();
+      kept.push({
+        id: `horizon_${randomUUID()}`,
+        tx: hts,
+        validFrom: hts,
+        validTo: null,
+        type: "verify",
+        state: "Suspect",
+        content: "",
+        provenance: { source: "user", sessionId: "compaction" },
+        supersedes: null,
+        blastRadius: null,
+        reverifyTrigger: null,
+        classification: "normal"
+      });
+    }
     const tmp = `${path}.${process.pid}.tmp`;
     const fd = openSync(tmp, "w");
     try {
