@@ -130,4 +130,14 @@ describe('handleInspect history mode', () => {
     expect(text).toContain('supersede:global');     // the closed forged row is labeled by its closer
     expect(text).not.toMatch(/DATA\[Verified:/);    // its forged state never surfaces as a grade
   });
+
+  it('key-absent history render appends the integrity-unavailable note; key-present does not', () => {
+    // With no master key the verifying replay clamps every grade to Fresh fail-safe — the history
+    // surface must say grades are unverified, exactly as recall does (handlers.ts integrityNote).
+    const { store } = tmpStore();
+    const a = store.commit({ content: 'db is postgres', source: 'user' });
+    expect(handleInspect(store, { history: true }).content[0]!.text).toContain('integrity verification unavailable');
+    store.confirm(a.id); // mints the master key + signs a genuine verify -> integrity now available
+    expect(handleInspect(store, { history: true }).content[0]!.text).not.toContain('integrity verification unavailable');
+  });
 });

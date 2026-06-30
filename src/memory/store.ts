@@ -317,15 +317,17 @@ export class MemoryStore {
    *  the graded live rows are byte-identical to the prior scopedVerified()-sourced ones. Atomicity
    *  here is intra-scope (one snapshot, two projections); it needs no lock — global+project remain two
    *  independent reads, and a forged cross-scope id stays distinguished by its scope tag. */
-  historyView(): { rows: ScopedHistoricalRecord[]; anomalies: Set<string>; truncated: boolean } {
+  historyView(): { rows: ScopedHistoricalRecord[]; anomalies: Set<string>; truncated: boolean; integrityAvailable: boolean } {
     const rows: ScopedHistoricalRecord[] = [];
     const anomalies = new Set<string>();
     let truncated = false;
+    let integrityAvailable = true; // false if ANY read scope lacked a master key (mirrors scopedVerified)
 
     const addScope = (ledger: LedgerPath, scope: MemoryScope) => {
       const records = parseLedger(ledger); // ONE read per scope — shared by both projections below
       // Live rows (graded) — membership authority + LEFT-join enrichment, identical to verifiedOf.
       const v = verifiedLiveOf(records, this.homeDir(), this.scopeRootOf(ledger));
+      if (!v.keyAvailable) integrityAvailable = false; // key-absent => every grade clamped Fresh (fail-safe)
       for (const r of v.live.values()) {
         rows.push({ record: r, scope, txTo: null, closedBy: null, integrity: v.compromised.has(r.id) ? 'compromised' : 'ok' });
       }
@@ -342,7 +344,7 @@ export class MemoryStore {
     const p = this.opts.project;
     if (p && isOwned(p.root, p.home)) addScope(p.ledger, 'project');
 
-    return { rows, anomalies, truncated };
+    return { rows, anomalies, truncated, integrityAvailable };
   }
 
   /** Explicitly adopt the active project ledger (trust its current contents). For team-shared

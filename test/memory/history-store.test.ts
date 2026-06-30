@@ -94,4 +94,14 @@ describe('MemoryStore.historyView', () => {
     expect(dupRows).toHaveLength(2);
     expect(new Set(dupRows.map((r) => r.scope))).toEqual(new Set(['global', 'project']));
   });
+
+  it('integrityAvailable is false when no master key exists, true once a signing verify mints it', () => {
+    // A plain commit never mints the master, so the verifying replay ran key-absent (every grade
+    // clamped Fresh fail-safe). historyView reports that so the surface can flag it (mirrors recall).
+    const { store } = tmpStore();
+    const a = store.commit({ content: 'db is postgres', source: 'user' });
+    expect(store.historyView().integrityAvailable).toBe(false);
+    store.confirm(a.id); // mints the master key + signs a genuine verify
+    expect(store.historyView().integrityAvailable).toBe(true);
+  });
 });
