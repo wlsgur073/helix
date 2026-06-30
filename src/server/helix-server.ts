@@ -58,9 +58,9 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   server.registerTool('helix_memory_inspect', {
     title: 'Inspect memory',
-    description: 'List current memory items (id, trust state, content).',
-    inputSchema: {},
-  }, async () => handleInspect(store, {}));
+    description: 'List current memory items (id, trust state, content). Pass history=true to also list closed (superseded/invalidated/erased) items with their [tx, txTo) declared system-time interval.',
+    inputSchema: { history: z.boolean().optional() },
+  }, async (args) => handleInspect(store, args));
 
   server.registerTool('helix_memory_erase', {
     title: 'Erase memory',
