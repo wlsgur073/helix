@@ -10,7 +10,11 @@ export interface History {
 /** Strict canonical-UTC instant, matching `new Date().toISOString()`. Used by the surface to
  *  sentinelize a forged/non-canonical timestamp before it enters a trusted label (spec §6). */
 const ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-export const isIsoInstant = (s: string): boolean => ISO_Z.test(s);
+export const isIsoInstant = (s: string): boolean => {
+  if (!ISO_Z.test(s)) return false;
+  const d = new Date(s);
+  return !Number.isNaN(d.getTime()) && d.toISOString() === s; // reject shaped-but-impossible instants
+};
 
 type Closer = { kind: 'supersede' | 'invalidate' | 'erase'; i: number; tx: string; markerId: string };
 const isClosing = (t: MemoryRecord['type']): t is Closer['kind'] =>

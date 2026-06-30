@@ -13435,7 +13435,11 @@ function compactLedger(path, opts) {
 
 // src/memory/history.ts
 var ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-var isIsoInstant = (s) => ISO_Z.test(s);
+var isIsoInstant = (s) => {
+  if (!ISO_Z.test(s)) return false;
+  const d = new Date(s);
+  return !Number.isNaN(d.getTime()) && d.toISOString() === s;
+};
 var isClosing = (t) => t === "supersede" || t === "invalidate" || t === "erase";
 function buildHistory(records) {
   const live = buildProjection(records);
@@ -22682,7 +22686,7 @@ function handleInspect(store2, args) {
       nonce: newNonce(),
       lines: rows2.map((r) => {
         const verb = r.closedBy ? r.closedBy.kind : r.record.state;
-        const interval = `${iso(r.record.tx)}..${r.txTo ? iso(r.txTo) : ""}`;
+        const interval = `${iso(r.record.tx)}..${r.txTo === null ? "" : iso(r.txTo)}`;
         return { text: `${safeId(r.record.id)} ${r.record.content}`, mark: `DATA[${verb}:${r.scope}:${interval}]| ` };
       })
     });

@@ -102,4 +102,18 @@ describe('handleInspect history mode', () => {
     expect(text).toMatch(/truncated/);
     expect(text).toMatch(/compaction/);
   });
+
+  it('a forged closed row whose derived txTo is empty renders the ?? sentinel, not an OPEN interval', () => {
+    const { store, ledger } = tmpStore();
+    // Forge a CLOSED row whose closer drives txTo to '' (empty string, not null): an assert with tx:''
+    // and a supersede targeting it, also tx:''. buildHistory selects that closer ('' >= '' true) so the
+    // derived txTo is '' — distinct from a genuine live row's null. A truthiness check would treat '' as
+    // falsy and render an OPEN interval (..]); the strict null-check routes '' through iso() -> ?? (#3).
+    appendRaw(ledger, { id: 'm_empty', type: 'assert', tx: '', content: 'old' });
+    appendRaw(ledger, { id: 'm_sup', type: 'supersede', supersedes: 'm_empty', tx: '', content: 'new' });
+    const text = handleInspect(store, { history: true }).content[0]!.text;
+    // The closed row's txTo ('') must be sentinelized to ??, not rendered as an open interval.
+    expect(text).toContain('DATA[supersede:global:??..??]');     // txTo='' -> ?? (closed, with sentinel)
+    expect(text).not.toContain('DATA[supersede:global:??..]');   // NOT the OPEN (live-looking) form
+  });
 });

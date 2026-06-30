@@ -66,7 +66,7 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean }): 
       nonce: newNonce(),
       lines: rows.map((r) => {
         const verb = r.closedBy ? r.closedBy.kind : r.record.state; // closed: verb; live: grade (both enums)
-        const interval = `${iso(r.record.tx)}..${r.txTo ? iso(r.txTo) : ''}`;
+        const interval = `${iso(r.record.tx)}..${r.txTo === null ? '' : iso(r.txTo)}`;
         return { text: `${safeId(r.record.id)} ${r.record.content}`, mark: `DATA[${verb}:${r.scope}:${interval}]| ` };
       }),
     });

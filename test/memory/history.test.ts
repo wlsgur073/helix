@@ -81,6 +81,17 @@ describe('buildHistory — core', () => {
     expect(isIsoInstant('2026-06-09T00:00:00Z')).toBe(false);
     expect(isIsoInstant('nonsense')).toBe(false);
   });
+
+  it('isIsoInstant rejects shaped-but-impossible instants (semantic, not shape-only)', async () => {
+    const { isIsoInstant } = await import('../../src/memory/history.js');
+    // Well-shaped but impossible calendar values must NOT enter a trusted label — a shape-only
+    // regex would pass them; the semantic check (valid Date + exact round-trip) rejects (spec §6).
+    expect(isIsoInstant('2026-99-99T99:99:99.999Z')).toBe(false);
+    expect(isIsoInstant('2026-13-01T00:00:00.000Z')).toBe(false); // month 13 is impossible
+    // Genuine rows are unaffected: canonical still true, non-canonical shape still false.
+    expect(isIsoInstant('2026-06-09T00:00:00.000Z')).toBe(true);
+    expect(isIsoInstant('2026-06-09T00:00:00Z')).toBe(false);
+  });
 });
 
 describe('buildHistory — anomaly + truncation signals', () => {
