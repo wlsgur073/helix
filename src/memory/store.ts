@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord } from '../types.js';
+import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord } from '../types.js';
 import { appendRecord, appendRecordUnlocked, parseLedger, compactLedger, type LedgerPath } from './ledger.js';
+import { buildHistory } from './history.js';
 import { findSecrets, redactSecrets } from './secret-scan.js';
 import { canCommit, isVerifyingSource, resolveTransition, type TransitionResult, type VerifyOutcome } from './firewall.js';
 import { runRealityCheck, checkBinding, type RealityCheck } from './reality-check.js';
@@ -300,6 +301,38 @@ export class MemoryStore {
 
   inspect(): ScopedRecord[] {
     return this.scopedProjection();
+  }
+
+  /** Live + closed rows across scopes for the bitemporal history view. Live rows come WHOLESALE from
+   *  the verified path (graded, total — an unverified live row defaults to Fresh and is never
+   *  dropped); closed rows come from buildHistory over the raw ledger. The live/closed partition is
+   *  overlap-free because buildHistory's liveness (buildProjection) equals the verified path's
+   *  membership. anomalies/truncated are aggregated across scopes. (Spec §4.1/§5.) */
+  historyView(): { rows: ScopedHistoricalRecord[]; anomalies: Set<string>; truncated: boolean } {
+    const rows: ScopedHistoricalRecord[] = [];
+    const anomalies = new Set<string>();
+    let truncated = false;
+
+    // Live rows (graded) — the membership authority + the LEFT-join enrichment source.
+    for (const s of this.scopedVerified().records) {
+      rows.push({ record: s.record, scope: s.scope, txTo: null, closedBy: null, integrity: s.integrity });
+    }
+
+    // Closed rows per scope from the raw ledger.
+    const addClosed = (ledger: LedgerPath, scope: MemoryScope) => {
+      const h = buildHistory(parseLedger(ledger));
+      for (const id of h.anomalies) anomalies.add(id);
+      if (h.truncated) truncated = true;
+      for (const row of h.rows) {
+        if (row.closedBy === null) continue; // live rows already added (graded) above
+        rows.push({ ...row, scope, integrity: 'ok' });
+      }
+    };
+    addClosed(this.global, 'global');
+    const p = this.opts.project;
+    if (p && isOwned(p.root, p.home)) addClosed(p.ledger, 'project');
+
+    return { rows, anomalies, truncated };
   }
 
   /** Explicitly adopt the active project ledger (trust its current contents). For team-shared

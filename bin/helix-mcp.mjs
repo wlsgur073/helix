@@ -13433,6 +13433,66 @@ function compactLedger(path, opts) {
   });
 }
 
+// src/memory/history.ts
+var isClosing = (t) => t === "supersede" || t === "invalidate" || t === "erase";
+function buildHistory(records) {
+  const live = buildProjection(records);
+  const anomalies = /* @__PURE__ */ new Set();
+  const factIndex = /* @__PURE__ */ new Map();
+  const markersByTarget = /* @__PURE__ */ new Map();
+  records.forEach((r, i) => {
+    if (r.type === "assert" || r.type === "supersede") {
+      if (factIndex.has(r.id)) anomalies.add(r.id);
+      else factIndex.set(r.id, i);
+    }
+    if (isClosing(r.type) && r.supersedes) {
+      const arr = markersByTarget.get(r.supersedes) ?? [];
+      arr.push({ kind: r.type, i, tx: r.tx, markerId: r.id });
+      markersByTarget.set(r.supersedes, arr);
+    }
+  });
+  const rows = [];
+  const emitted = /* @__PURE__ */ new Set();
+  for (const r of records) {
+    if (r.type !== "assert" && r.type !== "supersede") continue;
+    if (emitted.has(r.id)) continue;
+    emitted.add(r.id);
+    if (live.has(r.id)) {
+      rows.push({ record: r, txTo: null, closedBy: null });
+      continue;
+    }
+    const ri = factIndex.get(r.id);
+    const markers = markersByTarget.get(r.id) ?? [];
+    const after = markers.filter((m) => m.i > ri).sort((x, y) => x.i - y.i);
+    const C = after[0];
+    if (markers.some((m) => m.i < ri)) anomalies.add(r.id);
+    let txTo;
+    let closedBy;
+    if (C) {
+      closedBy = { kind: C.kind, markerId: C.markerId };
+      if (C.tx >= r.tx) {
+        txTo = C.tx;
+      } else {
+        txTo = r.tx;
+        anomalies.add(r.id);
+      }
+    } else {
+      const earliest = [...markers].sort((x, y) => x.i - y.i)[0];
+      closedBy = earliest ? { kind: earliest.kind, markerId: earliest.markerId } : null;
+      txTo = r.tx;
+      anomalies.add(r.id);
+    }
+    const record2 = closedBy?.kind === "erase" ? { ...r, content: "" } : r;
+    rows.push({ record: record2, txTo, closedBy });
+  }
+  const factIds = new Set(factIndex.keys());
+  const truncated = records.some((r) => {
+    if (r.type === "verify" && r.supersedes === null && !r.mac && r.content === "") return true;
+    return r.type === "erase" && r.supersedes !== null && !factIds.has(r.supersedes);
+  });
+  return { rows, anomalies, truncated };
+}
+
 // src/memory/secret-scan.ts
 var TIER_RANK = { named: 2, heuristic: 1, entropy: 0 };
 var PATTERNS = [
@@ -14122,6 +14182,32 @@ var MemoryStore = class {
   }
   inspect() {
     return this.scopedProjection();
+  }
+  /** Live + closed rows across scopes for the bitemporal history view. Live rows come WHOLESALE from
+   *  the verified path (graded, total — an unverified live row defaults to Fresh and is never
+   *  dropped); closed rows come from buildHistory over the raw ledger. The live/closed partition is
+   *  overlap-free because buildHistory's liveness (buildProjection) equals the verified path's
+   *  membership. anomalies/truncated are aggregated across scopes. (Spec §4.1/§5.) */
+  historyView() {
+    const rows = [];
+    const anomalies = /* @__PURE__ */ new Set();
+    let truncated = false;
+    for (const s of this.scopedVerified().records) {
+      rows.push({ record: s.record, scope: s.scope, txTo: null, closedBy: null, integrity: s.integrity });
+    }
+    const addClosed = (ledger, scope) => {
+      const h = buildHistory(parseLedger(ledger));
+      for (const id of h.anomalies) anomalies.add(id);
+      if (h.truncated) truncated = true;
+      for (const row of h.rows) {
+        if (row.closedBy === null) continue;
+        rows.push({ ...row, scope, integrity: "ok" });
+      }
+    };
+    addClosed(this.global, "global");
+    const p = this.opts.project;
+    if (p && isOwned(p.root, p.home)) addClosed(p.ledger, "project");
+    return { rows, anomalies, truncated };
   }
   /** Explicitly adopt the active project ledger (trust its current contents). For team-shared
    *  ledgers. Throws if no project layer is active. */
