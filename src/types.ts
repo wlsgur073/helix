@@ -70,3 +70,21 @@ export interface ScopedRecord {
    *  conflict on the target. */
   integrity?: 'ok' | 'compromised';
 }
+
+/** A ledger record paired with its DERIVED system-time end. Produced only by buildHistory at read
+ *  time; NEVER written to the ledger. Mirrors ScopedRecord — derived attrs on a wrapper, not on
+ *  the persisted MemoryRecord. txTo===null <=> closedBy===null <=> the row is live. */
+export interface HistoricalRecord {
+  record: MemoryRecord;
+  /** System-time end — a DECLARED/display ISO-8601 value (not authenticated), or null if live. */
+  txTo: string | null;
+  /** The closing marker (kind + its id, for audit), or null if live. */
+  closedBy: { kind: 'supersede' | 'invalidate' | 'erase'; markerId: string } | null;
+}
+
+/** A HistoricalRecord tagged with its scope. `integrity` is carried for live rows (from the
+ *  verified projection); closed rows default to 'ok'. */
+export interface ScopedHistoricalRecord extends HistoricalRecord {
+  scope: MemoryScope;
+  integrity?: 'ok' | 'compromised';
+}
