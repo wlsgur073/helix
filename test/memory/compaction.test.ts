@@ -207,4 +207,27 @@ describe('compactLedger — horizon marker (spec B)', () => {
     const marker = recs.find(isHorizonMarker)!;
     expect(buildProjection(recs).has(marker.id)).toBe(false);
   });
+
+  it('preserves the marker across a later all-live compaction (signal does not revert)', () => {
+    const p = tmpLedger();
+    appendRecord(p, rec({ id: 'm_1', content: 'old' }));
+    appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
+    compactLedger(p, { erasedIds: new Set() });            // drops m_1 -> emits one marker
+    expect(parseLedger(p).filter(isHorizonMarker)).toHaveLength(1);
+    compactLedger(p, { erasedIds: new Set() });            // all-live now: must PRESERVE the marker
+    expect(parseLedger(p).filter(isHorizonMarker)).toHaveLength(1);
+    expect(buildHistory(parseLedger(p)).truncated).toBe(true);
+  });
+
+  it('coalesces forged duplicate markers to one, tx-blind (keeps the append-first)', () => {
+    const p = tmpLedger();
+    appendRecord(p, rec({ id: 'm_live', content: 'live fact' }));
+    // Two forged horizon markers; the append-FIRST has the LATER tx, to prove selection ignores tx.
+    appendRecord(p, rec({ id: 'horizon_first', type: 'verify', supersedes: null, content: '', tx: '2026-06-09T00:00:02.000Z' }));
+    appendRecord(p, rec({ id: 'horizon_second', type: 'verify', supersedes: null, content: '', tx: '2026-06-09T00:00:01.000Z' }));
+    compactLedger(p, { erasedIds: new Set() });
+    const markers = parseLedger(p).filter(isHorizonMarker);
+    expect(markers).toHaveLength(1);
+    expect(markers[0]!.id).toBe('horizon_first');          // append-first, NOT the min/max-tx one
+  });
 });

@@ -13356,6 +13356,7 @@ function withFileLock(target, fn, opts = {}) {
 }
 
 // src/memory/ledger.ts
+var isHorizonMarker = (r) => r.type === "verify" && r.supersedes === null && !r.mac && r.id.startsWith("horizon_");
 function appendRecordUnlocked(path, record2) {
   mkdirSync2(dirname(path), { recursive: true });
   appendFileSync(path, JSON.stringify(record2) + "\n");
@@ -13421,7 +13422,10 @@ function compactLedger(path, opts) {
         });
       }
     }
-    if (records.some((r) => (r.type === "assert" || r.type === "supersede") && !live.has(r.id))) {
+    const existingHorizon = records.find(isHorizonMarker);
+    if (existingHorizon) {
+      kept.push(existingHorizon);
+    } else if (records.some((r) => (r.type === "assert" || r.type === "supersede") && !live.has(r.id))) {
       const hts = (/* @__PURE__ */ new Date()).toISOString();
       kept.push({
         id: `horizon_${randomUUID()}`,

@@ -130,9 +130,13 @@ export function compactLedger(path: LedgerPath, opts: CompactOptions): void {
       }
     }
 
-    // Compaction-horizon marker (spec §4): emit one when this compaction drops a closed FACT row
-    // (an assert/supersede absent from the live projection — covers supersede/invalidate/erase closers).
-    if (records.some((r) => (r.type === 'assert' || r.type === 'supersede') && !live.has(r.id))) {
+    // Compaction-horizon marker (spec §4): keep at most one. Preserve an existing one (tx-blind: the
+    // first in append order) so the signal never reverts; otherwise emit one iff this compaction drops a
+    // closed FACT row (an assert/supersede absent from live — covers supersede/invalidate/erase closers).
+    const existingHorizon = records.find(isHorizonMarker);
+    if (existingHorizon) {
+      kept.push(existingHorizon);
+    } else if (records.some((r) => (r.type === 'assert' || r.type === 'supersede') && !live.has(r.id))) {
       const hts = new Date().toISOString();
       kept.push({
         id: `horizon_${randomUUID()}`, tx: hts, validFrom: hts, validTo: null,
