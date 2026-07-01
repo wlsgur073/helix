@@ -14291,11 +14291,12 @@ var MemoryStore = class {
 };
 
 // src/memory/legacy-scan.ts
+var isContentFreeMarker = (r) => r.type === "verify" && r.supersedes === null && !r.mac && r.content === "" && r.state === "Suspect";
 function scanLegacyElevated(records, verify) {
   const offenders = [];
   for (const r of records) {
     if (r.type === "verify") {
-      if (!verify(r)) offenders.push(r.id);
+      if (!verify(r) && !isContentFreeMarker(r)) offenders.push(r.id);
     } else if ((r.type === "assert" || r.type === "supersede") && r.state !== "Fresh") {
       offenders.push(r.id);
     }

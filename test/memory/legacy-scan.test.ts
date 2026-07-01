@@ -78,4 +78,17 @@ describe('scanLegacyElevated', () => {
     const scan = scanLegacyElevated([base({ id: 'tomb', type: 'erase', state: 'Suspect', content: '', supersedes: 'x' })], pred(null));
     expect(scan.offenders).toEqual([]);
   });
+
+  // A content-free audit marker — the horizon marker (ledger.ts:141) and the integrity tombstone
+  // (ledger.ts:124) — is a verify-shaped record with a null target, no MAC, empty content, state
+  // Suspect. The replay treats it as inert (null target -> elevates nothing, verified-projection.ts:29),
+  // so the scan must NOT report it. Otherwise every truncated-compaction ledger warns "forged/legacy
+  // elevated" at startup, diluting the genuine-forgery signal it shares a count with (B1).
+  it('does NOT flag content-free horizon/integrity markers (null-target, no mac, empty content)', () => {
+    const horizon = base({ id: 'horizon_abc', type: 'verify', supersedes: null, content: '', state: 'Suspect' });
+    const integrity = base({ id: 'integrity_def', type: 'verify', supersedes: null, content: '', state: 'Suspect' });
+    const scan = scanLegacyElevated([base({ id: 'a' }), horizon, integrity], pred(null));
+    expect(scan.offenders).toEqual([]);
+    expect(scan.ok).toBe(true);
+  });
 });
