@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord } from '../types.js';
+import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
 import { appendRecord, appendRecordUnlocked, parseLedger, compactLedger, type LedgerPath } from './ledger.js';
-import { buildHistory } from './history.js';
+import { buildHistory, ledgerTruncated } from './history.js';
+import { buildAsOfEvidence } from './asof.js';
 import { findSecrets, redactSecrets } from './secret-scan.js';
 import { canCommit, isVerifyingSource, resolveTransition, type TransitionResult, type VerifyOutcome } from './firewall.js';
 import { runRealityCheck, checkBinding, type RealityCheck } from './reality-check.js';
@@ -345,6 +346,32 @@ export class MemoryStore {
     if (p && isOwned(p.root, p.home)) addScope(p.ledger, 'project');
 
     return { rows, anomalies, truncated, integrityAvailable };
+  }
+
+  /** Point-in-time forensic snapshot at system-time `t` (spec C §5). Mirrors historyView's ATOMIC
+   *  single-parse-per-scope: each scope's ledger is parsed ONCE and the single array feeds
+   *  buildAsOfEvidence + ledgerTruncated. `t` is assumed canonical (the surface validates). Membership
+   *  and v1 verify timing are DECLARED; only v2 verify tx is authenticated (per-evidence flag). */
+  asOfView(t: string): { facts: ScopedAsOfFact[]; keyAvailable: boolean; truncated: boolean } {
+    const facts: ScopedAsOfFact[] = [];
+    let keyAvailable = true;
+    let truncated = false;
+
+    const addScope = (ledger: LedgerPath, scope: MemoryScope) => {
+      const records = parseLedger(ledger);                 // ONE read per scope
+      const subkey = this.subkeyForLedger(ledger);
+      const out = buildAsOfEvidence(records, t, {
+        verify: (r) => (subkey ? verifyVerify(r, subkey) : false),
+        keyAvailable: subkey !== null,
+      });
+      if (!out.keyAvailable) keyAvailable = false;
+      if (ledgerTruncated(records)) truncated = true;      // over the FULL records, not the t-window
+      for (const f of out.facts) facts.push({ ...f, scope });
+    };
+    addScope(this.global, 'global');                       // exact project block copied from historyView
+    const p = this.opts.project;
+    if (p && isOwned(p.root, p.home)) addScope(p.ledger, 'project');
+    return { facts, keyAvailable, truncated };
   }
 
   /** Explicitly adopt the active project ledger (trust its current contents). For team-shared

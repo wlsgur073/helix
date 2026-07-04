@@ -20,6 +20,17 @@ type Closer = { kind: 'supersede' | 'invalidate' | 'erase'; i: number; tx: strin
 const isClosing = (t: MemoryRecord['type']): t is Closer['kind'] =>
   t === 'supersede' || t === 'invalidate' || t === 'erase';
 
+/** Best-effort "a past compaction dropped closed history" signal (spec §5): a content-free integrity/
+ *  horizon tombstone, or an orphan erase tombstone whose fact row is gone. Exported so asOfView reuses
+ *  the identical heuristic buildHistory uses. */
+export function ledgerTruncated(records: MemoryRecord[]): boolean {
+  const factIds = new Set(records.filter((r) => r.type === 'assert' || r.type === 'supersede').map((r) => r.id));
+  return records.some((r) => {
+    if (r.type === 'verify' && r.supersedes === null && !r.mac && r.content === '') return true;
+    return r.type === 'erase' && r.supersedes !== null && !factIds.has(r.supersedes);
+  });
+}
+
 /** Materialize [tx, txTo) for every fact row (assert + supersede replacement rows). Liveness comes
  *  from the SINGLE buildProjection call (spec §4.1); the marker scan only annotates closed rows.
  *  A "marker" is a closing record (supersede/invalidate/erase); verify is never a marker. */
@@ -75,13 +86,7 @@ export function buildHistory(records: MemoryRecord[]): History {
     rows.push({ record, txTo, closedBy });
   }
 
-  const factIds = new Set(factIndex.keys());
-  const truncated = records.some((r) => {
-    // integrity tombstone (content-free, unsigned, no target) => HMAC-aware compaction ran
-    if (r.type === 'verify' && r.supersedes === null && !r.mac && r.content === '') return true;
-    // orphan erase tombstone (target row no longer present) => permanent-erase compaction ran
-    return r.type === 'erase' && r.supersedes !== null && !factIds.has(r.supersedes);
-  });
+  const truncated = ledgerTruncated(records);
 
   return { rows, anomalies, truncated };
 }
