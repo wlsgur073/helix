@@ -4,7 +4,8 @@ import { dirname, join } from 'node:path';
 import { withFileLock } from './lock.js';
 import type { MemoryRecord } from '../types.js';
 
-export const MAC_VERSION = 1;
+export const MAC_VERSION = 2;                             // version NEW signatures carry
+const ACCEPTED_MAC_VERSIONS = new Set<number>([1, 2]);   // versions verifyVerify treats as valid
 
 /** Lowercase hex SHA-256 over the UTF-8 bytes of `content`. Used for the content binding. */
 export function digestContent(content: string): string {
@@ -76,34 +77,74 @@ const NULL_FIELD = Buffer.from([0x00, 0, 0, 0, 0]);
 const str = (s: string | null): Buffer => (s === null ? NULL_FIELD : field(Buffer.from(s, 'utf8')));
 const int = (n: number): Buffer => { const b = Buffer.alloc(8); b.writeBigUInt64BE(BigInt(n)); return field(b); };
 
-/** The exact bytes the MAC covers — fixed field order, length-prefixed, no JSON.
+/** The exact bytes the MAC covers — fixed field order, length-prefixed, no JSON. VERSIONED: the
+ *  leading version byte domain-separates v1 and v2, so one MAC can never validate under both
+ *  interpretations (computationally infeasible — the HMAC forgery bound).
  *
- *  Authenticated: DOMAIN, MAC_VERSION, keyId, type, id, supersedes, state, gen, targetDigest.
- *  Intentionally UNAUTHENTICATED (not bound by the MAC): tx, validFrom, validTo, provenance,
- *  blastRadius, reverifyTrigger, classification. This is benign ONLY because of a load-bearing
- *  INVARIANT: none of these unauthenticated fields may EVER be consulted for a trust decision or
- *  for gen ordering on replay. gen is the sole ordering key; the asset's own tx is used only as a
- *  display tiebreaker on records that are not MAC-protected. A future change that starts trusting
- *  any of them (e.g. a tx tiebreaker for equal-gen records) MUST first add that field to the
- *  authenticated set above — otherwise it becomes attacker-forgeable. */
-function macInput(r: MemoryRecord, keyId: string): Buffer {
-  return Buffer.concat([
-    DOMAIN, Buffer.from([MAC_VERSION]), field(Buffer.from(keyId, 'hex')),
+ *  v1 (macInputV1): DOMAIN, 1, keyId, type, id, supersedes, state, gen, targetDigest.  (tx NOT covered)
+ *  v2 (macInputV2): the same fields, version byte 2, PLUS tx.  signVerify writes v2; verifyVerify accepts both.
+ *
+ *  Authenticated in v2: all of the above INCLUDING tx. Still UNAUTHENTICATED (never bound): validFrom,
+ *  validTo, provenance, blastRadius, reverifyTrigger, classification. Load-bearing INVARIANT: none of
+ *  these unauthenticated fields may EVER drive a trust or gen-ordering decision. `tx` is authenticated
+ *  FOR v2 records ONLY — a v1 record's tx stays forgeable-in-place (v1 never covered it), so a consumer
+ *  that trusts tx MUST gate on isVerifyTxAuthenticated (verify-tx.ts), never on verifyVerify alone.
+ *  gen remains the sole ordering key. Benign malleability: gen 0/null/absent and targetDigest null/absent
+ *  are MAC-equivalent AND consumer-equivalent (every gen/targetDigest reader coalesces identically); a
+ *  future consumer reading either under a different coalescing MUST re-bind it strictly in a new version. */
+function macCommon(r: MemoryRecord, keyId: string): Buffer[] {
+  return [
+    field(Buffer.from(keyId, 'hex')),
     str(r.type), str(r.id), str(r.supersedes), str(r.state),
     int(r.gen ?? 0), str(r.targetDigest ?? null),
-  ]);
+  ];
+}
+// v1 FROZEN: literal version byte 1, NO tx. MUST NOT use MAC_VERSION (now 2), or every on-disk v1 breaks.
+// Exported (with macInputV2) as pure byte builders for the golden input-hex vectors — no signing power
+// without the subkey, and the input format is source-public anyway.
+export function macInputV1(r: MemoryRecord, keyId: string): Buffer {
+  return Buffer.concat([DOMAIN, Buffer.from([1]), ...macCommon(r, keyId)]);
+}
+// v2: version byte 2, tx appended (length-prefixed).
+export function macInputV2(r: MemoryRecord, keyId: string): Buffer {
+  return Buffer.concat([DOMAIN, Buffer.from([2]), ...macCommon(r, keyId), str(r.tx)]);
+}
+function macInputFor(version: number, r: MemoryRecord, keyId: string): Buffer {
+  return version === 1 ? macInputV1(r, keyId) : macInputV2(r, keyId);
 }
 
 export function signVerify(record: MemoryRecord, subkey: Buffer): MemoryRecord {
   const keyId = keyIdOf(subkey);
-  const mac = createHmac('sha256', subkey).update(macInput(record, keyId)).digest('hex');
+  // STRICT at write time (NOT total): a malformed tx throws here, so a genuine v2 record can never be
+  // minted malformed — which is what makes verifyVerify's read-side totality safe at compaction.
+  const mac = createHmac('sha256', subkey).update(macInputV2(record, keyId)).digest('hex');
   return { ...record, mac, keyId, macVersion: MAC_VERSION };
 }
 
+/** TEST-ONLY: mint a v1-scheme signature so a test can prove dual-accept keeps legacy grades valid.
+ *  Production always signs v2 via signVerify; NOTHING in src/ calls this (a test walks src/ to enforce it). */
+export function signVerifyV1(record: MemoryRecord, subkey: Buffer): MemoryRecord {
+  const keyId = keyIdOf(subkey);
+  const mac = createHmac('sha256', subkey).update(macInputV1(record, keyId)).digest('hex');
+  return { ...record, mac, keyId, macVersion: 1 };
+}
+
 export function verifyVerify(record: MemoryRecord, subkey: Buffer): boolean {
-  if (record.macVersion !== MAC_VERSION || !record.mac || !record.keyId) return false;
+  if (!record.mac || !record.keyId) return false;
+  // Dual-accept: dispatch on the record's own version. A numeric whitelist (not >= n) fails closed on an
+  // unknown/absent/string-typed version — this is also what makes macVersion a safe projection lane key.
+  if (typeof record.macVersion !== 'number' || !ACCEPTED_MAC_VERSIONS.has(record.macVersion)) return false;
   if (record.keyId !== keyIdOf(subkey)) return false;
-  const want = createHmac('sha256', subkey).update(macInput(record, record.keyId)).digest();
+  let want: Buffer;
+  try {
+    // Totality: parseLedger casts each JSONL line with NO type validation (ledger.ts), so a forged
+    // non-string MAC-covered field (e.g. tx:{}) would make str()/int() throw. A malformed record must
+    // be INVALID, never a crash — otherwise one junk line is a silent DoS (recall/hook/scan) or blocks
+    // right-to-erasure at compaction.
+    want = createHmac('sha256', subkey).update(macInputFor(record.macVersion, record, record.keyId)).digest();
+  } catch {
+    return false;
+  }
   let got: Buffer;
   try { got = Buffer.from(record.mac, 'hex'); } catch { return false; }
   return got.length === want.length && timingSafeEqual(got, want);

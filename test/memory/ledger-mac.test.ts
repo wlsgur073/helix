@@ -12,7 +12,7 @@ describe('digestContent', () => {
   });
 });
 
-import { mkdtempSync, writeFileSync, statSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, statSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ensureMaster, tryReadMaster, deriveSubkey, keyIdOf, LedgerMacError } from '../../src/memory/ledger-mac.js';
@@ -65,7 +65,7 @@ describe('deriveSubkey / keyIdOf', () => {
   });
 });
 
-import { signVerify, verifyVerify, digestContent as dc } from '../../src/memory/ledger-mac.js';
+import { signVerify, signVerifyV1, verifyVerify, macInputV1, macInputV2, digestContent as dc } from '../../src/memory/ledger-mac.js';
 import type { MemoryRecord } from '../../src/types.js';
 
 function verifyRec(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
@@ -81,7 +81,7 @@ describe('signVerify / verifyVerify', () => {
   it('a freshly signed record verifies under the same subkey', () => {
     const k = deriveSubkey(Buffer.alloc(32, 9), 'proj');
     const signed = signVerify(verifyRec(), k);
-    expect(signed.macVersion).toBe(1);
+    expect(signed.macVersion).toBe(2);
     expect(signed.keyId).toBe(keyIdOf(k));
     expect(verifyVerify(signed, k)).toBe(true);
   });
@@ -96,6 +96,7 @@ describe('signVerify / verifyVerify', () => {
     expect(verifyVerify({ ...signed, supersedes: 'target2' }, k)).toBe(false);
     expect(verifyVerify({ ...signed, gen: 2 }, k)).toBe(false);
     expect(verifyVerify({ ...signed, targetDigest: dc('other') }, k)).toBe(false);
+    expect(verifyVerify({ ...signed, tx: '2099-01-01T00:00:00.000Z' }, k)).toBe(false); // v2 binds tx
   });
   it('fails for an unsigned record or a length-collision attempt', () => {
     const k = deriveSubkey(Buffer.alloc(32, 9), 'proj');
@@ -103,5 +104,60 @@ describe('signVerify / verifyVerify', () => {
     // length-prefix integrity: moving a char across the id/target boundary must not re-validate
     const a = signVerify(verifyRec({ id: 'ab', supersedes: 'c' }), k);
     expect(verifyVerify({ ...a, id: 'a', supersedes: 'bc' }, k)).toBe(false);
+  });
+  it('dual-accepts a v1 signature (legacy grade preserved), and v1 tx stays forgeable', () => {
+    const k = deriveSubkey(Buffer.alloc(32, 9), 'proj');
+    const v1 = signVerifyV1(verifyRec(), k);
+    expect(v1.macVersion).toBe(1);
+    expect(verifyVerify(v1, k)).toBe(true);                                          // v1 still valid
+    expect(verifyVerify({ ...v1, tx: '2099-01-01T00:00:00.000Z' }, k)).toBe(true);   // v1 does NOT bind tx
+  });
+  it('v1 stays valid even when tx is malformed or absent (v1 lane never reads tx — spec §5/F1)', () => {
+    // REQUIRED, not incidental: if v1 validity depended on tx, an unauthenticated field would control
+    // grade validity and an adversary could destroy genuine v1 grades by editing tx to junk.
+    const k = deriveSubkey(Buffer.alloc(32, 9), 'proj');
+    const v1 = signVerifyV1(verifyRec(), k);
+    expect(verifyVerify({ ...v1, tx: {} as unknown as string }, k)).toBe(true);
+    expect(verifyVerify({ ...v1, tx: undefined as unknown as string }, k)).toBe(true);
+  });
+  it('benign malleability: gen 0/null/absent and targetDigest null/absent are MAC-equivalent (spec §3)', () => {
+    const k = deriveSubkey(Buffer.alloc(32, 9), 'proj');
+    const signed = signVerify(verifyRec({ gen: 0, targetDigest: undefined }), k); // absent digest -> NULL_FIELD
+    expect(verifyVerify({ ...signed, gen: null as unknown as number }, k)).toBe(true);
+    expect(verifyVerify({ ...signed, gen: undefined }, k)).toBe(true);
+    expect(verifyVerify({ ...signed, targetDigest: null as unknown as string }, k)).toBe(true); // null == absent
+    expect(verifyVerify({ ...signed, targetDigest: undefined }, k)).toBe(true);
+  });
+  it('rejects a version-downgrade/upgrade forgery (denial only, never elevation)', () => {
+    const k = deriveSubkey(Buffer.alloc(32, 9), 'proj');
+    const v2 = signVerify(verifyRec(), k);
+    const v1 = signVerifyV1(verifyRec(), k);
+    expect(verifyVerify({ ...v2, macVersion: 1 }, k)).toBe(false);   // v2 mac vs v1 input
+    expect(verifyVerify({ ...v1, macVersion: 2 }, k)).toBe(false);   // v1 mac vs v2 input
+  });
+  it('rejects an unknown, absent, or wrong-TYPE MAC version', () => {
+    const k = deriveSubkey(Buffer.alloc(32, 9), 'proj');
+    const v2 = signVerify(verifyRec(), k);
+    expect(verifyVerify({ ...v2, macVersion: 3 }, k)).toBe(false);
+    expect(verifyVerify({ ...v2, macVersion: undefined }, k)).toBe(false);
+    expect(verifyVerify({ ...v2, macVersion: '2' as unknown as number }, k)).toBe(false); // JSON type confusion
+  });
+  it('is total: a malformed or absent MAC-covered field makes it false, never throws', () => {
+    const k = deriveSubkey(Buffer.alloc(32, 9), 'proj');
+    const v2 = signVerify(verifyRec(), k);
+    expect(() => verifyVerify({ ...v2, tx: {} as unknown as string }, k)).not.toThrow();
+    expect(verifyVerify({ ...v2, tx: {} as unknown as string }, k)).toBe(false);
+    expect(verifyVerify({ ...v2, tx: undefined as unknown as string }, k)).toBe(false);
+  });
+  it('signVerify stays STRICT at write time: a malformed tx throws (genuine v2 cannot be minted malformed)', () => {
+    const k = deriveSubkey(Buffer.alloc(32, 9), 'proj');
+    expect(() => signVerify(verifyRec({ tx: {} as unknown as string }), k)).toThrow();
+  });
+  it('mechanical fence: signVerifyV1 is referenced nowhere in src/ outside its defining module', () => {
+    const files = readdirSync('src', { recursive: true }) as string[];
+    const offenders = files
+      .filter((f) => f.endsWith('.ts') && !f.endsWith('ledger-mac.ts'))
+      .filter((f) => readFileSync(join('src', f), 'utf8').includes('signVerifyV1'));
+    expect(offenders).toEqual([]);
   });
 });
