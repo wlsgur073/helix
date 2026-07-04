@@ -3,7 +3,11 @@ import { mkdtempSync, mkdirSync, appendFileSync, readFileSync, writeFileSync, rm
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
-import { digestContent } from '../../src/memory/ledger-mac.js';
+import { digestContent, verifyVerify, signVerifyV1 } from '../../src/memory/ledger-mac.js';
+import { parseLedger } from '../../src/memory/ledger.js';
+import { subkeyForScope, verifiedLiveOf } from '../../src/memory/verified-read.js';
+import { scanLegacyElevated } from '../../src/memory/legacy-scan.js';
+import type { MemoryRecord } from '../../src/types.js';
 
 function tmpStore() {
   const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
@@ -98,5 +102,47 @@ describe('store ledger-HMAC', () => {
     store.adopt();
     const hit = store.recall('planted').items.find((i) => i.record.id === 'seed')!;
     expect(hit.record.state).toBe('Fresh'); // NOT laundered into Verified
+  });
+
+  it('future-version survival: a macVersion-3 verify outlives permanent-erase compaction, grades nothing, is scan-flagged (spec §4.6)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const ledger = join(home, 'memory.jsonl');
+    const store = new MemoryStore(ledger, { sessionId: 's', home });
+    const keep = store.commit({ content: 'keep me', source: 'user' });
+    const gone = store.commit({ content: 'erase me', source: 'user' });
+    store.confirm(keep.id); // ensures the master exists so compaction runs in HMAC-aware mode
+    const ts = '2026-07-01T00:00:00.000Z'; // a "v3" record current code cannot verify — MUST be preserved
+    appendFileSync(ledger, JSON.stringify({ id: 'futurev', tx: ts, validFrom: ts, validTo: null,
+      type: 'verify', state: 'Verified', content: '', provenance: { source: 'user', sessionId: 's' },
+      supersedes: keep.id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+      gen: 9, targetDigest: digestContent('keep me'), mac: 'junk', keyId: 'junk', macVersion: 3 }) + '\n');
+    store.erase(gone.id, { permanent: true });
+    const after = parseLedger(ledger);
+    expect(after.some((r) => r.id === 'futurev')).toBe(true);                    // preserved, not destroyed
+    expect(after.filter((r) => r.id.startsWith('integrity_'))).toHaveLength(0);  // NOT counted as droppedForged
+    const proj = verifiedLiveOf(after, home);
+    expect(proj.live.get(keep.id)!.state).toBe('Verified');                      // grade from the GENUINE gen-1 v2 only
+    expect(proj.compromised.has(keep.id)).toBe(false);                           // futurev neither grades nor conflicts
+    const subkey = subkeyForScope(home)!;
+    const scan = scanLegacyElevated(after, (r) => verifyVerify(r, subkey));
+    expect(scan.offenders).toContain('futurev');                                 // visible, not laundered
+  });
+
+  it('collision-pair stability: an L2-colliding v1+v2 pair BOTH survive compaction (evidence stability, spec §4.5)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const ledger = join(home, 'memory.jsonl');
+    const store = new MemoryStore(ledger, { sessionId: 's', home });
+    const keep = store.commit({ content: 'keep me', source: 'user' });
+    const gone = store.commit({ content: 'erase me', source: 'user' });
+    store.confirm(keep.id); // genuine v2 gen-1 verify on keep
+    const subkey = subkeyForScope(home)!;
+    // a blind pre-A v1 verify colliding at gen 1 with a different state — both are MAC-valid, so
+    // compaction (MAC-validity based, never projection-lane based) must keep both for later inspection.
+    const v1 = signVerifyV1({ ...keep, id: 'v1collide', type: 'verify', state: 'Corroborated', content: '',
+      supersedes: keep.id, gen: 1, targetDigest: digestContent('keep me') } as MemoryRecord, subkey);
+    appendFileSync(ledger, JSON.stringify(v1) + '\n');
+    store.erase(gone.id, { permanent: true });
+    const keepVerifies = parseLedger(ledger).filter((r) => r.type === 'verify' && r.supersedes === keep.id);
+    expect(keepVerifies.map((r) => r.macVersion).sort()).toEqual([1, 2]);
   });
 });

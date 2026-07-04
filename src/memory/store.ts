@@ -13,7 +13,7 @@ import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce } from './content-frame.js';
 import { isOwned, stampOwnership } from './ownership.js';
-import { ensureMaster, signVerify, verifyVerify, digestContent } from './ledger-mac.js';
+import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
 import { buildVerifiedProjection, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLive, verifiedLiveOf } from './verified-read.js';
 import { withFileLock } from './lock.js';
@@ -388,7 +388,12 @@ export class MemoryStore {
       const sk = this.subkeyForLedger(ledger);
       compactLedger(ledger, {
         erasedIds: new Set([id]),
-        keepValidVerify: sk ? (r) => verifyVerify(r, sk) : () => true,
+        // spec §4.6: preserve records from a FUTURE MAC version too — an A-era compactor must never
+        // destroy what a newer binary signed (the pre-A -> v2 destructive-compaction class, one bump
+        // later). They stay grade-inert (verifyVerify false until a verifier exists) and scan-visible.
+        keepValidVerify: sk
+          ? (r) => verifyVerify(r, sk) || (typeof r.macVersion === 'number' && Number.isSafeInteger(r.macVersion) && r.macVersion > MAC_VERSION)
+          : () => true,
       });
     }
   }
