@@ -49,6 +49,12 @@ locally-held key, so:
 - Against an adversary that can write `.helix/memory.jsonl` but **cannot read `~/.helix`**,
   `Corroborated`/`Verified` are **unforgeable at the file/append surface**. This is the same trust
   boundary the ownership registry already relies on.
+- **Verification timing is authenticated (MAC v2).** A `verify` record now also binds its system-time
+  `tx` into the MAC, so the *timing* of a genuine verification cannot be edited in place. This is
+  **authenticity, not accuracy**: it certifies the bytes the signing clock claimed at mint time, not
+  that the clock was correct. Pre-existing v1 verifications stay valid but carry an unauthenticated
+  (editable) `tx` — timing trust is therefore per-record, and grows only as facts are genuinely
+  re-verified. Grade validity never depends on `tx`: a v1 grade survives even if its `tx` is garbage.
 
 **This authenticates the file surface, not the tool surface.** A legitimate `helix_memory_confirm`
 call still carries no enforceable human-approval signal, so the guidance above stands: do **not**

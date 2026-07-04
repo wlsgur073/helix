@@ -19,6 +19,12 @@ All notable changes to Helix are documented here. This project follows
   can mint valid MACs (irreducible; a readable home key voids the guarantee); rollback-by-suppression
   (deleting a later `verify`) is undetected (home high-water counter is a follow-on); and trust is
   machine-local (a `Verified` grade does not transfer to another machine).
+- Ledger MAC v2: `verify` records now bind their system-time `tx` into the MAC, so a genuine
+  verification's *timing* cannot be edited in place (authenticity, not clock accuracy). Reads
+  dual-accept existing v1 signatures, so no grades are lost; only new verifications become
+  `tx`-bound. A cross-version gen collision from a stale reader resolves to the lower trust grade
+  (never a permanent conflict), and an older binary can no longer destroy a newer version's records
+  during compaction.
 - Best-effort garbage collection of leaked Codex scratch directories: an age-based sweep
   (3-day floor, directories only, rate-limited to once a day) runs at runner start and never
   throws into the verify path.

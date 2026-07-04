@@ -3,8 +3,8 @@ import { mkdtempSync, mkdirSync, appendFileSync, readFileSync, writeFileSync, rm
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
-import { digestContent, verifyVerify, signVerifyV1 } from '../../src/memory/ledger-mac.js';
-import { parseLedger } from '../../src/memory/ledger.js';
+import { digestContent, verifyVerify, signVerifyV1, keyIdOf } from '../../src/memory/ledger-mac.js';
+import { parseLedger, compactLedger } from '../../src/memory/ledger.js';
 import { subkeyForScope, verifiedLiveOf } from '../../src/memory/verified-read.js';
 import { scanLegacyElevated } from '../../src/memory/legacy-scan.js';
 import type { MemoryRecord } from '../../src/types.js';
@@ -144,5 +144,77 @@ describe('store ledger-HMAC', () => {
     store.erase(gone.id, { permanent: true });
     const keepVerifies = parseLedger(ledger).filter((r) => r.type === 'verify' && r.supersedes === keep.id);
     expect(keepVerifies.map((r) => r.macVersion).sort()).toEqual([1, 2]);
+  });
+
+  it('store.confirm mints a v2 verify end-to-end', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const ledger = join(home, 'memory.jsonl');
+    const store = new MemoryStore(ledger, { sessionId: 's', home });
+    const a = store.commit({ content: 'plain fact', source: 'user' });
+    store.confirm(a.id);
+    const verifies = parseLedger(ledger).filter((r) => r.type === 'verify' && r.supersedes === a.id);
+    expect(verifies).toHaveLength(1);
+    expect(verifies[0]!.macVersion).toBe(2);
+  });
+
+  it('compaction preserves BOTH a v1 and a v2 verify for a live target', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const ledger = join(home, 'memory.jsonl');
+    const store = new MemoryStore(ledger, { sessionId: 's', home });
+    const a = store.commit({ content: 'plain fact', source: 'user' });
+    store.confirm(a.id);                       // mints the master + a genuine v2 verify (gen 1)
+    const subkey = subkeyForScope(home)!;      // resolvable only AFTER the master exists
+    const v1 = signVerifyV1(
+      { ...a, id: 'legacyv', type: 'verify', state: 'Verified', content: '', supersedes: a.id,
+        gen: 5, targetDigest: digestContent('plain fact') } as MemoryRecord,
+      subkey,
+    );
+    appendFileSync(ledger, JSON.stringify(v1) + '\n');
+    compactLedger(ledger, { erasedIds: new Set(), keepValidVerify: (r) => verifyVerify(r, subkey) });
+    const kept = parseLedger(ledger).filter((r) => r.type === 'verify' && r.supersedes === a.id);
+    expect(kept.map((r) => r.macVersion).sort()).toEqual([1, 2]);   // both survived dual-accept compaction
+  });
+
+  it('compaction is total over a malformed verify: erasure completes, forged line dropped, ONE tombstone (spec §5 delta)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const ledger = join(home, 'memory.jsonl');
+    const store = new MemoryStore(ledger, { sessionId: 's', home });
+    const a = store.commit({ content: 'erase me', source: 'user' });
+    const b = store.commit({ content: 'keep me', source: 'user' });
+    store.confirm(b.id);                       // genuine v2 verify on the fact that survives
+    const subkey = subkeyForScope(home)!;
+    // A verify that PASSES verifyVerify's pre-checks (mac+matching keyId+valid version) but whose
+    // malformed MAC-covered field (state:{}) makes str() THROW inside macInputFor. Pre-A this crashes
+    // compaction and aborts erasure (one junk line blocks right-to-erasure); post-A totality catches
+    // it -> false -> dropped as forged. Targets the still-live b so it reaches keepValidVerify.
+    appendFileSync(ledger, JSON.stringify({ ...b, id: 'malformed', type: 'verify', supersedes: b.id,
+      state: {}, gen: 1, mac: 'ab', keyId: keyIdOf(subkey), macVersion: 2 }) + '\n');
+    expect(() => store.erase(a.id, { permanent: true })).not.toThrow();
+    const after = parseLedger(ledger);
+    expect(after.some((r) => r.id === a.id)).toBe(false);                        // erasure completed
+    expect(after.some((r) => r.id === 'malformed')).toBe(false);                 // malformed dropped, not kept
+    expect(after.filter((r) => r.id.startsWith('integrity_'))).toHaveLength(1);  // audit tombstone minted
+    expect(after.some((r) => r.type === 'verify' && r.supersedes === b.id && r.macVersion === 2)).toBe(true); // genuine v2 kept
+  });
+
+  it('legacy-scan stays quiet on a genuine v1+v2 mix and content-free markers', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const ledger = join(home, 'memory.jsonl');
+    const store = new MemoryStore(ledger, { sessionId: 's', home });
+    const a = store.commit({ content: 'plain fact', source: 'user' });
+    store.confirm(a.id);                       // genuine v2
+    const subkey = subkeyForScope(home)!;
+    const v1 = signVerifyV1(
+      { ...a, id: 'legacyv', type: 'verify', state: 'Verified', content: '', supersedes: a.id,
+        gen: 5, targetDigest: digestContent('plain fact') } as MemoryRecord,
+      subkey,
+    );
+    appendFileSync(ledger, JSON.stringify(v1) + '\n');
+    const ts = '2026-07-01T00:00:00.000Z';     // horizon marker (content-free, unsigned — B1 exclusion)
+    appendFileSync(ledger, JSON.stringify({ id: 'horizon_x', tx: ts, validFrom: ts, validTo: null,
+      type: 'verify', state: 'Suspect', content: '', provenance: { source: 'user', sessionId: 'compaction' },
+      supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal' }) + '\n');
+    const scan = scanLegacyElevated(parseLedger(ledger), (r) => verifyVerify(r, subkey));
+    expect(scan).toEqual({ ok: true, offenders: [] });
   });
 });

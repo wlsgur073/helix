@@ -222,7 +222,7 @@ function parseLedger(path) {
 import { createHash, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
 import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, renameSync as renameSync2, statSync, chmodSync, mkdirSync as mkdirSync3 } from "node:fs";
 import { dirname, join as join2 } from "node:path";
-var MAC_VERSION = 1;
+var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 function digestContent(content) {
   return createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex");
 }
@@ -269,10 +269,8 @@ var int = (n) => {
   b.writeBigUInt64BE(BigInt(n));
   return field(b);
 };
-function macInput(r, keyId) {
-  return Buffer.concat([
-    DOMAIN,
-    Buffer.from([MAC_VERSION]),
+function macCommon(r, keyId) {
+  return [
     field(Buffer.from(keyId, "hex")),
     str(r.type),
     str(r.id),
@@ -280,12 +278,27 @@ function macInput(r, keyId) {
     str(r.state),
     int(r.gen ?? 0),
     str(r.targetDigest ?? null)
-  ]);
+  ];
+}
+function macInputV1(r, keyId) {
+  return Buffer.concat([DOMAIN, Buffer.from([1]), ...macCommon(r, keyId)]);
+}
+function macInputV2(r, keyId) {
+  return Buffer.concat([DOMAIN, Buffer.from([2]), ...macCommon(r, keyId), str(r.tx)]);
+}
+function macInputFor(version, r, keyId) {
+  return version === 1 ? macInputV1(r, keyId) : macInputV2(r, keyId);
 }
 function verifyVerify(record, subkey) {
-  if (record.macVersion !== MAC_VERSION || !record.mac || !record.keyId) return false;
+  if (!record.mac || !record.keyId) return false;
+  if (typeof record.macVersion !== "number" || !ACCEPTED_MAC_VERSIONS.has(record.macVersion)) return false;
   if (record.keyId !== keyIdOf(subkey)) return false;
-  const want = createHmac("sha256", subkey).update(macInput(record, record.keyId)).digest();
+  let want;
+  try {
+    want = createHmac("sha256", subkey).update(macInputFor(record.macVersion, record, record.keyId)).digest();
+  } catch {
+    return false;
+  }
   let got;
   try {
     got = Buffer.from(record.mac, "hex");
@@ -297,6 +310,7 @@ function verifyVerify(record, subkey) {
 
 // src/memory/verified-projection.ts
 var isPromotion = (s) => s === "Verified" || s === "Corroborated";
+var TRUST_RANK = { Suspect: 0, Fresh: 1, Corroborated: 2, Verified: 3 };
 function buildVerifiedProjection(records, opts) {
   const nonVerify = records.filter((r) => r.type !== "verify");
   const live = /* @__PURE__ */ new Map();
@@ -311,15 +325,32 @@ function buildVerifiedProjection(records, opts) {
   for (const [target, verifies] of byTarget) {
     const item = live.get(target);
     if (!item) continue;
-    const stateByGen = /* @__PURE__ */ new Map();
-    let conflict = false;
+    const laneOf = (v) => v.macVersion === 1 ? 1 : v.macVersion === 2 ? 2 : 0;
+    const byGen = /* @__PURE__ */ new Map();
     for (const v of verifies) {
       const g = v.gen ?? 0;
-      const prev = stateByGen.get(g);
-      if (prev === void 0) stateByGen.set(g, v.state);
-      else if (prev !== v.state) {
-        conflict = true;
-        break;
+      (byGen.get(g) ?? byGen.set(g, []).get(g)).push(v);
+    }
+    let conflict = false;
+    const active = [];
+    for (const slot of byGen.values()) {
+      const lanes = /* @__PURE__ */ new Map();
+      for (const v of slot) (lanes.get(laneOf(v)) ?? lanes.set(laneOf(v), []).get(laneOf(v))).push(v);
+      for (const members of lanes.values()) {
+        const s0 = members[0].state, d0 = members[0].targetDigest ?? null;
+        if (members.some((m) => m.state !== s0 || (m.targetDigest ?? null) !== d0)) {
+          conflict = true;
+          break;
+        }
+      }
+      if (conflict) break;
+      const l1 = lanes.get(1), l2 = lanes.get(2);
+      const r1 = l1?.[0], r2 = l2?.[0];
+      if (r1 && r2 && r1.state !== r2.state) {
+        active.push(...TRUST_RANK[r1.state] <= TRUST_RANK[r2.state] ? l1 : l2);
+        if (lanes.has(0)) active.push(...lanes.get(0));
+      } else {
+        active.push(...slot);
       }
     }
     if (conflict) {
@@ -327,7 +358,7 @@ function buildVerifiedProjection(records, opts) {
       continue;
     }
     const liveDigest = digestContent(item.content);
-    const sorted = [...verifies].sort((a, b) => (a.gen ?? 0) - (b.gen ?? 0));
+    const sorted = [...active].sort((a, b) => (a.gen ?? 0) - (b.gen ?? 0));
     let winner = null;
     for (const v of sorted) {
       const applicable = !isPromotion(v.state) || v.targetDigest === liveDigest;
