@@ -88,3 +88,30 @@ export interface ScopedHistoricalRecord extends HistoricalRecord {
   scope: MemoryScope;
   integrity?: 'ok' | 'compromised';
 }
+
+/** One valid verify considered when reconstructing a fact's grade, with the forensic detail the live
+ *  projection discards. Derived at read time; never persisted. `txAuthenticated` = the verify's system
+ *  time is MAC-bound (v2 + canonical instant); false for a legacy v1 verify (declared timing). */
+export interface AsOfVerify {
+  gen: number;
+  state: MemoryState;
+  tx: string;
+  macVersion: number;
+  txAuthenticated: boolean;
+  applicable: boolean;   // R3: a non-promotion, or a promotion whose targetDigest matches the fact content
+  winner: boolean;       // did this verify confer the reconstructed grade
+  lane: 0 | 1 | 2;       // MAC-version lane (0 = legacy/predicate-injected); spec A §4.5
+}
+
+/** A fact live at the as-of instant, its reconstructed grade, and the full verify evidence for why. */
+export interface AsOfFact {
+  record: MemoryRecord;
+  grade: MemoryState;
+  evidence: AsOfVerify[];
+  integrity: 'ok' | 'compromised';
+}
+
+/** An AsOfFact tagged with its source scope (mirrors ScopedHistoricalRecord). */
+export interface ScopedAsOfFact extends AsOfFact {
+  scope: MemoryScope;
+}

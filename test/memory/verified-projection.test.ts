@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildVerifiedProjection } from '../../src/memory/verified-projection.js';
+import { buildVerifiedProjection, resolveTargetGrade } from '../../src/memory/verified-projection.js';
 import { digestContent, deriveSubkey, signVerify, signVerifyV1, verifyVerify } from '../../src/memory/ledger-mac.js';
 import type { MemoryRecord } from '../../src/types.js';
 
@@ -162,5 +162,33 @@ describe('lane-aware equal-gen conflict + cross-lane fail-low (spec §4.5)', () 
     const out = buildVerifiedProjection(recs, { verify: V, keyAvailable: true });
     expect(out.live.get('a')!.state).toBe('Suspect');
     expect(out.compromised.has('a')).toBe(false);
+  });
+});
+
+describe('resolveTargetGrade (shared grade + evidence helper, spec C §4.3)', () => {
+  const D = digestContent('fact');
+  it('emits every considered verify with exactly one winner + correct applicable flags', () => {
+    const verifies = [
+      sv2({ id: 'g1', supersedes: 'a', state: 'Corroborated', gen: 1, targetDigest: D }),
+      sv2({ id: 'g2', supersedes: 'a', state: 'Verified', gen: 2, targetDigest: digestContent('STALE') }), // stale promo
+    ];
+    const { grade, compromised, evidence } = resolveTargetGrade(verifies, D);
+    expect(compromised).toBe(false);
+    expect(grade).toBe('Corroborated');                    // gen-2 Verified is non-applicable -> gen-1 wins
+    expect(evidence).toHaveLength(2);
+    expect(evidence.find((e) => e.gen === 2)!.applicable).toBe(false);
+    expect(evidence.find((e) => e.gen === 1)!.winner).toBe(true);
+    expect(evidence.filter((e) => e.winner)).toHaveLength(1);
+    expect(evidence.find((e) => e.gen === 1)!.txAuthenticated).toBe(true); // v2 + ISO tx
+  });
+  it('a same-lane conflict returns compromised with no winner', () => {
+    const verifies = [
+      sv2({ id: 'x', supersedes: 'a', state: 'Verified', gen: 1, targetDigest: D }),
+      sv2({ id: 'y', supersedes: 'a', state: 'Suspect', gen: 1, targetDigest: D }),
+    ];
+    const { grade, compromised, evidence } = resolveTargetGrade(verifies, D);
+    expect(compromised).toBe(true);
+    expect(grade).toBeNull();
+    expect(evidence.every((e) => !e.winner)).toBe(true);
   });
 });

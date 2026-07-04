@@ -13929,6 +13929,53 @@ function verifyVerify(record2, subkey) {
 // src/memory/verified-projection.ts
 var isPromotion = (s) => s === "Verified" || s === "Corroborated";
 var TRUST_RANK = { Suspect: 0, Fresh: 1, Corroborated: 2, Verified: 3 };
+function resolveTargetGrade(verifies, liveDigest) {
+  const laneOf = (v) => v.macVersion === 1 ? 1 : v.macVersion === 2 ? 2 : 0;
+  const byGen = /* @__PURE__ */ new Map();
+  for (const v of verifies) {
+    const g = v.gen ?? 0;
+    (byGen.get(g) ?? byGen.set(g, []).get(g)).push(v);
+  }
+  let conflict = false;
+  const active = [];
+  for (const slot of byGen.values()) {
+    const lanes = /* @__PURE__ */ new Map();
+    for (const v of slot) (lanes.get(laneOf(v)) ?? lanes.set(laneOf(v), []).get(laneOf(v))).push(v);
+    for (const members of lanes.values()) {
+      const s0 = members[0].state, d0 = members[0].targetDigest ?? null;
+      if (members.some((m) => m.state !== s0 || (m.targetDigest ?? null) !== d0)) {
+        conflict = true;
+        break;
+      }
+    }
+    if (conflict) break;
+    const l1 = lanes.get(1), l2 = lanes.get(2);
+    const r1 = l1?.[0], r2 = l2?.[0];
+    if (r1 && r2 && r1.state !== r2.state) {
+      active.push(...TRUST_RANK[r1.state] <= TRUST_RANK[r2.state] ? l1 : l2);
+      if (lanes.has(0)) active.push(...lanes.get(0));
+    } else {
+      active.push(...slot);
+    }
+  }
+  const toEvidence = (v, winner2) => ({
+    gen: v.gen ?? 0,
+    state: v.state,
+    tx: v.tx,
+    macVersion: v.macVersion ?? 0,
+    txAuthenticated: v.macVersion === 2 && typeof v.tx === "string" && isIsoInstant(v.tx),
+    applicable: !isPromotion(v.state) || v.targetDigest === liveDigest,
+    winner: winner2,
+    lane: laneOf(v)
+  });
+  if (conflict) return { grade: null, compromised: true, evidence: verifies.map((v) => toEvidence(v, false)) };
+  const sorted = [...active].sort((a, b) => (a.gen ?? 0) - (b.gen ?? 0));
+  let winner = null;
+  for (const v of sorted) {
+    if (!isPromotion(v.state) || v.targetDigest === liveDigest) winner = v;
+  }
+  return { grade: winner ? winner.state : null, compromised: false, evidence: verifies.map((v) => toEvidence(v, v === winner)) };
+}
 function buildVerifiedProjection(records, opts) {
   const nonVerify = records.filter((r) => r.type !== "verify");
   const live = /* @__PURE__ */ new Map();
@@ -13943,46 +13990,12 @@ function buildVerifiedProjection(records, opts) {
   for (const [target, verifies] of byTarget) {
     const item = live.get(target);
     if (!item) continue;
-    const laneOf = (v) => v.macVersion === 1 ? 1 : v.macVersion === 2 ? 2 : 0;
-    const byGen = /* @__PURE__ */ new Map();
-    for (const v of verifies) {
-      const g = v.gen ?? 0;
-      (byGen.get(g) ?? byGen.set(g, []).get(g)).push(v);
-    }
-    let conflict = false;
-    const active = [];
-    for (const slot of byGen.values()) {
-      const lanes = /* @__PURE__ */ new Map();
-      for (const v of slot) (lanes.get(laneOf(v)) ?? lanes.set(laneOf(v), []).get(laneOf(v))).push(v);
-      for (const members of lanes.values()) {
-        const s0 = members[0].state, d0 = members[0].targetDigest ?? null;
-        if (members.some((m) => m.state !== s0 || (m.targetDigest ?? null) !== d0)) {
-          conflict = true;
-          break;
-        }
-      }
-      if (conflict) break;
-      const l1 = lanes.get(1), l2 = lanes.get(2);
-      const r1 = l1?.[0], r2 = l2?.[0];
-      if (r1 && r2 && r1.state !== r2.state) {
-        active.push(...TRUST_RANK[r1.state] <= TRUST_RANK[r2.state] ? l1 : l2);
-        if (lanes.has(0)) active.push(...lanes.get(0));
-      } else {
-        active.push(...slot);
-      }
-    }
-    if (conflict) {
+    const { grade, compromised: c } = resolveTargetGrade(verifies, digestContent(item.content));
+    if (c) {
       compromised.add(target);
       continue;
     }
-    const liveDigest = digestContent(item.content);
-    const sorted = [...active].sort((a, b) => (a.gen ?? 0) - (b.gen ?? 0));
-    let winner = null;
-    for (const v of sorted) {
-      const applicable = !isPromotion(v.state) || v.targetDigest === liveDigest;
-      if (applicable) winner = v;
-    }
-    if (winner) live.set(target, { ...item, state: winner.state });
+    if (grade) live.set(target, { ...item, state: grade });
   }
   return { live, compromised, keyAvailable: true };
 }
