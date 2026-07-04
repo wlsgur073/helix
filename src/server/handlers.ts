@@ -56,11 +56,32 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
  *  the SAME DATA quarantine recall/SessionStart use — nonce frame + per-line datamark/normalizeUntrusted
  *  on the content — with the id sanitized and the known-enum state/scope in the (trusted) datamark, so
  *  no single record can forge an extra labelled line or break out of the frame. */
-export function handleInspect(store: MemoryStore, args: { history?: boolean }): ToolResult {
+export function handleInspect(store: MemoryStore, args: { history?: boolean; asOf?: string }): ToolResult {
+  const iso = (s: string): string => (isIsoInstant(s) ? s : '??');
+  if (args.asOf !== undefined) {
+    if (args.history) return ok('inspect: history and asOf are mutually exclusive — pass one.');
+    if (!isIsoInstant(args.asOf)) return ok('inspect: as-of cursor must be a canonical ISO-8601 instant (e.g. 2026-07-04T00:00:00.000Z).');
+    const { facts, keyAvailable, truncated } = store.asOfView(args.asOf);
+    if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})`);
+    const lines: Array<{ text: string; mark: string }> = [];
+    for (const f of facts) {
+      lines.push({ text: `${safeId(f.record.id)} ${f.record.content}`, mark: `DATA[${f.grade}:${f.scope}]| ` });
+      for (const e of f.evidence) {
+        const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? 'Y' : 'N'} applicable=${e.applicable ? 'Y' : 'N'}${e.winner ? ' WINNER' : ''}`;
+        lines.push({ text: `${safeId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
+      }
+    }
+    const frame = makeDataFrame({ label: `MEMORY AS OF ${args.asOf}`, nonce: newNonce(), lines });
+    const notes: string[] = ['\n\n(as-of snapshot — membership and timing are declared, not authenticated; only auth=Y verify timing is MAC-bound)'];
+    if (!keyAvailable) notes.push('\n\n(integrity verification unavailable — trust grades shown are unverified)');
+    if (facts.some((f) => f.integrity === 'compromised')) notes.push(`\n\n(integrity conflict — equal-generation verify mismatch: ${facts.filter((f) => f.integrity === 'compromised').map((f) => safeId(f.record.id)).join(', ')})`);
+    if (facts.some((f) => f.evidence.some((e) => !e.txAuthenticated))) notes.push('\n\n(verify timing marked auth=N is declared, not authenticated — v1/legacy)');
+    if (truncated) notes.push('\n\n(history may be truncated by a past compaction — reconstruction before the horizon is unreliable)');
+    return ok(frame + notes.join(''));
+  }
   if (args.history) {
     const { rows, anomalies, truncated, integrityAvailable } = store.historyView();
     if (rows.length === 0) return ok('(memory is empty)');
-    const iso = (s: string): string => (isIsoInstant(s) ? s : '??');
     const frame = makeDataFrame({
       label: 'MEMORY HISTORY',
       nonce: newNonce(),
