@@ -161,3 +161,30 @@ describe('signVerify / verifyVerify', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe('golden MAC vectors (frozen byte-identity)', () => {
+  const gk = deriveSubkey(Buffer.alloc(32, 7), 'golden'); // fixed master+nonce => deterministic subkey
+  // FULLY-LITERAL fixture — spec §8: no test-factory defaults. If gRec inherited from verifyRec(),
+  // a later factory edit would silently change the vector and invite a thoughtless re-capture.
+  const gRec: MemoryRecord = {
+    id: 'gv', tx: '2026-07-01T00:00:00.000Z', validFrom: '2026-07-01T00:00:00.000Z', validTo: null,
+    type: 'verify', state: 'Verified', content: '', provenance: { source: 'user', sessionId: 'golden' },
+    supersedes: 'gt', blastRadius: null, reverifyTrigger: null, classification: 'normal',
+    gen: 1, targetDigest: '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
+  };
+  const FROZEN_V1_INPUT = '68656c69782d6c65646765722d6d61630101000000085dee931aa0b985b3010000000676657269667901000000026776010000000267740100000008566572696669656401000000080000000000000001010000004030303131323233333434353536363737383839396161626263636464656566663030313132323333343435353636373738383939616162626363646465656666'; // macInputV1 byte hex — locks serialization
+  const FROZEN_V2_INPUT = '68656c69782d6c65646765722d6d61630201000000085dee931aa0b985b30100000006766572696679010000000267760100000002677401000000085665726966696564010000000800000000000000010100000040303031313232333334343535363637373838393961616262636364646565666630303131323233333434353536363737383839396161626263636464656566660100000018323032362d30372d30315430303a30303a30302e3030305a'; // separately from HKDF/HMAC drift (spec §8/J4)
+  const FROZEN_V1_MAC = 'cd0ff1d69cb46794feb631d617d354e89d7c48f43cffd5ae7b51f380c30b97c7';
+  const FROZEN_V2_MAC = 'b5575452d7f2a4bd3e90c48ef2d3ebc81484acbbe5f331c8a0675a0b90f82355';
+
+  it('v1 output is byte-frozen and still verifies', () => {
+    expect(macInputV1(gRec, keyIdOf(gk)).toString('hex')).toBe(FROZEN_V1_INPUT);
+    expect(signVerifyV1(gRec, gk).mac).toBe(FROZEN_V1_MAC);
+    expect(verifyVerify({ ...gRec, mac: FROZEN_V1_MAC, keyId: keyIdOf(gk), macVersion: 1 }, gk)).toBe(true);
+  });
+  it('v2 output is byte-frozen and still verifies', () => {
+    expect(macInputV2(gRec, keyIdOf(gk)).toString('hex')).toBe(FROZEN_V2_INPUT);
+    expect(signVerify(gRec, gk).mac).toBe(FROZEN_V2_MAC);
+    expect(verifyVerify({ ...gRec, mac: FROZEN_V2_MAC, keyId: keyIdOf(gk), macVersion: 2 }, gk)).toBe(true);
+  });
+});
