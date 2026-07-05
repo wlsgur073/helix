@@ -7,9 +7,13 @@ import type { RealityCheck } from '../memory/reality-check.js';
 import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus } from '../verify/codex.js';
+import { noopMetricsSink, type MetricsSink } from '../metrics.js';
 
 /** Build a Helix MCP server with the memory tools registered against `store`. */
-export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps): McpServer {
+export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps, metrics?: MetricsSink): McpServer {
+  // Single dispatch seam: every tool handler runs inside m.runOp so store.emitReplay calls made
+  // synchronously inside self-stamp the current op id (spec §5). Default noop = zero behavior change.
+  const m = metrics ?? noopMetricsSink;
   const server = new McpServer({ name: 'helix', version: '0.1.0' });
   // The no-deps fallback must honor HELIX_HOME too, or it would silently read the real
   // ~/.helix/config.json and write the real audit log under test isolation (the index.ts
@@ -48,25 +52,25 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       supersedes: z.string().optional(),
       scope: z.enum(['project', 'global']).optional(),
     },
-  }, async (args) => handleCommit(store, args));
+  }, async (args) => m.runOp('helix_memory_commit', () => handleCommit(store, args)));
 
   server.registerTool('helix_memory_recall', {
     title: 'Recall memory',
     description: 'Recall relevant memory as a DATA-only block; flags items needing re-verification.',
     inputSchema: { query: z.string(), maxItems: z.number().int().positive().optional() },
-  }, async (args) => handleRecall(store, args));
+  }, async (args) => m.runOp('helix_memory_recall', () => handleRecall(store, args)));
 
   server.registerTool('helix_memory_inspect', {
     title: 'Inspect memory',
     description: 'List current memory items (id, trust state, content). Pass history=true to also list closed items with their [tx, txTo) declared interval, OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive.',
     inputSchema: { history: z.boolean().optional(), asOf: z.string().optional() },
-  }, async (args) => handleInspect(store, args));
+  }, async (args) => m.runOp('helix_memory_inspect', () => handleInspect(store, args)));
 
   server.registerTool('helix_memory_erase', {
     title: 'Erase memory',
     description: 'Erase a memory item by id. Soft-only: the item is removed from the live view (recall/inspect) but remains recoverable on disk (no compaction) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool cannot physically destroy content — genuine right-to-erasure (compaction) is handled outside the agent tool surface.',
     inputSchema: { id: z.string() },
-  }, async (args) => handleErase(store, args, { auditPath: dv.auditPath, now: dv.now }));
+  }, async (args) => m.runOp('helix_memory_erase', () => handleErase(store, args, { auditPath: dv.auditPath, now: dv.now })));
 
   server.registerTool('helix_memory_recheck', {
     title: 'Recheck memory against reality',
@@ -79,7 +83,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       id: z.string(),
       check: z.object({ kind: z.literal('file-contains'), path: z.string(), pattern: z.string() }),
     },
-  }, async (args) => handleRecheck(store, args as { id: string; check: RealityCheck }, { auditPath: dv.auditPath, now: dv.now }));
+  }, async (args) => m.runOp('helix_memory_recheck', () => handleRecheck(store, args as { id: string; check: RealityCheck }, { auditPath: dv.auditPath, now: dv.now })));
 
   server.registerTool('helix_memory_confirm', {
     title: 'Confirm memory (user-vouched)',
@@ -90,7 +94,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       'are eligible (re-commit a relayed/inferred fact as source=user first). The user, not Helix, is the ' +
       'authority — do not allow-list this tool.',
     inputSchema: { id: z.string() },
-  }, async (args) => handleConfirm(store, args, { auditPath: dv.auditPath, now: dv.now }));
+  }, async (args) => m.runOp('helix_memory_confirm', () => handleConfirm(store, args, { auditPath: dv.auditPath, now: dv.now })));
 
   server.registerTool('helix_dual_verify', {
     title: 'Dual-verify with Codex',
@@ -100,19 +104,19 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       helixAnswer: z.string(),
       stakes: z.enum(['low', 'medium', 'high']).optional(),
     },
-  }, async (args) => handleDualVerify(args, dv));
+  }, async (args) => m.runOp('helix_dual_verify', () => handleDualVerify(args, dv)));
 
   server.registerTool('helix_codex_status', {
     title: 'Codex status',
     description: 'Show whether Helix is connected to Codex (CLI/version, login, auth mode), the dual-verify config, and the content-log state. Free — no metered Codex call.',
     inputSchema: {},
-  }, async () => handleCodexStatus(codexStatusDeps));
+  }, async () => m.runOp('helix_codex_status', () => handleCodexStatus(codexStatusDeps)));
 
   server.registerTool('helix_memory_adopt', {
     title: 'Adopt project memory',
     description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted.",
     inputSchema: {},
-  }, async () => handleAdopt(store, {}));
+  }, async () => m.runOp('helix_memory_adopt', () => handleAdopt(store, {})));
 
   return server;
 }

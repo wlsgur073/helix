@@ -11,6 +11,7 @@ import { verifyVerify } from '../memory/ledger-mac.js';
 import { buildServer } from './helix-server.js';
 import { installSelfTermination } from './lifecycle.js';
 import { loadConfig } from '../config.js';
+import { createMetricsSink } from '../metrics.js';
 import { realCodexRunner, checkCodexAvailable } from '../verify/codex.js';
 
 // HELIX_HOME relocates ALL user-level state (ledger, global config, audit) in one knob —
@@ -26,7 +27,12 @@ const projectActive = existsSync(join(projectRoot, '.helix'))
   && resolve(projectLedger) !== resolve(globalLedger);
 const project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : undefined;
 
-const store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? 'cli', project });
+// One config load drives both the store's metrics sink and the server deps. The real sink writes
+// content-free records to ~/.helix/metrics.jsonl, gated by config.metrics.enabled (noop when off).
+const config = loadConfig({ globalPath: join(home, 'config.json') });
+const metrics = createMetricsSink(join(home, 'metrics.jsonl'), config.metrics.enabled);
+
+const store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? 'cli', project, metricsSink: metrics });
 
 // Verifying integrity scan (spec §7): surface only records the verifying replay would NOT honour —
 // a `verify` whose MAC fails under the scope subkey (forged/legacy-unsigned) or a baked non-Fresh
@@ -49,13 +55,13 @@ for (const { ledger, root } of scanScopes) {
 }
 
 const server = buildServer(store, {
-  config: loadConfig({ globalPath: join(home, 'config.json') }),
+  config,
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
   echo: { mode: 'enforce', ledgerTexts: () => store.inspect().map(({ record }) => ({ id: record.id, content: record.content })) },
   auditPath: join(home, 'audit.jsonl'),
   codexLogPath: join(home, 'codex-log.jsonl'),
-});
+}, metrics);
 const transport = new StdioServerTransport();
 await server.connect(transport);
 installSelfTermination({

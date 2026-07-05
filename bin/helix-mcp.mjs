@@ -7422,10 +7422,10 @@ function prefixIssues(path, issues) {
 function unwrapMessage(message) {
   return typeof message === "string" ? message : message?.message;
 }
-function finalizeIssue(iss, ctx, config2) {
+function finalizeIssue(iss, ctx, config3) {
   const full = { ...iss, path: iss.path ?? [] };
   if (!iss.message) {
-    const message = unwrapMessage(iss.inst?._zod.def?.error?.(iss)) ?? unwrapMessage(ctx?.error?.(iss)) ?? unwrapMessage(config2.customError?.(iss)) ?? unwrapMessage(config2.localeError?.(iss)) ?? "Invalid input";
+    const message = unwrapMessage(iss.inst?._zod.def?.error?.(iss)) ?? unwrapMessage(ctx?.error?.(iss)) ?? unwrapMessage(config3.customError?.(iss)) ?? unwrapMessage(config3.localeError?.(iss)) ?? "Invalid input";
     full.message = message;
   }
   delete full.inst;
@@ -21738,13 +21738,13 @@ var ExperimentalMcpServerTasks = class {
   constructor(_mcpServer) {
     this._mcpServer = _mcpServer;
   }
-  registerToolTask(name, config2, handler) {
-    const execution = { taskSupport: "required", ...config2.execution };
+  registerToolTask(name, config3, handler) {
+    const execution = { taskSupport: "required", ...config3.execution };
     if (execution.taskSupport === "forbidden") {
       throw new Error(`Cannot register task-based tool '${name}' with taskSupport 'forbidden'. Use registerTool() instead.`);
     }
     const mcpServerInternal = this._mcpServer;
-    return mcpServerInternal._createRegisteredTool(name, config2.title, config2.description, config2.inputSchema, config2.outputSchema, config2.annotations, execution, config2._meta, handler);
+    return mcpServerInternal._createRegisteredTool(name, config3.title, config3.description, config3.inputSchema, config3.outputSchema, config3.annotations, execution, config3._meta, handler);
   }
 };
 
@@ -22173,12 +22173,12 @@ var McpServer = class {
       return registeredResourceTemplate;
     }
   }
-  registerResource(name, uriOrTemplate, config2, readCallback) {
+  registerResource(name, uriOrTemplate, config3, readCallback) {
     if (typeof uriOrTemplate === "string") {
       if (this._registeredResources[uriOrTemplate]) {
         throw new Error(`Resource ${uriOrTemplate} is already registered`);
       }
-      const registeredResource = this._createRegisteredResource(name, config2.title, uriOrTemplate, config2, readCallback);
+      const registeredResource = this._createRegisteredResource(name, config3.title, uriOrTemplate, config3, readCallback);
       this.setResourceRequestHandlers();
       this.sendResourceListChanged();
       return registeredResource;
@@ -22186,7 +22186,7 @@ var McpServer = class {
       if (this._registeredResourceTemplates[name]) {
         throw new Error(`Resource template ${name} is already registered`);
       }
-      const registeredResourceTemplate = this._createRegisteredResourceTemplate(name, config2.title, uriOrTemplate, config2, readCallback);
+      const registeredResourceTemplate = this._createRegisteredResourceTemplate(name, config3.title, uriOrTemplate, config3, readCallback);
       this.setResourceRequestHandlers();
       this.sendResourceListChanged();
       return registeredResourceTemplate;
@@ -22384,11 +22384,11 @@ var McpServer = class {
   /**
    * Registers a tool with a config object and callback.
    */
-  registerTool(name, config2, cb) {
+  registerTool(name, config3, cb) {
     if (this._registeredTools[name]) {
       throw new Error(`Tool ${name} is already registered`);
     }
-    const { title, description, inputSchema, outputSchema, annotations, _meta } = config2;
+    const { title, description, inputSchema, outputSchema, annotations, _meta } = config3;
     return this._createRegisteredTool(name, title, description, inputSchema, outputSchema, annotations, { taskSupport: "forbidden" }, _meta, cb);
   }
   prompt(name, ...rest) {
@@ -22412,11 +22412,11 @@ var McpServer = class {
   /**
    * Registers a prompt with a config object and callback.
    */
-  registerPrompt(name, config2, cb) {
+  registerPrompt(name, config3, cb) {
     if (this._registeredPrompts[name]) {
       throw new Error(`Prompt ${name} is already registered`);
     }
-    const { title, description, argsSchema } = config2;
+    const { title, description, argsSchema } = config3;
     const registeredPrompt = this._createRegisteredPrompt(name, title, description, argsSchema, cb);
     this.setPromptRequestHandlers();
     this.sendPromptListChanged();
@@ -23371,8 +23371,96 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
 }
 var realCodexRunner = createCodexRunner();
 
+// src/metrics.ts
+import { appendFileSync as appendFileSync4, mkdirSync as mkdirSync8 } from "node:fs";
+import { dirname as dirname7 } from "node:path";
+import { randomUUID as randomUUID3 } from "node:crypto";
+var noopMetricsSink = {
+  emitReplay: () => {
+  },
+  runOp: async (_tool, fn) => await fn()
+};
+function createMetricsSink(path, enabled, deps = {}) {
+  if (!enabled) return noopMetricsSink;
+  const append = deps.append ?? ((p, line) => {
+    mkdirSync8(dirname7(p), { recursive: true });
+    appendFileSync4(p, line, { mode: 384 });
+  });
+  const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
+  const genId = deps.genId ?? (() => `o_${randomUUID3()}`);
+  let currentOpId = null;
+  let buffer = null;
+  const safeAppend = (line) => {
+    try {
+      append(path, line);
+    } catch {
+    }
+  };
+  return {
+    emitReplay(r) {
+      try {
+        const line = JSON.stringify({
+          v: 1,
+          kind: "replay",
+          ts: now(),
+          op_id: currentOpId,
+          scope: r.scope,
+          rows: r.rows,
+          live_rows: r.liveRows,
+          bytes: r.bytes,
+          parse_ms: r.parseMs,
+          project_ms: r.projectMs,
+          key_available: r.keyAvailable,
+          caller: r.caller
+        }) + "\n";
+        if (buffer) buffer.push(line);
+        else safeAppend(line);
+      } catch {
+      }
+    },
+    async runOp(tool, fn) {
+      const prevOp = currentOpId;
+      const prevBuf = buffer;
+      const opId = genId();
+      const myBuf = [];
+      currentOpId = opId;
+      buffer = myBuf;
+      const started = performance.now();
+      let ok2 = true;
+      let errorType = null;
+      try {
+        return await fn();
+      } catch (e) {
+        ok2 = false;
+        errorType = e instanceof Error ? e.name : "NonError";
+        throw e;
+      } finally {
+        const durationMs = performance.now() - started;
+        currentOpId = prevOp;
+        buffer = prevBuf;
+        try {
+          safeAppend(JSON.stringify({
+            v: 1,
+            kind: "op",
+            ts: now(),
+            op_id: opId,
+            "mcp.method.name": "tools/call",
+            "gen_ai.tool.name": tool,
+            duration_ms: durationMs,
+            ok: ok2,
+            "error.type": errorType
+          }) + "\n");
+          for (const line of myBuf) safeAppend(line);
+        } catch {
+        }
+      }
+    }
+  };
+}
+
 // src/server/helix-server.ts
-function buildServer(store2, dualDeps) {
+function buildServer(store2, dualDeps, metrics2) {
+  const m = metrics2 ?? noopMetricsSink;
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
   const home2 = process.env.HELIX_HOME ?? join7(homedir2(), ".helix");
   const dv = dualDeps ?? {
@@ -23401,22 +23489,22 @@ function buildServer(store2, dualDeps) {
       supersedes: external_exports.string().optional(),
       scope: external_exports.enum(["project", "global"]).optional()
     }
-  }, async (args) => handleCommit(store2, args));
+  }, async (args) => m.runOp("helix_memory_commit", () => handleCommit(store2, args)));
   server2.registerTool("helix_memory_recall", {
     title: "Recall memory",
     description: "Recall relevant memory as a DATA-only block; flags items needing re-verification.",
     inputSchema: { query: external_exports.string(), maxItems: external_exports.number().int().positive().optional() }
-  }, async (args) => handleRecall(store2, args));
+  }, async (args) => m.runOp("helix_memory_recall", () => handleRecall(store2, args)));
   server2.registerTool("helix_memory_inspect", {
     title: "Inspect memory",
     description: "List current memory items (id, trust state, content). Pass history=true to also list closed items with their [tx, txTo) declared interval, OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive.",
     inputSchema: { history: external_exports.boolean().optional(), asOf: external_exports.string().optional() }
-  }, async (args) => handleInspect(store2, args));
+  }, async (args) => m.runOp("helix_memory_inspect", () => handleInspect(store2, args)));
   server2.registerTool("helix_memory_erase", {
     title: "Erase memory",
     description: "Erase a memory item by id. Soft-only: the item is removed from the live view (recall/inspect) but remains recoverable on disk (no compaction) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool cannot physically destroy content \u2014 genuine right-to-erasure (compaction) is handled outside the agent tool surface.",
     inputSchema: { id: external_exports.string() }
-  }, async (args) => handleErase(store2, args, { auditPath: dv.auditPath, now: dv.now }));
+  }, async (args) => m.runOp("helix_memory_erase", () => handleErase(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   server2.registerTool("helix_memory_recheck", {
     title: "Recheck memory against reality",
     description: "Run a content-bound mechanical reality-check on a memory item. A pass yields the Corroborated trust state (machine-checked, NOT human-verified \u2014 it can NEVER reach Verified). The check is file-contains and BOTH path and pattern MUST appear in the item content, or the call is rejected (prevents laundering an unrelated passing check into trust). Use for objective, checkable facts.",
@@ -23424,12 +23512,12 @@ function buildServer(store2, dualDeps) {
       id: external_exports.string(),
       check: external_exports.object({ kind: external_exports.literal("file-contains"), path: external_exports.string(), pattern: external_exports.string() })
     }
-  }, async (args) => handleRecheck(store2, args, { auditPath: dv.auditPath, now: dv.now }));
+  }, async (args) => m.runOp("helix_memory_recheck", () => handleRecheck(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   server2.registerTool("helix_memory_confirm", {
     title: "Confirm memory (user-vouched)",
     description: "Promote a memory item to the Verified state because THE USER explicitly vouched for it this turn. Requires explicit user approval; never self-confirm \u2014 call ONLY when the user directly confirmed the fact, never to confirm your own inference or a relayed claim. Only items committed with source=user are eligible (re-commit a relayed/inferred fact as source=user first). The user, not Helix, is the authority \u2014 do not allow-list this tool.",
     inputSchema: { id: external_exports.string() }
-  }, async (args) => handleConfirm(store2, args, { auditPath: dv.auditPath, now: dv.now }));
+  }, async (args) => m.runOp("helix_memory_confirm", () => handleConfirm(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   server2.registerTool("helix_dual_verify", {
     title: "Dual-verify with Codex",
     description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor.",
@@ -23438,17 +23526,17 @@ function buildServer(store2, dualDeps) {
       helixAnswer: external_exports.string(),
       stakes: external_exports.enum(["low", "medium", "high"]).optional()
     }
-  }, async (args) => handleDualVerify(args, dv));
+  }, async (args) => m.runOp("helix_dual_verify", () => handleDualVerify(args, dv)));
   server2.registerTool("helix_codex_status", {
     title: "Codex status",
     description: "Show whether Helix is connected to Codex (CLI/version, login, auth mode), the dual-verify config, and the content-log state. Free \u2014 no metered Codex call.",
     inputSchema: {}
-  }, async () => handleCodexStatus(codexStatusDeps));
+  }, async () => m.runOp("helix_codex_status", () => handleCodexStatus(codexStatusDeps)));
   server2.registerTool("helix_memory_adopt", {
     title: "Adopt project memory",
     description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted.",
     inputSchema: {}
-  }, async () => handleAdopt(store2, {}));
+  }, async () => m.runOp("helix_memory_adopt", () => handleAdopt(store2, {})));
   return server2;
 }
 
@@ -23489,7 +23577,9 @@ var projectRoot = process.cwd();
 var projectLedger = join8(projectRoot, ".helix", "memory.jsonl");
 var projectActive = existsSync6(join8(projectRoot, ".helix")) && resolve2(projectLedger) !== resolve2(globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
-var store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? "cli", project });
+var config2 = loadConfig({ globalPath: join8(home, "config.json") });
+var metrics = createMetricsSink(join8(home, "metrics.jsonl"), config2.metrics.enabled);
+var store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics });
 var scanScopes = [
   { ledger: globalLedger },
   ...project ? [{ ledger: project.ledger, root: project.root }] : []
@@ -23504,13 +23594,13 @@ for (const { ledger, root } of scanScopes) {
   }
 }
 var server = buildServer(store, {
-  config: loadConfig({ globalPath: join8(home, "config.json") }),
+  config: config2,
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
   echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
   auditPath: join8(home, "audit.jsonl"),
   codexLogPath: join8(home, "codex-log.jsonl")
-});
+}, metrics);
 var transport = new StdioServerTransport();
 await server.connect(transport);
 installSelfTermination({
