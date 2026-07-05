@@ -6,6 +6,12 @@ All notable changes to Helix are documented here. This project follows
 ## [Unreleased]
 
 ### Added
+- Replay metrics sensor: content-free op/replay latency records in `~/.helix/metrics.jsonl`
+  (default on; `metrics.enabled: false` disables; hook honors the global config only). The
+  sensor makes the long-deferred "migrate to SQLite at recall p95 > 150 ms" trigger observable.
+- Standing replay benchmark `scripts/bench-replay.ts`: synthetic EN/KO sweep with REAL signed
+  verify records (HMAC-era baseline), `--real` read-only mode, and a streaming `--report` mode
+  with a windowed dual verdict against the 150 ms trigger.
 - Two-tier memory trust labels on the tool path: machine-corroborated **Corroborated**
   (`helix_memory_recheck`, a content-bound mechanical file check) and best-effort human-attested
   **Verified** (`helix_memory_confirm`).

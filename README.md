@@ -95,6 +95,10 @@ Helix is local-first. Installing it lets Claude Code run code on your machine â€
 - **MCP server** (`node bin/helix-mcp.mjs`, launched by Claude Code): reads and writes memory under `~/.helix/` (and an owned `<project>/.helix/` ledger when present). It makes **no network calls** except the optional dual-verify path below.
 - **Session hooks:** SessionStart reads your trusted memory and injects it into the session as quarantined DATA (never as instructions); SessionEnd appends a session record. Neither sends anything off-machine.
 - **No telemetry.** Helix never phones home.
+- **Metrics (local only):** Helix appends content-free latency/size records (tool op durations,
+  ledger row/byte counts â€” never memory content, queries, paths, or error messages) to
+  `~/.helix/metrics.jsonl` to sense when the ledger needs the planned SQLite migration.
+  Disable with `metrics: { "enabled": false }` in `.helix/config.json`.
 
 ### What dual-verify sends (only when you enable it)
 
