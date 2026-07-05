@@ -39,6 +39,8 @@ export interface HelixConfig {
      *  (OFF). audit.jsonl still records decision metadata regardless of this flag. */
     logContent: boolean;
   };
+  /** Local-only, content-free latency/size records (spec 2026-07-05). Read once at startup. */
+  metrics: { enabled: boolean };
 }
 
 export const DEFAULT_CONFIG: HelixConfig = {
@@ -61,6 +63,8 @@ export const DEFAULT_CONFIG: HelixConfig = {
     // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
     logContent: false,
   },
+  // Local metrics sensor ON by default ("local logs always, export opt-in"); content-free records.
+  metrics: { enabled: true },
 };
 
 export interface LoadConfigOptions {
@@ -116,6 +120,19 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
       }
       if (typeof dv.logContent === 'boolean') merged.dualVerify.logContent = dv.logContent;
     }
+    const m = raw?.metrics as Record<string, unknown> | undefined;
+    if (m && typeof m === 'object' && typeof m.enabled === 'boolean') {
+      merged.metrics.enabled = m.enabled;
+    }
   }
   return merged;
+}
+
+/** Hook-safe metrics gate: GLOBAL config only (a hook's cwd is unreliable, and honoring a foreign
+ *  checkout's project config from a hook would let an untrusted repo toggle user-level behavior —
+ *  spec §6). Never throws; missing/malformed/absent key => true (the default). */
+export function metricsEnabledFromGlobalConfig(home: string): boolean {
+  const raw = readJson(join(home, 'config.json'));
+  const m = raw?.metrics as Record<string, unknown> | undefined;
+  return m && typeof m === 'object' && typeof m.enabled === 'boolean' ? m.enabled : true;
 }

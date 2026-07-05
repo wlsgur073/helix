@@ -13,7 +13,7 @@ const text = (r: { content: Array<{ text?: string }> }) => r.content.map((c) => 
 function deps(over: Partial<DualVerifyHandlerDeps>): DualVerifyHandlerDeps {
   const dir = mkdtempSync(join(tmpdir(), 'helix-hdv-'));
   return {
-    config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' }, logContent: false } },
+    config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' }, logContent: false }, metrics: { enabled: true } },
     runner: async () => ({ ok: true, answer: 'use postgres' }),
     checkAvailable: async () => ({ available: true }),
     echo: disabledEcho,
@@ -43,7 +43,7 @@ describe('handleDualVerify', () => {
 
   it('critique mode renders a DATA-framed critique block and audit-logs the mode', async () => {
     const d = deps({
-      config: { dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' }, logContent: false } },
+      config: { dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' }, logContent: false }, metrics: { enabled: true } },
       runner: async () => ({ ok: true, answer: 'consider failure modes' }),
     });
     const res = await handleDualVerify({ question: 'q', helixAnswer: 'a' }, d);
@@ -115,7 +115,7 @@ describe('handleDualVerify egress audit', () => {
   it('logs an allowed_override when policy=allow (the highest-interest event is visible)', async () => {
     const echoText = 'the deploy uses the blue cluster in us-east-1';
     const d = deps({
-      config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'allow', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' }, logContent: false } },
+      config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'allow', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' }, logContent: false }, metrics: { enabled: true } },
       echo: echoEnforce([{ id: 'm_1', content: echoText }]),
       runner: async () => ({ ok: true, answer: 'use postgres' }),
     });

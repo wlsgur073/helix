@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig, DEFAULT_CONFIG } from '../src/config.js';
+import { loadConfig, DEFAULT_CONFIG, metricsEnabledFromGlobalConfig } from '../src/config.js';
 
 function tmpDir() { return mkdtempSync(join(tmpdir(), 'helix-cfg-')); }
 
@@ -145,5 +145,32 @@ describe('loadConfig: dualVerify.logContent (opt-in content log gate)', () => {
     const dir = tmpDir();
     const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { logContent: 'yes' } }));
     expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.logContent).toBe(false);
+  });
+});
+
+describe('metrics config (spec §6)', () => {
+  it('defaults to enabled', () => {
+    expect(DEFAULT_CONFIG.metrics.enabled).toBe(true);
+    const dir = mkdtempSync(join(tmpdir(), 'helix-cfg-'));
+    const cfg = loadConfig({ globalPath: join(dir, 'none.json'), projectPath: join(dir, 'none2.json') });
+    expect(cfg.metrics.enabled).toBe(true);
+  });
+
+  it('project layer can disable; invalid values keep the default', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'helix-cfg-'));
+    const g = join(dir, 'g.json'); const p = join(dir, 'p.json');
+    writeFileSync(g, JSON.stringify({ metrics: { enabled: 'yes' } }));   // invalid -> default
+    writeFileSync(p, JSON.stringify({ metrics: { enabled: false } }));  // project wins
+    const cfg = loadConfig({ globalPath: g, projectPath: p });
+    expect(cfg.metrics.enabled).toBe(false);
+  });
+
+  it('metricsEnabledFromGlobalConfig: global-only, never throws, defaults true', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-cfg-'));
+    expect(metricsEnabledFromGlobalConfig(home)).toBe(true);              // missing file
+    writeFileSync(join(home, 'config.json'), '{not json');
+    expect(metricsEnabledFromGlobalConfig(home)).toBe(true);              // malformed -> default
+    writeFileSync(join(home, 'config.json'), JSON.stringify({ metrics: { enabled: false } }));
+    expect(metricsEnabledFromGlobalConfig(home)).toBe(false);
   });
 });

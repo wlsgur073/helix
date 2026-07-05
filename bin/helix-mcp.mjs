@@ -23060,7 +23060,9 @@ var DEFAULT_CONFIG = {
     egressPolicy: { memoryEcho: "block", piiHigh: "block", piiBulk: "block", secretHeuristic: "block", secretEntropy: "block" },
     // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
     logContent: false
-  }
+  },
+  // Local metrics sensor ON by default ("local logs always, export opt-in"); content-free records.
+  metrics: { enabled: true }
 };
 function readJson(path) {
   try {
@@ -23114,6 +23116,10 @@ function loadConfig(opts = {}) {
         warn("helix: dualVerify.memoryEgress was removed; use dualVerify.egressPolicy { memoryEcho, piiHigh, piiBulk, secretHeuristic, secretEntropy }");
       }
       if (typeof dv.logContent === "boolean") merged.dualVerify.logContent = dv.logContent;
+    }
+    const m = raw?.metrics;
+    if (m && typeof m === "object" && typeof m.enabled === "boolean") {
+      merged.metrics.enabled = m.enabled;
     }
   }
   return merged;
