@@ -2,11 +2,14 @@
 // Modes: default synthetic sweep | --real (read-only on the actual ledgers) | --report (summarize metrics.jsonl).
 // Establishes the HMAC-era baseline — the 2026-06-13 numbers predate the MAC gate and are NOT comparable.
 // Generator functions are exported for the future A4 JSONL-vs-SQLite comparison.
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { tmpdir, homedir } from 'node:os';
 import type { MemoryRecord } from '../src/types.js';
 import { ensureMaster, signVerify, digestContent } from '../src/memory/ledger-mac.js';
 import { subkeyForScope, verifiedLiveStats } from '../src/memory/verified-read.js';
+import { MemoryStore } from '../src/memory/store.js';
+import { isOwned, projectLedgerPath } from '../src/memory/ownership.js';
 
 // --- deterministic RNG (seedable) — reproducible fixtures, no Math.random ---
 function lcg(seed: number): () => number {
@@ -107,4 +110,107 @@ export function percentileNearestRank(sorted: number[], p: number): number {
   if (sorted.length === 0) return NaN;
   const rank = Math.max(1, Math.ceil((p / 100) * sorted.length));
   return sorted[rank - 1]!;
+}
+
+const fmt = (x: number): string => x.toFixed(1).padStart(9);
+
+function measurePhases(ledger: string, home: string, iters: number): { parse: number[]; project: number[]; recallMs: number[] } {
+  const parse: number[] = [];
+  const project: number[] = [];
+  const recallMs: number[] = [];
+  const store = new MemoryStore(ledger, { home, sessionId: 'bench' }); // NO sink -> no metrics pollution
+  for (let i = 0; i <= iters; i++) { // one extra: index 0 is the discarded warmup
+    const { stats } = verifiedLiveStats(ledger, home);
+    const t0 = performance.now();
+    store.recall('배포 config timeout');
+    const t1 = performance.now();
+    if (i === 0) continue; // discard warmup (spec §8)
+    parse.push(stats.parseMs);
+    project.push(stats.projectMs);
+    recallMs.push(t1 - t0);
+  }
+  return { parse, project, recallMs };
+}
+
+function printStatsRow(label: string, samples: number[]): void {
+  const s = computeStats(samples);
+  process.stdout.write(`${label.padEnd(10)} n=${String(s.n).padEnd(3)} median=${fmt(s.median)} min=${fmt(s.min)} max=${fmt(s.max)} mean=${fmt(s.mean)} sd=${fmt(s.sd)}\n`);
+}
+
+export function runSweep(opts: { sizes: number[]; iters: number; seed: number }): void {
+  const home = mkdtempSync(join(tmpdir(), 'helix-bench-home-'));
+  try {
+    process.stdout.write(`bench-replay synthetic sweep (HMAC-era baseline; iters=${opts.iters}, warmup discarded)\n`);
+    process.stdout.write('NOTE: no p95 column at this n — nearest-rank p95 <= max for n<=20; true p95 lives in --report.\n');
+    for (const rows of opts.sizes) {
+      const ledger = join(home, `bench-${rows}.jsonl`);
+      const gen = generateLedger(home, ledger, { rows, seed: opts.seed });
+      const m = measurePhases(ledger, home, opts.iters);
+      process.stdout.write(`\nrows=${rows} (verifies=${gen.verifies} supersedes=${gen.supersedes})  [all ms]\n`);
+      printStatsRow('parse', m.parse);
+      printStatsRow('project', m.project);
+      printStatsRow('recall', m.recallMs);
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+export function runReal(): void {
+  const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
+  const globalLedger = process.env.HELIX_LEDGER ?? join(home, 'memory.jsonl');
+  process.stdout.write(`bench-replay --real (read-only) home=${home}\n`);
+  const scopes: Array<{ label: string; ledger: string; root?: string }> = [{ label: 'global', ledger: globalLedger }];
+  const cwd = process.cwd();
+  if (existsSync(join(cwd, '.helix')) && isOwned(cwd, home)) {
+    scopes.push({ label: 'project', ledger: projectLedgerPath(cwd), root: cwd });
+  }
+  for (const s of scopes) {
+    const probe = verifiedLiveStats(s.ledger, home, s.root);
+    process.stdout.write(`\nscope=${s.label} rows=${probe.stats.rows} live=${probe.stats.liveRows} bytes=${probe.stats.bytes} key=${probe.stats.keyAvailable}\n`);
+    const parse: number[] = []; const project: number[] = [];
+    for (let i = 0; i <= 15; i++) {
+      const { stats } = verifiedLiveStats(s.ledger, home, s.root);
+      if (i === 0) continue;
+      parse.push(stats.parseMs); project.push(stats.projectMs);
+    }
+    printStatsRow('parse', parse);
+    printStatsRow('project', project);
+  }
+}
+
+// Temporary stub so the file compiles until Task 9 replaces it with the real metrics.jsonl summary.
+export function runReport(_o: { file?: string; sinceDays: number }): void { process.stdout.write('report: implemented in Task 9\n'); }
+
+// --- CLI entry ---
+interface BenchArgs {
+  mode: 'sweep' | 'real' | 'report';
+  rows?: number[];
+  iters: number;
+  seed: number;
+  file?: string;
+  sinceDays: number;
+}
+
+function parseArgs(argv: string[]): BenchArgs {
+  const out: BenchArgs = { mode: 'sweep', iters: 15, seed: 1, sinceDays: 14 };
+  for (let i = 2; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a === '--real') out.mode = 'real';
+    else if (a === '--report') out.mode = 'report';
+    else if (a === '--rows') out.rows = argv[++i]!.split(',').map(Number);
+    else if (a === '--iters') out.iters = Number(argv[++i]);
+    else if (a === '--seed') out.seed = Number(argv[++i]);
+    else if (a === '--file') out.file = argv[++i]!;
+    else if (a === '--since') out.sinceDays = Number(argv[++i]);
+  }
+  return out;
+}
+
+const invokedDirectly = process.argv[1]?.endsWith('bench-replay.ts') || process.argv[1]?.endsWith('bench-replay.js');
+if (invokedDirectly) {
+  const args = parseArgs(process.argv);
+  if (args.mode === 'real') runReal();
+  else if (args.mode === 'report') runReport({ file: args.file, sinceDays: args.sinceDays }); // Task 9
+  else runSweep({ sizes: args.rows ?? [1000, 5000, 10000, 50000, 100000], iters: args.iters, seed: args.seed });
 }
