@@ -1,7 +1,7 @@
 // src/hooks/session-start.ts
 import { writeSync as writeSync3 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join3, resolve as resolve2 } from "node:path";
+import { join as join4, resolve as resolve2 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/memory/firewall.ts
@@ -430,8 +430,108 @@ function verifiedLiveStats(ledger, home, projectRoot) {
     }
   };
 }
-function verifiedLive(ledger, home, projectRoot) {
-  return verifiedLiveStats(ledger, home, projectRoot).projection;
+
+// src/metrics.ts
+import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync4 } from "node:fs";
+import { dirname as dirname2 } from "node:path";
+import { randomUUID } from "node:crypto";
+var noopMetricsSink = {
+  emitReplay: () => {
+  },
+  runOp: async (_tool, fn) => await fn()
+};
+function createMetricsSink(path, enabled, deps = {}) {
+  if (!enabled) return noopMetricsSink;
+  const append = deps.append ?? ((p, line) => {
+    mkdirSync4(dirname2(p), { recursive: true });
+    appendFileSync2(p, line, { mode: 384 });
+  });
+  const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
+  const genId = deps.genId ?? (() => `o_${randomUUID()}`);
+  let currentOpId = null;
+  let buffer = null;
+  const safeAppend = (line) => {
+    try {
+      append(path, line);
+    } catch {
+    }
+  };
+  return {
+    emitReplay(r) {
+      try {
+        const line = JSON.stringify({
+          v: 1,
+          kind: "replay",
+          ts: now(),
+          op_id: currentOpId,
+          scope: r.scope,
+          rows: r.rows,
+          live_rows: r.liveRows,
+          bytes: r.bytes,
+          parse_ms: r.parseMs,
+          project_ms: r.projectMs,
+          key_available: r.keyAvailable,
+          caller: r.caller
+        }) + "\n";
+        if (buffer) buffer.push(line);
+        else safeAppend(line);
+      } catch {
+      }
+    },
+    async runOp(tool, fn) {
+      const prevOp = currentOpId;
+      const prevBuf = buffer;
+      const opId = genId();
+      const myBuf = [];
+      currentOpId = opId;
+      buffer = myBuf;
+      const started = performance.now();
+      let ok = true;
+      let errorType = null;
+      try {
+        return await fn();
+      } catch (e) {
+        ok = false;
+        errorType = e instanceof Error ? e.name : "NonError";
+        throw e;
+      } finally {
+        const durationMs = performance.now() - started;
+        currentOpId = prevOp;
+        buffer = prevBuf;
+        try {
+          safeAppend(JSON.stringify({
+            v: 1,
+            kind: "op",
+            ts: now(),
+            op_id: opId,
+            "mcp.method.name": "tools/call",
+            "gen_ai.tool.name": tool,
+            duration_ms: durationMs,
+            ok,
+            "error.type": errorType
+          }) + "\n");
+          for (const line of myBuf) safeAppend(line);
+        } catch {
+        }
+      }
+    }
+  };
+}
+
+// src/config.ts
+import { readFileSync as readFileSync4 } from "node:fs";
+import { join as join3 } from "node:path";
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync4(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function metricsEnabledFromGlobalConfig(home) {
+  const raw = readJson(join3(home, "config.json"));
+  const m = raw?.metrics;
+  return m && typeof m === "object" && typeof m.enabled === "boolean" ? m.enabled : true;
 }
 
 // src/hooks/session-start.ts
@@ -443,37 +543,53 @@ async function readStdin() {
 function gatherScopedRecords({ home, globalLedger, cwd }) {
   const records = [];
   let integrityAvailable = true;
-  const global = verifiedLive(globalLedger, home);
-  if (!global.keyAvailable) integrityAvailable = false;
-  for (const r of global.live.values()) records.push({ record: r, scope: "global" });
+  const replays = [];
+  const g = verifiedLiveStats(globalLedger, home);
+  replays.push({ scope: "global", ...g.stats });
+  if (!g.projection.keyAvailable) integrityAvailable = false;
+  for (const r of g.projection.live.values()) records.push({ record: r, scope: "global" });
   if (cwd) {
     try {
       if (isOwned(cwd, home)) {
         const projLedger = projectLedgerPath(cwd);
         if (resolve2(projLedger) !== resolve2(globalLedger)) {
-          const project = verifiedLive(projLedger, home, cwd);
-          if (!project.keyAvailable) integrityAvailable = false;
-          for (const r of project.live.values()) records.push({ record: r, scope: "project" });
+          const project = verifiedLiveStats(projLedger, home, cwd);
+          replays.push({ scope: "project", ...project.stats });
+          if (!project.projection.keyAvailable) integrityAvailable = false;
+          for (const r of project.projection.live.values()) records.push({ record: r, scope: "project" });
         }
       }
     } catch {
     }
   }
-  return { records, integrityAvailable };
+  return { records, integrityAvailable, replays };
 }
 async function main() {
   try {
-    const home = process.env.HELIX_HOME ?? join3(homedir(), ".helix");
-    const globalLedger = process.env.HELIX_LEDGER ?? join3(home, "memory.jsonl");
+    const home = process.env.HELIX_HOME ?? join4(homedir(), ".helix");
+    const globalLedger = process.env.HELIX_LEDGER ?? join4(home, "memory.jsonl");
     let cwd;
     try {
       const j = JSON.parse(await readStdin());
       if (typeof j.cwd === "string") cwd = j.cwd;
     } catch {
     }
-    const { records, integrityAvailable } = gatherScopedRecords({ home, globalLedger, cwd });
+    const { records, integrityAvailable, replays } = gatherScopedRecords({ home, globalLedger, cwd });
     const text = formatSessionStartContext(records, newNonce(), { integrityAvailable });
     if (text !== "") writeSync3(1, text + "\n");
+    const sink = createMetricsSink(join4(home, "metrics.jsonl"), metricsEnabledFromGlobalConfig(home));
+    for (const rp of replays) {
+      sink.emitReplay({
+        scope: rp.scope,
+        caller: "hook",
+        rows: rp.rows,
+        liveRows: rp.liveRows,
+        bytes: rp.bytes,
+        parseMs: rp.parseMs,
+        projectMs: rp.projectMs,
+        keyAvailable: rp.keyAvailable
+      });
+    }
   } catch {
   }
 }

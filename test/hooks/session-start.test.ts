@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, appendFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gatherScopedRecords } from '../../src/hooks/session-start.js';
@@ -86,5 +86,29 @@ describe('session-start gatherScopedRecords (verifying auto-load)', () => {
     expect(out).toContain('integrity verification unavailable — trust grades shown are unverified');
     const closeIdx = out.indexOf(`===HELIX ${N} END===`);
     expect(out.indexOf('integrity verification unavailable')).toBeGreaterThan(closeIdx);
+  });
+});
+
+describe('gather replay stats (spec §5 hook wiring)', () => {
+  it('returns one replay stats entry per scope read, with real counts', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-hook-'));
+    const globalLedger = join(home, 'memory.jsonl');
+    writeFileSync(globalLedger, JSON.stringify({
+      id: 'm_1', tx: '2026-07-05T00:00:00.000Z', validFrom: '2026-07-05T00:00:00.000Z', validTo: null,
+      type: 'assert', state: 'Fresh', content: 'hook fixture fact',
+      provenance: { source: 'user', sessionId: 's' },
+      supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+    }) + '\n');
+    const { replays } = gatherScopedRecords({ home, globalLedger });
+    expect(replays).toHaveLength(1);
+    expect(replays[0]).toMatchObject({ scope: 'global', rows: 1, liveRows: 1 });
+    expect(replays[0]!.bytes).toBeGreaterThan(0);
+  });
+
+  it('an absent global ledger yields a zero-row stats entry and no throw (spec §9.9)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-hook-'));
+    const { records, replays } = gatherScopedRecords({ home, globalLedger: join(home, 'absent.jsonl') });
+    expect(records).toHaveLength(0);
+    expect(replays[0]).toMatchObject({ scope: 'global', rows: 0, liveRows: 0, bytes: 0 });
   });
 });

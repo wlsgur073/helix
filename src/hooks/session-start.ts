@@ -14,8 +14,10 @@ import { fileURLToPath } from 'node:url';
 import { formatSessionStartContext } from './format-context.js';
 import { newNonce } from '../memory/content-frame.js';
 import { isOwned, projectLedgerPath } from '../memory/ownership.js';
-import { verifiedLive } from '../memory/verified-read.js';
-import type { ScopedRecord } from '../types.js';
+import { verifiedLiveStats, type ReplayStats } from '../memory/verified-read.js';
+import { createMetricsSink } from '../metrics.js';
+import { metricsEnabledFromGlobalConfig } from '../config.js';
+import type { MemoryScope, ScopedRecord } from '../types.js';
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -35,22 +37,28 @@ export interface GatherResult {
    *  then conservatively clamped to Fresh and none can be trusted. Mirrors recall's integrityAvailable
    *  signal so the hook can tell the agent the grades shown are unverified (spec §8 honest-signaling). */
   integrityAvailable: boolean;
+  /** Per-scope replay decomposition, in read order. Pure data — main() decides to emit. */
+  replays: Array<{ scope: MemoryScope } & ReplayStats>;
 }
 
 /**
  * Pure, testable: gather the VERIFIED live records from the global ledger + (the in-repo project
- * ledger iff owned), each scope-tagged, plus whether EVERY scope read had a key available. Routes
- * every read through verifiedLive so a forged/edited record clamps to Fresh — the same trust grades
- * recall/inspect show. No stdin, no process state, no I/O beyond reading the ledger/registry/master
- * under `home`.
+ * ledger iff owned), each scope-tagged, whether EVERY scope read had a key available, plus a
+ * per-scope replay decomposition (row/byte counts + parse/project timings, in read order). Routes
+ * every read through verifiedLiveStats so a forged/edited record clamps to Fresh — the same trust
+ * grades recall/inspect show. No stdin, no process state, no I/O beyond reading the
+ * ledger/registry/master under `home`; the replay stats are pure observations of those reads — not
+ * a write — so main() alone decides whether to emit them.
  */
 export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): GatherResult {
   const records: ScopedRecord[] = [];
   let integrityAvailable = true;
+  const replays: Array<{ scope: MemoryScope } & ReplayStats> = [];
 
-  const global = verifiedLive(globalLedger, home);
-  if (!global.keyAvailable) integrityAvailable = false;
-  for (const r of global.live.values()) records.push({ record: r, scope: 'global' });
+  const g = verifiedLiveStats(globalLedger, home);
+  replays.push({ scope: 'global', ...g.stats });
+  if (!g.projection.keyAvailable) integrityAvailable = false;
+  for (const r of g.projection.live.values()) records.push({ record: r, scope: 'global' });
 
   // Project root comes ONLY from the hook's stdin cwd (canonical). No process.cwd() fallback —
   // a hook's own cwd is unreliable. No cwd -> global only.
@@ -60,14 +68,15 @@ export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): G
         const projLedger = projectLedgerPath(cwd);
         // guard: never read the global ledger as a "project" layer (cwd == ~ collision)
         if (resolve(projLedger) !== resolve(globalLedger)) {
-          const project = verifiedLive(projLedger, home, cwd);
-          if (!project.keyAvailable) integrityAvailable = false;
-          for (const r of project.live.values()) records.push({ record: r, scope: 'project' });
+          const project = verifiedLiveStats(projLedger, home, cwd);
+          replays.push({ scope: 'project', ...project.stats });
+          if (!project.projection.keyAvailable) integrityAvailable = false;
+          for (const r of project.projection.live.values()) records.push({ record: r, scope: 'project' });
         }
       }
     } catch { /* unreadable/foreign project ledger → global only */ }
   }
-  return { records, integrityAvailable };
+  return { records, integrityAvailable, replays };
 }
 
 async function main(): Promise<void> {
@@ -81,12 +90,22 @@ async function main(): Promise<void> {
       if (typeof j.cwd === 'string') cwd = j.cwd;
     } catch { /* no/garbage stdin -> global only */ }
 
-    const { records, integrityAvailable } = gatherScopedRecords({ home, globalLedger, cwd });
+    const { records, integrityAvailable, replays } = gatherScopedRecords({ home, globalLedger, cwd });
     const text = formatSessionStartContext(records, newNonce(), { integrityAvailable });
     // Synchronous write to fd 1: process exit must not drop a buffered async pipe write on
     // Windows (which would inject an unterminated DATA block). No explicit exit() needed —
     // natural exit yields code 0 and there are no open handles to keep the loop alive.
     if (text !== '') writeSync(1, text + '\n');
+
+    // Best-effort sensor emission (spec §5): sync append for the same reason the context write is
+    // sync; the sink never throws; the global-only config gate never throws (spec §6).
+    const sink = createMetricsSink(join(home, 'metrics.jsonl'), metricsEnabledFromGlobalConfig(home));
+    for (const rp of replays) {
+      sink.emitReplay({
+        scope: rp.scope, caller: 'hook', rows: rp.rows, liveRows: rp.liveRows, bytes: rp.bytes,
+        parseMs: rp.parseMs, projectMs: rp.projectMs, keyAvailable: rp.keyAvailable,
+      });
+    }
   } catch {
     // fail-closed for injection: no memory block rather than a broken session
   }
