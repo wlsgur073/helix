@@ -141,7 +141,7 @@ export function runSweep(opts: { sizes: number[]; iters: number; seed: number })
   const home = mkdtempSync(join(tmpdir(), 'helix-bench-home-'));
   try {
     process.stdout.write(`bench-replay synthetic sweep (HMAC-era baseline; iters=${opts.iters}, warmup discarded)\n`);
-    process.stdout.write('NOTE: no p95 column at this n — nearest-rank p95 <= max for n<=20; true p95 lives in --report.\n');
+    process.stdout.write('NOTE: no p95 column at this n -- nearest-rank p95 <= max for n<=20; true p95 lives in --report.\n');
     for (const rows of opts.sizes) {
       const ledger = join(home, `bench-${rows}.jsonl`);
       const gen = generateLedger(home, ledger, { rows, seed: opts.seed });
