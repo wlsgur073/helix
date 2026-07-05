@@ -170,6 +170,9 @@ function globalScopeNonce(home) {
   return macNonce;
 }
 
+// src/memory/verified-read.ts
+import { statSync as statSync2 } from "node:fs";
+
 // src/memory/ledger.ts
 import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
 
@@ -404,8 +407,31 @@ function verifiedLiveOf(records, home, projectRoot) {
     keyAvailable: subkey !== null
   });
 }
+function verifiedLiveStats(ledger, home, projectRoot) {
+  let bytes = 0;
+  try {
+    bytes = statSync2(ledger).size;
+  } catch {
+  }
+  const t0 = performance.now();
+  const records = parseLedger(ledger);
+  const t1 = performance.now();
+  const projection = verifiedLiveOf(records, home, projectRoot);
+  const t2 = performance.now();
+  return {
+    projection,
+    stats: {
+      rows: records.length,
+      liveRows: projection.live.size,
+      bytes,
+      parseMs: t1 - t0,
+      projectMs: t2 - t1,
+      keyAvailable: projection.keyAvailable
+    }
+  };
+}
 function verifiedLive(ledger, home, projectRoot) {
-  return verifiedLiveOf(parseLedger(ledger), home, projectRoot);
+  return verifiedLiveStats(ledger, home, projectRoot).projection;
 }
 
 // src/hooks/session-start.ts

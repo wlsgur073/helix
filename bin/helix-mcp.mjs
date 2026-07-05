@@ -14036,6 +14036,7 @@ function globalScopeNonce(home2) {
 }
 
 // src/memory/verified-read.ts
+import { statSync as statSync4 } from "node:fs";
 function subkeyForScope(home2, projectRoot2) {
   const master = tryReadMaster(home2);
   if (!master) return null;
@@ -14049,8 +14050,31 @@ function verifiedLiveOf(records, home2, projectRoot2) {
     keyAvailable: subkey !== null
   });
 }
+function verifiedLiveStats(ledger, home2, projectRoot2) {
+  let bytes = 0;
+  try {
+    bytes = statSync4(ledger).size;
+  } catch {
+  }
+  const t0 = performance.now();
+  const records = parseLedger(ledger);
+  const t1 = performance.now();
+  const projection = verifiedLiveOf(records, home2, projectRoot2);
+  const t2 = performance.now();
+  return {
+    projection,
+    stats: {
+      rows: records.length,
+      liveRows: projection.live.size,
+      bytes,
+      parseMs: t1 - t0,
+      projectMs: t2 - t1,
+      keyAvailable: projection.keyAvailable
+    }
+  };
+}
 function verifiedLive(ledger, home2, projectRoot2) {
-  return verifiedLiveOf(parseLedger(ledger), home2, projectRoot2);
+  return verifiedLiveStats(ledger, home2, projectRoot2).projection;
 }
 
 // src/memory/store.ts
@@ -23103,7 +23127,7 @@ import { join as join6, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync4, readdirSync, lstatSync, statSync as statSync4, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync4, readdirSync, lstatSync, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join5 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
@@ -23123,7 +23147,7 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     const stampPath = join5(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
-      stampMtimeMs = statSync4(stampPath).mtimeMs;
+      stampMtimeMs = statSync5(stampPath).mtimeMs;
     } catch {
       stampMtimeMs = null;
     }
