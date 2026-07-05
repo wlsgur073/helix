@@ -98,7 +98,9 @@ Helix is local-first. Installing it lets Claude Code run code on your machine â€
 - **Metrics (local only):** Helix appends content-free latency/size records (tool op durations,
   ledger row/byte counts â€” never memory content, queries, paths, or error messages) to
   `~/.helix/metrics.jsonl` to sense when the ledger needs the planned SQLite migration.
-  Disable with `metrics: { "enabled": false }` in `.helix/config.json`.
+  Disable with `metrics: { "enabled": false }` in `~/.helix/config.json` (the SessionStart
+  hook honors the global config only; a per-project `.helix/config.json` setting silences
+  just that project's server records).
 
 ### What dual-verify sends (only when you enable it)
 
