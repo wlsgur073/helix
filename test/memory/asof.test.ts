@@ -67,4 +67,21 @@ describe('buildAsOfEvidence (spec C §4)', () => {
     expect(out.keyAvailable).toBe(false);
     expect(out.facts.find((x) => x.record.id === 'a')!.grade).toBe('Fresh');
   });
+
+  it('compromised: a same-lane equal-gen conflict clamps the grade Fresh and flags integrity (asof wiring, M2)', () => {
+    // Two VALID v2 verifies at the SAME gen with DIFFERENT states -> A §4.5 L1 same-lane conflict ->
+    // resolveTargetGrade returns compromised. This locks the asof-specific WIRING of that result: the
+    // record stamps Fresh (not the conflicting claim) AND integrity flips to 'compromised'. Discriminating:
+    // inverting the `integrity: compromised ? … : 'ok'` ternary, or stamping `state:grade` on the null-grade
+    // branch, fails this without touching the 5 happy-path cases above.
+    const recs = [
+      base({ id: 'a', content: 'fact', tx: T('01') }),
+      sv2({ id: 'vx', supersedes: 'a', state: 'Verified', gen: 1, targetDigest: D, tx: T('02') }),
+      sv2({ id: 'vy', supersedes: 'a', state: 'Suspect', gen: 1, targetDigest: D, tx: T('03') }),
+    ];
+    const f = buildAsOfEvidence(recs, T('59'), { verify: V, keyAvailable: true }).facts.find((x) => x.record.id === 'a')!;
+    expect(f.integrity).toBe('compromised');
+    expect(f.grade).toBe('Fresh');        // clamped, never the conflicting Verified/Suspect
+    expect(f.record.state).toBe('Fresh'); // the stamped record.state agrees with the grade (no contradiction)
+  });
 });

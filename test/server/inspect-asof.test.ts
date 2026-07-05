@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { handleInspect } from '../../src/server/handlers.js';
 import { subkeyForScope } from '../../src/memory/verified-read.js';
-import { signVerifyV1 } from '../../src/memory/ledger-mac.js';
+import { signVerifyV1, signVerify, digestContent } from '../../src/memory/ledger-mac.js';
 import type { MemoryRecord } from '../../src/types.js';
 
 const text = (r: { content: Array<{ text: string }> }) => r.content[0]!.text;
@@ -117,5 +117,23 @@ describe('handleInspect asOf (spec C §6)', () => {
     const forgedEv = out.split('\n').find((l) => l.startsWith('DATA[verify:global]| ') && l.includes('gen=2'))!;
     expect(forgedEv).toContain('tx=?? auth=N');
     expect(out).not.toContain('2026-01-01T00:00:00Z'); // raw forged tx never rendered (iso() replaced it)
+  });
+
+  it('surfaces the integrity-conflict note for a fact compromised at t (M2 surface)', () => {
+    const { store, id, rec, home, ledger } = mk();
+    // The genuine confirm minted a v2 gen-1 Verified verify. A ledger-write adversary (test proxy: has the
+    // subkey) appends a SECOND valid v2 verify at the SAME gen with a DIFFERENT state -> A §4.5 L1 same-lane
+    // equal-gen conflict -> the target is compromised (clamped Fresh). Locks the surface half of the
+    // compromised path: the out-of-band conflict note fires and lists the id, and the fact renders Fresh.
+    const subkey = subkeyForScope(home)!;
+    const conflicting = signVerify({ ...rec, id: 'm_conflict', type: 'verify', state: 'Suspect', content: '',
+      supersedes: id, gen: 1, targetDigest: digestContent('fact') } as MemoryRecord, subkey);
+    appendFileSync(ledger, JSON.stringify(conflicting) + '\n');
+    const out = text(handleInspect(store, { asOf: new Date().toISOString() }));
+
+    expect(out).toContain('integrity conflict'); // (integrity conflict — equal-generation verify mismatch: …)
+    expect(out).toContain(id);                   // the compromised id is listed (via safeId; store ids are clean)
+    // the fact renders at the clamped Fresh grade, never the conflicting Verified/Suspect claim
+    expect(out.split('\n').some((l) => l.startsWith('DATA[Fresh:global]| ') && l.includes(id))).toBe(true);
   });
 });
