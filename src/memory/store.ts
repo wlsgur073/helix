@@ -16,7 +16,8 @@ import { frameAsData, newNonce } from './content-frame.js';
 import { isOwned, stampOwnership } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
 import { buildVerifiedProjection, type VerifiedProjection } from './verified-projection.js';
-import { subkeyForScope, verifiedLive, verifiedLiveOf } from './verified-read.js';
+import { subkeyForScope, verifiedLiveOf, verifiedLiveStats } from './verified-read.js';
+import type { MetricsSink } from '../metrics.js';
 import { withFileLock } from './lock.js';
 
 export interface MemoryStoreOptions {
@@ -32,6 +33,8 @@ export interface MemoryStoreOptions {
   home?: string;
   /** EH-3: precomputed synonym expansion. Defaults to the committed asset; tests may inject/disable. */
   expansion?: Expansion;
+  /** Metrics sink (spec 2026-07-05). Absent => zero emission (tests/bench/library use stay clean). */
+  metricsSink?: MetricsSink;
 }
 
 export interface CommitInput {
@@ -107,9 +110,17 @@ export class MemoryStore {
 
   /** Verifying projection for one ledger (R1 clamp / R2 MAC gate / R3 content binding). When no
    *  subkey is available every state is clamped to Fresh and keyAvailable is false. Delegates to the
-   *  shared verified-read helper that the SessionStart hook also uses (provable consistency). */
+   *  shared verified-read helper that the SessionStart hook also uses (provable consistency).
+   *  Emits one replay record per read when a metrics sink is injected. */
   private verifiedOf(ledger: LedgerPath): VerifiedProjection {
-    return verifiedLive(ledger, this.homeDir(), this.scopeRootOf(ledger));
+    const root = this.scopeRootOf(ledger);
+    const { projection, stats } = verifiedLiveStats(ledger, this.homeDir(), root);
+    this.opts.metricsSink?.emitReplay({
+      scope: root ? 'project' : 'global', caller: 'store',
+      rows: stats.rows, liveRows: stats.liveRows, bytes: stats.bytes,
+      parseMs: stats.parseMs, projectMs: stats.projectMs, keyAvailable: stats.keyAvailable,
+    });
+    return projection;
   }
 
   commit(input: CommitInput): MemoryRecord {

@@ -14073,9 +14073,6 @@ function verifiedLiveStats(ledger, home2, projectRoot2) {
     }
   };
 }
-function verifiedLive(ledger, home2, projectRoot2) {
-  return verifiedLiveStats(ledger, home2, projectRoot2).projection;
-}
 
 // src/memory/store.ts
 var MemoryStore = class {
@@ -14122,9 +14119,22 @@ var MemoryStore = class {
   }
   /** Verifying projection for one ledger (R1 clamp / R2 MAC gate / R3 content binding). When no
    *  subkey is available every state is clamped to Fresh and keyAvailable is false. Delegates to the
-   *  shared verified-read helper that the SessionStart hook also uses (provable consistency). */
+   *  shared verified-read helper that the SessionStart hook also uses (provable consistency).
+   *  Emits one replay record per read when a metrics sink is injected. */
   verifiedOf(ledger) {
-    return verifiedLive(ledger, this.homeDir(), this.scopeRootOf(ledger));
+    const root = this.scopeRootOf(ledger);
+    const { projection, stats } = verifiedLiveStats(ledger, this.homeDir(), root);
+    this.opts.metricsSink?.emitReplay({
+      scope: root ? "project" : "global",
+      caller: "store",
+      rows: stats.rows,
+      liveRows: stats.liveRows,
+      bytes: stats.bytes,
+      parseMs: stats.parseMs,
+      projectMs: stats.projectMs,
+      keyAvailable: stats.keyAvailable
+    });
+    return projection;
   }
   commit(input) {
     if (input.content.trim() === "") throw new Error("commit: content must be non-empty");
