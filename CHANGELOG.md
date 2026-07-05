@@ -28,6 +28,10 @@ All notable changes to Helix are documented here. This project follows
 - Best-effort garbage collection of leaked Codex scratch directories: an age-based sweep
   (3-day floor, directories only, rate-limited to once a day) runs at runner start and never
   throws into the verify path.
+- Forensic point-in-time snapshot: `helix_memory_inspect asOf=<ISO instant>` reconstructs which
+  facts were live at a system-time, the grade each held, and the full verify evidence for why.
+  Grade reconstruction shares the live projection's rule (asOf(now) == live grade); membership and
+  legacy v1 verify timing are surfaced as declared, only v2 verify timing is authenticated.
 
 ### Changed
 - `dualVerify.timeoutMs` is now clamped to a 1-hour maximum. A valid integer ≥ 1s is accepted
