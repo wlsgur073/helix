@@ -201,14 +201,7 @@ function buildProjection(records) {
 }
 
 // src/memory/ledger.ts
-function parseLedger(path) {
-  let text;
-  try {
-    text = readFileSync2(path, "utf8");
-  } catch (err) {
-    if (err.code === "ENOENT") return [];
-    throw err;
-  }
+function parseLedgerText(text) {
   const out = [];
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
@@ -219,6 +212,16 @@ function parseLedger(path) {
     }
   }
   return out;
+}
+function parseLedger(path) {
+  let text;
+  try {
+    text = readFileSync2(path, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return [];
+    throw err;
+  }
+  return parseLedgerText(text);
 }
 
 // src/memory/ledger-mac.ts

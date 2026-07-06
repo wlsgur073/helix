@@ -32,6 +32,22 @@ export function appendRecord(path: LedgerPath, record: MemoryRecord): void {
   withFileLock(path, () => appendRecordUnlocked(path, record));
 }
 
+/** Parse already-read ledger TEXT into records (parseLedger's body minus the file read). Lets a
+ *  caller that must read the bytes for another purpose (A4 recall cache: hash the exact bytes) parse
+ *  the SAME bytes with no second read. Tolerates torn/corrupt lines (spec §10) — skip, don't crash. */
+export function parseLedgerText(text: string): MemoryRecord[] {
+  const out: MemoryRecord[] = [];
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') continue;
+    try {
+      out.push(JSON.parse(line) as MemoryRecord);
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
 /** Read every record from the ledger, in append order. Missing file -> []. */
 export function parseLedger(path: LedgerPath): MemoryRecord[] {
   let text: string;
@@ -41,17 +57,7 @@ export function parseLedger(path: LedgerPath): MemoryRecord[] {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw err;
   }
-  const out: MemoryRecord[] = [];
-  for (const line of text.split('\n')) {
-    if (line.trim() === '') continue;
-    try {
-      out.push(JSON.parse(line) as MemoryRecord);
-    } catch {
-      // Tolerate a torn/corrupt line (spec §10) — skip, don't crash.
-      continue;
-    }
-  }
-  return out;
+  return parseLedgerText(text);
 }
 
 export interface CompactOptions {
