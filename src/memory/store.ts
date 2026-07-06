@@ -1,22 +1,23 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { appendRecord, appendRecordUnlocked, parseLedger, compactLedger, type LedgerPath } from './ledger.js';
+import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerText, compactLedger, type LedgerPath } from './ledger.js';
 import { buildHistory, ledgerTruncated } from './history.js';
 import { buildAsOfEvidence } from './asof.js';
 import { findSecrets, redactSecrets } from './secret-scan.js';
 import { canCommit, isVerifyingSource, resolveTransition, type TransitionResult, type VerifyOutcome } from './firewall.js';
 import { runRealityCheck, checkBinding, type RealityCheck } from './reality-check.js';
 import { type RecallOptions } from './projection.js';
-import { rankRecords, type Expansion } from './retrieval.js';
+import { rankWithArtifacts, buildRankArtifacts, type Expansion } from './retrieval.js';
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce } from './content-frame.js';
 import { isOwned, stampOwnership } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
 import { buildVerifiedProjection, type VerifiedProjection } from './verified-projection.js';
-import { subkeyForScope, verifiedLiveOf, verifiedLiveStats } from './verified-read.js';
+import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedProjectionWithSubkey } from './verified-read.js';
+import { ledgerDigest, subkeyFingerprint, keyVectorEqual, type ScopeKeyComponent, type RecallCacheEntry } from './recall-cache.js';
 import type { MetricsSink } from '../metrics.js';
 import { withFileLock } from './lock.js';
 
@@ -78,6 +79,10 @@ export interface RecheckResult {
 /** Orchestrates the deterministic core modules over a real JSONL ledger file. */
 export class MemoryStore {
   constructor(private readonly global: LedgerPath, private readonly opts: MemoryStoreOptions = {}) {}
+
+  /** A4 single-slot recall cache (I5). Reused only on an exact content-identity key match; replaced on
+   *  any miss; cleared on self-erase (I8). Per-instance — dies with the store (I6). */
+  private rankCache: RecallCacheEntry | null = null;
 
   private now(): string { return (this.opts.now ?? (() => new Date().toISOString()))(); }
   private id(): string { return (this.opts.genId ?? (() => `m_${randomUUID()}`))(); }
@@ -214,21 +219,75 @@ export class MemoryStore {
     return this.scopedVerified().records;
   }
 
+  /** Read-once, content-identity-keyed recall input (spec §5). Reads each participating ledger's bytes
+   *  ONCE (I1), keys a single slot on (digest, fresh subkey fingerprint, scopeId) per scope (I2/I3),
+   *  and reuses the cached scoped projection + rank artifacts on an exact match; else rebuilds from the
+   *  SAME bytes. Ownership is checked fresh here, upstream of the key (I4). */
+  private recallInput(): { scoped: ScopedRecord[]; available: boolean; artifacts: ReturnType<typeof buildRankArtifacts> } {
+    const scopes: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined }> = [
+      { ledger: this.global, scope: 'global', root: undefined },
+    ];
+    const p = this.opts.project;
+    if (p && isOwned(p.root, p.home)) scopes.push({ ledger: p.ledger, scope: 'project', root: p.root });
+
+    const key: ScopeKeyComponent[] = [];
+    const reads: Array<{ scope: MemoryScope; root: string | undefined; text: string; bytes: number; subkey: Buffer | null }> = [];
+    for (const s of scopes) {
+      let buf: Buffer;
+      try {
+        buf = readFileSync(s.ledger);                 // I1: owned immutable buffer, read once
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT') buf = Buffer.alloc(0);
+        else throw e;
+      }
+      const subkey = this.subkeyForLedger(s.ledger);  // I3: resolved fresh from disk, never memoized
+      key.push({ scopeId: s.ledger, digest: ledgerDigest(buf), fingerprint: subkeyFingerprint(subkey) });
+      reads.push({ scope: s.scope, root: s.root, text: buf.toString('utf8'), bytes: buf.length, subkey });
+    }
+
+    if (this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
+      return { scoped: this.rankCache.scoped, available: this.rankCache.available, artifacts: this.rankCache.artifacts };
+    }
+
+    // MISS: rebuild from the SAME bytes; time + emit the replay exactly as verifiedOf does.
+    const scoped: ScopedRecord[] = [];
+    let available = true;
+    for (const r of reads) {
+      const t0 = performance.now();
+      const records = parseLedgerText(r.text);
+      const t1 = performance.now();
+      const proj = verifiedProjectionWithSubkey(records, r.subkey);
+      const t2 = performance.now();
+      if (!proj.keyAvailable) available = false;
+      for (const rec of proj.live.values()) {
+        scoped.push({ record: rec, scope: r.scope, integrity: proj.compromised.has(rec.id) ? 'compromised' : 'ok' });
+      }
+      this.opts.metricsSink?.emitReplay({
+        scope: r.root ? 'project' : 'global', caller: 'store',
+        rows: records.length, liveRows: proj.live.size, bytes: r.bytes,
+        parseMs: t1 - t0, projectMs: t2 - t1, keyAvailable: proj.keyAvailable,
+      });
+    }
+    const artifacts = buildRankArtifacts(scoped.map((s) => s.record));
+    this.rankCache = { key, scoped, available, artifacts };   // I5: single slot, atomic replace
+    return { scoped, available, artifacts };
+  }
+
   recall(query: string, opts: RecallOptions = {}): RecallResult {
-    const { records: scoped, available } = this.scopedVerified();
+    const { scoped, available, artifacts } = this.recallInput();
     const byId = new Map(scoped.map((s) => [s.record.id, s]));
     const expansion = this.opts.expansion ?? defaultExpansion();
-    const hits = rankRecords(scoped.map((s) => s.record), query,
+    const hits = rankWithArtifacts(scoped.map((s) => s.record), artifacts, query,
       { ...opts, expansion, semDiscount: SEM_DISCOUNT, semGate: SEM_GATE });
     const items: RecalledItem[] = hits.map((record) => ({
       record,
       scope: byId.get(record.id)?.scope ?? 'global',
-      needsReverify: requiresReverifyBeforeUse({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source }),
+      needsReverify: requiresReverifyBeforeUse({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source }),  // I7: recomputed per call
       integrity: byId.get(record.id)?.integrity ?? 'ok',
     }));
     return {
       items,
-      framed: frameAsData(items.map(({ record, scope }) => ({ record, scope })), this.nonce()),
+      framed: frameAsData(items.map(({ record, scope }) => ({ record, scope })), this.nonce()),  // I7: fresh nonce per call
       integrityAvailable: available,
     };
   }
@@ -434,5 +493,6 @@ export class MemoryStore {
           : () => true,
       });
     }
+    this.rankCache = null;   // I8: self-erase gives zero in-memory retention window
   }
 }

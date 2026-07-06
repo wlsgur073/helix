@@ -13013,7 +13013,7 @@ var StdioServerTransport = class {
 
 // src/memory/store.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { existsSync as existsSync2 } from "node:fs";
+import { existsSync as existsSync2, readFileSync as readFileSync7 } from "node:fs";
 import { dirname as dirname3 } from "node:path";
 
 // src/memory/ledger.ts
@@ -13272,9 +13272,6 @@ function rankWithArtifacts(records, artifacts, query, opts = {}) {
   }).filter((s) => s.keep && s.relevance > 0);
   scored.sort((a, b) => b.final - a.final || b.rec.tx.localeCompare(a.rec.tx));
   return scored.slice(0, opts.maxItems ?? 20).map((s) => s.rec);
-}
-function rankRecords(records, query, opts = {}) {
-  return rankWithArtifacts(records, buildRankArtifacts(records), query, opts);
 }
 
 // src/memory/projection.ts
@@ -14087,6 +14084,27 @@ function verifiedLiveStats(ledger, home2, projectRoot2) {
   };
 }
 
+// src/memory/recall-cache.ts
+import { createHash as createHash2, createHmac as createHmac2 } from "node:crypto";
+var KEY_ABSENT = "key-absent";
+var FP_LABEL = Buffer.from("helix-recall-cache-fingerprint-v1", "utf8");
+function ledgerDigest(bytes) {
+  return createHash2("sha256").update(bytes).digest("hex");
+}
+function subkeyFingerprint(subkey) {
+  if (!subkey) return KEY_ABSENT;
+  return createHmac2("sha256", subkey).update(FP_LABEL).digest("hex");
+}
+function keyVectorEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x.scopeId !== y.scopeId || x.digest !== y.digest || x.fingerprint !== y.fingerprint) return false;
+  }
+  return true;
+}
+
 // src/memory/store.ts
 var MemoryStore = class {
   constructor(global, opts = {}) {
@@ -14095,6 +14113,9 @@ var MemoryStore = class {
   }
   global;
   opts;
+  /** A4 single-slot recall cache (I5). Reused only on an exact content-identity key match; replaced on
+   *  any miss; cleared on self-erase (I8). Per-instance — dies with the store (I6). */
+  rankCache = null;
   now() {
     return (this.opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   }
@@ -14234,12 +14255,67 @@ var MemoryStore = class {
   scopedProjection() {
     return this.scopedVerified().records;
   }
+  /** Read-once, content-identity-keyed recall input (spec §5). Reads each participating ledger's bytes
+   *  ONCE (I1), keys a single slot on (digest, fresh subkey fingerprint, scopeId) per scope (I2/I3),
+   *  and reuses the cached scoped projection + rank artifacts on an exact match; else rebuilds from the
+   *  SAME bytes. Ownership is checked fresh here, upstream of the key (I4). */
+  recallInput() {
+    const scopes = [
+      { ledger: this.global, scope: "global", root: void 0 }
+    ];
+    const p = this.opts.project;
+    if (p && isOwned(p.root, p.home)) scopes.push({ ledger: p.ledger, scope: "project", root: p.root });
+    const key = [];
+    const reads = [];
+    for (const s of scopes) {
+      let buf;
+      try {
+        buf = readFileSync7(s.ledger);
+      } catch (e) {
+        if (e.code === "ENOENT") buf = Buffer.alloc(0);
+        else throw e;
+      }
+      const subkey = this.subkeyForLedger(s.ledger);
+      key.push({ scopeId: s.ledger, digest: ledgerDigest(buf), fingerprint: subkeyFingerprint(subkey) });
+      reads.push({ scope: s.scope, root: s.root, text: buf.toString("utf8"), bytes: buf.length, subkey });
+    }
+    if (this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
+      return { scoped: this.rankCache.scoped, available: this.rankCache.available, artifacts: this.rankCache.artifacts };
+    }
+    const scoped = [];
+    let available = true;
+    for (const r of reads) {
+      const t0 = performance.now();
+      const records = parseLedgerText(r.text);
+      const t1 = performance.now();
+      const proj = verifiedProjectionWithSubkey(records, r.subkey);
+      const t2 = performance.now();
+      if (!proj.keyAvailable) available = false;
+      for (const rec of proj.live.values()) {
+        scoped.push({ record: rec, scope: r.scope, integrity: proj.compromised.has(rec.id) ? "compromised" : "ok" });
+      }
+      this.opts.metricsSink?.emitReplay({
+        scope: r.root ? "project" : "global",
+        caller: "store",
+        rows: records.length,
+        liveRows: proj.live.size,
+        bytes: r.bytes,
+        parseMs: t1 - t0,
+        projectMs: t2 - t1,
+        keyAvailable: proj.keyAvailable
+      });
+    }
+    const artifacts = buildRankArtifacts(scoped.map((s) => s.record));
+    this.rankCache = { key, scoped, available, artifacts };
+    return { scoped, available, artifacts };
+  }
   recall(query, opts = {}) {
-    const { records: scoped, available } = this.scopedVerified();
+    const { scoped, available, artifacts } = this.recallInput();
     const byId = new Map(scoped.map((s) => [s.record.id, s]));
     const expansion = this.opts.expansion ?? defaultExpansion();
-    const hits = rankRecords(
+    const hits = rankWithArtifacts(
       scoped.map((s) => s.record),
+      artifacts,
       query,
       { ...opts, expansion, semDiscount: SEM_DISCOUNT, semGate: SEM_GATE }
     );
@@ -14247,11 +14323,13 @@ var MemoryStore = class {
       record: record2,
       scope: byId.get(record2.id)?.scope ?? "global",
       needsReverify: requiresReverifyBeforeUse({ state: record2.state, blastRadius: record2.blastRadius, source: record2.provenance.source }),
+      // I7: recomputed per call
       integrity: byId.get(record2.id)?.integrity ?? "ok"
     }));
     return {
       items,
       framed: frameAsData(items.map(({ record: record2, scope }) => ({ record: record2, scope })), this.nonce()),
+      // I7: fresh nonce per call
       integrityAvailable: available
     };
   }
@@ -14441,6 +14519,7 @@ var MemoryStore = class {
         keepValidVerify: sk ? (r) => verifyVerify(r, sk) || typeof r.macVersion === "number" && Number.isSafeInteger(r.macVersion) && r.macVersion > MAC_VERSION : () => true
       });
     }
+    this.rankCache = null;
   }
 };
 
@@ -22820,10 +22899,10 @@ function appendAudit(path, event) {
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync8 } from "node:fs";
+import { readFileSync as readFileSync9 } from "node:fs";
 
 // src/codex-log.ts
-import { appendFileSync as appendFileSync3, chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync6, readFileSync as readFileSync7, writeFileSync as writeFileSync3 } from "node:fs";
+import { appendFileSync as appendFileSync3, chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync6, readFileSync as readFileSync8, writeFileSync as writeFileSync3 } from "node:fs";
 import { dirname as dirname5 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
@@ -22837,7 +22916,7 @@ function appendCodexLog(path, entry) {
       } catch {
       }
     }
-    const lines = readFileSync7(path, "utf8").split("\n").filter((l) => l !== "");
+    const lines = readFileSync8(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
       writeFileSync3(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
@@ -22963,7 +23042,7 @@ function handleConfirm(store2, args, deps) {
 }
 function codexLogCount(path) {
   try {
-    return readFileSync8(path, "utf8").split("\n").filter((l) => l !== "").length;
+    return readFileSync9(path, "utf8").split("\n").filter((l) => l !== "").length;
   } catch {
     return 0;
   }
@@ -23057,7 +23136,7 @@ async function handleDualVerify(args, deps) {
 }
 
 // src/config.ts
-import { readFileSync as readFileSync9 } from "node:fs";
+import { readFileSync as readFileSync10 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join4 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
@@ -23089,7 +23168,7 @@ var DEFAULT_CONFIG = {
 };
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync9(path, "utf8"));
+    return JSON.parse(readFileSync10(path, "utf8"));
   } catch {
     return null;
   }
@@ -23150,7 +23229,7 @@ function loadConfig(opts = {}) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync5, mkdirSync as mkdirSync7, mkdtempSync, readFileSync as readFileSync10, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync5, mkdirSync as mkdirSync7, mkdtempSync, readFileSync as readFileSync11, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join6, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
@@ -23368,7 +23447,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
       }
       let answer = "";
       try {
-        answer = readFileSync10(outFile, "utf8").trim();
+        answer = readFileSync11(outFile, "utf8").trim();
       } catch {
       }
       return answer ? { ok: true, answer } : { ok: false, error: "codex produced no output" };
