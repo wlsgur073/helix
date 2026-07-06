@@ -13188,8 +13188,7 @@ function semanticCoverage(qTerms, docTokens, expansion, discount = 1) {
   }
   return { score: (lexicalMatched + semanticWeight) / qTerms.length, lexicalMatched, semanticWeight };
 }
-function phraseScore(query, docContent) {
-  const d = normalizeText(docContent);
+function phraseScoreNorm(query, d) {
   const words = normalizeText(query).split(/\s+/).filter(Boolean);
   let i = 0;
   while (i < words.length && isStopword(words[i])) i += 1;
@@ -13243,30 +13242,39 @@ var W_COVERAGE = 0.4;
 var W_BM25 = 0.1;
 var TRUST_PENALTY = { Verified: 0, Corroborated: 0.01, Fresh: 0.02, Suspect: 0.1 };
 var NONAUTH_PENALTY = 0.03;
-function rankRecords(records, query, opts = {}) {
+function buildRankArtifacts(records) {
+  const docs = records.map((r) => ({ id: r.id, tokens: tokenize(r.content), normContent: normalizeText(r.content) }));
+  const idx = buildIndex(docs.map((d) => ({ id: d.id, tokens: d.tokens })));
+  return { docs, idx };
+}
+function rankWithArtifacts(records, artifacts, query, opts = {}) {
   const qMeaning = [...new Set(meaningfulTokens(tokenize(query)))];
   if (qMeaning.length === 0 || records.length === 0) return [];
-  const docs = records.map((r) => ({ rec: r, tokens: tokenize(r.content) }));
-  const idx = buildIndex(docs.map((d) => ({ id: d.rec.id, tokens: d.tokens })));
+  const { idx } = artifacts;
+  const byId = new Map(artifacts.docs.map((d) => [d.id, d]));
   const rawBm = /* @__PURE__ */ new Map();
-  for (const d of docs) rawBm.set(d.rec.id, bm25Score(d.rec.id, qMeaning, idx));
+  for (const r of records) rawBm.set(r.id, bm25Score(r.id, qMeaning, idx));
   const vals = [...rawBm.values()];
   const max = Math.max(...vals);
   const min = Math.min(...vals);
   const bm25norm = (id) => max === min ? 0 : (rawBm.get(id) - min) / (max - min);
   const semGate = opts.semGate ?? 0;
-  const scored = docs.map((d) => {
+  const scored = records.map((r) => {
+    const d = byId.get(r.id);
     const cov = semanticCoverage(qMeaning, d.tokens, opts.expansion, opts.semDiscount ?? 1);
-    const phrase = phraseScore(query, d.rec.content);
-    const bm = bm25norm(d.rec.id);
+    const phrase = phraseScoreNorm(query, d.normContent);
+    const bm = bm25norm(r.id);
     const relevance = W_PHRASE * phrase + W_COVERAGE * cov.score + W_BM25 * bm;
-    const trust = TRUST_PENALTY[d.rec.state] + (isVerifyingSource(d.rec.provenance.source) ? 0 : NONAUTH_PENALTY);
+    const trust = TRUST_PENALTY[r.state] + (isVerifyingSource(r.provenance.source) ? 0 : NONAUTH_PENALTY);
     const semanticOnly = cov.lexicalMatched === 0 && phrase === 0 && bm === 0 && cov.semanticWeight > 0;
     const keep = relevance > 0 && (!semanticOnly || cov.semanticWeight >= semGate);
-    return { rec: d.rec, relevance, final: relevance - trust, keep };
+    return { rec: r, relevance, final: relevance - trust, keep };
   }).filter((s) => s.keep && s.relevance > 0);
   scored.sort((a, b) => b.final - a.final || b.rec.tx.localeCompare(a.rec.tx));
   return scored.slice(0, opts.maxItems ?? 20).map((s) => s.rec);
+}
+function rankRecords(records, query, opts = {}) {
+  return rankWithArtifacts(records, buildRankArtifacts(records), query, opts);
 }
 
 // src/memory/projection.ts

@@ -129,7 +129,12 @@ export function semanticCoverage(
  * >= 3 chars (else 'id' matches inside 'video'), CJK is meaningful at >= 2 (e.g. 배포).
  */
 export function phraseScore(query: string, docContent: string): number {
-  const d = normalizeText(docContent);
+  return phraseScoreNorm(query, normalizeText(docContent));
+}
+
+/** phraseScore over ALREADY-normalized doc content (NFKC + lowercase). Lets the A4 cache precompute
+ *  normContent once per record instead of per query. Identical result to phraseScore. */
+export function phraseScoreNorm(query: string, d: string): number {
   // Strip leading stopword words so a leading 'what'/'the' can't anchor a phrase match (spec §5:
   // stopwords never drive a match). Mid/trailing stopwords are harmless to a left-anchored prefix walk.
   const words = normalizeText(query).split(/\s+/).filter(Boolean);
@@ -208,37 +213,57 @@ export interface RankOptions {
   semGate?: number;        // min semanticWeight for a semantic-ONLY record to survive; default 0
 }
 
-/** Rank live records for a query: relevance (phrase+coverage+bm25) minus an additive trust margin. */
-export function rankRecords(records: MemoryRecord[], query: string, opts: RankOptions = {}): MemoryRecord[] {
+export interface RankArtifacts {
+  docs: Array<{ id: string; tokens: string[]; normContent: string }>;
+  idx: Bm25Index;
+}
+
+/** Query-INDEPENDENT rank pre-computation: per-record tokens + normalized content, plus the union
+ *  BM25 index. A pure function of the record SET — the A4 cache reuses it while the set is unchanged. */
+export function buildRankArtifacts(records: MemoryRecord[]): RankArtifacts {
+  const docs = records.map((r) => ({ id: r.id, tokens: tokenize(r.content), normContent: normalizeText(r.content) }));
+  const idx = buildIndex(docs.map((d) => ({ id: d.id, tokens: d.tokens })));
+  return { docs, idx };
+}
+
+/** Query-DEPENDENT scoring over pre-built artifacts. `records` supplies live state/provenance (the
+ *  trust margin); `artifacts` supplies tokens/normContent/index, matched to records by id. */
+export function rankWithArtifacts(records: MemoryRecord[], artifacts: RankArtifacts, query: string, opts: RankOptions = {}): MemoryRecord[] {
   const qMeaning = [...new Set(meaningfulTokens(tokenize(query)))];
   if (qMeaning.length === 0 || records.length === 0) return [];
-
-  const docs = records.map((r) => ({ rec: r, tokens: tokenize(r.content) }));
-  const idx = buildIndex(docs.map((d) => ({ id: d.rec.id, tokens: d.tokens })));
+  const { idx } = artifacts;
+  const byId = new Map(artifacts.docs.map((d) => [d.id, d]));
 
   const rawBm = new Map<string, number>();
-  for (const d of docs) rawBm.set(d.rec.id, bm25Score(d.rec.id, qMeaning, idx));
+  for (const r of records) rawBm.set(r.id, bm25Score(r.id, qMeaning, idx));
   const vals = [...rawBm.values()];
   const max = Math.max(...vals);
   const min = Math.min(...vals);
   const bm25norm = (id: string): number => (max === min ? 0 : (rawBm.get(id)! - min) / (max - min));
 
   const semGate = opts.semGate ?? 0;
-  const scored = docs
-    .map((d) => {
+  const scored = records
+    .map((r) => {
+      const d = byId.get(r.id)!;
       const cov = semanticCoverage(qMeaning, d.tokens, opts.expansion, opts.semDiscount ?? 1);
-      const phrase = phraseScore(query, d.rec.content);
-      const bm = bm25norm(d.rec.id);
+      const phrase = phraseScoreNorm(query, d.normContent);
+      const bm = bm25norm(r.id);
       const relevance = W_PHRASE * phrase + W_COVERAGE * cov.score + W_BM25 * bm;
-      const trust = TRUST_PENALTY[d.rec.state] + (isVerifyingSource(d.rec.provenance.source) ? 0 : NONAUTH_PENALTY);
+      const trust = TRUST_PENALTY[r.state] + (isVerifyingSource(r.provenance.source) ? 0 : NONAUTH_PENALTY);
       // A "semantic-only" record has NO lexical signal (no exact/prefix coverage, no phrase, no bm25)
       // and is rescued purely by neighbors -> it must clear the gate to avoid injecting noise.
       const semanticOnly = cov.lexicalMatched === 0 && phrase === 0 && bm === 0 && cov.semanticWeight > 0;
       const keep = relevance > 0 && (!semanticOnly || cov.semanticWeight >= semGate);
-      return { rec: d.rec, relevance, final: relevance - trust, keep };
+      return { rec: r, relevance, final: relevance - trust, keep };
     })
     .filter((s) => s.keep && s.relevance > 0);
 
   scored.sort((a, b) => b.final - a.final || b.rec.tx.localeCompare(a.rec.tx));
   return scored.slice(0, opts.maxItems ?? 20).map((s) => s.rec);
+}
+
+/** Rank live records for a query (build artifacts + score). Retained for callers/tests that do not
+ *  cache; byte-identical to the pre-A4 implementation. */
+export function rankRecords(records: MemoryRecord[], query: string, opts: RankOptions = {}): MemoryRecord[] {
+  return rankWithArtifacts(records, buildRankArtifacts(records), query, opts);
 }
