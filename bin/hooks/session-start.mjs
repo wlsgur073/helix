@@ -403,12 +403,14 @@ function subkeyForScope(home, projectRoot) {
   const nonce = projectRoot ? scopeNonce(projectRoot, home) : globalScopeNonce(home);
   return nonce ? deriveSubkey(master, nonce) : null;
 }
-function verifiedLiveOf(records, home, projectRoot) {
-  const subkey = subkeyForScope(home, projectRoot);
+function verifiedProjectionWithSubkey(records, subkey) {
   return buildVerifiedProjection(records, {
     verify: (r) => subkey ? verifyVerify(r, subkey) : false,
     keyAvailable: subkey !== null
   });
+}
+function verifiedLiveOf(records, home, projectRoot) {
+  return verifiedProjectionWithSubkey(records, subkeyForScope(home, projectRoot));
 }
 function verifiedLiveStats(ledger, home, projectRoot) {
   let bytes = 0;

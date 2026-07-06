@@ -14054,12 +14054,14 @@ function subkeyForScope(home2, projectRoot2) {
   const nonce = projectRoot2 ? scopeNonce(projectRoot2, home2) : globalScopeNonce(home2);
   return nonce ? deriveSubkey(master, nonce) : null;
 }
-function verifiedLiveOf(records, home2, projectRoot2) {
-  const subkey = subkeyForScope(home2, projectRoot2);
+function verifiedProjectionWithSubkey(records, subkey) {
   return buildVerifiedProjection(records, {
     verify: (r) => subkey ? verifyVerify(r, subkey) : false,
     keyAvailable: subkey !== null
   });
+}
+function verifiedLiveOf(records, home2, projectRoot2) {
+  return verifiedProjectionWithSubkey(records, subkeyForScope(home2, projectRoot2));
 }
 function verifiedLiveStats(ledger, home2, projectRoot2) {
   let bytes = 0;

@@ -27,21 +27,19 @@ export function subkeyForScope(home: string, projectRoot?: string): Buffer | nul
   return nonce ? deriveSubkey(master, nonce) : null;
 }
 
-/**
- * The verifying projection over an ALREADY-PARSED record array (R1 clamp / R2 MAC gate / R3 content
- * binding). This is the records-in CORE of verifiedLive: a caller that already holds the parsed ledger
- * — notably the store's historyView, which feeds the SAME array to buildHistory — shares ONE parse
- * across the verified projection and the history partition (no second, unsynchronized read). A forged
- * or edited record replays as Fresh; only a genuinely signed `verify` for the live, unedited target
- * confers Corroborated/Verified. Key-absent => keyAvailable false and every state clamps to Fresh
- * (fail-closed — no forged elevation is shown).
- */
-export function verifiedLiveOf(records: MemoryRecord[], home: string, projectRoot?: string): VerifiedProjection {
-  const subkey = subkeyForScope(home, projectRoot);
+/** The verifying projection over ALREADY-RESOLVED key material (R1 clamp / R2 MAC gate / R3 content
+ *  binding). The single source of truth both verifiedLiveOf AND the A4 recall cache route through, so
+ *  a resolved-subkey caller and a home+scope caller can never diverge. A null subkey => keyAvailable
+ *  false and every state clamps to Fresh (fail-closed). */
+export function verifiedProjectionWithSubkey(records: MemoryRecord[], subkey: Buffer | null): VerifiedProjection {
   return buildVerifiedProjection(records, {
     verify: (r) => (subkey ? verifyVerify(r, subkey) : false),
     keyAvailable: subkey !== null,
   });
+}
+
+export function verifiedLiveOf(records: MemoryRecord[], home: string, projectRoot?: string): VerifiedProjection {
+  return verifiedProjectionWithSubkey(records, subkeyForScope(home, projectRoot));
 }
 
 /** Per-read replay decomposition captured by verifiedLiveStats (spec §4). Pure data — the caller
