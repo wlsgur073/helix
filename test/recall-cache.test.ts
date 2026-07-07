@@ -19,6 +19,7 @@ describe('recall-cache key primitives', () => {
     expect(subkeyFingerprint(k)).not.toBe(k.toString('hex'));   // never the raw key
     expect(subkeyFingerprint(k)).toHaveLength(64);
     expect(subkeyFingerprint(null)).toBe(KEY_ABSENT);
+    expect(KEY_ABSENT).not.toMatch(/^[0-9a-f]{64}$/);          // sentinel can never collide a real fingerprint
   });
 
   it('keyVectorEqual is true only for identical ordered vectors', () => {
