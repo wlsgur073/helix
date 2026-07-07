@@ -133,6 +133,29 @@ function measurePhases(ledger: string, home: string, iters: number): { parse: nu
   return { parse, project, recallMs };
 }
 
+/** A4: separate the cache regimes honestly. COLD = first recall on a fresh store (cache empty, full
+ *  rebuild — today's cost, and also the per-miss cost). WARM = repeated recall on one store, unchanged
+ *  ledger (all HITs after the prime). No single number is reported as "the" speedup. */
+function measureRecallModes(ledger: string, home: string, iters: number): { cold: number[]; warm: number[] } {
+  const cold: number[] = [];
+  const warm: number[] = [];
+  const q = '배포 config timeout';
+  for (let i = 0; i < iters; i++) {
+    const fresh = new MemoryStore(ledger, { home, sessionId: 'bench' });   // cache empty -> MISS
+    const t0 = performance.now();
+    fresh.recall(q);
+    cold.push(performance.now() - t0);
+  }
+  const warmStore = new MemoryStore(ledger, { home, sessionId: 'bench' });
+  warmStore.recall(q);                                                     // prime (one MISS, discarded)
+  for (let i = 0; i < iters; i++) {
+    const t0 = performance.now();
+    warmStore.recall(q);                                                   // HIT
+    warm.push(performance.now() - t0);
+  }
+  return { cold, warm };
+}
+
 function printStatsRow(label: string, samples: number[]): void {
   const s = computeStats(samples);
   process.stdout.write(`${label.padEnd(10)} n=${String(s.n).padEnd(3)} median=${fmt(s.median)} min=${fmt(s.min)} max=${fmt(s.max)} mean=${fmt(s.mean)} sd=${fmt(s.sd)}\n`);
@@ -151,6 +174,9 @@ export function runSweep(opts: { sizes: number[]; iters: number; seed: number })
       printStatsRow('parse', m.parse);
       printStatsRow('project', m.project);
       printStatsRow('recall', m.recallMs);
+      const modes = measureRecallModes(ledger, home, opts.iters);
+      printStatsRow('recall.cold', modes.cold);
+      printStatsRow('recall.warm', modes.warm);
     }
   } finally {
     rmSync(home, { recursive: true, force: true });
