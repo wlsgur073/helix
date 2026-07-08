@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 export type DualVerifyMode = 'compare' | 'critique';
-export type StakesFloor = 'low' | 'medium' | 'high';
+export type StakesFloor = 'low' | 'medium' | 'high' | 'xhigh';
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export type EgressLegPolicy = 'block' | 'allow';
@@ -91,7 +91,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
     if (dv) {
       if (typeof dv.enabled === 'boolean') merged.dualVerify.enabled = dv.enabled;
       if (dv.mode === 'compare' || dv.mode === 'critique') merged.dualVerify.mode = dv.mode;
-      if (dv.stakesFloor === 'low' || dv.stakesFloor === 'medium' || dv.stakesFloor === 'high') {
+      if (dv.stakesFloor === 'low' || dv.stakesFloor === 'medium' || dv.stakesFloor === 'high' || dv.stakesFloor === 'xhigh') {
         merged.dualVerify.stakesFloor = dv.stakesFloor;
       }
       if (dv.model === null || (typeof dv.model === 'string' && MODEL_RE.test(dv.model))) {

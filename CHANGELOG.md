@@ -6,6 +6,10 @@ All notable changes to Helix are documented here. This project follows
 ## [Unreleased]
 
 ### Added
+- Dual-verify `xhigh` stakes tier: a 4th, strictest self-classified stakes level above `high`
+  (`stakes` on `helix_memory`-adjacent `helix_dual_verify`, and `dualVerify.stakesFloor` in config).
+  With `stakesFloor: "xhigh"`, only calls the agent classifies `xhigh` spend Codex quota — `high`
+  and below are skipped. Omitting `stakes` still bypasses the floor (an explicit call signals intent).
 - Replay metrics sensor: content-free op/replay latency records in `~/.helix/metrics.jsonl`
   (default on; `metrics.enabled: false` disables; hook honors the global config only). The
   sensor makes the long-deferred "migrate to SQLite at recall p95 > 150 ms" trigger observable.

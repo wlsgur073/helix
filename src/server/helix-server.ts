@@ -102,7 +102,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     inputSchema: {
       question: z.string(),
       helixAnswer: z.string(),
-      stakes: z.enum(['low', 'medium', 'high']).optional(),
+      stakes: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
     },
   }, async (args) => m.runOp('helix_dual_verify', () => handleDualVerify(args, dv)));
 

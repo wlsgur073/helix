@@ -22840,7 +22840,7 @@ function classifyEmission(content) {
 }
 
 // src/verify/dual-verify.ts
-var STAKES_RANK = { low: 0, medium: 1, high: 2 };
+var STAKES_RANK = { low: 0, medium: 1, high: 2, xhigh: 3 };
 function persistedReason(result) {
   return result.outcome === "error" ? "codex run failed" : result.reason;
 }
@@ -23192,7 +23192,7 @@ function loadConfig(opts = {}) {
     if (dv) {
       if (typeof dv.enabled === "boolean") merged.dualVerify.enabled = dv.enabled;
       if (dv.mode === "compare" || dv.mode === "critique") merged.dualVerify.mode = dv.mode;
-      if (dv.stakesFloor === "low" || dv.stakesFloor === "medium" || dv.stakesFloor === "high") {
+      if (dv.stakesFloor === "low" || dv.stakesFloor === "medium" || dv.stakesFloor === "high" || dv.stakesFloor === "xhigh") {
         merged.dualVerify.stakesFloor = dv.stakesFloor;
       }
       if (dv.model === null || typeof dv.model === "string" && MODEL_RE.test(dv.model)) {
@@ -23618,7 +23618,7 @@ function buildServer(store2, dualDeps, metrics2) {
     inputSchema: {
       question: external_exports.string(),
       helixAnswer: external_exports.string(),
-      stakes: external_exports.enum(["low", "medium", "high"]).optional()
+      stakes: external_exports.enum(["low", "medium", "high", "xhigh"]).optional()
     }
   }, async (args) => m.runOp("helix_dual_verify", () => handleDualVerify(args, dv)));
   server2.registerTool("helix_codex_status", {

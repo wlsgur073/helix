@@ -18,8 +18,8 @@ export interface DualVerifyDeps {
   echo: EchoSource;
 }
 
-export type Stakes = 'low' | 'medium' | 'high';
-const STAKES_RANK: Record<Stakes, number> = { low: 0, medium: 1, high: 2 };
+export type Stakes = 'low' | 'medium' | 'high' | 'xhigh';
+const STAKES_RANK: Record<Stakes, number> = { low: 0, medium: 1, high: 2, xhigh: 3 };
 
 export interface DualVerifyParams {
   question: string;

@@ -23,6 +23,14 @@ describe('loadConfig', () => {
     expect(cfg.dualVerify.stakesFloor).toBe('high');
   });
 
+  it('accepts xhigh as a stakesFloor (4th tier, strictest)', () => {
+    const dir = tmpDir();
+    const p = join(dir, 'config.json');
+    writeFileSync(p, JSON.stringify({ dualVerify: { stakesFloor: 'xhigh' } }));
+    const cfg = loadConfig({ projectPath: p, globalPath: join(dir, 'global.json') });
+    expect(cfg.dualVerify.stakesFloor).toBe('xhigh');
+  });
+
   it('project config overrides global config', () => {
     const dir = tmpDir();
     const g = join(dir, 'g.json'); writeFileSync(g, JSON.stringify({ dualVerify: { enabled: false } }));

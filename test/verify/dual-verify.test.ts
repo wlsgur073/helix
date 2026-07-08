@@ -87,6 +87,19 @@ describe('dualVerify', () => {
     expect(r.ran).toBe(true);
   });
 
+  it('xhigh floor: a high-stakes call is below it and skips; only xhigh meets it', async () => {
+    const withFloor = (f: HelixConfig['dualVerify']['stakesFloor']): HelixConfig => {
+      const c = enabled(); c.dualVerify.stakesFloor = f; return c;
+    };
+    const below = await dualVerify({ question: 'q', helixAnswer: 'a', stakes: 'high' },
+      deps({ config: withFloor('xhigh') }));
+    expect(below.ran).toBe(false);
+    expect(below.reason).toMatch(/stakes 'high' below configured floor 'xhigh'/);
+    const meets = await dualVerify({ question: 'q', helixAnswer: 'the answer is 4', stakes: 'xhigh' },
+      deps({ config: withFloor('xhigh') }));
+    expect(meets.ran).toBe(true);
+  });
+
   it('runs when stakes are unspecified (an explicit tool invocation signals intent)', async () => {
     const r = await dualVerify({ question: 'q', helixAnswer: 'the answer is 4' }, deps({ config: enabled() }));
     expect(r.ran).toBe(true);

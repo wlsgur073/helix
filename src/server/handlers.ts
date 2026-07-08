@@ -238,7 +238,7 @@ function deciderLeg(v: EgressVerdict): Leg | undefined {
 }
 
 export async function handleDualVerify(
-  args: { question: string; helixAnswer: string; stakes?: 'low' | 'medium' | 'high' },
+  args: { question: string; helixAnswer: string; stakes?: 'low' | 'medium' | 'high' | 'xhigh' },
   deps: DualVerifyHandlerDeps,
 ): Promise<ToolResult> {
   const ts = (deps.now ?? (() => new Date().toISOString()))();
