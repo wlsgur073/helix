@@ -231,25 +231,31 @@ export class MemoryStore {
     if (p && isOwned(p.root, p.home)) scopes.push({ ledger: p.ledger, scope: 'project', root: p.root });
 
     const key: ScopeKeyComponent[] = [];
-    const reads: Array<{ scope: MemoryScope; root: string | undefined; text: string; bytes: number; subkey: Buffer | null }> = [];
+    const reads: Array<{ scope: MemoryScope; root: string | undefined; text: string; bytes: number; subkey: Buffer | null; readMs: number }> = [];
     for (const s of scopes) {
       let buf: Buffer;
+      const rt0 = performance.now();
       try {
         buf = readFileSync(s.ledger);                 // I1: owned immutable buffer, read once
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code === 'ENOENT') buf = Buffer.alloc(0);
         else throw e;
       }
+      const text = buf.toString('utf8');              // decode timed WITH the read (parseLedger's parseMs is read+decode-inclusive)
+      const readMs = performance.now() - rt0;
       const subkey = this.subkeyForLedger(s.ledger);  // I3: resolved fresh from disk, never memoized
       key.push({ scopeId: s.ledger, digest: ledgerDigest(buf), fingerprint: subkeyFingerprint(subkey) });
-      reads.push({ scope: s.scope, root: s.root, text: buf.toString('utf8'), bytes: buf.length, subkey });
+      reads.push({ scope: s.scope, root: s.root, text, bytes: buf.length, subkey, readMs });
     }
 
     if (this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
       return { scoped: this.rankCache.scoped, available: this.rankCache.available, artifacts: this.rankCache.artifacts };
     }
 
-    // MISS: rebuild from the SAME bytes; time + emit the replay exactly as verifiedOf does.
+    // MISS: rebuild from the SAME bytes already read above. parseMs = per-scope read+decode (captured
+    // with the read) + line-split + JSON.parse, matching verifiedLiveStats' read-inclusive parseMs so
+    // the A3 replay curve stays comparable across the store/hook emitters; projectMs is the verifying
+    // replay, exactly as verifiedOf emits.
     const scoped: ScopedRecord[] = [];
     let available = true;
     for (const r of reads) {
@@ -265,7 +271,7 @@ export class MemoryStore {
       this.opts.metricsSink?.emitReplay({
         scope: r.root ? 'project' : 'global', caller: 'store',
         rows: records.length, liveRows: proj.live.size, bytes: r.bytes,
-        parseMs: t1 - t0, projectMs: t2 - t1, keyAvailable: proj.keyAvailable,
+        parseMs: r.readMs + (t1 - t0), projectMs: t2 - t1, keyAvailable: proj.keyAvailable,
       });
     }
     const artifacts = buildRankArtifacts(scoped.map((s) => s.record));
