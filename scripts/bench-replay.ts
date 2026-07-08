@@ -115,22 +115,20 @@ export function percentileNearestRank(sorted: number[], p: number): number {
 
 const fmt = (x: number): string => x.toFixed(1).padStart(9);
 
-function measurePhases(ledger: string, home: string, iters: number): { parse: number[]; project: number[]; recallMs: number[] } {
+function measurePhases(ledger: string, home: string, iters: number): { parse: number[]; project: number[] } {
+  // parse/project come from verifiedLiveStats (a fresh read each call), independent of any store cache.
+  // Recall latency is measured separately and honestly in measureRecallModes (cold vs warm): a single
+  // reused store here would hit the A4 rank cache after the first call, so its recall numbers would be
+  // warm-path only and duplicate recall.warm — so this loop reports no recall row.
   const parse: number[] = [];
   const project: number[] = [];
-  const recallMs: number[] = [];
-  const store = new MemoryStore(ledger, { home, sessionId: 'bench' }); // NO sink -> no metrics pollution
   for (let i = 0; i <= iters; i++) { // one extra: index 0 is the discarded warmup
     const { stats } = verifiedLiveStats(ledger, home);
-    const t0 = performance.now();
-    store.recall('배포 config timeout');
-    const t1 = performance.now();
     if (i === 0) continue; // discard warmup (spec §8)
     parse.push(stats.parseMs);
     project.push(stats.projectMs);
-    recallMs.push(t1 - t0);
   }
-  return { parse, project, recallMs };
+  return { parse, project };
 }
 
 /** A4: separate the cache regimes honestly. COLD = first recall on a fresh store (cache empty, full
@@ -173,10 +171,9 @@ export function runSweep(opts: { sizes: number[]; iters: number; seed: number })
       process.stdout.write(`\nrows=${rows} (verifies=${gen.verifies} supersedes=${gen.supersedes})  [all ms]\n`);
       printStatsRow('parse', m.parse);
       printStatsRow('project', m.project);
-      printStatsRow('recall', m.recallMs);
       const modes = measureRecallModes(ledger, home, opts.iters);
-      printStatsRow('recall.cold', modes.cold);
-      printStatsRow('recall.warm', modes.warm);
+      printStatsRow('recall.cold', modes.cold);   // full rebuild — the baseline-comparable recall cost
+      printStatsRow('recall.warm', modes.warm);    // A4 cache HIT on an unchanged ledger
     }
   } finally {
     rmSync(home, { recursive: true, force: true });
