@@ -13250,8 +13250,7 @@ function buildRankArtifacts(records) {
 function rankWithArtifacts(records, artifacts, query, opts = {}) {
   const qMeaning = [...new Set(meaningfulTokens(tokenize(query)))];
   if (qMeaning.length === 0 || records.length === 0) return [];
-  const { idx } = artifacts;
-  const byId = new Map(artifacts.docs.map((d) => [d.id, d]));
+  const { idx, docs } = artifacts;
   const rawBm = /* @__PURE__ */ new Map();
   for (const r of records) rawBm.set(r.id, bm25Score(r.id, qMeaning, idx));
   const vals = [...rawBm.values()];
@@ -13259,8 +13258,8 @@ function rankWithArtifacts(records, artifacts, query, opts = {}) {
   const min = Math.min(...vals);
   const bm25norm = (id) => max === min ? 0 : (rawBm.get(id) - min) / (max - min);
   const semGate = opts.semGate ?? 0;
-  const scored = records.map((r) => {
-    const d = byId.get(r.id);
+  const scored = records.map((r, i) => {
+    const d = docs[i];
     const cov = semanticCoverage(qMeaning, d.tokens, opts.expansion, opts.semDiscount ?? 1);
     const phrase = phraseScoreNorm(query, d.normContent);
     const bm = bm25norm(r.id);
@@ -14269,15 +14268,18 @@ var MemoryStore = class {
     const reads = [];
     for (const s of scopes) {
       let buf;
+      const rt0 = performance.now();
       try {
         buf = readFileSync7(s.ledger);
       } catch (e) {
         if (e.code === "ENOENT") buf = Buffer.alloc(0);
         else throw e;
       }
+      const text = buf.toString("utf8");
+      const readMs = performance.now() - rt0;
       const subkey = this.subkeyForLedger(s.ledger);
       key.push({ scopeId: s.ledger, digest: ledgerDigest(buf), fingerprint: subkeyFingerprint(subkey) });
-      reads.push({ scope: s.scope, root: s.root, text: buf.toString("utf8"), bytes: buf.length, subkey });
+      reads.push({ scope: s.scope, root: s.root, text, bytes: buf.length, subkey, readMs });
     }
     if (this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
       return { scoped: this.rankCache.scoped, available: this.rankCache.available, artifacts: this.rankCache.artifacts };
@@ -14300,7 +14302,7 @@ var MemoryStore = class {
         rows: records.length,
         liveRows: proj.live.size,
         bytes: r.bytes,
-        parseMs: t1 - t0,
+        parseMs: r.readMs + (t1 - t0),
         projectMs: t2 - t1,
         keyAvailable: proj.keyAvailable
       });
