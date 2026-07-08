@@ -12,6 +12,13 @@ All notable changes to Helix are documented here. This project follows
 - Standing replay benchmark `scripts/bench-replay.ts`: synthetic EN/KO sweep with REAL signed
   verify records (HMAC-era baseline), `--real` read-only mode, and a streaming `--report` mode
   with a windowed dual verdict against the 150 ms trigger.
+- Recall index cache (A4): an in-process, single-slot cache keyed by content identity — the ledger
+  byte digest, the resolved MAC-subkey fingerprint, and the scope set. On an unchanged ledger a warm
+  recall reuses the verified projection and BM25 artifacts instead of re-reading and re-replaying, so
+  repeated recalls within a session get materially cheaper. Invalidated by any ledger byte change
+  (content-digest keyed, so even a same-length in-place edit misses), a master-key/subkey change, or a
+  project-ownership flip; it is per-process and dies with the store. Observable metrics effect: a warm
+  (HIT) recall emits no replay row to `metrics.jsonl` (a cold/MISS recall still emits one per scope).
 - Two-tier memory trust labels on the tool path: machine-corroborated **Corroborated**
   (`helix_memory_recheck`, a content-bound mechanical file check) and best-effort human-attested
   **Verified** (`helix_memory_confirm`).
