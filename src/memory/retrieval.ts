@@ -227,12 +227,13 @@ export function buildRankArtifacts(records: MemoryRecord[]): RankArtifacts {
 }
 
 /** Query-DEPENDENT scoring over pre-built artifacts. `records` supplies live state/provenance (the
- *  trust margin); `artifacts` supplies tokens/normContent/index, matched to records by id. */
+ *  trust margin); `artifacts.docs` supplies tokens/normContent, paired to `records` BY POSITION
+ *  (buildRankArtifacts preserves record order — callers must pass the same record set/order the
+ *  artifacts were built from). BM25 stays id-keyed via the shared union index. */
 export function rankWithArtifacts(records: MemoryRecord[], artifacts: RankArtifacts, query: string, opts: RankOptions = {}): MemoryRecord[] {
   const qMeaning = [...new Set(meaningfulTokens(tokenize(query)))];
   if (qMeaning.length === 0 || records.length === 0) return [];
-  const { idx } = artifacts;
-  const byId = new Map(artifacts.docs.map((d) => [d.id, d]));
+  const { idx, docs } = artifacts;
 
   const rawBm = new Map<string, number>();
   for (const r of records) rawBm.set(r.id, bm25Score(r.id, qMeaning, idx));
@@ -243,8 +244,12 @@ export function rankWithArtifacts(records: MemoryRecord[], artifacts: RankArtifa
 
   const semGate = opts.semGate ?? 0;
   const scored = records
-    .map((r) => {
-      const d = byId.get(r.id)!;
+    .map((r, i) => {
+      // Pair each record with its OWN doc positionally, not via an id-keyed map: duplicate ids
+      // (reachable only by an adversarial cross-scope collision — honest ids are random UUIDs)
+      // would collapse last-wins and score a record against another record's content. Positional
+      // pairing is byte-identical to pre-A4 rankRecords, which scored each record against itself.
+      const d = docs[i]!;
       const cov = semanticCoverage(qMeaning, d.tokens, opts.expansion, opts.semDiscount ?? 1);
       const phrase = phraseScoreNorm(query, d.normContent);
       const bm = bm25norm(r.id);
