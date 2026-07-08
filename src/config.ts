@@ -11,6 +11,19 @@ export type EgressLeg = 'memoryEcho' | 'piiHigh' | 'piiBulk' | 'secretHeuristic'
 export type EgressPolicy = Record<EgressLeg, EgressLegPolicy>;
 const EGRESS_LEGS: readonly EgressLeg[] = ['memoryEcho', 'piiHigh', 'piiBulk', 'secretHeuristic', 'secretEntropy'];
 
+export interface CompactionConfig {
+  auto: boolean;
+  dirtyRatio: number;   // (0, 1]
+  minRows: number;      // integer >= 0
+  minDirtyBytes: number; // integer >= 0
+  graceMs: number;      // integer >= 0
+  maxBytes: number;     // integer > 0
+}
+
+const DEFAULT_COMPACTION: CompactionConfig = {
+  auto: false, dirtyRatio: 0.5, minRows: 200, minDirtyBytes: 1_048_576, graceMs: 86_400_000, maxBytes: 52_428_800,
+};
+
 const EFFORTS: readonly ReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh'];
 const MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/; // argv-safe model token: no leading dash, no shell/space chars
 
@@ -135,4 +148,25 @@ export function metricsEnabledFromGlobalConfig(home: string): boolean {
   const raw = readJson(join(home, 'config.json'));
   const m = raw?.metrics as Record<string, unknown> | undefined;
   return m && typeof m === 'object' && typeof m.enabled === 'boolean' ? m.enabled : true;
+}
+
+/** Merge a raw compaction object over defaults, validating each key's TYPE and BOUNDS. Out-of-range
+ *  or wrong-typed values keep the default (never throw). */
+function mergeCompaction(raw: unknown): CompactionConfig {
+  const c: CompactionConfig = { ...DEFAULT_COMPACTION };
+  const o = raw as Record<string, unknown> | undefined;
+  if (!o || typeof o !== 'object') return c;
+  if (typeof o.auto === 'boolean') c.auto = o.auto;
+  if (typeof o.dirtyRatio === 'number' && o.dirtyRatio > 0 && o.dirtyRatio <= 1) c.dirtyRatio = o.dirtyRatio;
+  if (typeof o.minRows === 'number' && Number.isInteger(o.minRows) && o.minRows >= 0) c.minRows = o.minRows;
+  if (typeof o.minDirtyBytes === 'number' && Number.isInteger(o.minDirtyBytes) && o.minDirtyBytes >= 0) c.minDirtyBytes = o.minDirtyBytes;
+  if (typeof o.graceMs === 'number' && Number.isInteger(o.graceMs) && o.graceMs >= 0) c.graceMs = o.graceMs;
+  if (typeof o.maxBytes === 'number' && Number.isInteger(o.maxBytes) && o.maxBytes > 0) c.maxBytes = o.maxBytes;
+  return c;
+}
+
+/** Compaction config, GLOBAL only. Compaction is destructive (it can close the soft-erase undo
+ *  window), so a foreign checkout's project config must never enable or tune it. Never throws. */
+export function compactionConfigFromGlobal(home: string): CompactionConfig {
+  return mergeCompaction(readJson(join(home, 'config.json'))?.compaction);
 }

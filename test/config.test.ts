@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig, DEFAULT_CONFIG, metricsEnabledFromGlobalConfig } from '../src/config.js';
+import { loadConfig, DEFAULT_CONFIG, metricsEnabledFromGlobalConfig, compactionConfigFromGlobal } from '../src/config.js';
 
 function tmpDir() { return mkdtempSync(join(tmpdir(), 'helix-cfg-')); }
 
@@ -180,5 +180,25 @@ describe('metrics config (spec §6)', () => {
     expect(metricsEnabledFromGlobalConfig(home)).toBe(true);              // malformed -> default
     writeFileSync(join(home, 'config.json'), JSON.stringify({ metrics: { enabled: false } }));
     expect(metricsEnabledFromGlobalConfig(home)).toBe(false);
+  });
+});
+
+describe('compactionConfigFromGlobal', () => {
+  it('defaults to disabled with safe thresholds when no global config exists', () => {
+    expect(compactionConfigFromGlobal(tmpDir())).toEqual({
+      auto: false, dirtyRatio: 0.5, minRows: 200, minDirtyBytes: 1048576, graceMs: 86400000, maxBytes: 52428800,
+    });
+  });
+
+  it('reads the GLOBAL config and validates bounds (bad values keep defaults)', () => {
+    const home = tmpDir();
+    writeFileSync(join(home, 'config.json'), JSON.stringify({ compaction: { auto: true, dirtyRatio: 0, graceMs: -5, minRows: 10, maxBytes: 0, minDirtyBytes: -1 } }));
+    const c = compactionConfigFromGlobal(home);
+    expect(c.auto).toBe(true);              // valid boolean accepted
+    expect(c.dirtyRatio).toBe(0.5);          // 0 out of (0,1] -> default
+    expect(c.graceMs).toBe(86400000);        // negative -> default
+    expect(c.minRows).toBe(10);              // valid integer >= 0 accepted
+    expect(c.maxBytes).toBe(52428800);       // 0 fails strict >0 -> default
+    expect(c.minDirtyBytes).toBe(1048576);   // negative fails >=0 -> default
   });
 });
