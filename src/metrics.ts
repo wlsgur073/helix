@@ -22,9 +22,20 @@ export interface ReplayInput {
   keyAvailable: boolean;
 }
 
+/** One auto-compaction attempt. Metadata-only (no content, no paths). */
+export interface CompactionInput {
+  scope: 'global' | 'project';
+  durationMs: number;
+  droppedRows: number;
+  reclaimedBytes: number;
+  ok: boolean;
+}
+
 export interface MetricsSink {
   /** Emit one replay record. Buffered while an op is active (flushed after duration capture). */
   emitReplay(r: ReplayInput): void;
+  /** Emit one compaction record (best-effort, never throws). */
+  emitCompaction(c: CompactionInput): void;
   /** Time a tool handler to settlement (sync or promise), emit one op record, and bracket a
    *  current-op id so replays emitted synchronously inside self-stamp it. Save/restore, not
    *  null-clear, so a nested runOp cannot orphan the outer op's later replays. */
@@ -40,6 +51,7 @@ export interface MetricsSinkDeps {
 /** Shared no-op sink: methods do nothing; runOp still runs the handler. */
 export const noopMetricsSink: MetricsSink = {
   emitReplay: () => {},
+  emitCompaction: () => {},
   runOp: async (_tool, fn) => await fn(),
 };
 
@@ -68,6 +80,16 @@ export function createMetricsSink(path: string, enabled: boolean, deps: MetricsS
         }) + '\n';
         if (buffer) buffer.push(line); else safeAppend(line);
       } catch { /* never throw into a read path */ }
+    },
+
+    emitCompaction(c: CompactionInput): void {
+      try {
+        const line = JSON.stringify({
+          v: 1, kind: 'compaction', ts: now(), op_id: currentOpId, scope: c.scope,
+          duration_ms: c.durationMs, dropped_rows: c.droppedRows, reclaimed_bytes: c.reclaimedBytes, ok: c.ok,
+        }) + '\n';
+        if (buffer) buffer.push(line); else safeAppend(line);
+      } catch { /* never throw into a compaction path */ }
     },
 
     async runOp<T>(tool: string, fn: () => T | Promise<T>): Promise<T> {

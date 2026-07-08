@@ -11,6 +11,7 @@ function captureSink(): { sink: MetricsSink; replays: ReplayInput[] } {
     replays,
     sink: {
       emitReplay: (r) => { replays.push(r); },
+      emitCompaction: () => {},
       runOp: async (_t, fn) => await fn(),
     },
   };

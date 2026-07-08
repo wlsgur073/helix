@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
-import { createMetricsSink, noopMetricsSink, type ReplayInput } from '../src/metrics.js';
+import { createMetricsSink, noopMetricsSink, type CompactionInput, type ReplayInput } from '../src/metrics.js';
 
 const tmp = (): string => mkdtempSync(join(tmpdir(), 'helix-metrics-'));
 const replay = (over: Partial<ReplayInput> = {}): ReplayInput => ({
   scope: 'global', caller: 'store', rows: 3, liveRows: 2, bytes: 120,
   parseMs: 1.5, projectMs: 0.5, keyAvailable: true, ...over,
+});
+const compaction = (over: Partial<CompactionInput> = {}): CompactionInput => ({
+  scope: 'global', durationMs: 12.5, droppedRows: 40, reclaimedBytes: 4096, ok: true, ...over,
 });
 const lines = (path: string): Record<string, unknown>[] =>
   readFileSync(path, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
@@ -74,6 +77,8 @@ describe('createMetricsSink', () => {
     const path = join(tmp(), 'metrics.jsonl');
     const sink = createMetricsSink(path, false);
     sink.emitReplay(replay());
+    sink.emitCompaction(compaction());
+    noopMetricsSink.emitCompaction(compaction());
     await expect(sink.runOp('helix_memory_recall', () => 1)).resolves.toBe(1);
     await expect(noopMetricsSink.runOp('helix_memory_recall', () => 2)).resolves.toBe(2);
     expect(() => statSync(path)).toThrow(); // file never created
@@ -113,5 +118,36 @@ describe('createMetricsSink', () => {
     const path = join(tmp(), 'metrics.jsonl');
     createMetricsSink(path, true).emitReplay(replay());
     expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe('emitCompaction', () => {
+  it('writes one content-free compaction record', () => {
+    const out: string[] = [];
+    const sink = createMetricsSink('/unused', true, { append: (_p, l) => out.push(l), now: () => '2026-07-09T00:00:00.000Z' });
+    sink.emitCompaction(compaction());
+    const rec = JSON.parse(out[0]!) as Record<string, unknown>;
+    // EXACT key set: toMatchObject is a subset matcher, so only this can catch a future
+    // record that adds a content-bearing field (path/query/error) -- HARD RULE, spec section 3.
+    expect(Object.keys(rec).sort()).toEqual([
+      'dropped_rows', 'duration_ms', 'kind', 'ok', 'op_id', 'reclaimed_bytes', 'scope', 'ts', 'v',
+    ]);
+    expect(rec).toMatchObject({
+      v: 1, kind: 'compaction', ts: '2026-07-09T00:00:00.000Z', op_id: null, scope: 'global',
+      duration_ms: 12.5, dropped_rows: 40, reclaimed_bytes: 4096, ok: true,
+    });
+  });
+
+  it('stamps op_id and buffers while an op is active', async () => {
+    const out: string[] = [];
+    const sink = createMetricsSink('/unused', true, { append: (_p, l) => out.push(l), genId: () => 'o_c' });
+    await sink.runOp('helix_memory_commit', () => {
+      sink.emitCompaction(compaction({ scope: 'project', durationMs: 3, droppedRows: 1, reclaimedBytes: 8, ok: false }));
+    });
+    const rows = out.map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(rows.find((r) => r.kind === 'compaction')!.op_id).toBe('o_c');
+    // buffered: flushed AFTER the op record, per emitReplay's contract
+    expect(rows.findIndex((r) => r.kind === 'op'))
+      .toBeLessThan(rows.findIndex((r) => r.kind === 'compaction'));
   });
 });
