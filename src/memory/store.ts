@@ -113,6 +113,33 @@ export class MemoryStore {
     return subkeyForScope(this.homeDir(), this.scopeRootOf(ledger));
   }
 
+  /** The verify-keep predicate a compaction must use: key-present => genuine-signed OR a future MAC
+   *  version (never destroy what a newer binary signed); key-absent => keep every live-target verify
+   *  (cannot tell genuine from forged, so dropping would be destructive). SHARED by the manual erase
+   *  path and the auto-compaction trigger so the two never diverge.
+   *
+   *  Takes an ALREADY-RESOLVED subkey (never re-resolves per record): the caller resolves once so the
+   *  whole compaction makes one atomic keep/drop decision — a per-record re-resolve could see a valid
+   *  subkey for one verify and a transient null for the next, tearing a single rewrite into an
+   *  inconsistent partial state.
+   *
+   *  Key-absent => PRESERVE every live-target verify (`() => true`), do NOT drop. Compaction is
+   *  DESTRUCTIVE (unlike the recoverable read-path clamp): if subkeyForLedger returns null — which
+   *  a transient registry/master read failure can cause even with the key still on disk — we cannot
+   *  tell genuine from forged, so dropping would permanently destroy recoverable elevations AND
+   *  demotions. Keeping them is safe: with no key the read path clamps everything to Fresh
+   *  regardless, so kept records confer no trust, and the next key-present compaction purges any
+   *  forgeries. (Must NOT fall through to the legacy bake-and-drop path.)
+   *
+   *  spec §4.6: preserve records from a FUTURE MAC version too — an A-era compactor must never
+   *  destroy what a newer binary signed (the pre-A -> v2 destructive-compaction class, one bump
+   *  later). They stay grade-inert (verifyVerify false until a verifier exists) and scan-visible. */
+  private keepValidVerifyFor(subkey: Buffer | null): (r: MemoryRecord) => boolean {
+    return subkey
+      ? (r) => verifyVerify(r, subkey) || (typeof r.macVersion === 'number' && Number.isSafeInteger(r.macVersion) && r.macVersion > MAC_VERSION)
+      : () => true;
+  }
+
   /** Verifying projection for one ledger (R1 clamp / R2 MAC gate / R3 content binding). When no
    *  subkey is available every state is clamped to Fresh and keyAvailable is false. Delegates to the
    *  shared verified-read helper that the SessionStart hook also uses (provable consistency).
@@ -477,27 +504,11 @@ export class MemoryStore {
     });
     if (opts.permanent) {
       // HMAC-aware compaction: preserve genuine signed verifies for this ledger, drop forgeries.
-      // Resolve the subkey ONCE so the whole compaction makes one atomic keep/drop decision — a
-      // per-record re-resolve could see a valid subkey for one verify and a transient null for the
-      // next, tearing a single rewrite into an inconsistent partial state.
-      //
-      // Key-absent => PRESERVE every live-target verify (`() => true`), do NOT drop. Compaction is
-      // DESTRUCTIVE (unlike the recoverable read-path clamp): if subkeyForLedger returns null — which
-      // a transient registry/master read failure can cause even with the key still on disk — we
-      // cannot tell genuine from forged, so dropping would permanently destroy recoverable
-      // elevations AND demotions. Keeping them is safe: with no key the read path clamps everything
-      // to Fresh regardless, so kept records confer no trust, and the next key-present compaction
-      // purges any forgeries. (Must NOT fall through to the legacy bake-and-drop path here.)
+      // Resolve the subkey ONCE (see keepValidVerifyFor) so the whole compaction makes one atomic
+      // keep/drop decision, and share that predicate with the auto-compaction trigger so the two
+      // paths can never diverge.
       const sk = this.subkeyForLedger(ledger);
-      compactLedger(ledger, {
-        erasedIds: new Set([id]),
-        // spec §4.6: preserve records from a FUTURE MAC version too — an A-era compactor must never
-        // destroy what a newer binary signed (the pre-A -> v2 destructive-compaction class, one bump
-        // later). They stay grade-inert (verifyVerify false until a verifier exists) and scan-visible.
-        keepValidVerify: sk
-          ? (r) => verifyVerify(r, sk) || (typeof r.macVersion === 'number' && Number.isSafeInteger(r.macVersion) && r.macVersion > MAC_VERSION)
-          : () => true,
-      });
+      compactLedger(ledger, { erasedIds: new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk) });
     }
     this.rankCache = null;   // I8: self-erase gives zero in-memory retention window
   }
