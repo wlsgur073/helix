@@ -1,5 +1,6 @@
 import type { MemoryStore, CommitInput } from '../memory/store.js';
 import type { HelixConfig } from '../config.js';
+import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type EchoSource } from '../verify/dual-verify.js';
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, newNonce, safeId } from '../memory/content-frame.js';
@@ -174,9 +175,12 @@ export function handleConfirm(store: MemoryStore, args: { id: string }, deps: Re
 }
 
 export interface CodexStatusDeps {
-  inspect: () => Promise<CodexStatus>;   // default checkCodexStatus
-  config: HelixConfig;                   // dual-verify enabled/mode + logContent
-  codexLogPath: string;                  // for the content-log entry-count line
+  inspect: () => Promise<CodexStatus>;          // default checkCodexStatus
+  /** Resolve the model codex would pick for itself. Default checkCodexModel. Called ONLY when
+   *  dualVerify.model is null and the CLI is present + logged in; returns null when unresolved. */
+  resolveModel: () => Promise<string | null>;
+  config: HelixConfig;                          // dual-verify enabled/mode + logContent
+  codexLogPath: string;                         // for the content-log entry-count line
 }
 
 /** Count JSONL lines best-effort; a missing/unreadable file is 0 (never throws). */
@@ -208,14 +212,46 @@ export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResu
   const contentLog = dv.logContent
     ? `ON — ${deps.codexLogPath} (${codexLogCount(deps.codexLogPath)} entries)`
     : 'OFF — set dualVerify.logContent=true to record prompts+responses';
-  return ok([
+
+  // An explicit model wins at argv, so codex's own default is irrelevant — do not spend ~1s asking.
+  // Otherwise ask codex, but only if it can answer. A failed probe says "unresolved"; it never
+  // guesses from ~/.codex/config.toml, where profiles / CODEX_HOME / -c would make it confidently
+  // wrong. Not gated on dv.enabled: this free tool exists to answer "what happens if I turn it on".
+  let model: string;
+  if (dv.model !== null) {
+    model = `${dv.model} (helix override)`;
+  } else {
+    const resolved = s.cliFound && s.available ? await deps.resolveModel() : null;
+    model = resolved !== null
+      ? `${resolved} (inherited from codex config)`
+      : 'inherited from codex config (unresolved)';
+  }
+  // No probe exists for effort: `doctor --json` does not report model_reasoning_effort.
+  const effort = dv.effort !== null ? `${dv.effort} (helix override)` : 'inherited from codex config';
+
+  const lines = [
     'Helix <-> Codex',
     `- codex CLI:      ${cli}`,
     `- connection:     ${connection}`,
     `- auth mode:      ${auth}`,
     `- dual-verify:    ${dualVerify}`,
-    `- content log:    ${contentLog}`,
-  ].join('\n'));
+    `- model:          ${model}`,
+    `- effort:         ${effort}`,
+    // No "(default)" suffix: HelixConfig does not record whether timeoutMs was set, and printing
+    // provenance we do not track would be a guess.
+    `- timeout:        ${dv.timeoutMs} ms`,
+  ];
+  // Advisory, gated on RISK not provenance — an explicit 300000 carries the same exposure as the
+  // default. A timeout tree-kills the run AFTER the quota is spent. Silent when effort is inherited:
+  // codex's config may well say `ultra`, but Helix does not know that and will not pretend.
+  if (dv.effort !== null && SLOW_EFFORTS.includes(dv.effort) && dv.timeoutMs <= SLOW_EFFORT_TIMEOUT_HINT_MS) {
+    lines.push(
+      `  note: ${dv.effort} runs can exceed this timeout; a timeout kills the run after`,
+      '        quota is spent. Raise dualVerify.timeoutMs.',
+    );
+  }
+  lines.push(`- content log:    ${contentLog}`);
+  return ok(lines.join('\n'));
 }
 
 export interface DualVerifyHandlerDeps {

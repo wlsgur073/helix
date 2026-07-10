@@ -6,7 +6,7 @@ import type { MemoryStore } from '../memory/store.js';
 import type { RealityCheck } from '../memory/reality-check.js';
 import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
-import { realCodexRunner, checkCodexAvailable, checkCodexStatus } from '../verify/codex.js';
+import { realCodexRunner, checkCodexAvailable, checkCodexStatus, checkCodexModel } from '../verify/codex.js';
 import { noopMetricsSink, type MetricsSink } from '../metrics.js';
 
 /** Build a Helix MCP server with the memory tools registered against `store`. */
@@ -30,6 +30,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   const codexStatusDeps: CodexStatusDeps = {
     inspect: () => checkCodexStatus(),
+    resolveModel: () => checkCodexModel(),
     config: dv.config,
     codexLogPath: dv.codexLogPath,
   };
