@@ -23749,7 +23749,7 @@ function buildServer(store2, dualDeps, metrics2) {
   }, async (args) => m.runOp("helix_memory_inspect", () => handleInspect(store2, args)));
   server2.registerTool("helix_memory_erase", {
     title: "Erase memory",
-    description: "Erase a memory item by id. Soft-only: the item is removed from the live view (recall/inspect) but remains recoverable on disk (no compaction) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool cannot physically destroy content \u2014 genuine right-to-erasure (compaction) is handled outside the agent tool surface.",
+    description: "Erase a memory item by id. Soft: the item is removed from the live view (recall/inspect) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool itself never physically destroys content. By default (compaction off) the erased content stays recoverable on disk indefinitely; but if the user has enabled compaction.auto, that recoverability is time-bounded \u2014 an ordinary helix_memory_recall can then compact the ledger and physically destroy it once the grace window (graceMs) has passed.",
     inputSchema: { id: external_exports.string() }
   }, async (args) => m.runOp("helix_memory_erase", () => handleErase(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   server2.registerTool("helix_memory_recheck", {

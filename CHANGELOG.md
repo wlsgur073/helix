@@ -30,7 +30,9 @@ All notable changes to Helix are documented here. This project follows
 
   Keys (invalid or out-of-range values silently keep the default): `auto` (bool, `false`),
   `dirtyRatio` in `(0, 1]` (`0.5`), `minRows` int ≥ 0 (`200`), `minDirtyBytes` int ≥ 1 (`1048576`),
-  `graceMs` int ≥ 0 (`86400000`), `maxBytes` int > 0 (`52428800`).
+  `graceMs` int ≥ 0 (`86400000`), `maxBytes` int > 0 (`52428800`). `graceMs: 0` disables the grace
+  entirely — a fact soft-erased moments ago can be destroyed by the very next eligible recall, with no
+  undo window at all.
 
   Self-limiting: a compacted ledger has *essentially* zero reclaimable rows and bytes, so it will not
   re-compact until new churn. The one exception is the content-free integrity tombstone minted when a

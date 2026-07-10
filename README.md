@@ -104,7 +104,9 @@ off unless you turn it on:
   reclaimable byte count reaches this, whatever the ratio.
 - `minRows` — integer ≥ 0, default `200`. Never compact a ledger with fewer physical rows.
 - `graceMs` — integer ≥ 0, default `86400000` (24 h). Required idle time since the ledger file's **last
-  write** (its mtime). This is the window that protects your undo.
+  write** (its mtime). This is the window that protects your undo. `graceMs: 0` disables the grace
+  entirely — a fact soft-erased moments ago can be destroyed by the very next eligible recall, with no
+  undo window at all.
 - `maxBytes` — integer > 0, default `52428800` (50 MiB). Skip ledgers larger than this.
 
 Invalid or out-of-range values are ignored and the default is kept (Helix never fails to start over a

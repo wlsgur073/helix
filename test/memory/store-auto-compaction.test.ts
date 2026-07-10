@@ -306,4 +306,57 @@ describe('auto-compaction on recall', () => {
       expect((store as unknown as { rankCache: unknown }).rankCache).toBeNull();
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
+
+  // CROSS-CUTTING SEAM (a): auto-compaction dropping closed fact rows must surface as truncation on
+  // BOTH bitemporal read surfaces. planCompaction mints a `horizon_` marker, ledgerTruncated detects
+  // it, and historyView()/asOfView() report it. No per-task test covers this trigger -> surface seam;
+  // it went RED under a mutation that skips minting the horizon marker.
+  it('surfaces truncated history on BOTH inspect surfaces after an auto-compaction', () => {
+    const home = newHome();
+    try {
+      const ledger = join(home, 'memory.jsonl');
+      const store = new MemoryStore(ledger, { home, sessionId: 't', now: () => FUTURE, compaction: enabled });
+      makeDirty(store);
+      expect(store.historyView().truncated).toBe(false);                  // no compaction yet -> no horizon
+      store.recall('deploy');                                             // eligible MISS -> auto-compaction
+      expect(parseLedger(ledger).some((r) => r.id.startsWith('horizon_'))).toBe(true); // it actually ran
+      expect(store.historyView().truncated).toBe(true);                   // closed rows were dropped
+      expect(store.asOfView('2100-06-01T00:00:00.000Z').truncated).toBe(true);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  // CROSS-CUTTING SEAM (b): a genuine Verified grade must survive an auto-compaction. planCompaction
+  // resets each kept asset's declared `state` to 'Fresh' (invisible: the verifying replay clamps
+  // declared state anyway), and the SHARED keepValidVerifyFor predicate preserves the genuine signed
+  // verify, which re-elevates the asset to Verified on replay. It went RED under a mutation that makes
+  // keepValidVerifyFor drop genuine verifies (`() => false`).
+  it('preserves a genuine Verified grade across an auto-compaction (fresh store re-elevates)', () => {
+    const home = newHome();
+    try {
+      const ledger = join(home, 'memory.jsonl');
+      const store = new MemoryStore(ledger, { home, sessionId: 't', now: () => FUTURE, compaction: enabled });
+      const live = makeDirty(store);
+      const target = live[1]!;
+      store.confirm(target);                       // mints the master key + a genuine signed verify -> Verified
+
+      const beforeInspect = store.inspect();
+      const beforeIds = new Set(beforeInspect.map((s) => s.record.id));
+      expect(beforeInspect.find((s) => s.record.id === target)!.record.state).toBe('Verified');
+      const rowsBefore = parseLedger(ledger).length;
+
+      const beforeRecall = store.recall('deploy timeout');  // eligible MISS -> auto-compaction fires here
+      const beforeIntegrity = beforeRecall.integrityAvailable;
+      expect(beforeIntegrity).toBe(true);
+      expect(parseLedger(ledger).length).toBeLessThan(rowsBefore);   // compaction really ran (else vacuous)
+
+      // A FRESH store re-derives the grade from the compacted ledger: the kept asset's declared state is
+      // now 'Fresh', but the preserved signed verify re-elevates it to Verified on replay.
+      const fresh = new MemoryStore(ledger, { home, sessionId: 't2', now: () => FUTURE, compaction: enabled });
+      const afterInspect = fresh.inspect();
+      const afterIds = new Set(afterInspect.map((s) => s.record.id));
+      expect(afterInspect.find((s) => s.record.id === target)!.record.state).toBe('Verified'); // survived
+      expect(afterIds).toEqual(beforeIds);                                                      // live id-set identical
+      expect(fresh.recall('deploy timeout').integrityAvailable).toBe(beforeIntegrity);          // unchanged
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
 });
