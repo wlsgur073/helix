@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 export type DualVerifyMode = 'compare' | 'critique';
 export type StakesFloor = 'low' | 'medium' | 'high' | 'xhigh';
-export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 
 export type EgressLegPolicy = 'block' | 'allow';
 export type EgressLeg = 'memoryEcho' | 'piiHigh' | 'piiBulk' | 'secretHeuristic' | 'secretEntropy';
@@ -24,8 +24,36 @@ const DEFAULT_COMPACTION: CompactionConfig = {
   auto: false, dirtyRatio: 0.5, minRows: 200, minDirtyBytes: 1_048_576, graceMs: 86_400_000, maxBytes: 52_428_800,
 };
 
-const EFFORTS: readonly ReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh'];
-const MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/; // argv-safe model token: no leading dash, no shell/space chars
+// Codex 5.6 (codex-cli 0.144.1) vocabulary. `minimal` is gone: the CLI's own enum still parses it,
+// but no model in `codex debug models` advertises it, so it is rejected by the API *after* the
+// metered call is spent. Per-model support varies (gpt-5.6-luna has no `ultra`); Helix does not
+// arbitrate that — it validates the vocabulary and lets Codex judge the pair.
+const EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+const MODES: readonly DualVerifyMode[] = ['compare', 'critique'];
+const STAKES: readonly StakesFloor[] = ['low', 'medium', 'high', 'xhigh'];
+
+const MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/; // no leading dash (argv flag spoofing), no shell/space chars
+const MODEL_MAX_LEN = 64;
+
+/**
+ * A model token safe to put in argv AND to render into a tool result the model reads.
+ * The charset bans whitespace, newlines and a leading dash; the length bound keeps it a token.
+ * `verify/codex.ts` reuses this to bound the model name it prints from `codex doctor --json`, where
+ * the charset is precisely what removes the prompt-injection surface. Do not widen either bound.
+ */
+export function isArgvSafeModel(s: string): boolean {
+  return s.length <= MODEL_MAX_LEN && MODEL_RE.test(s);
+}
+
+/** Efforts whose runs routinely outlast a short timeout. Advisory only (helix_codex_status). */
+export const SLOW_EFFORTS: readonly ReasoningEffort[] = ['max', 'ultra'];
+/** At or below this run timeout, a SLOW_EFFORTS run is likely to be tree-killed mid-flight — after
+ *  the Codex quota is already spent. Gates an advisory line only; it changes no behavior. */
+export const SLOW_EFFORT_TIMEOUT_HINT_MS = 300_000;
+
+/** Render an untrusted config value for a diagnostic line: single line, bounded length.
+ *  JSON.stringify escapes newlines and quotes, so a hostile config cannot forge log lines. */
+function q(v: unknown): string { return JSON.stringify(String(v).slice(0, 60)); }
 
 /** Effective Codex run-timeout ceiling (ms). A value above this is clamped, not rejected, so the
  *  scratch-gc floor can assume no run outlives it. Shared with the runner hard-clamp in codex.ts. */
@@ -103,15 +131,33 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
     const dv = raw?.dualVerify as (Partial<HelixConfig['dualVerify']> & Record<string, unknown>) | undefined;
     if (dv) {
       if (typeof dv.enabled === 'boolean') merged.dualVerify.enabled = dv.enabled;
+      // Each key: assign when valid, warn when PRESENT and invalid, stay silent when absent.
+      // The `!== undefined` guard is load-bearing: loadConfig merges [global, project], so a project
+      // file that sets `enabled` but omits `effort` yields `dv.effort === undefined` on a perfectly
+      // valid setup. A bare `else warn()` would fire on every such config.
+      //
+      // The message says `-> ignored`, not `-> inheriting codex config`: when the global file holds a
+      // valid value and the project file holds garbage, the survivor is the GLOBAL HELIX value, not
+      // Codex's. `-> ignored` is true in both orders.
       if (dv.mode === 'compare' || dv.mode === 'critique') merged.dualVerify.mode = dv.mode;
+      else if (dv.mode !== undefined) warn(`helix: invalid dualVerify.mode ${q(dv.mode)} (valid: ${MODES.join(', ')}) -> ignored`);
+
       if (dv.stakesFloor === 'low' || dv.stakesFloor === 'medium' || dv.stakesFloor === 'high' || dv.stakesFloor === 'xhigh') {
         merged.dualVerify.stakesFloor = dv.stakesFloor;
+      } else if (dv.stakesFloor !== undefined) {
+        warn(`helix: invalid dualVerify.stakesFloor ${q(dv.stakesFloor)} (valid: ${STAKES.join(', ')}) -> ignored`);
       }
-      if (dv.model === null || (typeof dv.model === 'string' && MODEL_RE.test(dv.model))) {
+      // model/effort accept null — it is the documented "omit the flag, inherit codex" value.
+      // mode/stakesFloor have no such semantics, so null there is invalid and does warn.
+      if (dv.model === null || (typeof dv.model === 'string' && isArgvSafeModel(dv.model))) {
         merged.dualVerify.model = dv.model;
+      } else if (dv.model !== undefined) {
+        warn(`helix: invalid dualVerify.model ${q(dv.model)} (argv-safe token, <= ${MODEL_MAX_LEN} chars) -> ignored`);
       }
       if (dv.effort === null || (typeof dv.effort === 'string' && EFFORTS.includes(dv.effort as ReasoningEffort))) {
         merged.dualVerify.effort = dv.effort as ReasoningEffort | null;
+      } else if (dv.effort !== undefined) {
+        warn(`helix: invalid dualVerify.effort ${q(dv.effort)} (valid: ${EFFORTS.join(', ')}) -> ignored`);
       }
       // Valid integer >= 1s is accepted, clamped to MAX_TIMEOUT_MS (1h). Above 1h was an artifact of
       // Node's setTimeout 32-bit ceiling, not a real use case; clamping (vs reject->default) keeps a

@@ -59,17 +59,95 @@ describe('loadConfig', () => {
   });
 
   it('rejects a malformed model and an unknown effort, keeping defaults', () => {
-    const dir = tmpDir();
-    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { model: 'bad; rm -rf', effort: 'ultra' } }));
-    const cfg = loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') });
+    const dir = tmpDir(); const warn = vi.fn();
+    // 'ultra' used to sit here as the "unknown effort" example; Codex 5.6 made it valid.
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { model: 'bad; rm -rf', effort: 'insane' } }));
+    const cfg = loadConfig({ projectPath: p, globalPath: join(dir, 'g.json'), warn });
     expect(cfg.dualVerify.model).toBeNull();   // default kept (malformed rejected)
     expect(cfg.dualVerify.effort).toBeNull();  // default kept (unknown rejected)
+    expect(warn).toHaveBeenCalledTimes(2);     // neither is dropped silently any more
   });
 
   it('allows model:null to inherit codex default', () => {
     const dir = tmpDir();
     const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { model: null } }));
     expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.model).toBeNull();
+  });
+
+  it('accepts the Codex 5.6 efforts max and ultra', () => {
+    const dir = tmpDir();
+    for (const effort of ['max', 'ultra'] as const) {
+      const p = join(dir, `e-${effort}.json`); writeFileSync(p, JSON.stringify({ dualVerify: { effort } }));
+      expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json') }).dualVerify.effort).toBe(effort);
+    }
+  });
+
+  it('rejects minimal (retired: no codex model advertises it) and warns', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { effort: 'minimal' } }));
+    expect(loadConfig({ projectPath: p, globalPath: join(dir, 'g.json'), warn }).dualVerify.effort).toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('minimal'));
+  });
+
+  it('an invalid project effort does not clobber a valid global effort (-> ignored, not -> inherit)', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    const g = join(dir, 'g.json'); writeFileSync(g, JSON.stringify({ dualVerify: { effort: 'max' } }));
+    const p = join(dir, 'p.json'); writeFileSync(p, JSON.stringify({ dualVerify: { effort: 'nope' } }));
+    expect(loadConfig({ projectPath: p, globalPath: g, warn }).dualVerify.effort).toBe('max');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('nope'));
+  });
+
+  it('an ABSENT key never warns (a valid two-file setup must stay silent)', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    const g = join(dir, 'g.json'); writeFileSync(g, JSON.stringify({ dualVerify: { effort: 'high' } }));
+    const p = join(dir, 'p.json'); writeFileSync(p, JSON.stringify({ dualVerify: { enabled: true } }));
+    const cfg = loadConfig({ projectPath: p, globalPath: g, warn });
+    expect(cfg.dualVerify.effort).toBe('high');
+    expect(cfg.dualVerify.enabled).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('warns on an invalid mode and an invalid stakesFloor, keeping the previous value', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { mode: 'debate', stakesFloor: 'urgent' } }));
+    const cfg = loadConfig({ projectPath: p, globalPath: join(dir, 'g.json'), warn });
+    expect(cfg.dualVerify.mode).toBe('compare');       // DEFAULT_CONFIG value kept
+    expect(cfg.dualVerify.stakesFloor).toBe('high');   // DEFAULT_CONFIG value kept
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('debate'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('urgent'));
+  });
+
+  it('mode:null and stakesFloor:null warn (they have no inherit semantics); model/effort null do not', () => {
+    const dir = tmpDir();
+    const nullish = vi.fn();
+    const p1 = join(dir, 'a.json'); writeFileSync(p1, JSON.stringify({ dualVerify: { mode: null, stakesFloor: null } }));
+    loadConfig({ projectPath: p1, globalPath: join(dir, 'g.json'), warn: nullish });
+    expect(nullish).toHaveBeenCalledTimes(2);
+
+    const quiet = vi.fn();
+    const p2 = join(dir, 'b.json'); writeFileSync(p2, JSON.stringify({ dualVerify: { model: null, effort: null } }));
+    loadConfig({ projectPath: p2, globalPath: join(dir, 'g.json'), warn: quiet });
+    expect(quiet).not.toHaveBeenCalled();
+  });
+
+  it('rejects a model longer than 64 chars (the display-safety bound) and warns', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    const ok64 = 'g'.repeat(64);
+    const long65 = 'g'.repeat(65);
+    const a = join(dir, 'ok.json'); writeFileSync(a, JSON.stringify({ dualVerify: { model: ok64 } }));
+    expect(loadConfig({ projectPath: a, globalPath: join(dir, 'g.json') }).dualVerify.model).toBe(ok64);
+    const b = join(dir, 'long.json'); writeFileSync(b, JSON.stringify({ dualVerify: { model: long65 } }));
+    expect(loadConfig({ projectPath: b, globalPath: join(dir, 'g.json'), warn }).dualVerify.model).toBeNull();
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('a warned value is rendered on one bounded line (no raw newline reaches stderr)', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { model: 'x\ny'.repeat(80) } }));
+    loadConfig({ projectPath: p, globalPath: join(dir, 'g.json'), warn });
+    const msg = warn.mock.calls[0]![0] as string;
+    expect(msg.split('\n')).toHaveLength(1);   // the real invariant: no raw newline forges a log line
+    expect(msg.length).toBeLessThan(200);      // bounded: a 10MB model string cannot flood stderr
   });
 
   it('defaults every egressPolicy leg to block (fail-closed)', () => {
