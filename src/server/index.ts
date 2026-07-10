@@ -10,7 +10,7 @@ import { subkeyForScope } from '../memory/verified-read.js';
 import { verifyVerify } from '../memory/ledger-mac.js';
 import { buildServer } from './helix-server.js';
 import { installSelfTermination } from './lifecycle.js';
-import { loadConfig } from '../config.js';
+import { loadConfig, compactionConfigFromGlobal } from '../config.js';
 import { createMetricsSink } from '../metrics.js';
 import { realCodexRunner, checkCodexAvailable } from '../verify/codex.js';
 
@@ -32,7 +32,10 @@ const project = projectActive ? { ledger: projectLedger, root: projectRoot, home
 const config = loadConfig({ globalPath: join(home, 'config.json') });
 const metrics = createMetricsSink(join(home, 'metrics.jsonl'), config.metrics.enabled);
 
-const store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? 'cli', project, metricsSink: metrics });
+// Auto-compaction is read GLOBAL-only (never via loadConfig's project layer): it is destructive — it
+// can close the soft-erase undo window — so a foreign checkout's `.helix/config.json` must never be
+// able to enable or tune it. Default OFF; the store's own gates decide whether it ever fires.
+const store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? 'cli', project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
 
 // Verifying integrity scan (spec §7): surface only records the verifying replay would NOT honour —
 // a `verify` whose MAC fails under the scope subkey (forged/legacy-unsigned) or a baked non-Fresh

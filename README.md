@@ -61,6 +61,73 @@ Dual-verify is disabled by default. To enable it, create `~/.helix/config.json` 
 
 `HELIX_HOME` relocates all state; `HELIX_LEDGER` points the memory ledger elsewhere.
 
+### Automatic compaction (opt-in, off by default)
+
+Over time a ledger accumulates dead rows (superseded facts, erased content, closed history). Compaction
+rewrites it down to the live projection. Helix can do this for you, but it is **destructive**, so it is
+off unless you turn it on:
+
+```json
+{
+  "compaction": {
+    "auto": true,
+    "dirtyRatio": 0.5,
+    "minRows": 200,
+    "minDirtyBytes": 1048576,
+    "graceMs": 86400000,
+    "maxBytes": 52428800
+  }
+}
+```
+
+> **Read this before enabling it.** Compaction drops *every* dead record, however recently it died —
+> there is no per-record age filter. Once a ledger has been idle past `graceMs`, an ordinary
+> `helix_memory_recall` can **permanently close the soft-erase undo window** — a soft-erased fact stays
+> recoverable on disk only until a compaction, which physically destroys it — and **drop recent
+> point-in-time `asOf` / `history` rows**. What a recall returns is unaffected: the live projection is
+> preserved by construction.
+
+- **Global config only.** These keys are read from `~/.helix/config.json` and nowhere else. A project
+  `.helix/config.json` can neither enable nor tune compaction, so a repo you cloned cannot destroy your
+  memory. That single global setting does still govern **both** your global ledger and an *owned* project
+  ledger — each is gated independently.
+- **When it fires.** At most **once per session**, synchronously, during a recall — the first one that
+  rebuilds its index (a recall served from the in-process cache, i.e. unchanged ledger bytes, skips the
+  check) and whose ledger passes every gate below. It never runs on a write, on a timer, or in the
+  background. That single attempt is spent whether it **succeeds or fails**: a compaction that throws is
+  swallowed (your recall still answers normally, and the ledger is left byte-identical) but it is not
+  retried until a new session. A failure surfaces as an `"ok": false` metric row *if metrics are enabled*
+  (see Observability below) — never as a retry.
+- `auto` (bool, default `false`) — the master switch.
+- `dirtyRatio` — `(0, 1]`, default `0.5`. Fire when reclaimable rows / total rows reaches this.
+- `minDirtyBytes` — integer ≥ 1, default `1048576` (1 MiB). Alternative trigger: fire when the exact
+  reclaimable byte count reaches this, whatever the ratio.
+- `minRows` — integer ≥ 0, default `200`. Never compact a ledger with fewer physical rows.
+- `graceMs` — integer ≥ 0, default `86400000` (24 h). Required idle time since the ledger file's **last
+  write** (its mtime). This is the window that protects your undo.
+- `maxBytes` — integer > 0, default `52428800` (50 MiB). Skip ledgers larger than this.
+
+Invalid or out-of-range values are ignored and the default is kept (Helix never fails to start over a
+config typo).
+
+**Observability.** When metrics are enabled (`metrics.enabled`, the default), every attempt appends a
+content-free `compaction` record to `~/.helix/metrics.jsonl`, failed attempts included (`"ok": false`).
+Its `reclaimed_bytes` can legitimately be **negative** when a compaction drops little but adds a
+content-free audit tombstone, so the file net-grew. If you set `metrics.enabled: false`, the metrics sink
+is a no-op and compactions — successful *or* failed — leave **no trace at all**. Enabling a destructive
+operation with metrics turned off means you cannot tell whether it ever ran.
+
+**Known v1 limitations.** This is not a size cap. Preserved audit data — erase tombstones and genuine
+signed verifies on live facts — is never reclaimed, so it does not bound total ledger size. A ledger you
+write to constantly may **never** auto-compact, because quiescence is required and there is no max-lag
+force-compaction. A ledger already above `maxBytes` is skipped and gets no automatic relief; compact it
+manually. And a **forward clock jump of at least `graceMs`** (a bad RTC at boot, a restored VM snapshot)
+can make a just-written ledger look idle and fire compaction early, closing the undo window ahead of
+schedule — quiescence compares file mtime against the wall clock, and the read path has no monotonic
+reference. A backward jump only defers compaction, never fires it early. In none of these cases is
+ledger **integrity** at risk: compaction holds the ledger lock across read → rewrite → atomic rename, so
+a concurrent append is never lost and erased content is never resurrected.
+
 ## Memory scope
 
 Helix keeps two ledgers that it always reads together:

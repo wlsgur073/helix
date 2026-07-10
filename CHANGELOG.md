@@ -6,6 +6,56 @@ All notable changes to Helix are documented here. This project follows
 ## [Unreleased]
 
 ### Added
+- Automatic compaction trigger — **opt-in, GLOBAL config only, default OFF** (`compaction.auto`).
+  When enabled, a recall whose ledger passes every gate rewrites that ledger through the existing
+  crash-safe `compactLedger` (ledger lock held across read → rewrite → atomic rename), synchronously,
+  at most once per session. It is checked on the first recall that rebuilds its index — a recall served
+  from the in-process recall cache (unchanged ledger bytes) skips the check entirely. The attempt is
+  counted whether it **succeeds or fails**: a compaction that throws is swallowed (it never breaks the
+  recall) but still consumes the session's single attempt, and is not retried until a new session. It
+  surfaces as an `ok: false` metric row *if metrics are enabled* (see below). On that failure path the
+  ledger is byte-identical — `compactLedger` writes a tmp file and renames — so nothing was dropped.
+
+  **The consequence you are opting into.** Compaction drops *every* dead record, however recently it
+  died — it has no per-record age filter. So once a ledger goes quiescent past the grace window
+  (`compaction.graceMs`, default 24 h since the ledger file's **last write**), an ordinary
+  `helix_memory_recall` can **permanently close the soft-erase undo window** and **drop recent
+  point-in-time (`asOf` / `history`) rows**. What a recall *answers* is unchanged: the live projection
+  is preserved by construction.
+
+  Because the config is destructive it is read from the **global `~/.helix/config.json` only** — a
+  cloned repo's `.helix/config.json` can neither enable nor tune it. That one global setting still
+  governs compaction of **both** the global ledger and an *owned* project ledger, each gated
+  independently.
+
+  Keys (invalid or out-of-range values silently keep the default): `auto` (bool, `false`),
+  `dirtyRatio` in `(0, 1]` (`0.5`), `minRows` int ≥ 0 (`200`), `minDirtyBytes` int ≥ 1 (`1048576`),
+  `graceMs` int ≥ 0 (`86400000`), `maxBytes` int > 0 (`52428800`).
+
+  Self-limiting: a compacted ledger has *essentially* zero reclaimable rows and bytes, so it will not
+  re-compact until new churn. The one exception is the content-free integrity tombstone minted when a
+  compaction drops a forged verify — unlike every other preserved class it is not a fixpoint, so a later
+  compaction removes it (minting no replacement, which settles it in one pass). It cannot re-trigger the
+  gates on its own: one ~330-byte row satisfies neither the default `dirtyRatio` (at the default
+  `minRows` of 200, `1/200` is far below `0.5`) nor the default `minDirtyBytes` of 1 MiB.
+
+  Observable **when metrics are enabled** (`metrics.enabled`, the default): every attempt emits a
+  content-free `compaction` record to `~/.helix/metrics.jsonl`, failures included (`ok: false`). Its
+  `reclaimed_bytes` is **legitimately negative** when a compaction drops little but mints a content-free
+  horizon/integrity tombstone — the ledger net-grew, and that is reported, not clamped. With
+  `metrics.enabled: false` the sink is a no-op, so **neither a successful nor a failed compaction leaves
+  any trace**: turning compaction on while metrics are off means a destructive operation runs with zero
+  visibility.
+
+  Named v1 limitations (spec §7). It does **not** bound total ledger size: preserved audit data (erase
+  tombstones, genuine signed verifies on live targets) is never reclaimed. A continuously churny ledger
+  may **never** auto-compact — quiescence is required and there is no max-lag force-compaction. A ledger
+  already above `maxBytes` is skipped and gets **no automatic relief**; it defers to manual/incremental
+  compaction. And a **forward clock step of at least `graceMs`** (bad RTC at boot, VM snapshot restore)
+  can make a just-written ledger read as quiescent and fire early, closing the undo window ahead of
+  schedule — quiescence is file-mtime versus wall clock, and the read path has no monotonic reference.
+  Backward skew only defers, never fires early. **Ledger integrity is never at risk in any of these
+  cases**: the compaction lock plus the atomic rename hold regardless.
 - Dual-verify `xhigh` stakes tier: a 4th, strictest self-classified stakes level above `high`
   (`stakes` on `helix_memory`-adjacent `helix_dual_verify`, and `dualVerify.stakesFloor` in config).
   With `stakesFloor: "xhigh"`, only calls the agent classifies `xhigh` spend Codex quota — `high`

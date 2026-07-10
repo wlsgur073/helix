@@ -171,10 +171,10 @@ function globalScopeNonce(home) {
 }
 
 // src/memory/verified-read.ts
-import { statSync as statSync2 } from "node:fs";
+import { statSync as statSync3 } from "node:fs";
 
 // src/memory/ledger.ts
-import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
+import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync, statSync } from "node:fs";
 
 // src/memory/projection.ts
 function buildProjection(records) {
@@ -226,7 +226,7 @@ function parseLedger(path) {
 
 // src/memory/ledger-mac.ts
 import { createHash, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, renameSync as renameSync2, statSync, chmodSync, mkdirSync as mkdirSync3 } from "node:fs";
+import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, renameSync as renameSync2, statSync as statSync2, chmodSync, mkdirSync as mkdirSync3 } from "node:fs";
 import { dirname, join as join2 } from "node:path";
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 function digestContent(content) {
@@ -248,7 +248,7 @@ function tryReadMasterStrict(path) {
   }
   if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
   try {
-    if ((statSync(path).mode & 63) !== 0) chmodSync(path, 384);
+    if ((statSync2(path).mode & 63) !== 0) chmodSync(path, 384);
   } catch {
   }
   return buf;
@@ -415,7 +415,7 @@ function verifiedLiveOf(records, home, projectRoot) {
 function verifiedLiveStats(ledger, home, projectRoot) {
   let bytes = 0;
   try {
-    bytes = statSync2(ledger).size;
+    bytes = statSync3(ledger).size;
   } catch {
   }
   const t0 = performance.now();
@@ -442,6 +442,8 @@ import { dirname as dirname2 } from "node:path";
 import { randomUUID } from "node:crypto";
 var noopMetricsSink = {
   emitReplay: () => {
+  },
+  emitCompaction: () => {
   },
   runOp: async (_tool, fn) => await fn()
 };
@@ -477,6 +479,24 @@ function createMetricsSink(path, enabled, deps = {}) {
           project_ms: r.projectMs,
           key_available: r.keyAvailable,
           caller: r.caller
+        }) + "\n";
+        if (buffer) buffer.push(line);
+        else safeAppend(line);
+      } catch {
+      }
+    },
+    emitCompaction(c) {
+      try {
+        const line = JSON.stringify({
+          v: 1,
+          kind: "compaction",
+          ts: now(),
+          op_id: currentOpId,
+          scope: c.scope,
+          duration_ms: c.durationMs,
+          dropped_rows: c.droppedRows,
+          reclaimed_bytes: c.reclaimedBytes,
+          ok: c.ok
         }) + "\n";
         if (buffer) buffer.push(line);
         else safeAppend(line);

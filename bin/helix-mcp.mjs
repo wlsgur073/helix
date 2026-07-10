@@ -13013,12 +13013,12 @@ var StdioServerTransport = class {
 
 // src/memory/store.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { existsSync as existsSync2, readFileSync as readFileSync7 } from "node:fs";
+import { existsSync as existsSync2, readFileSync as readFileSync7, statSync as statSync6 } from "node:fs";
 import { dirname as dirname3 } from "node:path";
 
 // src/memory/ledger.ts
 import { randomUUID } from "node:crypto";
-import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync } from "node:fs";
+import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync, statSync as statSync2 } from "node:fs";
 import { dirname } from "node:path";
 
 // src/memory/firewall.ts
@@ -13391,53 +13391,30 @@ function parseLedger(path) {
   }
   return parseLedgerText(text);
 }
-function compactLedger(path, opts) {
-  withFileLock(path, () => {
-    const records = parseLedger(path);
-    const live = buildProjection(records);
-    const hmacAware = opts.keepValidVerify !== void 0;
-    const kept = [];
-    for (const r of live.values()) {
-      if (opts.erasedIds.has(r.id)) continue;
-      kept.push(hmacAware ? { ...r, state: "Fresh" } : r);
-    }
+function planCompaction(records, opts) {
+  const live = buildProjection(records);
+  const hmacAware = opts.keepValidVerify !== void 0;
+  const kept = [];
+  for (const r of live.values()) {
+    if (opts.erasedIds.has(r.id)) continue;
+    kept.push(hmacAware ? { ...r, state: "Fresh" } : r);
+  }
+  for (const r of records) {
+    if (r.type === "erase") kept.push({ ...r, content: "" });
+  }
+  if (opts.keepValidVerify) {
+    let droppedForged = 0;
     for (const r of records) {
-      if (r.type === "erase") kept.push({ ...r, content: "" });
+      if (r.type !== "verify" || !r.supersedes || !live.has(r.supersedes)) continue;
+      if (opts.keepValidVerify(r)) kept.push(r);
+      else droppedForged++;
     }
-    if (opts.keepValidVerify) {
-      let droppedForged = 0;
-      for (const r of records) {
-        if (r.type !== "verify" || !r.supersedes || !live.has(r.supersedes)) continue;
-        if (opts.keepValidVerify(r)) kept.push(r);
-        else droppedForged++;
-      }
-      if (droppedForged > 0) {
-        const ts = (/* @__PURE__ */ new Date()).toISOString();
-        kept.push({
-          id: `integrity_${randomUUID()}`,
-          tx: ts,
-          validFrom: ts,
-          validTo: null,
-          type: "verify",
-          state: "Suspect",
-          content: "",
-          provenance: { source: "user", sessionId: "compaction" },
-          supersedes: null,
-          blastRadius: null,
-          reverifyTrigger: null,
-          classification: "normal"
-        });
-      }
-    }
-    const existingHorizon = records.find(isHorizonMarker);
-    if (existingHorizon) {
-      kept.push(existingHorizon);
-    } else if (records.some((r) => (r.type === "assert" || r.type === "supersede") && !live.has(r.id))) {
-      const hts = (/* @__PURE__ */ new Date()).toISOString();
+    if (droppedForged > 0) {
+      const ts = (/* @__PURE__ */ new Date()).toISOString();
       kept.push({
-        id: `horizon_${randomUUID()}`,
-        tx: hts,
-        validFrom: hts,
+        id: `integrity_${randomUUID()}`,
+        tx: ts,
+        validFrom: ts,
         validTo: null,
         type: "verify",
         state: "Suspect",
@@ -13449,6 +13426,46 @@ function compactLedger(path, opts) {
         classification: "normal"
       });
     }
+  }
+  const existingHorizon = records.find(isHorizonMarker);
+  if (existingHorizon) {
+    kept.push(existingHorizon);
+  } else if (records.some((r) => (r.type === "assert" || r.type === "supersede") && !live.has(r.id))) {
+    const hts = (/* @__PURE__ */ new Date()).toISOString();
+    kept.push({
+      id: `horizon_${randomUUID()}`,
+      tx: hts,
+      validFrom: hts,
+      validTo: null,
+      type: "verify",
+      state: "Suspect",
+      content: "",
+      provenance: { source: "user", sessionId: "compaction" },
+      supersedes: null,
+      blastRadius: null,
+      reverifyTrigger: null,
+      classification: "normal"
+    });
+  }
+  return kept;
+}
+function serializedBytes(records) {
+  let n = 0;
+  for (const r of records) n += Buffer.byteLength(JSON.stringify(r)) + 1;
+  return n;
+}
+function fileSize(path) {
+  try {
+    return statSync2(path).size;
+  } catch {
+    return 0;
+  }
+}
+function compactLedger(path, opts) {
+  return withFileLock(path, () => {
+    const beforeBytes = fileSize(path);
+    const records = parseLedger(path);
+    const kept = planCompaction(records, opts);
     const tmp = `${path}.${process.pid}.tmp`;
     const fd = openSync(tmp, "w");
     try {
@@ -13458,7 +13475,21 @@ function compactLedger(path, opts) {
       closeSync(fd);
     }
     renameSync(tmp, path);
+    return { droppedRows: records.length - kept.length, reclaimedBytes: beforeBytes - fileSize(path) };
   });
+}
+
+// src/memory/compaction-trigger.ts
+function cheapGate(a) {
+  if (!a.cfg.auto) return { proceed: false, reason: "notAuto" };
+  if (a.rows < a.cfg.minRows) return { proceed: false, reason: "tooSmall" };
+  if (a.totalBytes > a.cfg.maxBytes) return { proceed: false, reason: "tooBig" };
+  if (a.nowMs - a.mtimeMs < a.cfg.graceMs) return { proceed: false, reason: "notQuiescent" };
+  return { proceed: true };
+}
+function dirtyGate(a) {
+  if (a.rows === 0) return false;
+  return a.reclaimable / a.rows >= a.cfg.dirtyRatio || a.reclaimableBytes >= a.cfg.minDirtyBytes;
 }
 
 // src/memory/history.ts
@@ -13532,7 +13563,7 @@ function buildHistory(records) {
 
 // src/memory/ledger-mac.ts
 import { createHash, createHmac, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, renameSync as renameSync2, statSync as statSync2, chmodSync, mkdirSync as mkdirSync3 } from "node:fs";
+import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, renameSync as renameSync2, statSync as statSync3, chmodSync, mkdirSync as mkdirSync3 } from "node:fs";
 import { dirname as dirname2, join as join2 } from "node:path";
 var MAC_VERSION = 2;
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
@@ -13591,7 +13622,7 @@ function tryReadMasterStrict(path) {
   }
   if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
   try {
-    if ((statSync2(path).mode & 63) !== 0) chmodSync(path, 384);
+    if ((statSync3(path).mode & 63) !== 0) chmodSync(path, 384);
   } catch {
   }
   return buf;
@@ -13851,7 +13882,7 @@ function redactSecrets(content, spans) {
 }
 
 // src/memory/reality-check.ts
-import { existsSync, readFileSync as readFileSync4, statSync as statSync3 } from "node:fs";
+import { existsSync, readFileSync as readFileSync4, statSync as statSync4 } from "node:fs";
 var INDETERMINATE = { ran: false, indeterminate: true, passed: false };
 var MAX_FILE_BYTES = 5e6;
 function runRealityCheck(check2) {
@@ -13864,7 +13895,7 @@ function runRealityCheck(check2) {
       case "file-contains": {
         if (typeof check2.path !== "string" || typeof check2.pattern !== "string") return INDETERMINATE;
         if (!existsSync(check2.path)) return INDETERMINATE;
-        if (statSync3(check2.path).size > MAX_FILE_BYTES) return INDETERMINATE;
+        if (statSync4(check2.path).size > MAX_FILE_BYTES) return INDETERMINATE;
         const text = readFileSync4(check2.path, "utf8");
         return { ran: true, indeterminate: false, passed: text.includes(check2.pattern) };
       }
@@ -14043,7 +14074,7 @@ function globalScopeNonce(home2) {
 }
 
 // src/memory/verified-read.ts
-import { statSync as statSync4 } from "node:fs";
+import { statSync as statSync5 } from "node:fs";
 function subkeyForScope(home2, projectRoot2) {
   const master = tryReadMaster(home2);
   if (!master) return null;
@@ -14062,7 +14093,7 @@ function verifiedLiveOf(records, home2, projectRoot2) {
 function verifiedLiveStats(ledger, home2, projectRoot2) {
   let bytes = 0;
   try {
-    bytes = statSync4(ledger).size;
+    bytes = statSync5(ledger).size;
   } catch {
   }
   const t0 = performance.now();
@@ -14115,6 +14146,9 @@ var MemoryStore = class {
   /** A4 single-slot recall cache (I5). Reused only on an exact content-identity key match; replaced on
    *  any miss; cleared on self-erase (I8). Per-instance — dies with the store (I6). */
   rankCache = null;
+  /** Once-per-session auto-compaction guard, set on ATTEMPT (spec §4.5) so a failed compaction does
+   *  not retry within the session. */
+  compactedThisSession = false;
   now() {
     return (this.opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   }
@@ -14149,6 +14183,30 @@ var MemoryStore = class {
    *  (fail-safe) and a project writeVerify would throw rather than mis-sign. */
   subkeyForLedger(ledger) {
     return subkeyForScope(this.homeDir(), this.scopeRootOf(ledger));
+  }
+  /** The verify-keep predicate a compaction must use: key-present => genuine-signed OR a future MAC
+   *  version (never destroy what a newer binary signed); key-absent => keep every live-target verify
+   *  (cannot tell genuine from forged, so dropping would be destructive). SHARED by the manual erase
+   *  path and the auto-compaction trigger so the two never diverge.
+   *
+   *  Takes an ALREADY-RESOLVED subkey (never re-resolves per record): the caller resolves once so the
+   *  whole compaction makes one atomic keep/drop decision — a per-record re-resolve could see a valid
+   *  subkey for one verify and a transient null for the next, tearing a single rewrite into an
+   *  inconsistent partial state.
+   *
+   *  Key-absent => PRESERVE every live-target verify (`() => true`), do NOT drop. Compaction is
+   *  DESTRUCTIVE (unlike the recoverable read-path clamp): if subkeyForLedger returns null — which
+   *  a transient registry/master read failure can cause even with the key still on disk — we cannot
+   *  tell genuine from forged, so dropping would permanently destroy recoverable elevations AND
+   *  demotions. Keeping them is safe: with no key the read path clamps everything to Fresh
+   *  regardless, so kept records confer no trust, and the next key-present compaction purges any
+   *  forgeries. (Must NOT fall through to the legacy bake-and-drop path.)
+   *
+   *  spec §4.6: preserve records from a FUTURE MAC version too — an A-era compactor must never
+   *  destroy what a newer binary signed (the pre-A -> v2 destructive-compaction class, one bump
+   *  later). They stay grade-inert (verifyVerify false until a verifier exists) and scan-visible. */
+  keepValidVerifyFor(subkey) {
+    return subkey ? (r) => verifyVerify(r, subkey) || typeof r.macVersion === "number" && Number.isSafeInteger(r.macVersion) && r.macVersion > MAC_VERSION : () => true;
   }
   /** Verifying projection for one ledger (R1 clamp / R2 MAC gate / R3 content binding). When no
    *  subkey is available every state is clamped to Fresh and keyAvailable is false. Delegates to the
@@ -14279,7 +14337,7 @@ var MemoryStore = class {
       const readMs = performance.now() - rt0;
       const subkey = this.subkeyForLedger(s.ledger);
       key.push({ scopeId: s.ledger, digest: ledgerDigest(buf), fingerprint: subkeyFingerprint(subkey) });
-      reads.push({ scope: s.scope, root: s.root, text, bytes: buf.length, subkey, readMs });
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, text, bytes: buf.length, subkey, readMs });
     }
     if (this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
       return { scoped: this.rankCache.scoped, available: this.rankCache.available, artifacts: this.rankCache.artifacts };
@@ -14309,7 +14367,65 @@ var MemoryStore = class {
     }
     const artifacts = buildRankArtifacts(scoped.map((s) => s.record));
     this.rankCache = { key, scoped, available, artifacts };
+    this.maybeAutoCompact(reads);
     return { scoped, available, artifacts };
+  }
+  /** Auto-compaction (spec 2026-07-09): once per session, on the first ELIGIBLE recall MISS. Evaluates
+   *  cheap gates from free signals first; only then runs planCompaction (the shared classifier) for the
+   *  reclaim branch, so post-compaction reclaimable is exactly zero (self-limiting, no persisted state).
+   *  All errors are swallowed — compaction must never break a recall.
+   *
+   *  The guard is checked ONCE at entry, so every participating scope (global + an owned project) that
+   *  is independently eligible compacts within this one attempt; the guard suppresses a SECOND attempt
+   *  on later recalls, not a second scope in this one.
+   *
+   *  METRIC SEMANTICS (planned vs actual). The GATES legitimately reason about a PROJECTION: they ask
+   *  "would a compaction reclaim enough?" of a lock-free snapshot, and `reclaimable`/`reclaimableBytes`
+   *  below are exactly that. The emitted METRIC may not: its fields are past tense, and a consumer will
+   *  sum them as work done. So it reports the counts compactLedger MEASURED INSIDE ITS OWN LOCK, never
+   *  the numbers planned out here — a concurrent cross-process append landing between this lock-free
+   *  plan and that lock would otherwise be attributed to this compaction. Both fields are ZERO on
+   *  failure: compactLedger writes a tmp and renames, so a throw leaves the ledger byte-identical and
+   *  nothing was dropped or reclaimed. */
+  maybeAutoCompact(reads) {
+    const cfg = this.opts.compaction;
+    if (!cfg || this.compactedThisSession) return;
+    const nowMs = Date.parse(this.now());
+    for (const r of reads) {
+      let mtimeMs = 0;
+      let totalBytes = 0;
+      try {
+        const st = statSync6(r.ledger);
+        mtimeMs = st.mtimeMs;
+        totalBytes = st.size;
+      } catch {
+        continue;
+      }
+      const records = parseLedgerText(r.text);
+      const gate = cheapGate({ rows: records.length, totalBytes, mtimeMs, nowMs, cfg });
+      if (!gate.proceed) continue;
+      const keepValidVerify = this.keepValidVerifyFor(r.subkey);
+      const kept = planCompaction(records, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
+      const reclaimable = records.length - kept.length;
+      const reclaimableBytes = serializedBytes(records) - serializedBytes(kept);
+      if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
+      this.compactedThisSession = true;
+      const started = performance.now();
+      let stats = null;
+      try {
+        stats = compactLedger(r.ledger, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
+      } catch {
+      }
+      const durationMs = performance.now() - started;
+      this.rankCache = null;
+      this.opts.metricsSink?.emitCompaction({
+        scope: r.root ? "project" : "global",
+        durationMs,
+        droppedRows: stats?.droppedRows ?? 0,
+        reclaimedBytes: stats?.reclaimedBytes ?? 0,
+        ok: stats !== null
+      });
+    }
   }
   recall(query, opts = {}) {
     const { scoped, available, artifacts } = this.recallInput();
@@ -14513,13 +14629,7 @@ var MemoryStore = class {
     });
     if (opts.permanent) {
       const sk = this.subkeyForLedger(ledger);
-      compactLedger(ledger, {
-        erasedIds: /* @__PURE__ */ new Set([id]),
-        // spec §4.6: preserve records from a FUTURE MAC version too — an A-era compactor must never
-        // destroy what a newer binary signed (the pre-A -> v2 destructive-compaction class, one bump
-        // later). They stay grade-inert (verifyVerify false until a verifier exists) and scan-visible.
-        keepValidVerify: sk ? (r) => verifyVerify(r, sk) || typeof r.macVersion === "number" && Number.isSafeInteger(r.macVersion) && r.macVersion > MAC_VERSION : () => true
-      });
+      compactLedger(ledger, { erasedIds: /* @__PURE__ */ new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk) });
     }
     this.rankCache = null;
   }
@@ -23142,6 +23252,14 @@ import { readFileSync as readFileSync10 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join4 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
+var DEFAULT_COMPACTION = {
+  auto: false,
+  dirtyRatio: 0.5,
+  minRows: 200,
+  minDirtyBytes: 1048576,
+  graceMs: 864e5,
+  maxBytes: 52428800
+};
 var EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
 var MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
 var MAX_TIMEOUT_MS = 36e5;
@@ -23228,6 +23346,21 @@ function loadConfig(opts = {}) {
   }
   return merged;
 }
+function mergeCompaction(raw) {
+  const c = { ...DEFAULT_COMPACTION };
+  const o = raw;
+  if (!o || typeof o !== "object") return c;
+  if (typeof o.auto === "boolean") c.auto = o.auto;
+  if (typeof o.dirtyRatio === "number" && o.dirtyRatio > 0 && o.dirtyRatio <= 1) c.dirtyRatio = o.dirtyRatio;
+  if (typeof o.minRows === "number" && Number.isInteger(o.minRows) && o.minRows >= 0) c.minRows = o.minRows;
+  if (typeof o.minDirtyBytes === "number" && Number.isInteger(o.minDirtyBytes) && o.minDirtyBytes >= 1) c.minDirtyBytes = o.minDirtyBytes;
+  if (typeof o.graceMs === "number" && Number.isInteger(o.graceMs) && o.graceMs >= 0) c.graceMs = o.graceMs;
+  if (typeof o.maxBytes === "number" && Number.isInteger(o.maxBytes) && o.maxBytes > 0) c.maxBytes = o.maxBytes;
+  return c;
+}
+function compactionConfigFromGlobal(home2) {
+  return mergeCompaction(readJson(join4(home2, "config.json"))?.compaction);
+}
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
@@ -23237,7 +23370,7 @@ import { join as join6, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync4, readdirSync, lstatSync, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync4, readdirSync, lstatSync, statSync as statSync7, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join5 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
@@ -23257,7 +23390,7 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     const stampPath = join5(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
-      stampMtimeMs = statSync5(stampPath).mtimeMs;
+      stampMtimeMs = statSync7(stampPath).mtimeMs;
     } catch {
       stampMtimeMs = null;
     }
@@ -23472,6 +23605,8 @@ import { randomUUID as randomUUID3 } from "node:crypto";
 var noopMetricsSink = {
   emitReplay: () => {
   },
+  emitCompaction: () => {
+  },
   runOp: async (_tool, fn) => await fn()
 };
 function createMetricsSink(path, enabled, deps = {}) {
@@ -23506,6 +23641,24 @@ function createMetricsSink(path, enabled, deps = {}) {
           project_ms: r.projectMs,
           key_available: r.keyAvailable,
           caller: r.caller
+        }) + "\n";
+        if (buffer) buffer.push(line);
+        else safeAppend(line);
+      } catch {
+      }
+    },
+    emitCompaction(c) {
+      try {
+        const line = JSON.stringify({
+          v: 1,
+          kind: "compaction",
+          ts: now(),
+          op_id: currentOpId,
+          scope: c.scope,
+          duration_ms: c.durationMs,
+          dropped_rows: c.droppedRows,
+          reclaimed_bytes: c.reclaimedBytes,
+          ok: c.ok
         }) + "\n";
         if (buffer) buffer.push(line);
         else safeAppend(line);
@@ -23673,7 +23826,7 @@ var projectActive = existsSync6(join8(projectRoot, ".helix")) && resolve2(projec
 var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
 var config2 = loadConfig({ globalPath: join8(home, "config.json") });
 var metrics = createMetricsSink(join8(home, "metrics.jsonl"), config2.metrics.enabled);
-var store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics });
+var store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
 var scanScopes = [
   { ledger: globalLedger },
   ...project ? [{ ledger: project.ledger, root: project.root }] : []
