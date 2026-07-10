@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, readFileSync, mkdirSync, openSync, fsyncSync, closeSync, writeSync, renameSync } from 'node:fs';
+import { appendFileSync, readFileSync, mkdirSync, openSync, fsyncSync, closeSync, writeSync, renameSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
@@ -152,6 +152,26 @@ export function serializedBytes(records: MemoryRecord[]): number {
   return n;
 }
 
+/** What a compaction ACTUALLY did, measured entirely inside its own lock. Never a projection: a
+ *  caller may emit these as past-tense metrics. */
+export interface CompactionStats {
+  /** Physical rows removed: rows read at lock entry minus rows written. Always >= 0 in practice
+   *  (planCompaction keeps a subset of the live projection plus fixed-width markers), and never
+   *  attributable to another writer — see the lock argument on compactLedger. */
+  droppedRows: number;
+  /** On-disk bytes reclaimed: file size at lock entry minus file size after the rename.
+   *  LEGITIMATELY NEGATIVE when a compaction drops little or nothing but mints a content-free
+   *  horizon/integrity tombstone: the file NET-GREW. That is a truthful report, not an error, so it
+   *  is not clamped — a clamp would silently turn "this compaction grew the ledger" into "reclaimed
+   *  nothing", hiding exactly the case an operator wants to see. */
+  reclaimedBytes: number;
+}
+
+/** Size of `path` in bytes, or 0 if it does not exist (parseLedger treats a missing ledger as []). */
+function fileSize(path: LedgerPath): number {
+  try { return statSync(path).size; } catch { return 0; }
+}
+
 /**
  * Rewrite the ledger to the canonical current state. Crash-safe: writes <path>.tmp,
  * fsyncs, then atomically renames over <path>.
@@ -159,12 +179,21 @@ export function serializedBytes(records: MemoryRecord[]): number {
  * Output = the live projection (superseded/invalidated/erased targets already excluded,
  * verify states applied) MINUS any `erasedIds`, PLUS one content-free tombstone per erase
  * marker (so an erasure leaves an audit trace but no plaintext — satisfies right-to-erasure).
+ *
+ * Returns what it actually did. BOTH numbers are measured INSIDE the lock — `beforeBytes` before
+ * `parseLedger`, `afterBytes` after `renameSync` — so they are attributable to exactly THIS
+ * compaction: every appender goes through appendRecord, which takes the SAME lock, so no writer can
+ * slip a row in between the two measurements. Measuring `beforeBytes` outside the lock would silently
+ * fold a concurrent cross-process append's bytes into this compaction's reclaim (and could report a
+ * negative reclaim for a compaction that in fact freed space). No unit test can catch that inversion —
+ * it needs a real concurrent appender — so the invariant lives here, in the code that must hold it.
  */
-export function compactLedger(path: LedgerPath, opts: CompactOptions): void {
+export function compactLedger(path: LedgerPath, opts: CompactOptions): CompactionStats {
   // Hold the lock across read -> rewrite -> rename so a concurrent append can't be lost and a
   // stale snapshot can't resurrect erased content. parseLedger runs INSIDE the lock, so we
   // always compact the latest committed state.
-  withFileLock(path, () => {
+  return withFileLock(path, () => {
+    const beforeBytes = fileSize(path);   // inside the lock, BEFORE the read (see above)
     const records = parseLedger(path);
     const kept = planCompaction(records, opts);
     // Per-process tmp name: even if the lock is ever stolen, two processes never share a
@@ -178,5 +207,6 @@ export function compactLedger(path: LedgerPath, opts: CompactOptions): void {
       closeSync(fd);
     }
     renameSync(tmp, path); // atomic on the same filesystem
+    return { droppedRows: records.length - kept.length, reclaimedBytes: beforeBytes - fileSize(path) };
   });
 }

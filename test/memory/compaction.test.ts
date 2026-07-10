@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, existsSync, readdirSync, appendFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, appendFileSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { appendRecord, parseLedger, compactLedger, isHorizonMarker } from '../../src/memory/ledger.js';
@@ -66,6 +66,47 @@ describe('compactLedger', () => {
     const files = readdirSync(dirname(p));
     expect(files.filter((f) => f.endsWith('.tmp'))).toHaveLength(0);
     expect(existsSync(p)).toBe(true);
+  });
+
+  // The returned stats are what a caller emits as a past-tense metric, so they must equal the REAL
+  // on-disk deltas: droppedRows is the rows removed (never the rows kept), reclaimedBytes is
+  // before-minus-after (never the reverse).
+  it('returns the row and byte deltas it actually wrote', () => {
+    const p = tmpLedger();
+    appendRecord(p, rec({ id: 'm_1', content: 'old fact with some length to it' }));
+    appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
+    appendRecord(p, rec({ id: 'm_3', content: 'another fact that will be superseded' }));
+    appendRecord(p, rec({ id: 'm_4', type: 'supersede', supersedes: 'm_3', content: 'newer' }));
+    const rowsBefore = parseLedger(p).length;
+    const bytesBefore = statSync(p).size;
+
+    const stats = compactLedger(p, { erasedIds: new Set() });
+
+    const rowsAfter = parseLedger(p).length;
+    const bytesAfter = statSync(p).size;
+    expect(stats.droppedRows).toBe(rowsBefore - rowsAfter);   // dropped, not surviving
+    expect(stats.droppedRows).toBeGreaterThan(0);
+    expect(stats.reclaimedBytes).toBe(bytesBefore - bytesAfter); // before - after, not after - before
+    expect(stats.reclaimedBytes).toBeGreaterThan(0);
+  });
+
+  // A compaction that drops NOTHING but mints a content-free horizon marker makes the ledger net-GROW.
+  // That is a truthful negative reclaim, not an error: clamping it to 0 would report "reclaimed
+  // nothing" for a compaction that actually cost disk space — the one case an operator needs to see.
+  it('reports a net-growing compaction as a NEGATIVE reclaim (never clamped)', () => {
+    const p = tmpLedger();
+    appendRecord(p, rec({ id: 'm_1', content: 'x' }));                                  // tiny fact
+    appendRecord(p, rec({ id: 'e_1', type: 'erase', supersedes: 'm_1', content: '' }));  // closes it
+    const bytesBefore = statSync(p).size;
+
+    const stats = compactLedger(p, { erasedIds: new Set() });
+
+    const bytesAfter = statSync(p).size;
+    // Kept: the erase tombstone + a freshly minted horizon marker (m_1's assert row is now closed).
+    expect(stats.droppedRows).toBe(0);
+    expect(bytesAfter).toBeGreaterThan(bytesBefore);              // the file really did grow
+    expect(stats.reclaimedBytes).toBe(bytesBefore - bytesAfter);  // reported as-is...
+    expect(stats.reclaimedBytes).toBeLessThan(0);                 // ...i.e. negative, not clamped to 0
   });
 });
 

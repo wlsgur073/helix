@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerText, compactLedger, planCompaction, serializedBytes, type LedgerPath } from './ledger.js';
+import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerText, compactLedger, planCompaction, serializedBytes, type CompactionStats, type LedgerPath } from './ledger.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated } from './history.js';
@@ -328,15 +328,14 @@ export class MemoryStore {
    *  is independently eligible compacts within this one attempt; the guard suppresses a SECOND attempt
    *  on later recalls, not a second scope in this one.
    *
-   *  METRIC SEMANTICS (planned vs actual). The gates legitimately reason about a PROJECTION: they ask
-   *  "would a compaction reclaim enough?" from a lock-free snapshot. The emitted metric must not: its
-   *  fields are past tense. So `reclaimedBytes` is the ACTUAL on-disk size delta (statSync before/after),
-   *  and both fields are ZERO on failure — compactLedger writes a tmp and renames, so a throw leaves the
-   *  ledger byte-identical and nothing was reclaimed. `droppedRows` is the PLAN's drop count: the exact
-   *  row delta whenever no concurrent write lands between this lock-free plan and compactLedger's own
-   *  locked re-plan (the common case), and off by that writer's rows otherwise. Making it exact would
-   *  need compactLedger to return the counts it wrote under its lock; the byte delta is exact for free,
-   *  so it is measured rather than projected. */
+   *  METRIC SEMANTICS (planned vs actual). The GATES legitimately reason about a PROJECTION: they ask
+   *  "would a compaction reclaim enough?" of a lock-free snapshot, and `reclaimable`/`reclaimableBytes`
+   *  below are exactly that. The emitted METRIC may not: its fields are past tense, and a consumer will
+   *  sum them as work done. So it reports the counts compactLedger MEASURED INSIDE ITS OWN LOCK, never
+   *  the numbers planned out here — a concurrent cross-process append landing between this lock-free
+   *  plan and that lock would otherwise be attributed to this compaction. Both fields are ZERO on
+   *  failure: compactLedger writes a tmp and renames, so a throw leaves the ledger byte-identical and
+   *  nothing was dropped or reclaimed. */
   private maybeAutoCompact(reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; text: string; subkey: Buffer | null }>): void {
     const cfg = this.opts.compaction;
     if (!cfg || this.compactedThisSession) return;
@@ -362,21 +361,19 @@ export class MemoryStore {
       // Eligible: guard on ATTEMPT (before the call), fire, emit a metric, swallow errors.
       this.compactedThisSession = true;
       const started = performance.now();
-      let ok = true;
+      let stats: CompactionStats | null = null;   // null <=> the compaction threw <=> nothing happened
       try {
-        compactLedger(r.ledger, { erasedIds: new Set(), keepValidVerify });
-      } catch { ok = false; }
+        stats = compactLedger(r.ledger, { erasedIds: new Set(), keepValidVerify });
+      } catch { /* swallowed: compaction must never break a recall */ }
       const durationMs = performance.now() - started;   // capture BEFORE any metrics I/O
       // Drop the entry this recall just installed. On SUCCESS the ledger bytes changed, so the
       // content-identity key would miss anyway (belt and braces). On FAILURE the bytes did NOT change,
       // and clearing is what forces the next recall to MISS and re-enter this method — where the
-      // once-per-session guard, not a cache hit, is what suppresses the retry. Keep both paths honest.
+      // once-per-session guard, not a cache hit, then suppresses the retry. Defensive on both paths.
       this.rankCache = null;
-      let postBytes = totalBytes;
-      try { postBytes = statSync(r.ledger).size; } catch { /* unreadable => report a zero delta */ }
       this.opts.metricsSink?.emitCompaction({
         scope: r.root ? 'project' : 'global', durationMs,
-        droppedRows: ok ? reclaimable : 0, reclaimedBytes: ok ? totalBytes - postBytes : 0, ok,
+        droppedRows: stats?.droppedRows ?? 0, reclaimedBytes: stats?.reclaimedBytes ?? 0, ok: stats !== null,
       });
     }
   }

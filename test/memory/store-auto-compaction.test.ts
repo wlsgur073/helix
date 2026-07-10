@@ -103,6 +103,55 @@ describe('auto-compaction on recall', () => {
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
+  // ATTRIBUTION: the metric must report what compactLedger measured under its LOCK, not what the
+  // lock-free eligibility pass PLANNED. A write landing between the two is compacted into the same
+  // rewrite, so plan-derived numbers would silently attribute that writer's rows/bytes to us.
+  // The injectable clock is the seam: `now()` is called exactly once during recall(), inside
+  // maybeAutoCompact, AFTER the read loop snapshotted the ledger text and BEFORE compactLedger locks.
+  it('reports the counts measured under the lock, not the eligibility plan (late write attribution)', () => {
+    const home = newHome();
+    try {
+      const ledger = join(home, 'memory.jsonl');
+      let armed = false;
+      let bytesAtLock = 0;
+      let rowsAtLock = 0;
+      let lateTarget = '';
+      const now = (): string => {
+        if (armed) {
+          armed = false;
+          // A late supersede: +1 physical row, and it kills a live record. The lock-free plan (11 rows)
+          // projects 4 drops; the locked compaction (12 rows) actually performs 5.
+          appendFileSync(ledger, JSON.stringify({
+            id: 'late_1', tx: FUTURE, validFrom: FUTURE, validTo: null,
+            type: 'supersede', state: 'Fresh', content: 'late deploy timeout fact',
+            provenance: { source: 'user', sessionId: 't' },
+            supersedes: lateTarget, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+          }) + '\n');
+          rowsAtLock = parseLedger(ledger).length;
+          bytesAtLock = statSync(ledger).size;
+        }
+        return FUTURE;
+      };
+      const { sink, emitted } = recordingSink();
+      const store = new MemoryStore(ledger, { home, sessionId: 't', now, compaction: enabled, metricsSink: sink });
+      const live = makeDirty(store);
+      lateTarget = live[0]!;
+      expect(parseLedger(ledger).length).toBe(11);   // the snapshot the recall will read
+
+      armed = true;
+      store.recall('deploy');
+
+      expect(rowsAtLock).toBe(12);                   // the late write really did land before the lock
+      const rowsAfter = parseLedger(ledger).length;
+      const bytesAfter = statSync(ledger).size;
+      const m = emitted[0]!;
+      expect(m.ok).toBe(true);
+      expect(m.droppedRows).toBe(rowsAtLock - rowsAfter);      // 5 (measured), not 4 (planned)
+      expect(m.droppedRows).toBe(5);
+      expect(m.reclaimedBytes).toBe(bytesAtLock - bytesAfter); // measured from the locked file
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
   it('I1: self-limiting — a second session over the compacted ledger is not eligible again', () => {
     const home = newHome();
     try {
@@ -240,12 +289,13 @@ describe('auto-compaction on recall', () => {
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
-  // White-box on purpose, and load-bearing. The rank cache is keyed on a ledger content digest, so a
-  // SUCCESSFUL compaction always changes the key and a stale entry can never be served — no black-box
-  // assertion can catch the removal of `this.rankCache = null` on that path. But on the FAILED path the
-  // bytes are unchanged, so dropping the clear makes the next recall a cache HIT that never re-enters
-  // maybeAutoCompact — which silently masks a deleted once-per-session guard (verified: clearing BOTH
-  // leaves I4/I5 green, and only this assertion goes red). It is the sole detector of that pair.
+  // White-box on purpose: the rank cache is keyed on a ledger content digest, so a SUCCESSFUL
+  // compaction always changes the key and a stale entry can never be served — no black-box assertion
+  // can catch the removal of `this.rankCache = null`. It pins a DEFENSIVE line, not a live behavioural
+  // contract: dropping the clear is close to behaviour-preserving today (on the failed path a cache HIT
+  // suppresses the retry instead of the guard; on the success path the trigger self-limits because
+  // reclaimable is then ~0). Kept because the line is what makes the guard — rather than an incidental
+  // cache hit — the thing that stops a second attempt, and that should not silently rot.
   it('clears the rank cache after a compaction attempt', () => {
     const home = newHome();
     try {
