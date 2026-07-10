@@ -169,9 +169,11 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
       const ep = dv.egressPolicy as Record<string, unknown> | undefined;
       if (ep && typeof ep === 'object') {
         for (const [key, val] of Object.entries(ep)) {
-          if (!EGRESS_LEGS.includes(key as EgressLeg)) { warn(`helix: ignoring unknown dualVerify.egressPolicy key "${key}"`); continue; }
+          // key is untrusted here (unvalidated Object.entries key) -> q(); val below is untrusted too,
+          // but that branch's key has already passed EGRESS_LEGS, so it stays bare.
+          if (!EGRESS_LEGS.includes(key as EgressLeg)) { warn(`helix: ignoring unknown dualVerify.egressPolicy key ${q(key)}`); continue; }
           if (val === 'allow') merged.dualVerify.egressPolicy[key as EgressLeg] = 'allow';
-          else if (val !== 'block') warn(`helix: invalid dualVerify.egressPolicy.${key} "${String(val)}" -> block`);
+          else if (val !== 'block') warn(`helix: invalid dualVerify.egressPolicy.${key} ${q(val)} -> block`);
         }
       }
       if (dv.memoryEgress !== undefined) {

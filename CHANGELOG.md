@@ -8,8 +8,8 @@ All notable changes to Helix are documented here. This project follows
 ### Added
 - Codex 5.6 reasoning efforts. `dualVerify.effort` now accepts `max` and `ultra`. Per-model support
   varies and Helix does not arbitrate it — `codex debug models` is the authority.
-- `helix_codex_status` now reports the effective model, reasoning effort and run timeout a dual-verify
-  call would actually use. When `dualVerify.model` is `null` (inherit), it resolves the name from a free
+- `helix_codex_status` now reports the effective model, the configured effort, and the run timeout.
+  When `dualVerify.model` is `null` (inherit), it resolves the name from a free
   `codex doctor --json` probe; a failed probe prints `(unresolved)` rather than guessing. There is no
   equivalent probe for effort — `codex doctor --json` does not report `model_reasoning_effort` — so when
   `dualVerify.effort` is `null` the line prints only the literal `inherited from codex config`, and the
@@ -144,6 +144,10 @@ All notable changes to Helix are documented here. This project follows
   silent, so a valid global+project config pair emits nothing.
 - `dualVerify.model` is now bounded at 64 characters, as the same predicate guards a value rendered
   into a tool result.
+- `dualVerify.egressPolicy`'s unknown-key and invalid-value warnings now render the untrusted config
+  data through the same bounded single-line guard as `mode`/`stakesFloor`/`model`/`effort`, instead of
+  interpolating it raw. A crafted value (or key) containing a newline could otherwise forge a second
+  line in the stderr diagnostic; an ordinary key/value renders byte-identically to before.
 
 ## [0.1.0] — 2026-06-18
 

@@ -95,6 +95,9 @@ describe('loadConfig', () => {
     const p = join(dir, 'p.json'); writeFileSync(p, JSON.stringify({ dualVerify: { effort: 'nope' } }));
     expect(loadConfig({ projectPath: p, globalPath: g, warn }).dualVerify.effort).toBe('max');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('nope'));
+    // The wording is load-bearing (design §3.2): the survivor here is the GLOBAL Helix value, not
+    // Codex's, so the message must say "-> ignored", never "-> inheriting codex config".
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('-> ignored'));
   });
 
   it('an ABSENT key never warns (a valid two-file setup must stay silent)', () => {
@@ -115,6 +118,10 @@ describe('loadConfig', () => {
     expect(cfg.dualVerify.stakesFloor).toBe('high');   // DEFAULT_CONFIG value kept
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('debate'));
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('urgent'));
+    // Pin each call individually (not "some call contains -> ignored"): a regression on either the
+    // mode or the stakesFloor message alone must still fail this test.
+    expect(warn.mock.calls[0]![0]).toEqual(expect.stringContaining('-> ignored'));
+    expect(warn.mock.calls[1]![0]).toEqual(expect.stringContaining('-> ignored'));
   });
 
   it('mode:null and stakesFloor:null warn (they have no inherit semantics); model/effort null do not', () => {
@@ -139,15 +146,24 @@ describe('loadConfig', () => {
     const b = join(dir, 'long.json'); writeFileSync(b, JSON.stringify({ dualVerify: { model: long65 } }));
     expect(loadConfig({ projectPath: b, globalPath: join(dir, 'g.json'), warn }).dualVerify.model).toBeNull();
     expect(warn).toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('-> ignored'));
   });
 
-  it('a warned value is rendered on one bounded line (no raw newline reaches stderr)', () => {
-    const dir = tmpDir(); const warn = vi.fn();
-    const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { model: 'x\ny'.repeat(80) } }));
-    loadConfig({ projectPath: p, globalPath: join(dir, 'g.json'), warn });
-    const msg = warn.mock.calls[0]![0] as string;
-    expect(msg.split('\n')).toHaveLength(1);   // the real invariant: no raw newline forges a log line
-    expect(msg.length).toBeLessThan(200);      // bounded: a 10MB model string cannot flood stderr
+  it('a warned value is rendered on one bounded line for every q()-guarded key (no raw newline reaches stderr)', () => {
+    const dir = tmpDir();
+    const evil = 'x\ny'.repeat(80);
+    // mode/stakesFloor/model/effort all route their warn through q(); a future edit that interpolates
+    // any one of them raw (e.g. `${dv.effort}`) must fail this loop, not just the model case.
+    for (const key of ['mode', 'stakesFloor', 'model', 'effort'] as const) {
+      const warn = vi.fn();
+      const dv: Record<string, unknown> = { [key]: evil };
+      const p = join(dir, `${key}.json`); writeFileSync(p, JSON.stringify({ dualVerify: dv }));
+      loadConfig({ projectPath: p, globalPath: join(dir, 'g.json'), warn });
+      expect(warn).toHaveBeenCalledTimes(1);
+      const msg = warn.mock.calls[0]![0] as string;
+      expect(msg.split('\n')).toHaveLength(1);   // the real invariant: no raw newline forges a log line
+      expect(msg.length).toBeLessThan(200);      // bounded: a 10MB value cannot flood stderr
+    }
   });
 
   it('defaults every egressPolicy leg to block (fail-closed)', () => {
@@ -175,6 +191,17 @@ describe('loadConfig', () => {
     const p = join(dir, 'c.json'); writeFileSync(p, JSON.stringify({ dualVerify: { egressPolicy: { secretHuristic: 'allow' } } }));
     loadConfig({ projectPath: p, globalPath: join(dir, 'g.json'), warn });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('secretHuristic'));
+  });
+
+  it('an egressPolicy value containing a raw newline cannot forge a second stderr line', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    // A hostile checkout's project config tries to smuggle a fake log line via the invalid value.
+    const p = join(dir, 'c.json');
+    writeFileSync(p, JSON.stringify({ dualVerify: { egressPolicy: { piiHigh: 'block\nhelix: FORGED LINE' } } }));
+    loadConfig({ projectPath: p, globalPath: join(dir, 'g.json'), warn });
+    expect(warn).toHaveBeenCalledTimes(1);
+    const msg = warn.mock.calls[0]![0] as string;
+    expect(msg.split('\n')).toHaveLength(1);   // no raw newline reaches stderr -> no forged second line
   });
 
   it('warns that the removed memoryEgress key is ignored', () => {

@@ -22842,11 +22842,11 @@ function loadConfig(opts = {}) {
       if (ep && typeof ep === "object") {
         for (const [key, val] of Object.entries(ep)) {
           if (!EGRESS_LEGS.includes(key)) {
-            warn(`helix: ignoring unknown dualVerify.egressPolicy key "${key}"`);
+            warn(`helix: ignoring unknown dualVerify.egressPolicy key ${q(key)}`);
             continue;
           }
           if (val === "allow") merged.dualVerify.egressPolicy[key] = "allow";
-          else if (val !== "block") warn(`helix: invalid dualVerify.egressPolicy.${key} "${String(val)}" -> block`);
+          else if (val !== "block") warn(`helix: invalid dualVerify.egressPolicy.${key} ${q(val)} -> block`);
         }
       }
       if (dv.memoryEgress !== void 0) {
