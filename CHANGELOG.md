@@ -6,6 +6,16 @@ All notable changes to Helix are documented here. This project follows
 ## [Unreleased]
 
 ### Added
+- Codex 5.6 reasoning efforts. `dualVerify.effort` now accepts `max` and `ultra`. Per-model support
+  varies and Helix does not arbitrate it — `codex debug models` is the authority.
+- `helix_codex_status` now reports the effective model, reasoning effort and run timeout a dual-verify
+  call would actually use. When `dualVerify.model` is `null` (inherit), it resolves the name from a free
+  `codex doctor --json` probe; a failed probe prints `(unresolved)` rather than guessing. There is no
+  equivalent probe for effort — `codex doctor --json` does not report `model_reasoning_effort` — so when
+  `dualVerify.effort` is `null` the line prints only the literal `inherited from codex config`, and the
+  advisory note below never fires on that path. A Helix-set (non-`null`) `max` or `ultra` effort at a run
+  timeout of `300000` ms or less prints that advisory note, because a timeout tree-kills the run after
+  the Codex quota is spent.
 - Automatic compaction trigger — **opt-in, GLOBAL config only, default OFF** (`compaction.auto`).
   When enabled, a recall whose ledger passes every gate rewrites that ledger through the existing
   crash-safe `compactLedger` (ledger lock held across read → rewrite → atomic rename), synchronously,
@@ -121,6 +131,19 @@ All notable changes to Helix are documented here. This project follows
   by `dualVerify.egressPolicy`, a per-leg map (`memoryEcho` / `piiHigh` / `piiBulk` /
   `secretHeuristic` / `secretEntropy`), each defaulting to `block`. Provider-format secrets stay
   override-proof. A leftover `memoryEgress` key is ignored with a startup warning.
+
+### Removed
+- `dualVerify.effort: 'minimal'`. The CLI still parses it, but no model in `codex debug models`
+  advertises it, so the API rejects it after the metered call is already spent.
+
+### Fixed
+- `dualVerify.mode`, `stakesFloor`, `model` and `effort` no longer discard an invalid value in
+  silence. Previously an unrecognised `effort` left the field at `null`, which means "omit `-c` and
+  inherit `~/.codex/config.toml`" — so `"effort": "max"` produced whatever Codex was configured with,
+  with no diagnostic. Each key now warns on stderr when present and invalid. An **absent** key stays
+  silent, so a valid global+project config pair emits nothing.
+- `dualVerify.model` is now bounded at 64 characters, as the same predicate guards a value rendered
+  into a tool result.
 
 ## [0.1.0] — 2026-06-18
 

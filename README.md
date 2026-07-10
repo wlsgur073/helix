@@ -56,8 +56,19 @@ Dual-verify is disabled by default. To enable it, create `~/.helix/config.json` 
 ```
 
 - `mode` — `compare` (independent answer + an agreement map) or `critique` (Codex reviews your answer).
-- `stakesFloor` — skip the metered Codex call below this stakes level (`low` / `medium` / `high`).
-- `model` / `effort` — omit (or `null`) to inherit your `~/.codex/config.toml`; set to override for dual-verify only.
+- `stakesFloor` — skip the metered Codex call below this stakes level (`low` / `medium` / `high` / `xhigh`).
+- `model` / `effort` — omit (or `null`) to inherit your `~/.codex/config.toml`; set to override for
+  dual-verify only. Valid efforts are `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. Support varies
+  by model — `codex debug models` lists what yours accepts.
+- `timeoutMs` — Codex run timeout (default `300000`, clamped to 1 hour). `max` and `ultra` runs can
+  outlast the default; a timeout kills the run *after* the quota is spent, so raise this before using
+  them. `helix_codex_status` always shows the timeout and resolves the model even when inherited (a free
+  `codex doctor --json` probe) — there is no such probe for effort, so an inherited effort prints only
+  the literal `inherited from codex config` with no value, and the `max`/`ultra` advisory note fires only
+  when `effort` is a Helix override, never on the inherited path.
+
+A `mode`, `stakesFloor`, `model` or `effort` value that is present but invalid is ignored with a warning
+on stderr, not silently.
 
 `HELIX_HOME` relocates all state; `HELIX_LEDGER` points the memory ledger elsewhere.
 

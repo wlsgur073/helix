@@ -13192,13 +13192,13 @@ function phraseScoreNorm(query, d) {
   const words = normalizeText(query).split(/\s+/).filter(Boolean);
   let i = 0;
   while (i < words.length && isStopword(words[i])) i += 1;
-  const q = words.slice(i).join(" ");
-  if (q.length === 0) return 0;
-  const minLen = CJK.test(q) ? 2 : 3;
-  if (q.length < minLen) return 0;
-  if (d.includes(q)) return 1;
-  for (let len = q.length - 1; len >= minLen; len -= 1) {
-    if (d.includes(q.slice(0, len))) return len / q.length;
+  const q2 = words.slice(i).join(" ");
+  if (q2.length === 0) return 0;
+  const minLen = CJK.test(q2) ? 2 : 3;
+  if (q2.length < minLen) return 0;
+  if (d.includes(q2)) return 1;
+  for (let len = q2.length - 1; len >= minLen; len -= 1) {
+    if (d.includes(q2.slice(0, len))) return len / q2.length;
   }
   return 0;
 }
@@ -22744,6 +22744,139 @@ var EMPTY_COMPLETION_RESULT = {
   }
 };
 
+// src/config.ts
+import { readFileSync as readFileSync8 } from "node:fs";
+import { homedir } from "node:os";
+import { join as join4 } from "node:path";
+var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
+var DEFAULT_COMPACTION = {
+  auto: false,
+  dirtyRatio: 0.5,
+  minRows: 200,
+  minDirtyBytes: 1048576,
+  graceMs: 864e5,
+  maxBytes: 52428800
+};
+var EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"];
+var MODES = ["compare", "critique"];
+var STAKES = ["low", "medium", "high", "xhigh"];
+var MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
+var MODEL_MAX_LEN = 64;
+function isArgvSafeModel(s) {
+  return s.length <= MODEL_MAX_LEN && MODEL_RE.test(s);
+}
+var SLOW_EFFORTS = ["max", "ultra"];
+var SLOW_EFFORT_TIMEOUT_HINT_MS = 3e5;
+function q(v) {
+  return JSON.stringify(String(v).slice(0, 60));
+}
+var MAX_TIMEOUT_MS = 36e5;
+var DEFAULT_CONFIG = {
+  dualVerify: {
+    enabled: false,
+    mode: "compare",
+    stakesFloor: "high",
+    // Default: inherit the user's ~/.codex/config.toml (no hardcoding, tracks whatever they set
+    // there). Pass -m / -c only when these are set here, to deliberately override codex's own
+    // model/effort for dual-verify specifically.
+    model: null,
+    effort: null,
+    // Codex run timeout (ms). 5 min gives heavy prompts headroom (the old 120s cap timed them out);
+    // the process is tree-killed on timeout so a higher ceiling does not leak a hung run.
+    timeoutMs: 3e5,
+    // Block every non-named egress leg to the external Codex model by default. User opts into risk
+    // per-leg (a human edit, outside model control). Invalid/unknown => 'block'. Named secrets are
+    // override-proof regardless of this map.
+    egressPolicy: { memoryEcho: "block", piiHigh: "block", piiBulk: "block", secretHeuristic: "block", secretEntropy: "block" },
+    // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
+    logContent: false
+  },
+  // Local metrics sensor ON by default ("local logs always, export opt-in"); content-free records.
+  metrics: { enabled: true }
+};
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync8(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function loadConfig(opts = {}) {
+  const projectPath = opts.projectPath ?? join4(process.cwd(), ".helix", "config.json");
+  const globalPath = opts.globalPath ?? join4(homedir(), ".helix", "config.json");
+  const merged = structuredClone(DEFAULT_CONFIG);
+  const seen = /* @__PURE__ */ new Set();
+  const warn = (msg) => {
+    if (!seen.has(msg)) {
+      seen.add(msg);
+      (opts.warn ?? ((m) => process.stderr.write(m + "\n")))(msg);
+    }
+  };
+  for (const path of [globalPath, projectPath]) {
+    const raw = readJson(path);
+    const dv = raw?.dualVerify;
+    if (dv) {
+      if (typeof dv.enabled === "boolean") merged.dualVerify.enabled = dv.enabled;
+      if (dv.mode === "compare" || dv.mode === "critique") merged.dualVerify.mode = dv.mode;
+      else if (dv.mode !== void 0) warn(`helix: invalid dualVerify.mode ${q(dv.mode)} (valid: ${MODES.join(", ")}) -> ignored`);
+      if (dv.stakesFloor === "low" || dv.stakesFloor === "medium" || dv.stakesFloor === "high" || dv.stakesFloor === "xhigh") {
+        merged.dualVerify.stakesFloor = dv.stakesFloor;
+      } else if (dv.stakesFloor !== void 0) {
+        warn(`helix: invalid dualVerify.stakesFloor ${q(dv.stakesFloor)} (valid: ${STAKES.join(", ")}) -> ignored`);
+      }
+      if (dv.model === null || typeof dv.model === "string" && isArgvSafeModel(dv.model)) {
+        merged.dualVerify.model = dv.model;
+      } else if (dv.model !== void 0) {
+        warn(`helix: invalid dualVerify.model ${q(dv.model)} (argv-safe token, <= ${MODEL_MAX_LEN} chars) -> ignored`);
+      }
+      if (dv.effort === null || typeof dv.effort === "string" && EFFORTS.includes(dv.effort)) {
+        merged.dualVerify.effort = dv.effort;
+      } else if (dv.effort !== void 0) {
+        warn(`helix: invalid dualVerify.effort ${q(dv.effort)} (valid: ${EFFORTS.join(", ")}) -> ignored`);
+      }
+      const t = dv.timeoutMs;
+      if (typeof t === "number" && Number.isInteger(t) && t >= 1e3) {
+        merged.dualVerify.timeoutMs = Math.min(t, MAX_TIMEOUT_MS);
+      }
+      const ep = dv.egressPolicy;
+      if (ep && typeof ep === "object") {
+        for (const [key, val] of Object.entries(ep)) {
+          if (!EGRESS_LEGS.includes(key)) {
+            warn(`helix: ignoring unknown dualVerify.egressPolicy key "${key}"`);
+            continue;
+          }
+          if (val === "allow") merged.dualVerify.egressPolicy[key] = "allow";
+          else if (val !== "block") warn(`helix: invalid dualVerify.egressPolicy.${key} "${String(val)}" -> block`);
+        }
+      }
+      if (dv.memoryEgress !== void 0) {
+        warn("helix: dualVerify.memoryEgress was removed; use dualVerify.egressPolicy { memoryEcho, piiHigh, piiBulk, secretHeuristic, secretEntropy }");
+      }
+      if (typeof dv.logContent === "boolean") merged.dualVerify.logContent = dv.logContent;
+    }
+    const m = raw?.metrics;
+    if (m && typeof m === "object" && typeof m.enabled === "boolean") {
+      merged.metrics.enabled = m.enabled;
+    }
+  }
+  return merged;
+}
+function mergeCompaction(raw) {
+  const c = { ...DEFAULT_COMPACTION };
+  const o = raw;
+  if (!o || typeof o !== "object") return c;
+  if (typeof o.auto === "boolean") c.auto = o.auto;
+  if (typeof o.dirtyRatio === "number" && o.dirtyRatio > 0 && o.dirtyRatio <= 1) c.dirtyRatio = o.dirtyRatio;
+  if (typeof o.minRows === "number" && Number.isInteger(o.minRows) && o.minRows >= 0) c.minRows = o.minRows;
+  if (typeof o.minDirtyBytes === "number" && Number.isInteger(o.minDirtyBytes) && o.minDirtyBytes >= 1) c.minDirtyBytes = o.minDirtyBytes;
+  if (typeof o.graceMs === "number" && Number.isInteger(o.graceMs) && o.graceMs >= 0) c.graceMs = o.graceMs;
+  if (typeof o.maxBytes === "number" && Number.isInteger(o.maxBytes) && o.maxBytes > 0) c.maxBytes = o.maxBytes;
+  return c;
+}
+function compactionConfigFromGlobal(home2) {
+  return mergeCompaction(readJson(join4(home2, "config.json"))?.compaction);
+}
+
 // src/verify/agreement-map.ts
 function sentences(answer) {
   return answer.split(/[.\n;]+/).map((s) => s.trim()).filter((s) => s.length > 0);
@@ -23011,10 +23144,10 @@ function appendAudit(path, event) {
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync9 } from "node:fs";
+import { readFileSync as readFileSync10 } from "node:fs";
 
 // src/codex-log.ts
-import { appendFileSync as appendFileSync3, chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync6, readFileSync as readFileSync8, writeFileSync as writeFileSync3 } from "node:fs";
+import { appendFileSync as appendFileSync3, chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync6, readFileSync as readFileSync9, writeFileSync as writeFileSync3 } from "node:fs";
 import { dirname as dirname5 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
@@ -23028,7 +23161,7 @@ function appendCodexLog(path, entry) {
       } catch {
       }
     }
-    const lines = readFileSync8(path, "utf8").split("\n").filter((l) => l !== "");
+    const lines = readFileSync9(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
       writeFileSync3(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
@@ -23154,7 +23287,7 @@ function handleConfirm(store2, args, deps) {
 }
 function codexLogCount(path) {
   try {
-    return readFileSync9(path, "utf8").split("\n").filter((l) => l !== "").length;
+    return readFileSync10(path, "utf8").split("\n").filter((l) => l !== "").length;
   } catch {
     return 0;
   }
@@ -23173,14 +23306,34 @@ async function handleCodexStatus(deps) {
   const auth = AUTH_MODE_LABEL[s.authMode];
   const dualVerify2 = dv.enabled ? `enabled, mode=${dv.mode}` : "disabled";
   const contentLog = dv.logContent ? `ON \u2014 ${deps.codexLogPath} (${codexLogCount(deps.codexLogPath)} entries)` : "OFF \u2014 set dualVerify.logContent=true to record prompts+responses";
-  return ok([
+  let model;
+  if (dv.model !== null) {
+    model = `${dv.model} (helix override)`;
+  } else {
+    const resolved = s.cliFound && s.available ? await deps.resolveModel() : null;
+    model = resolved !== null ? `${resolved} (inherited from codex config)` : "inherited from codex config (unresolved)";
+  }
+  const effort = dv.effort !== null ? `${dv.effort} (helix override)` : "inherited from codex config";
+  const lines = [
     "Helix <-> Codex",
     `- codex CLI:      ${cli}`,
     `- connection:     ${connection}`,
     `- auth mode:      ${auth}`,
     `- dual-verify:    ${dualVerify2}`,
-    `- content log:    ${contentLog}`
-  ].join("\n"));
+    `- model:          ${model}`,
+    `- effort:         ${effort}`,
+    // No "(default)" suffix: HelixConfig does not record whether timeoutMs was set, and printing
+    // provenance we do not track would be a guess.
+    `- timeout:        ${dv.timeoutMs} ms`
+  ];
+  if (dv.effort !== null && SLOW_EFFORTS.includes(dv.effort) && dv.timeoutMs <= SLOW_EFFORT_TIMEOUT_HINT_MS) {
+    lines.push(
+      `  note: ${dv.effort} runs can exceed this timeout; a timeout kills the run after`,
+      "        quota is spent. Raise dualVerify.timeoutMs."
+    );
+  }
+  lines.push(`- content log:    ${contentLog}`);
+  return ok(lines.join("\n"));
 }
 function deciderLeg(v) {
   if (v.legs.includes("secret")) return "secret";
@@ -23245,121 +23398,6 @@ async function handleDualVerify(args, deps) {
     a.divergences.length ? "divergences:\n" + a.divergences.map((d) => datamark(d, "DATA| ")).join("\n") : "no divergences",
     frameClose(nonce)
   ].join("\n"));
-}
-
-// src/config.ts
-import { readFileSync as readFileSync10 } from "node:fs";
-import { homedir } from "node:os";
-import { join as join4 } from "node:path";
-var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
-var DEFAULT_COMPACTION = {
-  auto: false,
-  dirtyRatio: 0.5,
-  minRows: 200,
-  minDirtyBytes: 1048576,
-  graceMs: 864e5,
-  maxBytes: 52428800
-};
-var EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
-var MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
-var MAX_TIMEOUT_MS = 36e5;
-var DEFAULT_CONFIG = {
-  dualVerify: {
-    enabled: false,
-    mode: "compare",
-    stakesFloor: "high",
-    // Default: inherit the user's ~/.codex/config.toml (no hardcoding, tracks whatever they set
-    // there). Pass -m / -c only when these are set here, to deliberately override codex's own
-    // model/effort for dual-verify specifically.
-    model: null,
-    effort: null,
-    // Codex run timeout (ms). 5 min gives heavy prompts headroom (the old 120s cap timed them out);
-    // the process is tree-killed on timeout so a higher ceiling does not leak a hung run.
-    timeoutMs: 3e5,
-    // Block every non-named egress leg to the external Codex model by default. User opts into risk
-    // per-leg (a human edit, outside model control). Invalid/unknown => 'block'. Named secrets are
-    // override-proof regardless of this map.
-    egressPolicy: { memoryEcho: "block", piiHigh: "block", piiBulk: "block", secretHeuristic: "block", secretEntropy: "block" },
-    // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
-    logContent: false
-  },
-  // Local metrics sensor ON by default ("local logs always, export opt-in"); content-free records.
-  metrics: { enabled: true }
-};
-function readJson(path) {
-  try {
-    return JSON.parse(readFileSync10(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function loadConfig(opts = {}) {
-  const projectPath = opts.projectPath ?? join4(process.cwd(), ".helix", "config.json");
-  const globalPath = opts.globalPath ?? join4(homedir(), ".helix", "config.json");
-  const merged = structuredClone(DEFAULT_CONFIG);
-  const seen = /* @__PURE__ */ new Set();
-  const warn = (msg) => {
-    if (!seen.has(msg)) {
-      seen.add(msg);
-      (opts.warn ?? ((m) => process.stderr.write(m + "\n")))(msg);
-    }
-  };
-  for (const path of [globalPath, projectPath]) {
-    const raw = readJson(path);
-    const dv = raw?.dualVerify;
-    if (dv) {
-      if (typeof dv.enabled === "boolean") merged.dualVerify.enabled = dv.enabled;
-      if (dv.mode === "compare" || dv.mode === "critique") merged.dualVerify.mode = dv.mode;
-      if (dv.stakesFloor === "low" || dv.stakesFloor === "medium" || dv.stakesFloor === "high" || dv.stakesFloor === "xhigh") {
-        merged.dualVerify.stakesFloor = dv.stakesFloor;
-      }
-      if (dv.model === null || typeof dv.model === "string" && MODEL_RE.test(dv.model)) {
-        merged.dualVerify.model = dv.model;
-      }
-      if (dv.effort === null || typeof dv.effort === "string" && EFFORTS.includes(dv.effort)) {
-        merged.dualVerify.effort = dv.effort;
-      }
-      const t = dv.timeoutMs;
-      if (typeof t === "number" && Number.isInteger(t) && t >= 1e3) {
-        merged.dualVerify.timeoutMs = Math.min(t, MAX_TIMEOUT_MS);
-      }
-      const ep = dv.egressPolicy;
-      if (ep && typeof ep === "object") {
-        for (const [key, val] of Object.entries(ep)) {
-          if (!EGRESS_LEGS.includes(key)) {
-            warn(`helix: ignoring unknown dualVerify.egressPolicy key "${key}"`);
-            continue;
-          }
-          if (val === "allow") merged.dualVerify.egressPolicy[key] = "allow";
-          else if (val !== "block") warn(`helix: invalid dualVerify.egressPolicy.${key} "${String(val)}" -> block`);
-        }
-      }
-      if (dv.memoryEgress !== void 0) {
-        warn("helix: dualVerify.memoryEgress was removed; use dualVerify.egressPolicy { memoryEcho, piiHigh, piiBulk, secretHeuristic, secretEntropy }");
-      }
-      if (typeof dv.logContent === "boolean") merged.dualVerify.logContent = dv.logContent;
-    }
-    const m = raw?.metrics;
-    if (m && typeof m === "object" && typeof m.enabled === "boolean") {
-      merged.metrics.enabled = m.enabled;
-    }
-  }
-  return merged;
-}
-function mergeCompaction(raw) {
-  const c = { ...DEFAULT_COMPACTION };
-  const o = raw;
-  if (!o || typeof o !== "object") return c;
-  if (typeof o.auto === "boolean") c.auto = o.auto;
-  if (typeof o.dirtyRatio === "number" && o.dirtyRatio > 0 && o.dirtyRatio <= 1) c.dirtyRatio = o.dirtyRatio;
-  if (typeof o.minRows === "number" && Number.isInteger(o.minRows) && o.minRows >= 0) c.minRows = o.minRows;
-  if (typeof o.minDirtyBytes === "number" && Number.isInteger(o.minDirtyBytes) && o.minDirtyBytes >= 1) c.minDirtyBytes = o.minDirtyBytes;
-  if (typeof o.graceMs === "number" && Number.isInteger(o.graceMs) && o.graceMs >= 0) c.graceMs = o.graceMs;
-  if (typeof o.maxBytes === "number" && Number.isInteger(o.maxBytes) && o.maxBytes > 0) c.maxBytes = o.maxBytes;
-  return c;
-}
-function compactionConfigFromGlobal(home2) {
-  return mergeCompaction(readJson(join4(home2, "config.json"))?.compaction);
 }
 
 // src/verify/codex.ts
@@ -23565,6 +23603,34 @@ async function checkCodexStatus(invocation) {
     return { cliFound: false, version: void 0, available: false, authMode: "none", reason: `codex status check failed: ${e.message}` };
   }
 }
+function dig(root, ...keys) {
+  let cur = root;
+  for (const k of keys) {
+    if (typeof cur !== "object" || cur === null || !(k in cur)) return void 0;
+    cur = cur[k];
+  }
+  return cur;
+}
+function interpretDoctorModel(stdout) {
+  let root;
+  try {
+    root = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  const m = dig(root, "checks", "config.load", "details", "model");
+  return typeof m === "string" && isArgvSafeModel(m) ? m : null;
+}
+async function checkCodexModel(invocation) {
+  try {
+    const inv = invocation !== void 0 ? invocation : await resolveCodexInvocation();
+    if (!inv) return null;
+    const r = await runCodex(inv, ["doctor", "--json"], null, 1e4);
+    return interpretDoctorModel(r.stdout);
+  } catch {
+    return null;
+  }
+}
 function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) {
   return async (question, opts = {}) => {
     const inv = await resolveInv();
@@ -23720,6 +23786,7 @@ function buildServer(store2, dualDeps, metrics2) {
   };
   const codexStatusDeps = {
     inspect: () => checkCodexStatus(),
+    resolveModel: () => checkCodexModel(),
     config: dv.config,
     codexLogPath: dv.codexLogPath
   };
