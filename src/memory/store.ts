@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerText, compactLedger, type LedgerPath } from './ledger.js';
+import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerText, compactLedger, planCompaction, serializedBytes, type LedgerPath } from './ledger.js';
+import { cheapGate, dirtyGate } from './compaction-trigger.js';
+import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated } from './history.js';
 import { buildAsOfEvidence } from './asof.js';
 import { findSecrets, redactSecrets } from './secret-scan.js';
@@ -36,6 +38,9 @@ export interface MemoryStoreOptions {
   expansion?: Expansion;
   /** Metrics sink (spec 2026-07-05). Absent => zero emission (tests/bench/library use stay clean). */
   metricsSink?: MetricsSink;
+  /** Resolved auto-compaction config (spec 2026-07-09). Injected by the server from the GLOBAL config
+   *  only; absent => disabled. */
+  compaction?: CompactionConfig;
 }
 
 export interface CommitInput {
@@ -83,6 +88,10 @@ export class MemoryStore {
   /** A4 single-slot recall cache (I5). Reused only on an exact content-identity key match; replaced on
    *  any miss; cleared on self-erase (I8). Per-instance — dies with the store (I6). */
   private rankCache: RecallCacheEntry | null = null;
+
+  /** Once-per-session auto-compaction guard, set on ATTEMPT (spec §4.5) so a failed compaction does
+   *  not retry within the session. */
+  private compactedThisSession = false;
 
   private now(): string { return (this.opts.now ?? (() => new Date().toISOString()))(); }
   private id(): string { return (this.opts.genId ?? (() => `m_${randomUUID()}`))(); }
@@ -258,7 +267,7 @@ export class MemoryStore {
     if (p && isOwned(p.root, p.home)) scopes.push({ ledger: p.ledger, scope: 'project', root: p.root });
 
     const key: ScopeKeyComponent[] = [];
-    const reads: Array<{ scope: MemoryScope; root: string | undefined; text: string; bytes: number; subkey: Buffer | null; readMs: number }> = [];
+    const reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; text: string; bytes: number; subkey: Buffer | null; readMs: number }> = [];
     for (const s of scopes) {
       let buf: Buffer;
       const rt0 = performance.now();
@@ -272,7 +281,7 @@ export class MemoryStore {
       const readMs = performance.now() - rt0;
       const subkey = this.subkeyForLedger(s.ledger);  // I3: resolved fresh from disk, never memoized
       key.push({ scopeId: s.ledger, digest: ledgerDigest(buf), fingerprint: subkeyFingerprint(subkey) });
-      reads.push({ scope: s.scope, root: s.root, text, bytes: buf.length, subkey, readMs });
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, text, bytes: buf.length, subkey, readMs });
     }
 
     if (this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
@@ -303,7 +312,73 @@ export class MemoryStore {
     }
     const artifacts = buildRankArtifacts(scoped.map((s) => s.record));
     this.rankCache = { key, scoped, available, artifacts };   // I5: single slot, atomic replace
+    // Fire the once-per-session auto-compaction on the MISS path only. It returns the projection
+    // computed ABOVE (locals, not the cache), so compaction cannot change what this recall answers:
+    // compactLedger preserves the live projection by construction.
+    this.maybeAutoCompact(reads);
     return { scoped, available, artifacts };
+  }
+
+  /** Auto-compaction (spec 2026-07-09): once per session, on the first ELIGIBLE recall MISS. Evaluates
+   *  cheap gates from free signals first; only then runs planCompaction (the shared classifier) for the
+   *  reclaim branch, so post-compaction reclaimable is exactly zero (self-limiting, no persisted state).
+   *  All errors are swallowed — compaction must never break a recall.
+   *
+   *  The guard is checked ONCE at entry, so every participating scope (global + an owned project) that
+   *  is independently eligible compacts within this one attempt; the guard suppresses a SECOND attempt
+   *  on later recalls, not a second scope in this one.
+   *
+   *  METRIC SEMANTICS (planned vs actual). The gates legitimately reason about a PROJECTION: they ask
+   *  "would a compaction reclaim enough?" from a lock-free snapshot. The emitted metric must not: its
+   *  fields are past tense. So `reclaimedBytes` is the ACTUAL on-disk size delta (statSync before/after),
+   *  and both fields are ZERO on failure — compactLedger writes a tmp and renames, so a throw leaves the
+   *  ledger byte-identical and nothing was reclaimed. `droppedRows` is the PLAN's drop count: the exact
+   *  row delta whenever no concurrent write lands between this lock-free plan and compactLedger's own
+   *  locked re-plan (the common case), and off by that writer's rows otherwise. Making it exact would
+   *  need compactLedger to return the counts it wrote under its lock; the byte delta is exact for free,
+   *  so it is measured rather than projected. */
+  private maybeAutoCompact(reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; text: string; subkey: Buffer | null }>): void {
+    const cfg = this.opts.compaction;
+    if (!cfg || this.compactedThisSession) return;
+    const nowMs = Date.parse(this.now());
+    for (const r of reads) {
+      let mtimeMs = 0; let totalBytes = 0;
+      try { const st = statSync(r.ledger); mtimeMs = st.mtimeMs; totalBytes = st.size; } catch { continue; }
+      const records = parseLedgerText(r.text);
+      // `rows` is the TOTAL PHYSICAL row count for BOTH gates (never liveRows), and `reclaimable` /
+      // `reclaimableBytes` come from ONE planCompaction pass over that SAME array — dirtyGate's
+      // `0 <= reclaimable <= rows` precondition is the caller's to keep.
+      const gate = cheapGate({ rows: records.length, totalBytes, mtimeMs, nowMs, cfg });
+      if (!gate.proceed) continue;
+      // Resolve-once: `r.subkey` was resolved by the read loop and is shared by the eligibility plan
+      // AND the compaction below, so the counted keep-set is the written keep-set. A second resolution
+      // could transiently return null (registry/master read failure), flipping the predicate to the
+      // key-absent `() => true` and preserving forgeries the plan counted as dropped.
+      const keepValidVerify = this.keepValidVerifyFor(r.subkey);
+      const kept = planCompaction(records, { erasedIds: new Set(), keepValidVerify });
+      const reclaimable = records.length - kept.length;
+      const reclaimableBytes = serializedBytes(records) - serializedBytes(kept);
+      if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
+      // Eligible: guard on ATTEMPT (before the call), fire, emit a metric, swallow errors.
+      this.compactedThisSession = true;
+      const started = performance.now();
+      let ok = true;
+      try {
+        compactLedger(r.ledger, { erasedIds: new Set(), keepValidVerify });
+      } catch { ok = false; }
+      const durationMs = performance.now() - started;   // capture BEFORE any metrics I/O
+      // Drop the entry this recall just installed. On SUCCESS the ledger bytes changed, so the
+      // content-identity key would miss anyway (belt and braces). On FAILURE the bytes did NOT change,
+      // and clearing is what forces the next recall to MISS and re-enter this method — where the
+      // once-per-session guard, not a cache hit, is what suppresses the retry. Keep both paths honest.
+      this.rankCache = null;
+      let postBytes = totalBytes;
+      try { postBytes = statSync(r.ledger).size; } catch { /* unreadable => report a zero delta */ }
+      this.opts.metricsSink?.emitCompaction({
+        scope: r.root ? 'project' : 'global', durationMs,
+        droppedRows: ok ? reclaimable : 0, reclaimedBytes: ok ? totalBytes - postBytes : 0, ok,
+      });
+    }
   }
 
   recall(query: string, opts: RecallOptions = {}): RecallResult {
