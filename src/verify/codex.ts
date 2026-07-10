@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { dirname, join, win32 as winPath } from 'node:path';
 import { promisify } from 'node:util';
-import { MAX_TIMEOUT_MS } from '../config.js';
+import { isArgvSafeModel, MAX_TIMEOUT_MS } from '../config.js';
 import { sweepScratchRoot } from './scratch-gc.js';
 
 const execFileAsync = promisify(execFile);
@@ -27,7 +27,8 @@ export interface CodexInvocation { file: string; argsPrefix: string[] }
 
 /**
  * Build the `codex exec` argv: read-only sandbox + ephemeral + final message to a file.
- * The trailing '-' makes codex read the prompt from stdin (codex-cli 0.138 `exec --help`),
+ * The trailing '-' makes codex read the prompt from stdin (re-verified against codex-cli 0.144.1
+ * `exec --help`: --skip-git-repo-check, -s, --ephemeral, -o, -m and -c all still exist),
  * so the question never enters argv — there is no flag-smuggling surface left to guard.
  * model/effort come from user config but still become argv values — keep them argv-safe.
  */
@@ -204,6 +205,58 @@ export async function checkCodexStatus(invocation?: CodexInvocation | null): Pro
     return interpretStatus(v.stdout + v.stderr, l.stdout + l.stderr);
   } catch (e) {
     return { cliFound: false, version: undefined, available: false, authMode: 'none', reason: `codex status check failed: ${(e as Error).message}` };
+  }
+}
+
+/** Walk a plain-object path; undefined on any missing key or non-object hop. Never throws. */
+function dig(root: unknown, ...keys: string[]): unknown {
+  let cur: unknown = root;
+  for (const k of keys) {
+    if (typeof cur !== 'object' || cur === null || !(k in (cur as Record<string, unknown>))) return undefined;
+    cur = (cur as Record<string, unknown>)[k];
+  }
+  return cur;
+}
+
+/**
+ * Pure: the model codex resolved for itself, from `codex doctor --json` STDOUT.
+ *
+ * Feed it stdout ALONE — unlike interpretStatus, one stray stderr byte makes JSON.parse throw.
+ * Deliberately does NOT gate on schemaVersion (a harmless bump must not blind the probe; a real
+ * shape change already degrades to null here) and ignores overallStatus (a failing network check
+ * does not invalidate the resolved model).
+ *
+ * The result is rendered into a tool result the model reads, so it is bounded by isArgvSafeModel:
+ * no whitespace, no newline, no leading dash, <= 64 chars. Nothing instruction-shaped survives, so
+ * the caller can print it without a datamark frame. Any parse failure, missing key, non-string, or
+ * charset violation returns null — "unresolved", never a guess.
+ *
+ * runCodex caps captured stdout at 65_536 bytes (today's report is ~13KB). If the report ever
+ * outgrows the cap the JSON is truncated, JSON.parse throws, and this returns null. Reconstructing
+ * truncated JSON is deliberately not attempted.
+ */
+export function interpretDoctorModel(stdout: string): string | null {
+  let root: unknown;
+  try { root = JSON.parse(stdout); } catch { return null; }
+  // 'config.load' is one literal key, not two hops: doctor's `checks` is a flat map keyed by dotted
+  // check ids (each entry's own `id` field repeats the key). Verified against codex-cli 0.144.1.
+  const m = dig(root, 'checks', 'config.load', 'details', 'model');
+  return typeof m === 'string' && isArgvSafeModel(m) ? m : null;
+}
+
+/**
+ * Real probe through the resolved launcher: `codex doctor --json`, 10s timeout, matching the other
+ * free probes. FREE — no `codex exec`, no inference, no quota. The exit code is not consulted: a
+ * doctor run with a failing check still reports the resolved model. Any failure -> null; never throws.
+ */
+export async function checkCodexModel(invocation?: CodexInvocation | null): Promise<string | null> {
+  try {
+    const inv = invocation !== undefined ? invocation : await resolveCodexInvocation();
+    if (!inv) return null;
+    const r = await runCodex(inv, ['doctor', '--json'], null, 10_000);
+    return interpretDoctorModel(r.stdout);
+  } catch {
+    return null;
   }
 }
 
