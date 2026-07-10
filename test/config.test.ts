@@ -199,6 +199,15 @@ describe('compactionConfigFromGlobal', () => {
     expect(c.graceMs).toBe(86400000);        // negative -> default
     expect(c.minRows).toBe(10);              // valid integer >= 0 accepted
     expect(c.maxBytes).toBe(52428800);       // 0 fails strict >0 -> default
-    expect(c.minDirtyBytes).toBe(1048576);   // negative fails >=0 -> default
+    expect(c.minDirtyBytes).toBe(1048576);   // negative fails >=1 -> default
+  });
+
+  it('rejects minDirtyBytes: 0 (it would make the byte branch always fire) and accepts 1', () => {
+    const zero = tmpDir();
+    writeFileSync(join(zero, 'config.json'), JSON.stringify({ compaction: { minDirtyBytes: 0 } }));
+    expect(compactionConfigFromGlobal(zero).minDirtyBytes).toBe(1048576); // 0 out of [1,inf) -> default
+    const one = tmpDir();
+    writeFileSync(join(one, 'config.json'), JSON.stringify({ compaction: { minDirtyBytes: 1 } }));
+    expect(compactionConfigFromGlobal(one).minDirtyBytes).toBe(1);        // inclusive lower bound accepted
   });
 });

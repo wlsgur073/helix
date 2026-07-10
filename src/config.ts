@@ -15,7 +15,7 @@ export interface CompactionConfig {
   auto: boolean;
   dirtyRatio: number;   // (0, 1]
   minRows: number;      // integer >= 0
-  minDirtyBytes: number; // integer >= 0
+  minDirtyBytes: number; // integer >= 1
   graceMs: number;      // integer >= 0
   maxBytes: number;     // integer > 0
 }
@@ -159,7 +159,10 @@ function mergeCompaction(raw: unknown): CompactionConfig {
   if (typeof o.auto === 'boolean') c.auto = o.auto;
   if (typeof o.dirtyRatio === 'number' && o.dirtyRatio > 0 && o.dirtyRatio <= 1) c.dirtyRatio = o.dirtyRatio;
   if (typeof o.minRows === 'number' && Number.isInteger(o.minRows) && o.minRows >= 0) c.minRows = o.minRows;
-  if (typeof o.minDirtyBytes === 'number' && Number.isInteger(o.minDirtyBytes) && o.minDirtyBytes >= 0) c.minDirtyBytes = o.minDirtyBytes;
+  // >= 1, not >= 0: `reclaimableBytes >= 0` is a tautology, so minDirtyBytes: 0 would make
+  // dirtyGate's absolute branch fire on a perfectly CLEAN ledger every grace window. Mirrors the
+  // dirtyRatio (0,1] bound, which excludes 0 for exactly the same always-fire reason.
+  if (typeof o.minDirtyBytes === 'number' && Number.isInteger(o.minDirtyBytes) && o.minDirtyBytes >= 1) c.minDirtyBytes = o.minDirtyBytes;
   if (typeof o.graceMs === 'number' && Number.isInteger(o.graceMs) && o.graceMs >= 0) c.graceMs = o.graceMs;
   if (typeof o.maxBytes === 'number' && Number.isInteger(o.maxBytes) && o.maxBytes > 0) c.maxBytes = o.maxBytes;
   return c;
