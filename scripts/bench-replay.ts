@@ -208,9 +208,10 @@ export interface ReportSummary {
   replayCurve: Array<{ bucket: string; scope: string; caller: string; n: number; p50: number; p95: number }>;
   skipped: { malformed: number; newerSchema: number };
   verdict: {
-    windowDays: number; recallN: number; recallP95: number | null;
+    windowDays: number; recallOkN: number; recallFailN: number; recallP95: number | null;
     replayN: number; replayP95: number | null;
-    latestRows: number | null; latestBytes: number | null; triggered: boolean;
+    latestRows: number | null; latestBytes: number | null;
+    forgedDrops: number; state: 'exceeded' | 'below' | 'insufficient';
   };
 }
 
@@ -221,9 +222,11 @@ const TRIGGER_MS = 150; // roadmap 2026-06-13 §2: migrate when measured recall 
 export function summarizeMetrics(lines: Iterable<string>, opts: { sinceMs: number; nowMs: number }): ReportSummary {
   const cutoff = opts.nowMs - opts.sinceMs;
   const opAll = new Map<string, { all: number[]; errors: number }>();
-  const opWindow = new Map<string, number[]>();
   const replayBuckets = new Map<string, number[]>();
   const replayWindow: number[] = [];
+  const recallOkWin: number[] = [];
+  const recallFailWin: number[] = [];
+  let forgedDrops = 0;
   let latestReplay: { ts: number; rows: number; bytes: number } | null = null;
   const skipped = { malformed: 0, newerSchema: 0 };
 
@@ -235,15 +238,13 @@ export function summarizeMetrics(lines: Iterable<string>, opts: { sinceMs: numbe
     const ts = typeof row.ts === 'string' ? Date.parse(row.ts) : NaN;
     if (row.kind === 'op' && typeof row['gen_ai.tool.name'] === 'string' && typeof row.duration_ms === 'number' && !Number.isNaN(ts)) {
       const tool = row['gen_ai.tool.name'];
+      const ok = row.ok !== false;
       const slot = opAll.get(tool) ?? { all: [], errors: 0 };
       slot.all.push(row.duration_ms);
-      if (row.ok === false) slot.errors++;
+      if (!ok) slot.errors++;
       opAll.set(tool, slot);
-      if (ts >= cutoff) {
-        const w = opWindow.get(tool) ?? [];
-        w.push(row.duration_ms);
-        opWindow.set(tool, w);
-      }
+      // successful-only window for the trigger; failures counted separately (E2)
+      if (ts >= cutoff && tool === 'helix_memory_recall') { (ok ? recallOkWin : recallFailWin).push(row.duration_ms); }
     } else if (row.kind === 'replay' && typeof row.rows === 'number' && typeof row.parse_ms === 'number' && typeof row.project_ms === 'number' && !Number.isNaN(ts)) {
       const total = row.parse_ms + (row.project_ms as number);
       const bucket = row.rows < 1000 ? '<1k' : row.rows < 10_000 ? '1k-10k' : row.rows < 50_000 ? '10k-50k' : '>=50k';
@@ -254,6 +255,9 @@ export function summarizeMetrics(lines: Iterable<string>, opts: { sinceMs: numbe
       if (ts >= cutoff) replayWindow.push(total);
       const bytes = typeof row.bytes === 'number' ? row.bytes : 0;
       if (!latestReplay || ts >= latestReplay.ts) latestReplay = { ts, rows: row.rows, bytes };
+    } else if (row.kind === 'compaction' && typeof row.duration_ms === 'number' && !Number.isNaN(ts)) {
+      // E2: a legitimate B2 compaction row -- NOT corruption. Sum the content-free forged-drop count.
+      if (typeof row.dropped_forged_verifies === 'number' && ts >= cutoff) forgedDrops += row.dropped_forged_verifies;
     } else {
       skipped.malformed++;
     }
@@ -270,17 +274,22 @@ export function summarizeMetrics(lines: Iterable<string>, opts: { sinceMs: numbe
     return { bucket, scope, caller, n: sorted.length, p50: percentileNearestRank(sorted, 50), p95: percentileNearestRank(sorted, 95) };
   });
 
-  const recallWin = (opWindow.get('helix_memory_recall') ?? []).sort((a, b) => a - b);
   const replayWin = [...replayWindow].sort((a, b) => a - b);
-  const recallP95 = recallWin.length ? percentileNearestRank(recallWin, 95) : null;
   const replayP95 = replayWin.length ? percentileNearestRank(replayWin, 95) : null;
+  const recallOk = [...recallOkWin].sort((a, b) => a - b);
+  const recallP95 = recallOk.length ? percentileNearestRank(recallOk, 95) : null;
+  const state: 'exceeded' | 'below' | 'insufficient' =
+    recallOk.length === 0 ? 'insufficient'
+    : recallP95! > TRIGGER_MS ? 'exceeded'
+    : 'below';
   return {
     ops, replayCurve, skipped,
     verdict: {
-      windowDays: opts.sinceMs / 86_400_000, recallN: recallWin.length, recallP95,
+      windowDays: opts.sinceMs / 86_400_000,
+      recallOkN: recallOk.length, recallFailN: recallFailWin.length, recallP95,
       replayN: replayWin.length, replayP95,
       latestRows: latestReplay?.rows ?? null, latestBytes: latestReplay?.bytes ?? null,
-      triggered: recallP95 !== null && recallP95 > TRIGGER_MS,
+      forgedDrops, state,
     },
   };
 }
@@ -310,9 +319,16 @@ export async function runReport(opts: { file?: string; sinceDays: number }): Pro
   }
   const v = s.verdict;
   process.stdout.write(`\nverdict (window: last ${v.windowDays} days; current size: rows=${v.latestRows ?? '?'} bytes=${v.latestBytes ?? '?'})\n`);
-  process.stdout.write(`  recall op p95: ${v.recallP95 === null ? 'no samples' : `${v.recallP95.toFixed(1)}ms (n=${v.recallN}${v.recallN < 20 ? ', insufficient' : ''})`} vs trigger ${TRIGGER_MS}ms\n`);
+  process.stdout.write(`  recall (successful): ${v.recallOkN} samples${v.recallFailN ? `, ${v.recallFailN} failed` : ''}\n`);
+  const cmp = v.recallP95 === null ? '(no successful samples)' : `${v.recallP95.toFixed(1)}ms vs trigger ${TRIGGER_MS}ms`;
+  process.stdout.write(`  recall op p95: ${cmp}\n`);
   process.stdout.write(`  replay p95:    ${v.replayP95 === null ? 'no samples' : `${v.replayP95.toFixed(1)}ms (n=${v.replayN})`}\n`);
-  process.stdout.write(v.triggered ? `  TRIGGER EXCEEDED -- evaluate the Stage-B SQLite migration (roadmap 2026-06-13 section 6)\n` : `  below trigger -- no action\n`);
+  if (v.forgedDrops > 0) process.stdout.write(`  forged verify rows dropped by compaction (window): ${v.forgedDrops}\n`);
+  process.stdout.write(
+    v.state === 'exceeded' ? `  TRIGGER EXCEEDED -- evaluate the Stage-B SQLite migration (roadmap 2026-06-13 section 6)\n`
+    : v.state === 'below' ? `  below trigger -- no action\n`
+    : `  insufficient evidence (${v.recallOkN} successful recalls) -- no judgment\n`,
+  );
 }
 
 // --- CLI entry ---
