@@ -15,7 +15,9 @@ export interface LedgerItem {
 export interface DetectEchoOptions {
   /** Minimum verbatim run length (normalized chars) that counts as an echo. */
   k?: number;
-  /** Cap on total payload chars scanned (DoS bound). */
+  /** Cap on payload chars scanned PER FORM (DoS bound). detectEcho slices each element of `forms`
+   *  to this length independently, so the real total bound across a call is `forms.length × maxScan`
+   *  (classifyEgress passes up to 2 forms: raw and outbound), not maxScan alone. */
   maxScan?: number;
 }
 

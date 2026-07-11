@@ -393,7 +393,7 @@ describe('G1: the egress gate scans the EXACT outbound bytes', () => {
     expect(v.echoMemoryIds).toEqual(['m_secret']);      // today: []
   });
 
-  it('blocks a full-width confusable memory', () => {
+  it('blocks a full-width confusable memory — NFKC control, pre-existing', () => {
     const fw = MEMO.replace(/[A-Z ]/g, (c) => (c === ' ' ? '　' : String.fromCodePoint(c.codePointAt(0)! + 0xfee0)));
     const v = classifyEgress({ texts: [fw], outbound: normalizeUntrusted(fw), ledger, policy: ALL('block') });
     expect(v.decision).toBe('blocked');

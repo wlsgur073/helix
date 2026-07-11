@@ -351,4 +351,28 @@ describe('G1: what the gate scanned is what the runner is sent', () => {
     expect(called).toBe(false);
     expect(result.egress?.echoMemoryIds).toEqual(['m_secret']);
   });
+
+  // Regression lock for the "build once, never rebuild" invariant (8a3bb1a): the string handed to
+  // deps.runner must be BYTE-IDENTICAL to result.promptSent (what the gate scanned and what the opt-in
+  // content log records), and it must differ from the raw question whenever normalizeUntrusted actually
+  // changes it. Every other prompt assertion in this file (e.g. 'which db?') uses a pure-ASCII question
+  // where normalizeUntrusted is the identity, so none of them can distinguish "sent the already-built
+  // prompt" from "rebuilt the raw question at the call site" -- a bug this exact shape shipped once
+  // already (8a3bb1a) and every existing test stayed green through it. This question contains a fence
+  // run ("===") that normalizeUntrusted breaks ("= = ="), so a rebuild-at-send-site regression is
+  // observable: the runner would see the untouched raw question instead.
+  it('compare mode: the runner receives the SAME bytes the gate scanned, not a rebuilt raw question', async () => {
+    const question = 'what does === mean in js?';
+    let runnerSaw: string | null = null;
+    const result = await dualVerify(
+      { question, helixAnswer: 'strict equality, no type coercion' },
+      deps({
+        config: enabled(),   // mode: 'compare'
+        runner: async (prompt: string) => { runnerSaw = prompt; return { ok: true, answer: 'x' }; },
+      }),
+    );
+    expect(result.outcome).toBe('sent');
+    expect(runnerSaw).toBe(result.promptSent);   // byte-identical to what the audit/content log records
+    expect(runnerSaw).not.toBe(question);        // and NOT the raw, un-normalized question
+  });
 });
