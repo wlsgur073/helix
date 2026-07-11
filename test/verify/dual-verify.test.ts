@@ -310,3 +310,45 @@ describe('persistedReason (content-free reason for the durable sinks)', () => {
     expect(persistedReason({ outcome: 'sent', reason: undefined })).toBeUndefined();
   });
 });
+
+describe('G1: what the gate scanned is what the runner is sent', () => {
+  it('a zero-width-padded memory is refused and NEVER reaches the runner', async () => {
+    const MEMO = 'PROJECT ORION LAUNCH CODE IS ALPHA';
+    const zw = MEMO.split('').join('​');
+    let runnerSaw: string | null = null;
+    const result = await dualVerify(
+      { question: `please review: ${zw}`, helixAnswer: 'looks fine' },
+      deps({
+        config: enabled(),      // every egress leg already 'block' in this helper
+        runner: async (prompt: string) => { runnerSaw = prompt; return { ok: true, answer: 'ok' }; },
+        echo: { mode: 'enforce', ledgerTexts: () => [{ id: 'm_secret', content: MEMO }] },
+      }),
+    );
+    expect(result.outcome).toBe('refused');
+    expect(result.ran).toBe(false);
+    expect(runnerSaw).toBeNull();            // today: the runner receives the reconstituted memory
+  });
+
+  // Mutation-testing lock (task-2 Step 7, Isolate-B at the dual-verify caller level): compare mode's
+  // `outbound` is built from `question` ALONE (see dual-verify.ts) -- helixAnswer is never transmitted
+  // in that mode. A ZWSP-padded echo hidden ONLY in helixAnswer is therefore invisible to any
+  // outbound-only scan, by construction. This still must block: Helix treats `texts` (both fields)
+  // conservatively for detection/audit even though only `outbound` leaves the machine in this mode.
+  // Only the raw-form scan with the Cf-strip (normalizeForMatch) active can catch it here.
+  it('compare mode still blocks an echo hidden only in helixAnswer, though it is never sent', async () => {
+    const MEMO = 'PROJECT ORION LAUNCH CODE IS ALPHA';
+    const zw = MEMO.split('').join('​');
+    let called = false;
+    const result = await dualVerify(
+      { question: 'what do you think?', helixAnswer: `echoing back: ${zw}` },
+      deps({
+        config: enabled(),   // mode: 'compare' -- helixAnswer is not part of the sent prompt
+        runner: async () => { called = true; return { ok: true, answer: 'ok' }; },
+        echo: { mode: 'enforce', ledgerTexts: () => [{ id: 'm_secret', content: MEMO }] },
+      }),
+    );
+    expect(result.outcome).toBe('refused');
+    expect(called).toBe(false);
+    expect(result.egress?.echoMemoryIds).toEqual(['m_secret']);
+  });
+});

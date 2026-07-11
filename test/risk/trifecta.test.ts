@@ -4,6 +4,7 @@ import {
   type LedgerItem, type EgressInput, type EgressVerdict, type EmissionFlag,
 } from '../../src/risk/trifecta.js';
 import type { EgressPolicy, EgressLeg } from '../../src/config.js';
+import { normalizeUntrusted } from '../../src/memory/content-frame.js';
 
 const item = (id: string, content: string): LedgerItem => ({ id, content });
 
@@ -61,12 +62,15 @@ describe('detectEcho', () => {
 const ALL = (v: 'block' | 'allow'): EgressPolicy => ({ memoryEcho: v, piiHigh: v, piiBulk: v, secretHeuristic: v, secretEntropy: v });
 
 describe('classifyEgress', () => {
-  const clean = (over: Partial<EgressInput>): EgressInput => ({
-    texts: ['what is the capital of France?'],
-    ledger: [],
-    policy: ALL('block'),
-    ...over,
-  });
+  const clean = (over: Partial<EgressInput> = {}): EgressInput => {
+    const texts = over.texts ?? ['hello', 'world'];
+    return {
+      texts,
+      outbound: over.outbound ?? normalizeUntrusted(texts.join('\n')),
+      ledger: over.ledger ?? [],
+      policy: over.policy ?? ALL('block'),
+    };
+  };
 
   it('passes clean content under both policies with no legs', () => {
     expect(classifyEgress(clean({ policy: ALL('block') })).decision).toBe('pass');
@@ -195,7 +199,7 @@ describe('classifyEgress scans what is SENT (confusable normalization)', () => {
   const ZW_KEY = 'key is sk​-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34';   // zero-width split
 
   const at = (texts: string[], policy: EgressPolicy): EgressVerdict =>
-    classifyEgress({ texts, ledger: [], policy });
+    classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy });
 
   it('a full-width card is blocked (NFKC folds it into a live card in the prompt)', () => {
     const v = at([FW_CARD], ALL('block'));
@@ -244,11 +248,15 @@ describe('classifyEgress leg dominance (a blocked leg is never suppressed by an 
   // Decision precedence in classifyEgress (named secrets sit above all of these, deny-dominant).
   const ORDER: EgressLeg[] = ['memoryEcho', 'piiHigh', 'secretHeuristic', 'secretEntropy', 'piiBulk'];
 
-  const input = (legs: EgressLeg[], policy: EgressPolicy): EgressInput => ({
-    texts: ['q: status?', legs.map((l) => FRAG[l]).join(' ')],
-    ledger: legs.includes('memoryEcho') ? [ECHO_ITEM] : [],
-    policy,
-  });
+  const input = (legs: EgressLeg[], policy: EgressPolicy): EgressInput => {
+    const texts = ['q: status?', legs.map((l) => FRAG[l]).join(' ')];
+    return {
+      texts,
+      outbound: normalizeUntrusted(texts.join('\n')),
+      ledger: legs.includes('memoryEcho') ? [ECHO_ITEM] : [],
+      policy,
+    };
+  };
 
   // Cross-product: for every pair where the ALLOWED leg outranks the BLOCKED one, the block wins.
   for (const [i, allowed] of ORDER.entries()) {
@@ -276,8 +284,10 @@ describe('classifyEgress leg dominance (a blocked leg is never suppressed by an 
   });
 
   it('a named secret still dominates every allowed leg', () => {
+    const texts = ['key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34 ' + FRAG.memoryEcho + ' ' + FRAG.piiHigh];
     const v = classifyEgress({
-      texts: ['key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34 ' + FRAG.memoryEcho + ' ' + FRAG.piiHigh],
+      texts,
+      outbound: normalizeUntrusted(texts.join('\n')),
       ledger: [ECHO_ITEM],
       policy: ALL('allow'),
     });
@@ -322,13 +332,15 @@ describe('classifyEgress leg dominance (a blocked leg is never suppressed by an 
   });
 
   it('a named secret reports decidedBy=named (override-proof)', () => {
-    const v = classifyEgress({ texts: ['key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34'], ledger: [], policy: ALL('allow') });
+    const texts = ['key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34'];
+    const v = classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy: ALL('allow') });
     expect(v.decidedBy).toBe('named');
   });
 
   it('the high-severity label counts HIGH-severity kinds only', () => {
     // card (high) + a single email (low) -> one high-severity kind, not two.
-    const v = classifyEgress({ texts: ['card 4111 1111 1111 1111 and kim@example.com'], ledger: [], policy: ALL('block') });
+    const texts = ['card 4111 1111 1111 1111 and kim@example.com'];
+    const v = classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy: ALL('block') });
     expect(v.decision).toBe('blocked');
     expect(v.reason).toContain('high-severity PII (1 kinds)');
     expect(v.piiKinds).toEqual(expect.arrayContaining(['credit_card', 'email']));   // audit keeps both
@@ -362,10 +374,104 @@ describe('classifyEmission', () => {
   });
 });
 
+describe('G1: the egress gate scans the EXACT outbound bytes', () => {
+  const MEMO = 'PROJECT ORION LAUNCH CODE IS ALPHA';   // >= k (24)
+  const ledger = [{ id: 'm_secret', content: MEMO }];
+
+  it('blocks a zero-width-padded memory that the outbound normalizer reconstitutes', () => {
+    const zw = MEMO.split('').join('​');           // invisible char between every letter
+    const outbound = normalizeUntrusted(zw);            // what dual-verify will actually send
+    expect(outbound).toContain(MEMO);                   // sanity: it IS reconstituted on the wire
+
+    const v = classifyEgress({
+      texts: ['please review', zw],
+      outbound,
+      ledger,
+      policy: ALL('block'),
+    });
+    expect(v.decision).toBe('blocked');                 // today: 'pass'
+    expect(v.echoMemoryIds).toEqual(['m_secret']);      // today: []
+  });
+
+  it('blocks a full-width confusable memory', () => {
+    const fw = MEMO.replace(/[A-Z ]/g, (c) => (c === ' ' ? '　' : String.fromCodePoint(c.codePointAt(0)! + 0xfee0)));
+    const v = classifyEgress({ texts: [fw], outbound: normalizeUntrusted(fw), ledger, policy: ALL('block') });
+    expect(v.decision).toBe('blocked');
+    expect(v.echoMemoryIds).toEqual(['m_secret']);
+  });
+
+  it('still blocks the plain (unpadded) echo — the control', () => {
+    const v = classifyEgress({ texts: [MEMO], outbound: normalizeUntrusted(MEMO), ledger, policy: ALL('block') });
+    expect(v.decision).toBe('blocked');
+  });
+
+  it('a clean payload with no echo still passes', () => {
+    const q = 'what is the capital of France';
+    expect(classifyEgress({ texts: [q], outbound: normalizeUntrusted(q), ledger, policy: ALL('block') }).decision).toBe('pass');
+  });
+});
+
+// Mutation-testing lock (task-2 Step 7): the two G1 defenses above -- (A) scanning the outbound form
+// in classifyEgress, and (B) the Cf-strip inside normalizeForMatch -- are REDUNDANT for the ZWSP/
+// full-width cases above (either alone still catches them, since normalizeUntrusted already strips Cf
+// before `outbound` ever reaches normalizeForMatch). Reverting either A or B alone left the suite above
+// green; only reverting both went red. That is a real gap: it means the suite above never independently
+// proved either defense necessary. These two cases close it, each engineered so exactly ONE defense can
+// possibly catch it.
+describe('G1 mutation lock: each defense independently matters (not just redundantly)', () => {
+  const MEMO = 'PROJECT ORION LAUNCH CODE IS ALPHA';
+  const ledger = [{ id: 'm_secret', content: MEMO }];
+
+  it('Isolate-A: only scanning the outbound (fence-broken) form catches this — no Cf chars involved', () => {
+    // The ledger memory already reads as a fence-broken string (single spaces between the dashes). The
+    // attacker's raw payload carries the SAME prefix/suffix but with an unbroken 3-dash run, which
+    // normalizeForMatch (NFKC + Cf-strip + casefold + ws-collapse) does NOT touch -- dashes are not
+    // \p{Cc}/\p{Cf} and not \s. Only normalizeUntrusted's fence-break (which built `outbound`) turns "---"
+    // into "- - -", which then matches. The prefix/suffix are deliberately SHORT and mutually distinct (9
+    // and 10 normalized chars) so neither alone reaches k=24 and no window can match without spanning the
+    // dash run -- verified empirically: a same-shape construction with a long shared tail matched via that
+    // tail alone regardless of fence-breaking, which would have silently made this NOT isolate anything.
+    // This case has zero Cf/confusable chars, so the Cf-strip (Defense B) cannot be what catches it -- it
+    // isolates Defense A (scanning the outbound form) on its own.
+    const PREFIX = 'zulu mesa';
+    const SUFFIX = 'kilo tango';
+    const FENCE_MEMO = `${PREFIX} - - - ${SUFFIX}`;
+    const fenceLedger = [{ id: 'm_fence', content: FENCE_MEMO }];
+    const attackerRaw = `${PREFIX} --- ${SUFFIX}`;
+    const v = classifyEgress({
+      texts: [attackerRaw],
+      outbound: normalizeUntrusted(attackerRaw),
+      ledger: fenceLedger,
+      policy: ALL('block'),
+    });
+    expect(v.decision).toBe('blocked');
+    expect(v.echoMemoryIds).toEqual(['m_fence']);
+  });
+
+  it('Isolate-B: only the raw form (Cf-stripped) catches this — the echo never reaches outbound scope', () => {
+    // Mirrors dual-verify's compare mode, where `outbound` is built from the question ALONE (helixAnswer
+    // is never transmitted to Codex in that mode -- see dual-verify.ts). A ZWSP-padded memory hidden in
+    // the SECOND text element is invisible to any outbound-only scan, by construction: no fence-break, no
+    // Cf-strip upstream of `outbound` can reveal text that was never included in `outbound` at all. Only a
+    // raw-form scan with the Cf-strip (Defense B) active reconstructs it. This isolates Defense B on its
+    // own -- Defense A (scanning outbound) is powerless here no matter how it is implemented.
+    const zw = MEMO.split('').join('​');
+    const question = 'what do you think?';
+    const v = classifyEgress({
+      texts: [question, `echoing back: ${zw}`],
+      outbound: normalizeUntrusted(question),   // faithfully excludes the second text element
+      ledger,
+      policy: ALL('block'),
+    });
+    expect(v.decision).toBe('blocked');
+    expect(v.echoMemoryIds).toEqual(['m_secret']);
+  });
+});
+
 describe('EH-4: egress hex-literal exemption + credential proximity guard', () => {
   const SHA = 'da39a3ee5e6b4b0d3255bfef95601890afd80709';
   const block = (texts: string[], policy: EgressPolicy = ALL('block')): string =>
-    classifyEgress({ texts, ledger: [], policy }).decision;
+    classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy }).decision;
 
   it('PASS: a bare git SHA / digest with no credential keyword (hex-exempt)', () => {
     expect(block([`fixed in commit ${SHA}`])).toBe('pass');
@@ -401,12 +507,14 @@ describe('EH-4: egress hex-literal exemption + credential proximity guard', () =
   });
 
   it('secretEntropy:allow releases a keyword-guarded hex too', () => {
-    const v = classifyEgress({ texts: [`secret ${SHA}`], ledger: [], policy: { ...ALL('block'), secretEntropy: 'allow' } });
+    const texts = [`secret ${SHA}`];
+    const v = classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy: { ...ALL('block'), secretEntropy: 'allow' } });
     expect(v.decision).toBe('allowed_override');
   });
 
   it('audit: a hex-exempt pass records the secret leg with a content-free reason', () => {
-    const v = classifyEgress({ texts: [`fixed in commit ${SHA}`], ledger: [], policy: ALL('block') });
+    const texts = [`fixed in commit ${SHA}`];
+    const v = classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy: ALL('block') });
     expect(v.decision).toBe('pass');
     expect(v.legs).toContain('secret');
     expect(v.reason).not.toContain(SHA);

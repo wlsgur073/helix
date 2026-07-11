@@ -3,6 +3,7 @@ import { detectSecret } from '../../src/memory/secret-scan.js';
 import { detectPII } from '../../src/memory/pii-scan.js';
 import { classifyEgress, classifyEmission } from '../../src/risk/trifecta.js';
 import type { EgressPolicy } from '../../src/config.js';
+import { normalizeUntrusted } from '../../src/memory/content-frame.js';
 
 // EH-1 Task 2: egress policy is now per-leg. These characterization tests exercise the
 // entropy / high-PII legs, both of which remain policy-overridable; ALL() sets every leg uniformly.
@@ -34,11 +35,13 @@ describe('J1 audit — secret egress is now confidence-tiered (J1-11 FIXED)', ()
   const sha = 'da39a3ee5e6b4b0d3255bfef95601890afd80709';
   it('EH-4 (J1-1 FIXED at egress): a bare hex literal no longer trips the egress block — passes by default', () => {
     const texts = [`the fix landed in commit ${sha}`];
-    expect(classifyEgress({ texts, ledger: [], policy: ALL('block') }).decision).toBe('pass');
-    expect(classifyEgress({ texts, ledger: [], policy: ALL('allow') }).decision).toBe('pass');
+    const outbound = normalizeUntrusted(texts.join('\n'));
+    expect(classifyEgress({ texts, outbound, ledger: [], policy: ALL('block') }).decision).toBe('pass');
+    expect(classifyEgress({ texts, outbound, ledger: [], policy: ALL('allow') }).decision).toBe('pass');
   });
   it('a NAMED secret stays override-proof: blocked even under policy=allow', () => {
-    const v = classifyEgress({ texts: ['key sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34'], ledger: [], policy: ALL('allow') });
+    const texts = ['key sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34'];
+    const v = classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy: ALL('allow') });
     expect(v.decision).toBe('blocked');
     expect(v.legs).toContain('secret');
   });
@@ -52,10 +55,12 @@ describe('J1 audit — pii-scan national_id now validated (J1-5 IMPROVED)', () =
   it('RESIDUAL: a structurally-VALID SSN shape (100-20-3000) still flags — 3-2-4 has no checksum', () => {
     // Honest limitation: SSN has no check digit, so a coincidental valid-structure number still
     // matches. The egress consequence is policy-overridable (high-PII is gated, not override-proof).
-    const v = classifyEgress({ texts: ['part number 100-20-3000 in stock'], ledger: [], policy: ALL('block') });
+    const texts = ['part number 100-20-3000 in stock'];
+    const outbound = normalizeUntrusted(texts.join('\n'));
+    const v = classifyEgress({ texts, outbound, ledger: [], policy: ALL('block') });
     expect(v.decision).toBe('blocked');
     expect(v.piiKinds).toContain('national_id');
-    expect(classifyEgress({ texts: ['part number 100-20-3000 in stock'], ledger: [], policy: ALL('allow') }).decision)
+    expect(classifyEgress({ texts, outbound, ledger: [], policy: ALL('allow') }).decision)
       .toBe('allowed_override'); // override-able
   });
 });

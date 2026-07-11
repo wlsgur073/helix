@@ -90,12 +90,19 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
     return { ran: false, attempted: false, outcome: 'skipped', reason: `stakes '${params.stakes}' below configured floor '${floor}'` };
   }
 
-  // Outbound egress firewall (S1): classifyEgress subsumes the old secret-only test and adds PII +
-  // memory-echo legs. A NAMED secret blocks regardless of policy (deny-dominant); every other leg is
-  // gated per-leg by dualVerify.egressPolicy. Free, local, pre-spawn.
+  // Build the EXACT outbound payload first, then gate it. The gate must clear the bytes that actually
+  // leave the machine (G1) -- scanning a stand-in is how the echo leg was bypassed.
+  const mode = deps.config.dualVerify.mode;
+  const prompt = mode === 'critique'
+    ? buildCritiquePrompt(params.question, params.helixAnswer)
+    : normalizeUntrusted(params.question);
+
+  // Outbound egress firewall (S1): secret / PII / memory-echo legs. A NAMED secret blocks regardless of
+  // policy (deny-dominant); every other leg is gated per-leg by dualVerify.egressPolicy. Free, pre-spawn.
   const ledger = deps.echo.mode === 'enforce' ? deps.echo.ledgerTexts() : null;
   const verdict = classifyEgress({
     texts: [params.question, params.helixAnswer],
+    outbound: prompt,
     ledger,
     policy: deps.config.dualVerify.egressPolicy,
   });
@@ -108,15 +115,8 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
     return { ran: false, attempted: false, outcome: 'unavailable', reason: avail.reason ?? 'codex unavailable', egress: verdict };
   }
 
-  // Past the gates: the next call spends the user's Codex quota (metered).
-  // SEND EXACTLY WHAT THE GATE SCANNED. classifyEgress scans the raw AND the normalized form of the
-  // payload; critique mode normalizes inside buildCritiquePrompt, but agreement mode used to ship the
-  // RAW question — so what left the machine could differ from what was inspected. normalizeUntrusted
-  // is idempotent, so this is a no-op for critique and closes the raw path for agreement.
-  const mode = deps.config.dualVerify.mode;
-  const prompt = mode === 'critique'
-    ? buildCritiquePrompt(params.question, params.helixAnswer)
-    : normalizeUntrusted(params.question);
+  // Past the gates: the next call spends the user's Codex quota (metered). `prompt` is the byte-identical
+  // string the gate just cleared -- never rebuild it here.
   const res = await deps.runner(prompt, {
     model: deps.config.dualVerify.model,
     effort: deps.config.dualVerify.effort,

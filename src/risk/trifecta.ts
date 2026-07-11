@@ -5,7 +5,6 @@
 
 import { findSecrets } from '../memory/secret-scan.js';
 import { detectPII, type PiiKind } from '../memory/pii-scan.js';
-import { normalizeUntrusted } from '../memory/content-frame.js';
 import type { EgressPolicy, EgressLeg } from '../config.js';
 
 export interface LedgerItem {
@@ -24,35 +23,40 @@ const DEFAULT_K = 24;
 const DEFAULT_MAX_SCAN = 20_000;
 const PER_ITEM_CAP = 10_000;
 
-/** Match-only normalization: NFKC + casefold + whitespace-collapse. NOT normalizeUntrusted
- *  (which mutates fence runs for framing). Purpose here is comparison, not safe display. */
+/** Match-only normalization: NFKC + strip control/format chars + casefold + whitespace-collapse. NOT
+ *  normalizeUntrusted (which also breaks fence runs, for safe display).
+ *
+ *  The Cf strip is load-bearing. normalizeUntrusted (the OUTBOUND normalizer) removes `\p{Cc}\p{Cf}`;
+ *  this one used to keep them, because JS `\s` does not match U+200B. So a memory interleaved with
+ *  zero-width spaces matched nothing here, and then folded back into the verbatim memory on the wire.
+ *  Stripping invisibles can only ever ADD matches (fail-safe): it cannot invent a false echo. */
 function normalizeForMatch(s: string): string {
-  return s.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+  return s.normalize('NFKC')
+    .replace(/[\p{Cc}\p{Cf}]/gu, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
- * Bounded sliding-window substring scan: for each (length-capped) ledger item, slide a
- * length-k window over its normalized content and test each window against the normalized,
- * length-capped payload via String.prototype.includes. On the first hit, record the item id
- * and move to the next item. Caps bound the work regardless of input size.
+ * Bounded sliding-window substring scan. Builds the length-k window set from EVERY scanned FORM of the
+ * payload (raw AND the exact outbound bytes — see classifyEgress), then tests each ledger item's k-grams
+ * against it. O(sum of form lengths + sum of item lengths); caps bound the work regardless of input size.
  */
 export function detectEcho(
-  texts: string[],
+  forms: string[],
   ledger: LedgerItem[],
   opts: DetectEchoOptions = {},
 ): { memoryIds: string[] } {
   const k = opts.k ?? DEFAULT_K;
   const maxScan = opts.maxScan ?? DEFAULT_MAX_SCAN;
-  const haystack = normalizeForMatch(texts.join('\n')).slice(0, maxScan);
-  if (haystack.length < k) return { memoryIds: [] };
 
-  // Precompute the haystack's length-k windows ONCE (O(haystack)); each item then matches iff any
-  // of its k-grams is in the set (O(item) hash lookups). Equivalent to the prior per-position
-  // `haystack.includes(window)` but O(n+m) instead of O(n*m). The no-echo case (the common path,
-  // every position checked) was the previous worst case and runs on EVERY dual-verify over the full
-  // ledger (the server wires ledgerTexts = all items), so the quadratic form was a real hot-path cliff.
   const windows = new Set<string>();
-  for (let i = 0; i + k <= haystack.length; i++) windows.add(haystack.slice(i, i + k));
+  for (const form of forms) {
+    const hay = normalizeForMatch(form).slice(0, maxScan);
+    for (let i = 0; i + k <= hay.length; i++) windows.add(hay.slice(i, i + k));
+  }
+  if (windows.size === 0) return { memoryIds: [] };
 
   const ids: string[] = [];
   const seen = new Set<string>();
@@ -74,7 +78,12 @@ export function detectEcho(
 export type Leg = 'secret' | 'pii' | 'memory_echo';
 
 export interface EgressInput {
-  texts: string[];                 // [question, helixAnswer]
+  texts: string[];                 // [question, helixAnswer] — the RAW inputs
+  /** The EXACT string the caller will transmit. The gate must clear the bytes that actually leave the
+   *  machine, not a stand-in: the prompt builder normalizes on the way out (NFKC + control-strip +
+   *  fence-break), so a confusable that is inert in the raw form can fold back into a live secret — or a
+   *  verbatim memory — inside the outbound prompt. */
+  outbound: string;
   ledger: LedgerItem[] | null;     // null = echo leg explicitly disabled (EchoSource 'disabled')
   policy: EgressPolicy;            // dualVerify.egressPolicy (per-leg block/allow; named secrets ignore it)
 }
@@ -159,19 +168,29 @@ function scanText(text: string): Scan {
  * gated by their own egressPolicy key. When `ledger` is null the echo leg is skipped (explicit
  * EchoSource:'disabled').
  *
- * SCANS BOTH FORMS. The prompt builder normalizes untrusted text on the way out
- * (normalizeUntrusted: NFKC + control-strip + fence-break), so scanning only the raw string is
- * blind to full-width/zero-width confusables that fold back into a live card or API key inside the
- * outbound prompt — a `pass` verdict on text that leaves as a working secret. Scanning only the
- * normalized string is not sound either: fence-breaking can destroy a token the raw form reveals.
- * So both forms are scanned and the signals combined CONSERVATIVELY (any-form hit ⇒ hit), while
- * counts take the max per form — never the sum, which would double-count an ASCII email that
- * appears in both forms and could trip the bulk-PII floor on a benign payload.
+ * SCANS BOTH FORMS — EVERY leg, echo included (G1). `input.outbound` is the exact string the caller
+ * will transmit; the prompt builder normalizes untrusted text on the way out (normalizeUntrusted:
+ * NFKC + control-strip + fence-break), so scanning only the raw string is blind to full-width/
+ * zero-width confusables that fold back into a live card, API key, or VERBATIM MEMORY inside the
+ * outbound prompt — a `pass` verdict on text that leaves as a working secret or an exfiltrated
+ * memory. Scanning only the outbound form is not sound either: fence-breaking can destroy a token
+ * the raw form reveals, and a caller whose outbound bytes are a strict subset of `texts` (e.g.
+ * dual-verify's compare mode, where `helixAnswer` is scanned for audit but never transmitted) would
+ * leave part of the payload unscanned. So both forms are scanned and the signals combined
+ * CONSERVATIVELY (any-form hit ⇒ hit), while counts take the max per form — never the sum, which
+ * would double-count an ASCII email that appears in both forms and could trip the bulk-PII floor on
+ * a benign payload. detectEcho normalizes each form internally (normalizeForMatch), so the leg is
+ * confusable-safe on WHATEVER forms it is given — but that only helps if the dangerous bytes are in
+ * one of the scanned forms in the first place, which is exactly why both are required here.
  */
 export function classifyEgress(input: EgressInput): EgressVerdict {
   const raw = input.texts.join('\n');
-  const normalized = normalizeUntrusted(raw);
-  const scans = normalized === raw ? [scanText(raw)] : [scanText(raw), scanText(normalized)];
+  const outbound = input.outbound;
+  // Two-form, conservative (any-form hit => hit). Neither form alone is sound: the outbound form is
+  // blind to a token that fence-breaking destroys, and the raw form is blind to a confusable that
+  // normalization folds back into a live secret. Counts take the max per form, never the sum.
+  const forms = outbound === raw ? [raw] : [raw, outbound];
+  const scans = forms.map(scanText);
   const any = (f: (s: Scan) => boolean): boolean => scans.some(f);
 
   const secretHit = any((s) => s.secretHit);
@@ -185,8 +204,10 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   const lowPiiCount = Math.max(...scans.map((s) => s.lowPiiCount));
   const bulkLowPii = lowPiiCount >= BULK_PII_N;
 
-  // detectEcho normalizes internally (normalizeForMatch), so it is confusable-safe already.
-  const echo = input.ledger === null ? { memoryIds: [] } : detectEcho(input.texts, input.ledger);
+  // The echo leg scans the SAME forms (G1). It used to see only `input.texts` (raw), so a
+  // zero-width-padded memory matched nothing here and then reconstituted itself verbatim in the
+  // outbound prompt — a `pass` verdict on a payload that left as an exfiltrated memory.
+  const echo = input.ledger === null ? { memoryIds: [] } : detectEcho(forms, input.ledger);
   const echoMemoryIds = echo.memoryIds;
   const echoHit = echoMemoryIds.length > 0;
   const piiHit = piiKinds.length > 0;            // kinds is empty iff there were no PII hits
