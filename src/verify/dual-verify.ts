@@ -109,8 +109,14 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
   }
 
   // Past the gates: the next call spends the user's Codex quota (metered).
+  // SEND EXACTLY WHAT THE GATE SCANNED. classifyEgress scans the raw AND the normalized form of the
+  // payload; critique mode normalizes inside buildCritiquePrompt, but agreement mode used to ship the
+  // RAW question — so what left the machine could differ from what was inspected. normalizeUntrusted
+  // is idempotent, so this is a no-op for critique and closes the raw path for agreement.
   const mode = deps.config.dualVerify.mode;
-  const prompt = mode === 'critique' ? buildCritiquePrompt(params.question, params.helixAnswer) : params.question;
+  const prompt = mode === 'critique'
+    ? buildCritiquePrompt(params.question, params.helixAnswer)
+    : normalizeUntrusted(params.question);
   const res = await deps.runner(prompt, {
     model: deps.config.dualVerify.model,
     effort: deps.config.dualVerify.effort,

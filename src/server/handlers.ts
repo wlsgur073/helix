@@ -265,12 +265,18 @@ export interface DualVerifyHandlerDeps {
   genNonce?: () => string; // injectable per-frame nonce (default crypto)
 }
 
-/** The deciding leg for audit, in classifyEgress precedence order: secret > memory_echo > pii. */
+/** The DECIDING leg for audit, mapped from the classifier's typed `decidedBy` to the coarse audit
+ *  enum. Never re-derive it from `v.legs`: `legs` reports every DETECTED leg, and under the
+ *  blocked-dominant fold the decider is the highest-precedence leg whose POLICY blocks — which can
+ *  sit below a detected-but-released leg. Re-deriving it would name a leg the operator explicitly
+ *  allowed (e.g. `memory_echo`) as the blocker of a payload a card actually stopped. */
 function deciderLeg(v: EgressVerdict): Leg | undefined {
-  if (v.legs.includes('secret')) return 'secret';
-  if (v.legs.includes('memory_echo')) return 'memory_echo';
-  if (v.legs.includes('pii')) return 'pii';
-  return undefined;
+  switch (v.decidedBy) {
+    case 'named': case 'secretHeuristic': case 'secretEntropy': return 'secret';
+    case 'piiHigh': case 'piiBulk': return 'pii';
+    case 'memoryEcho': return 'memory_echo';
+    default: return undefined;   // clean / audit-only pass: nothing decided
+  }
 }
 
 export async function handleDualVerify(
