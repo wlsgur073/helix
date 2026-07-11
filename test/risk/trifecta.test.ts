@@ -51,11 +51,13 @@ describe('detectEcho', () => {
     expect(out.memoryIds).toEqual([]);
   });
 
-  it('bounds work via the per-item content cap (oversized ledger item stays bounded)', () => {
-    // The echo sits AFTER a 50_000-char prefix, past the 10000 per-item cap, so it is dropped —
-    // an oversized ledger item cannot blow up the scan and its out-of-cap tail does not match.
+  it('G2: no per-item truncation — the TAIL of an oversized ledger item still matches', () => {
+    // The per-item cap was DELETED (G2): an unscanned tail on a long memory was the same fail-open in
+    // miniature as the payload cap (a memory writer could bury a real echo past the truncation point
+    // and it would never be scanned). Aggregate ledger work is bounded by classifyEgress's
+    // MAX_LEDGER_SCAN instead, not by per-item truncation inside detectEcho.
     const ledger = [item('m_1', 'y'.repeat(50_000) + 'the deploy uses the blue cluster in us-east-1')];
-    expect(detectEcho(['the deploy uses the blue cluster in us-east-1'], ledger).memoryIds).toEqual([]);
+    expect(detectEcho(['the deploy uses the blue cluster in us-east-1'], ledger).memoryIds).toEqual(['m_1']);
   });
 });
 
@@ -525,5 +527,45 @@ describe('EH-4: egress hex-literal exemption + credential proximity guard', () =
     expect(block([`secret=${SHA}`])).toBe('blocked');
     expect(block([`x=${SHA}`])).toBe('blocked');
     expect(block([`0x${SHA}`])).toBe('blocked');
+  });
+});
+
+describe('G2: the scan budget fails CLOSED', () => {
+  const MEMO = 'PROJECT ORION LAUNCH CODE IS ALPHA';
+  const ledger = [{ id: 'm_secret', content: MEMO }];
+
+  it('detects an echo that sits past the OLD 20k scan cap', () => {
+    const payload = 'x'.repeat(25_000) + '\n' + MEMO;
+    const v = classifyEgress({ texts: [payload], outbound: normalizeUntrusted(payload), ledger, policy: ALL('block') });
+    expect(v.decision).toBe('blocked');                 // today: 'pass' -- sent, never scanned
+    expect(v.echoMemoryIds).toEqual(['m_secret']);
+  });
+
+  it('detects an echo of the TAIL of a long memory (past the old per-item cap)', () => {
+    const long = 'y'.repeat(12_000) + MEMO;
+    const v = classifyEgress({ texts: [MEMO], outbound: normalizeUntrusted(MEMO), ledger: [{ id: 'm_long', content: long }], policy: ALL('block') });
+    expect(v.decision).toBe('blocked');                 // today: 'pass' -- the tail was truncated away
+    expect(v.echoMemoryIds).toEqual(['m_long']);
+  });
+
+  it('REFUSES a payload too large to inspect, rather than sending it unscanned', () => {
+    const huge = 'z'.repeat(200_001);
+    const v = classifyEgress({ texts: [huge], outbound: huge, ledger, policy: ALL('allow') });
+    expect(v.decision).toBe('blocked');                 // fail closed, even with every leg allowed
+    expect(v.decidedBy).toBe('scan_limit');
+    expect(v.reason).toContain('scan limit');
+    expect(v.reason).not.toContain('zzz');              // content-free
+  });
+
+  it('REFUSES when the ledger is too large to inspect', () => {
+    const fat = [{ id: 'm_fat', content: 'w'.repeat(8_000_001) }];
+    const v = classifyEgress({ texts: ['hi'], outbound: 'hi', ledger: fat, policy: ALL('allow') });
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('scan_limit');
+  });
+
+  it('a normal-sized payload is unaffected', () => {
+    const q = 'a'.repeat(30_000);                       // 30KB: the size of a real design review
+    expect(classifyEgress({ texts: [q], outbound: q, ledger, policy: ALL('block') }).decision).toBe('pass');
   });
 });

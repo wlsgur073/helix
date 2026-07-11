@@ -22,8 +22,15 @@ export interface DetectEchoOptions {
 }
 
 const DEFAULT_K = 24;
-const DEFAULT_MAX_SCAN = 20_000;
-const PER_ITEM_CAP = 10_000;
+/** Chars scanned per payload FORM. The gate must never inspect less than it transmits: above this, the
+ *  payload is REFUSED, not sent unscanned. 200k is ~7x the largest real call (a 30KB design review);
+ *  the k-gram window Set is the memory bound, so this is the knob to benchmark if it is ever raised. */
+const MAX_FORM_SCAN = 200_000;
+/** Aggregate ledger chars scanned. Beyond this the echo leg cannot clear the payload, so it refuses. A
+ *  ledger writer can thus cause availability loss -- that is the correct failure direction, and far
+ *  cheaper than the alternative (unbounded scanning of adversary-sized rows => heap exhaustion). Sized
+ *  ~3x above the persistent-index migration trigger (12k rows), so no legitimate ledger reaches it. */
+const MAX_LEDGER_SCAN = 8_000_000;
 
 /** Match-only normalization: NFKC + strip control/format chars + casefold + whitespace-collapse. NOT
  *  normalizeUntrusted (which also breaks fence runs, for safe display).
@@ -51,7 +58,7 @@ export function detectEcho(
   opts: DetectEchoOptions = {},
 ): { memoryIds: string[] } {
   const k = opts.k ?? DEFAULT_K;
-  const maxScan = opts.maxScan ?? DEFAULT_MAX_SCAN;
+  const maxScan = opts.maxScan ?? MAX_FORM_SCAN;
 
   const windows = new Set<string>();
   for (const form of forms) {
@@ -64,7 +71,7 @@ export function detectEcho(
   const seen = new Set<string>();
   for (const item of ledger) {
     if (seen.has(item.id)) continue;
-    const norm = normalizeForMatch(item.content).slice(0, PER_ITEM_CAP);
+    const norm = normalizeForMatch(item.content);        // no truncation: an unscanned tail is a fail-open
     if (norm.length < k) continue;
     for (let i = 0; i + k <= norm.length; i++) {
       if (windows.has(norm.slice(i, i + k))) {
@@ -97,10 +104,11 @@ export interface EgressVerdict {
   echoMemoryIds: string[];
   reason: string;                  // content-free: counts / labels only, never a matched span
   /** The leg that DECIDED (typed, machine-readable): the policy key that blocked or was released,
-   *  or 'named' for the override-proof secret tier; undefined on a clean/audit-only pass. Consumers
-   *  MUST read this instead of re-deriving a decider from `legs` — `legs` reports every DETECTED
-   *  leg (audit), which after the blocked-dominant fold is no longer the leg that decided. */
-  decidedBy?: EgressLeg | 'named';
+   *  'named' for the override-proof secret tier, or 'scan_limit' when the payload/ledger was too large to
+   *  inspect (fail-closed, no leg). undefined on a clean/audit-only pass. Consumers MUST read this
+   *  instead of re-deriving a decider from `legs` — `legs` reports every DETECTED leg (audit), which
+   *  after the blocked-dominant fold is no longer the leg that decided. */
+  decidedBy?: EgressLeg | 'named' | 'scan_limit';
 }
 
 /** Bulk low-severity PII threshold: >= N distinct low-sev hits is exfiltration-shaped. */
@@ -188,6 +196,24 @@ function scanText(text: string): Scan {
 export function classifyEgress(input: EgressInput): EgressVerdict {
   const raw = input.texts.join('\n');
   const outbound = input.outbound;
+  // Fail CLOSED: we cannot clear bytes we did not inspect. Checked before any scanning so an oversized
+  // payload costs O(1), not O(n). Content-free reason (a length, never a span).
+  if (raw.length > MAX_FORM_SCAN || outbound.length > MAX_FORM_SCAN) {
+    return {
+      decision: 'blocked', legs: [], piiKinds: [], echoMemoryIds: [], decidedBy: 'scan_limit',
+      reason: `blocked: payload exceeds the egress scan limit (${MAX_FORM_SCAN} chars)`,
+    };
+  }
+  if (input.ledger !== null) {
+    let ledgerChars = 0;
+    for (const item of input.ledger) ledgerChars += item.content.length;
+    if (ledgerChars > MAX_LEDGER_SCAN) {
+      return {
+        decision: 'blocked', legs: [], piiKinds: [], echoMemoryIds: [], decidedBy: 'scan_limit',
+        reason: `blocked: ledger exceeds the egress scan limit (${MAX_LEDGER_SCAN} chars)`,
+      };
+    }
+  }
   // Two-form, conservative (any-form hit => hit). Neither form alone is sound: the outbound form is
   // blind to a token that fence-breaking destroys, and the raw form is blind to a confusable that
   // normalization folds back into a live secret. Counts take the max per form, never the sum.

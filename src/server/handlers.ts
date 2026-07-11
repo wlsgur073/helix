@@ -275,6 +275,7 @@ function deciderLeg(v: EgressVerdict): Leg | undefined {
     case 'named': case 'secretHeuristic': case 'secretEntropy': return 'secret';
     case 'piiHigh': case 'piiBulk': return 'pii';
     case 'memoryEcho': return 'memory_echo';
+    case 'scan_limit': return undefined;   // not a leg: nothing was detected, the payload was un-inspectable
     default: return undefined;   // clean / audit-only pass: nothing decided
   }
 }
