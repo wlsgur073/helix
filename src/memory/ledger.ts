@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync, mkdirSync, openSync, fsyncSync, closeSync, writeSync, renameSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
@@ -7,12 +6,40 @@ import { withFileLock } from './lock.js';
 
 export type LedgerPath = string;
 
+/** Fixed sentinel timestamp for the coalesced, unsigned advisory markers. They carry NO honest time
+ *  (an unsigned boolean has no chronology), so a CONSTANT makes them byte-identical across compactions
+ *  and denies an adversary any preserved bytes. */
+const MARKER_SENTINEL_TX = '1970-01-01T00:00:00.000Z';
+
+/** A verify-shaped, unsigned, content-free tombstone with a null target. Both marker kinds share this
+ *  shape; the id PREFIX distinguishes them. Predicates are TOTAL (typeof-guarded) so a malformed row
+ *  that slipped a parse boundary can never throw here. */
+const isMarkerShape = (r: MemoryRecord): boolean =>
+  r != null && r.type === 'verify' && r.supersedes === null && !r.mac && typeof r.id === 'string';
+
 /** A compaction-horizon marker: a content-free, unsigned, verify-shaped tombstone (mirrors the
  *  integrity tombstone) recording that a compaction dropped closed fact history (spec §3). The
  *  `horizon_` id prefix distinguishes it from the integrity tombstone. It is inert in every replay
  *  path (a verify with a null target) and is counted by buildHistory's truncated heuristic. */
-export const isHorizonMarker = (r: MemoryRecord): boolean =>
-  r.type === 'verify' && r.supersedes === null && !r.mac && r.id.startsWith('horizon_');
+export const isHorizonMarker = (r: MemoryRecord): boolean => isMarkerShape(r) && r.id.startsWith('horizon_');
+
+/** The integrity-incident counterpart to isHorizonMarker: an audit signal that a compaction dropped
+ *  >=1 forged verify (spec §5 delta). Module-private — external callers key off the `integrity_`
+ *  prefix via parseLedger output (e.g. test assertions), never need the predicate itself. */
+const isIntegrityMarker = (r: MemoryRecord): boolean => isMarkerShape(r) && r.id.startsWith('integrity_');
+
+/** Reconstruct a marker CANONICALLY — every field whitelisted, constant id, sentinel timestamps. Never
+ *  copies an existing row through, so hostile content/provenance/timestamps/extension fields on a
+ *  planted marker cannot survive. `kind` is the stable id, so at most one row per kind can ever exist
+ *  and it is byte-identical every time it is (re)minted. */
+function canonicalMarker(kind: 'integrity_marker' | 'horizon_marker'): MemoryRecord {
+  return {
+    id: kind, tx: MARKER_SENTINEL_TX, validFrom: MARKER_SENTINEL_TX, validTo: null,
+    type: 'verify', state: 'Suspect', content: '',
+    provenance: { source: 'user', sessionId: 'compaction' },
+    supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+  };
+}
 
 /** Append one record as a single JSONL line WITHOUT taking the ledger lock. Creates parent dirs
  *  as needed. For callers that ALREADY hold the ledger lock (withFileLock is not re-entrant), e.g.
@@ -110,11 +137,11 @@ export interface CompactOptions {
 /** Keep-set planner: the exact set of records compactLedger writes for `records` + `opts`.
  *  Shared by compactLedger (which writes it) AND the auto-compaction eligibility check (which counts
  *  it), so the two can never disagree — post-compaction reclaimable is exactly zero. Does NO IO and
- *  takes NO lock (safe on the read path), but is NOT pure: it mints content-free integrity/horizon
- *  markers via new Date()/randomUUID(). Those markers are FIXED-WIDTH, so callers use this for the
- *  kept-set and its COUNTS/SIZES, never for record identity — the self-limiting invariant holds
- *  because the markers are fixed-width, not because the function is pure. */
-export function planCompaction(records: MemoryRecord[], opts: CompactOptions): MemoryRecord[] {
+ *  takes NO lock (safe on the read path). The integrity/horizon markers it mints are CANONICAL
+ *  fixpoints (constant id, sentinel timestamps — see canonicalMarker), so, unlike the pre-D2
+ *  randomUUID-stamped markers, this function IS pure: two calls over the same `records`/`opts`
+ *  produce byte-identical output, and callers may use the kept-set for identity, not just counts. */
+export function planCompaction(records: MemoryRecord[], opts: CompactOptions): { kept: MemoryRecord[]; droppedForgedVerifies: number } {
   // The live projection already excludes superseded/invalidated/erased targets and applies
   // verify states, so materializing it yields the canonical current facts.
   const live = buildProjection(records);
@@ -137,42 +164,31 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): M
   }
   // HMAC-aware: preserve genuine signed verifies (so R2/R3 re-elevate the asset on replay) and
   // drop forged ones. A verify whose target was superseded/erased is naturally excluded — its
-  // target is no longer in `live`. If any forgery is discarded, emit ONE content-free integrity
-  // tombstone as an audit signal (no MAC: it confers no trust, and R2 never treats it as a
-  // transition because supersedes is null).
+  // target is no longer in `live`.
+  let droppedForgedVerifies = 0;
   if (opts.keepValidVerify) {
-    let droppedForged = 0;
     for (const r of records) {
       if (r.type !== 'verify' || !r.supersedes || !live.has(r.supersedes)) continue;
       if (opts.keepValidVerify(r)) kept.push(r);
-      else droppedForged++;
-    }
-    if (droppedForged > 0) {
-      const ts = new Date().toISOString();
-      kept.push({
-        id: `integrity_${randomUUID()}`, tx: ts, validFrom: ts, validTo: null,
-        type: 'verify', state: 'Suspect', content: '',
-        provenance: { source: 'user', sessionId: 'compaction' },
-        supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
-      });
+      else droppedForgedVerifies++;
     }
   }
-  // Compaction-horizon marker (spec §4): keep at most one. Preserve an existing one (tx-blind: the
-  // first in append order) so the signal never reverts; otherwise emit one iff this compaction drops a
-  // closed FACT row (an assert/supersede absent from live — covers supersede/invalidate/erase closers).
-  const existingHorizon = records.find(isHorizonMarker);
-  if (existingHorizon) {
-    kept.push(existingHorizon);
-  } else if (records.some((r) => (r.type === 'assert' || r.type === 'supersede') && !live.has(r.id))) {
-    const hts = new Date().toISOString();
-    kept.push({
-      id: `horizon_${randomUUID()}`, tx: hts, validFrom: hts, validTo: null,
-      type: 'verify', state: 'Suspect', content: '',
-      provenance: { source: 'user', sessionId: 'compaction' },
-      supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
-    });
+  // Integrity marker (D2): coalesced canonical fixpoint, never a copy-through. Emit exactly one iff
+  // an existing marker is present (so a genuine prior incident's signal survives a compaction that
+  // itself drops nothing forged — the D2 bug this closes) OR this compaction dropped >=1 forged
+  // verify. Reconstructed via canonicalMarker, so a planted integrity_* row's hostile
+  // content/provenance/timestamp cannot survive and 50 planted rows collapse to one.
+  if (records.some(isIntegrityMarker) || droppedForgedVerifies > 0) {
+    kept.push(canonicalMarker('integrity_marker'));
   }
-  return kept;
+  // Horizon marker (spec §4): same fixpoint treatment as the integrity marker — coalesced, never
+  // preserved verbatim, so a planted horizon_* row's hostile bytes cannot be immortalized. Emit one
+  // iff an existing marker is present (signal never reverts) OR this compaction drops a closed FACT
+  // row (an assert/supersede absent from live — covers supersede/invalidate/erase closers).
+  if (records.some(isHorizonMarker) || records.some((r) => (r.type === 'assert' || r.type === 'supersede') && !live.has(r.id))) {
+    kept.push(canonicalMarker('horizon_marker'));
+  }
+  return { kept, droppedForgedVerifies };
 }
 
 /** UTF-8 serialized byte length of a record array as written to the ledger (one JSON line + newline each). */
@@ -195,6 +211,15 @@ export interface CompactionStats {
    *  is not clamped — a clamp would silently turn "this compaction grew the ledger" into "reclaimed
    *  nothing", hiding exactly the case an operator wants to see. */
   reclaimedBytes: number;
+  /** Content-free count of forged verify rows DROPPED by this compaction, measured under the lock.
+   *  0 when compaction ran with no HMAC subkey (forged and genuine are then indistinguishable — every
+   *  live-target verify is kept). The honest forensic counterpart to the unsigned integrity marker:
+   *  the marker's mere PRESENCE is forgeable (anyone can append an `integrity_`-prefixed row), but
+   *  this count is derived from the keep-set this same lock just computed and written. It is still
+   *  NOT a trustworthy forensic trail on its own — metrics are optional and best-effort (spec:
+   *  metrics.ts), so with metrics disabled or the sink failing (e.g. disk full), only the forgeable
+   *  marker survives. */
+  droppedForgedVerifies: number;
 }
 
 /** Size of `path` in bytes, or 0 if it does not exist (parseLedger treats a missing ledger as []). */
@@ -225,7 +250,7 @@ export function compactLedger(path: LedgerPath, opts: CompactOptions): Compactio
   return withFileLock(path, () => {
     const beforeBytes = fileSize(path);   // inside the lock, BEFORE the read (see above)
     const records = parseLedger(path);
-    const kept = planCompaction(records, opts);
+    const { kept, droppedForgedVerifies } = planCompaction(records, opts);
     // Per-process tmp name: even if the lock is ever stolen, two processes never share a
     // half-written tmp file (the rename stays atomic on the same filesystem).
     const tmp = `${path}.${process.pid}.tmp`;
@@ -237,6 +262,6 @@ export function compactLedger(path: LedgerPath, opts: CompactOptions): Compactio
       closeSync(fd);
     }
     renameSync(tmp, path); // atomic on the same filesystem
-    return { droppedRows: records.length - kept.length, reclaimedBytes: beforeBytes - fileSize(path) };
+    return { droppedRows: records.length - kept.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
   });
 }

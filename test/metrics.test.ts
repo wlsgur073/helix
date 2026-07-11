@@ -10,7 +10,7 @@ const replay = (over: Partial<ReplayInput> = {}): ReplayInput => ({
   parseMs: 1.5, projectMs: 0.5, keyAvailable: true, ...over,
 });
 const compaction = (over: Partial<CompactionInput> = {}): CompactionInput => ({
-  scope: 'global', durationMs: 12.5, droppedRows: 40, reclaimedBytes: 4096, ok: true, ...over,
+  scope: 'global', durationMs: 12.5, droppedRows: 40, reclaimedBytes: 4096, droppedForgedVerifies: 2, ok: true, ...over,
 });
 const lines = (path: string): Record<string, unknown>[] =>
   readFileSync(path, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
@@ -130,11 +130,12 @@ describe('emitCompaction', () => {
     // EXACT key set: toMatchObject is a subset matcher, so only this can catch a future
     // record that adds a content-bearing field (path/query/error) -- HARD RULE, spec section 3.
     expect(Object.keys(rec).sort()).toEqual([
-      'dropped_rows', 'duration_ms', 'kind', 'ok', 'op_id', 'reclaimed_bytes', 'scope', 'ts', 'v',
+      'dropped_forged_verifies', 'dropped_rows', 'duration_ms', 'kind', 'ok', 'op_id',
+      'reclaimed_bytes', 'scope', 'ts', 'v',
     ]);
     expect(rec).toMatchObject({
       v: 1, kind: 'compaction', ts: '2026-07-09T00:00:00.000Z', op_id: null, scope: 'global',
-      duration_ms: 12.5, dropped_rows: 40, reclaimed_bytes: 4096, ok: true,
+      duration_ms: 12.5, dropped_rows: 40, reclaimed_bytes: 4096, dropped_forged_verifies: 2, ok: true,
     });
   });
 

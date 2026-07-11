@@ -28,6 +28,9 @@ export interface CompactionInput {
   durationMs: number;
   droppedRows: number;
   reclaimedBytes: number;
+  /** Content-free count of forged verify rows dropped, measured under compactLedger's lock (0 on a
+   *  failed/no-op compaction or when no HMAC subkey was available). */
+  droppedForgedVerifies: number;
   ok: boolean;
 }
 
@@ -86,7 +89,8 @@ export function createMetricsSink(path: string, enabled: boolean, deps: MetricsS
       try {
         const line = JSON.stringify({
           v: 1, kind: 'compaction', ts: now(), op_id: currentOpId, scope: c.scope,
-          duration_ms: c.durationMs, dropped_rows: c.droppedRows, reclaimed_bytes: c.reclaimedBytes, ok: c.ok,
+          duration_ms: c.durationMs, dropped_rows: c.droppedRows, reclaimed_bytes: c.reclaimedBytes,
+          dropped_forged_verifies: c.droppedForgedVerifies, ok: c.ok,
         }) + '\n';
         if (buffer) buffer.push(line); else safeAppend(line);
       } catch { /* never throw into a compaction path */ }

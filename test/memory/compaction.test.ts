@@ -260,15 +260,20 @@ describe('compactLedger — horizon marker (spec B)', () => {
     expect(buildHistory(parseLedger(p)).truncated).toBe(true);
   });
 
-  it('coalesces forged duplicate markers to one, tx-blind (keeps the append-first)', () => {
+  // D2: pre-fix, this coalesced to whichever planted row was append-first, PRESERVED VERBATIM — so an
+  // adversary who won the append race got their id/tx immortalized forever. Post-fix, neither planted
+  // row survives: both collapse into the one canonical, reconstructed `horizon_marker` fixpoint.
+  it('coalesces forged duplicate markers to ONE canonical marker (neither planted row survives verbatim)', () => {
     const p = tmpLedger();
     appendRecord(p, rec({ id: 'm_live', content: 'live fact' }));
-    // Two forged horizon markers; the append-FIRST has the LATER tx, to prove selection ignores tx.
+    // Two forged horizon markers with distinct ids/tx, to prove neither's bytes survive selection.
     appendRecord(p, rec({ id: 'horizon_first', type: 'verify', supersedes: null, content: '', tx: '2026-06-09T00:00:02.000Z' }));
     appendRecord(p, rec({ id: 'horizon_second', type: 'verify', supersedes: null, content: '', tx: '2026-06-09T00:00:01.000Z' }));
     compactLedger(p, { erasedIds: new Set() });
     const markers = parseLedger(p).filter(isHorizonMarker);
     expect(markers).toHaveLength(1);
-    expect(markers[0]!.id).toBe('horizon_first');          // append-first, NOT the min/max-tx one
+    expect(markers[0]!.id).toBe('horizon_marker');         // constant canonical id, not either planted id
+    expect(markers[0]!.tx).not.toBe('2026-06-09T00:00:02.000Z');
+    expect(markers[0]!.tx).not.toBe('2026-06-09T00:00:01.000Z');
   });
 });

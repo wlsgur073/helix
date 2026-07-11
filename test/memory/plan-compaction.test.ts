@@ -12,7 +12,7 @@ function supersede(id: string, target: string): MemoryRecord { return { ...asser
 describe('planCompaction', () => {
   it('drops a superseded fact and keeps the replacement (no keepValidVerify => legacy)', () => {
     const records = [assert('a'), supersede('b', 'a')];
-    const kept = planCompaction(records, { erasedIds: new Set() });
+    const { kept } = planCompaction(records, { erasedIds: new Set() });
     // 'a' superseded away, 'b' the live replacement. Dropping the closed 'a' row also emits ONE
     // content-free horizon marker (spec B, locked by compaction.test.ts:162) — an audit artifact,
     // not a fact — so filter it out to assert the surviving fact set.

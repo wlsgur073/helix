@@ -354,7 +354,7 @@ export class MemoryStore {
       // could transiently return null (registry/master read failure), flipping the predicate to the
       // key-absent `() => true` and preserving forgeries the plan counted as dropped.
       const keepValidVerify = this.keepValidVerifyFor(r.subkey);
-      const kept = planCompaction(records, { erasedIds: new Set(), keepValidVerify });
+      const { kept } = planCompaction(records, { erasedIds: new Set(), keepValidVerify });
       const reclaimable = records.length - kept.length;
       const reclaimableBytes = serializedBytes(records) - serializedBytes(kept);
       if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
@@ -373,7 +373,8 @@ export class MemoryStore {
       this.rankCache = null;
       this.opts.metricsSink?.emitCompaction({
         scope: r.root ? 'project' : 'global', durationMs,
-        droppedRows: stats?.droppedRows ?? 0, reclaimedBytes: stats?.reclaimedBytes ?? 0, ok: stats !== null,
+        droppedRows: stats?.droppedRows ?? 0, reclaimedBytes: stats?.reclaimedBytes ?? 0,
+        droppedForgedVerifies: stats?.droppedForgedVerifies ?? 0, ok: stats !== null,
       });
     }
   }
