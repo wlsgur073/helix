@@ -204,7 +204,7 @@ function buildProjection(records) {
 function isWellFormedRecord(v) {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
   const r = v;
-  return typeof r.id === "string" && typeof r.content === "string" && typeof r.provenance === "object" && r.provenance !== null && (r.mac === void 0 || typeof r.mac === "string");
+  return typeof r.id === "string" && typeof r.content === "string" && typeof r.tx === "string" && typeof r.provenance === "object" && r.provenance !== null && (r.mac === void 0 || typeof r.mac === "string");
 }
 function parseLedgerText(text) {
   const out = [];
