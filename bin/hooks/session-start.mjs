@@ -201,15 +201,22 @@ function buildProjection(records) {
 }
 
 // src/memory/ledger.ts
+function isWellFormedRecord(v) {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const r = v;
+  return typeof r.id === "string" && typeof r.content === "string" && typeof r.provenance === "object" && r.provenance !== null && (r.mac === void 0 || typeof r.mac === "string");
+}
 function parseLedgerText(text) {
   const out = [];
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
+    let v;
     try {
-      out.push(JSON.parse(line));
+      v = JSON.parse(line);
     } catch {
       continue;
     }
+    if (isWellFormedRecord(v)) out.push(v);
   }
   return out;
 }

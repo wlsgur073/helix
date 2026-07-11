@@ -13369,15 +13369,22 @@ function appendRecord(path, record2) {
   mkdirSync2(dirname(path), { recursive: true });
   withFileLock(path, () => appendRecordUnlocked(path, record2));
 }
+function isWellFormedRecord(v) {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const r = v;
+  return typeof r.id === "string" && typeof r.content === "string" && typeof r.provenance === "object" && r.provenance !== null && (r.mac === void 0 || typeof r.mac === "string");
+}
 function parseLedgerText(text) {
   const out = [];
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
+    let v;
     try {
-      out.push(JSON.parse(line));
+      v = JSON.parse(line);
     } catch {
       continue;
     }
+    if (isWellFormedRecord(v)) out.push(v);
   }
   return out;
 }
@@ -22978,23 +22985,25 @@ function detectPII(text) {
 
 // src/risk/trifecta.ts
 var DEFAULT_K = 24;
-var DEFAULT_MAX_SCAN = 2e4;
-var PER_ITEM_CAP = 1e4;
+var MAX_FORM_SCAN = 2e5;
+var MAX_LEDGER_SCAN = 8e6;
 function normalizeForMatch(s) {
-  return s.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
+  return s.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
 }
-function detectEcho(texts, ledger, opts = {}) {
+function detectEcho(forms, ledger, opts = {}) {
   const k = opts.k ?? DEFAULT_K;
-  const maxScan = opts.maxScan ?? DEFAULT_MAX_SCAN;
-  const haystack = normalizeForMatch(texts.join("\n")).slice(0, maxScan);
-  if (haystack.length < k) return { memoryIds: [] };
+  const maxScan = opts.maxScan ?? MAX_FORM_SCAN;
   const windows = /* @__PURE__ */ new Set();
-  for (let i = 0; i + k <= haystack.length; i++) windows.add(haystack.slice(i, i + k));
+  for (const form of forms) {
+    const hay = normalizeForMatch(form).slice(0, maxScan);
+    for (let i = 0; i + k <= hay.length; i++) windows.add(hay.slice(i, i + k));
+  }
+  if (windows.size === 0) return { memoryIds: [] };
   const ids = [];
   const seen = /* @__PURE__ */ new Set();
   for (const item of ledger) {
     if (seen.has(item.id)) continue;
-    const norm = normalizeForMatch(item.content).slice(0, PER_ITEM_CAP);
+    const norm = normalizeForMatch(item.content);
     if (norm.length < k) continue;
     for (let i = 0; i + k <= norm.length; i++) {
       if (windows.has(norm.slice(i, i + k))) {
@@ -23038,8 +23047,33 @@ function scanText(text) {
 }
 function classifyEgress(input) {
   const raw = input.texts.join("\n");
-  const normalized = normalizeUntrusted(raw);
-  const scans = normalized === raw ? [scanText(raw)] : [scanText(raw), scanText(normalized)];
+  const outbound = input.outbound;
+  if (raw.length > MAX_FORM_SCAN || outbound.length > MAX_FORM_SCAN) {
+    return {
+      decision: "blocked",
+      legs: [],
+      piiKinds: [],
+      echoMemoryIds: [],
+      decidedBy: "scan_limit",
+      reason: `blocked: payload exceeds the egress scan limit (${MAX_FORM_SCAN} chars)`
+    };
+  }
+  if (input.ledger !== null) {
+    let ledgerChars = 0;
+    for (const item of input.ledger) ledgerChars += item.content.length;
+    if (ledgerChars > MAX_LEDGER_SCAN) {
+      return {
+        decision: "blocked",
+        legs: [],
+        piiKinds: [],
+        echoMemoryIds: [],
+        decidedBy: "scan_limit",
+        reason: `blocked: ledger exceeds the egress scan limit (${MAX_LEDGER_SCAN} chars)`
+      };
+    }
+  }
+  const forms = outbound === raw ? [raw] : [raw, outbound];
+  const scans = forms.map(scanText);
   const any = (f) => scans.some(f);
   const secretHit = any((s) => s.secretHit);
   const secretNamed = any((s) => s.secretNamed);
@@ -23050,7 +23084,7 @@ function classifyEgress(input) {
   const highPii = any((s) => s.highPii);
   const lowPiiCount = Math.max(...scans.map((s) => s.lowPiiCount));
   const bulkLowPii = lowPiiCount >= BULK_PII_N;
-  const echo = input.ledger === null ? { memoryIds: [] } : detectEcho(input.texts, input.ledger);
+  const echo = input.ledger === null ? { memoryIds: [] } : detectEcho(forms, input.ledger);
   const echoMemoryIds = echo.memoryIds;
   const echoHit = echoMemoryIds.length > 0;
   const piiHit = piiKinds.length > 0;
@@ -23119,9 +23153,12 @@ async function dualVerify(params, deps) {
   if (params.stakes && STAKES_RANK[params.stakes] < STAKES_RANK[floor]) {
     return { ran: false, attempted: false, outcome: "skipped", reason: `stakes '${params.stakes}' below configured floor '${floor}'` };
   }
+  const mode = deps.config.dualVerify.mode;
+  const prompt = mode === "critique" ? buildCritiquePrompt(params.question, params.helixAnswer) : normalizeUntrusted(params.question);
   const ledger = deps.echo.mode === "enforce" ? deps.echo.ledgerTexts() : null;
   const verdict = classifyEgress({
     texts: [params.question, params.helixAnswer],
+    outbound: prompt,
     ledger,
     policy: deps.config.dualVerify.egressPolicy
   });
@@ -23132,8 +23169,6 @@ async function dualVerify(params, deps) {
   if (!avail.available) {
     return { ran: false, attempted: false, outcome: "unavailable", reason: avail.reason ?? "codex unavailable", egress: verdict };
   }
-  const mode = deps.config.dualVerify.mode;
-  const prompt = mode === "critique" ? buildCritiquePrompt(params.question, params.helixAnswer) : normalizeUntrusted(params.question);
   const res = await deps.runner(prompt, {
     model: deps.config.dualVerify.model,
     effort: deps.config.dualVerify.effort,
@@ -23360,6 +23395,9 @@ function deciderLeg(v) {
       return "pii";
     case "memoryEcho":
       return "memory_echo";
+    case "scan_limit":
+      return void 0;
+    // not a leg: nothing was detected, the payload was un-inspectable
     default:
       return void 0;
   }
@@ -23395,6 +23433,16 @@ async function handleDualVerify(args, deps) {
     });
   }
   if (!result.ran) {
+    if (result.outcome === "error") {
+      const nonce2 = (deps.genNonce ?? newNonce)();
+      return ok([
+        "dual-verify did not run: codex run failed. (No Codex answer \u2014 nothing fabricated.)",
+        frameOpen("DUAL-VERIFY ERROR", nonce2),
+        DATA_SEMANTICS,
+        datamark(result.reason ?? "", "DATA| "),
+        frameClose(nonce2)
+      ].join("\n"));
+    }
     return ok(`dual-verify did not run: ${result.reason}. (No Codex answer \u2014 nothing fabricated.)`);
   }
   const nonce = (deps.genNonce ?? newNonce)();
