@@ -32,6 +32,28 @@ export function appendRecord(path: LedgerPath, record: MemoryRecord): void {
   withFileLock(path, () => appendRecordUnlocked(path, record));
 }
 
+/**
+ * Structural guard at the parse boundary. `JSON.parse(line) as MemoryRecord` is a lie to the type
+ * checker: a ledger-write adversary appends ANY JSON value and every downstream predicate then
+ * dereferences it. A bare `null` line, or `content: null`, throws inside recall (TypeError on `.type` /
+ * `.normalize`) and PERMANENTLY BRICKS the tool; `id: null` throws inside the marker predicates.
+ *
+ * MINIMAL BY DESIGN. It rejects only values that make a TOTAL function throw — a non-object, or a
+ * non-string where downstream calls a string method (`id.startsWith` / `safeId(id).replace`,
+ * `content.normalize`, `provenance.source`). It deliberately does NOT validate enums (`type`, `state`),
+ * timestamps, or `supersedes`: those are only COMPARED, never dereferenced, and rejecting an unknown
+ * value there would silently DROP a legitimate row written by a future schema. Data loss is worse than
+ * the crash this fixes. Malformed rows are skipped exactly like torn lines (the existing §10 tolerance).
+ */
+function isWellFormedRecord(v: unknown): v is MemoryRecord {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const r = v as Record<string, unknown>;
+  return typeof r.id === 'string'
+    && typeof r.content === 'string'
+    && typeof r.provenance === 'object' && r.provenance !== null
+    && (r.mac === undefined || typeof r.mac === 'string');
+}
+
 /** Parse already-read ledger TEXT into records (parseLedger's body minus the file read). Lets a
  *  caller that must read the bytes for another purpose (A4 recall cache: hash the exact bytes) parse
  *  the SAME bytes with no second read. Tolerates torn/corrupt lines (spec §10) — skip, don't crash. */
@@ -39,11 +61,13 @@ export function parseLedgerText(text: string): MemoryRecord[] {
   const out: MemoryRecord[] = [];
   for (const line of text.split('\n')) {
     if (line.trim() === '') continue;
+    let v: unknown;
     try {
-      out.push(JSON.parse(line) as MemoryRecord);
+      v = JSON.parse(line);
     } catch {
-      continue;
+      continue;              // torn line — skip, don't crash (spec §10)
     }
+    if (isWellFormedRecord(v)) out.push(v);   // structurally invalid — same treatment as a torn line
   }
   return out;
 }
@@ -85,6 +109,12 @@ export interface CompactOptions {
  *  kept-set and its COUNTS/SIZES, never for record identity — the self-limiting invariant holds
  *  because the markers are fixed-width, not because the function is pure. */
 export function planCompaction(records: MemoryRecord[], opts: CompactOptions): MemoryRecord[] {
+  // Same structural guard as the parse boundary (isWellFormedRecord, above). planCompaction is
+  // exported and callable directly with a MemoryRecord[] that never passed through
+  // parseLedgerText, so a malformed element would otherwise reach buildProjection's unguarded
+  // `r.type` and isHorizonMarker's unguarded `r.id.startsWith` below and throw. Filtering here,
+  // once, before either is used, keeps every downstream use of `records` in this function total.
+  records = records.filter(isWellFormedRecord);
   // The live projection already excludes superseded/invalidated/erased targets and applies
   // verify states, so materializing it yields the canonical current facts.
   const live = buildProjection(records);

@@ -10,10 +10,10 @@ describe('parseLedgerText', () => {
     try {
       const path = join(dir, 'm.jsonl');
       const lines = [
-        JSON.stringify({ id: 'a', type: 'assert', content: 'one', state: 'Fresh' }),
+        JSON.stringify({ id: 'a', type: 'assert', content: 'one', state: 'Fresh', provenance: { source: 'user', sessionId: 's' } }),
         '   ',                                   // blank -> skipped
         '{not json',                             // torn -> tolerated/skipped
-        JSON.stringify({ id: 'b', type: 'assert', content: 'two', state: 'Fresh' }),
+        JSON.stringify({ id: 'b', type: 'assert', content: 'two', state: 'Fresh', provenance: { source: 'user', sessionId: 's' } }),
       ].join('\n') + '\n';
       writeFileSync(path, lines);
       expect(parseLedgerText(readFileSync(path, 'utf8'))).toEqual(parseLedger(path));
