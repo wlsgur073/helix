@@ -327,4 +327,15 @@ describe('D1: the egress decision is disclosed on every sent result', () => {
     expect(forged.length).toBeGreaterThanOrEqual(1);
     expect(lines.some((l) => l === 'egress: allowed_override (released: piiHigh)')).toBe(false); // model's copy never trusted
   });
+
+  it('the disclosure line names ONLY released policy keys, never an audit-only secret', async () => {
+    const d = deps({
+      config: { ...DEFAULT_CONFIG, dualVerify: { ...DEFAULT_CONFIG.dualVerify, enabled: true, mode: 'compare', egressPolicy: { ...DEFAULT_CONFIG.dualVerify.egressPolicy, piiHigh: 'allow' } } },
+      runner: async () => ({ ok: true, answer: 'ok' }),
+    });
+    const res = await handleDualVerify({ question: 'digest a3f5c9d2b7e14608a3f5c9d2b7e14608a3f5c9d2 ship to 4111 1111 1111 1111?', helixAnswer: 'yes' }, d);
+    const lines = text(res).split('\n');
+    expect(lines).toContain('egress: allowed_override (released: piiHigh)');
+    expect(lines.some((l) => l.startsWith('egress:') && l.includes('secret'))).toBe(false);
+  });
 });

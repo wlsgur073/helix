@@ -647,4 +647,15 @@ describe('D1: classifier reports leg OUTCOMES, not just detections', () => {
     ];
     for (const v of samples) expect(TEMPLATES.some((t) => t.test(v.reason))).toBe(true);
   });
+
+  it('detected legs STRICTLY exceed released: a hex-exempt secret + an allowed card', () => {
+    const v = classifyEgress(clean({
+      texts: ['digest a3f5c9d2b7e14608a3f5c9d2b7e14608a3f5c9d2 ship to 4111 1111 1111 1111'],
+      policy: { ...ALL('block'), piiHigh: 'allow' },
+    }));
+    expect(v.decision).toBe('allowed_override');
+    expect(v.releasedLegs).toEqual(['piiHigh']);      // ONLY the policy-released key
+    expect(v.auditOnlyLegs).toEqual(['secret']);      // the hex secret was never gated
+    expect(v.legs).toEqual(['secret', 'pii']);        // both DETECTED
+  });
 });

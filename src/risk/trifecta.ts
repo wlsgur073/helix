@@ -121,8 +121,10 @@ export interface EgressVerdict {
 }
 
 /** Canonical render + audit order for the typed leg-outcome lists (D1). A single public constant so the
- *  disclosure line and the audit record are deterministic — never incidental push order. Mirrors
- *  config's EGRESS_LEGS precedence. */
+ *  disclosure line and the audit record are deterministic — never incidental push order. Matches the
+ *  `gated`-array DECISION precedence below (echo > piiHigh > heuristic > entropy > piiBulk), so
+ *  `decidedBy` is always the first leg rendered — NOT config's EGRESS_LEGS order (which places piiBulk
+ *  third, not last). */
 export const EGRESS_LEG_ORDER: readonly EgressLeg[] = ['memoryEcho', 'piiHigh', 'secretHeuristic', 'secretEntropy', 'piiBulk'];
 /** Canonical order for the coarse audit-only legs (detected but never gated). */
 export const AUDIT_LEG_ORDER: readonly Leg[] = ['secret', 'pii', 'memory_echo'];
