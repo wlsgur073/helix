@@ -23019,52 +23019,66 @@ function nearCredential(text, start, end) {
   if (m >= 0) post = post.slice(0, m);
   return CREDENTIAL_CONTEXT.test(pre) || CREDENTIAL_CONTEXT.test(post);
 }
-function classifyEgress(input) {
-  const text = input.texts.join("\n");
+function scanText(text) {
   const secretSpans = findSecrets(text);
-  const secretHit = secretSpans.length > 0;
-  const secretNamed = secretSpans.some((s) => s.tier === "named");
-  const secretHeuristic = secretSpans.some((s) => s.tier === "heuristic");
-  const secretEntropy = secretSpans.some(
-    (s) => s.tier === "entropy" && (!s.entropyHex || nearCredential(text, s.start, s.end))
-  );
   const piiHits = detectPII(text);
-  const piiKinds = [...new Set(piiHits.map((h) => h.kind))];
-  const highPii = piiHits.some((h) => h.severity === "high");
-  const lowPiiCount = piiHits.filter((h) => h.severity === "low").length;
+  const highHits = piiHits.filter((h) => h.severity === "high");
+  return {
+    secretHit: secretSpans.length > 0,
+    secretNamed: secretSpans.some((s) => s.tier === "named"),
+    secretHeuristic: secretSpans.some((s) => s.tier === "heuristic"),
+    secretEntropy: secretSpans.some(
+      (s) => s.tier === "entropy" && (!s.entropyHex || nearCredential(text, s.start, s.end))
+    ),
+    piiKinds: [...new Set(piiHits.map((h) => h.kind))],
+    highKinds: [...new Set(highHits.map((h) => h.kind))],
+    highPii: highHits.length > 0,
+    lowPiiCount: piiHits.filter((h) => h.severity === "low").length
+  };
+}
+function classifyEgress(input) {
+  const raw = input.texts.join("\n");
+  const normalized = normalizeUntrusted(raw);
+  const scans = normalized === raw ? [scanText(raw)] : [scanText(raw), scanText(normalized)];
+  const any = (f) => scans.some(f);
+  const secretHit = any((s) => s.secretHit);
+  const secretNamed = any((s) => s.secretNamed);
+  const secretHeuristic = any((s) => s.secretHeuristic);
+  const secretEntropy = any((s) => s.secretEntropy);
+  const piiKinds = [...new Set(scans.flatMap((s) => s.piiKinds))];
+  const highKinds = [...new Set(scans.flatMap((s) => s.highKinds))];
+  const highPii = any((s) => s.highPii);
+  const lowPiiCount = Math.max(...scans.map((s) => s.lowPiiCount));
   const bulkLowPii = lowPiiCount >= BULK_PII_N;
   const echo = input.ledger === null ? { memoryIds: [] } : detectEcho(input.texts, input.ledger);
   const echoMemoryIds = echo.memoryIds;
   const echoHit = echoMemoryIds.length > 0;
+  const piiHit = piiKinds.length > 0;
   const legs = [];
   if (secretHit) legs.push("secret");
-  if (piiHits.length > 0) legs.push("pii");
+  if (piiHit) legs.push("pii");
   if (echoHit) legs.push("memory_echo");
-  const gate = (leg) => input.policy[leg] === "allow" ? "allowed_override" : "blocked";
   if (secretNamed) {
-    return { decision: "blocked", legs, piiKinds, echoMemoryIds, reason: "blocked: secret token (override-proof)" };
+    return { decision: "blocked", legs, piiKinds, echoMemoryIds, decidedBy: "named", reason: "blocked: secret token (override-proof)" };
   }
-  if (echoHit) {
-    const d = gate("memoryEcho");
-    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: memory-echo (${echoMemoryIds.length} items)` };
+  const gated = [
+    { hit: echoHit, key: "memoryEcho", label: `memory-echo (${echoMemoryIds.length} items)` },
+    { hit: highPii, key: "piiHigh", label: `high-severity PII (${highKinds.length} kinds)` },
+    { hit: secretHeuristic, key: "secretHeuristic", label: "secret keyword-assignment (low-confidence)" },
+    { hit: secretEntropy, key: "secretEntropy", label: "high-entropy token (low-confidence)" },
+    { hit: bulkLowPii, key: "piiBulk", label: `bulk low-severity PII (${lowPiiCount} hits)` }
+  ];
+  const applicable = gated.filter((g) => g.hit);
+  const blocking = applicable.filter((g) => input.policy[g.key] !== "allow");
+  if (blocking.length > 0) {
+    const d = blocking[0];
+    return { decision: "blocked", legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `blocked: ${d.label}` };
   }
-  if (highPii) {
-    const d = gate("piiHigh");
-    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: high-severity PII (${piiKinds.length} kinds)` };
+  if (applicable.length > 0) {
+    const d = applicable[0];
+    return { decision: "allowed_override", legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `allowed_override: ${d.label}` };
   }
-  if (secretHeuristic) {
-    const d = gate("secretHeuristic");
-    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: secret keyword-assignment (low-confidence)` };
-  }
-  if (secretEntropy) {
-    const d = gate("secretEntropy");
-    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: high-entropy token (low-confidence)` };
-  }
-  if (bulkLowPii) {
-    const d = gate("piiBulk");
-    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: bulk low-severity PII (${lowPiiCount} hits)` };
-  }
-  if (piiHits.length > 0) {
+  if (piiHit) {
     return { decision: "pass", legs, piiKinds, echoMemoryIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)` };
   }
   return {
@@ -23119,7 +23133,7 @@ async function dualVerify(params, deps) {
     return { ran: false, attempted: false, outcome: "unavailable", reason: avail.reason ?? "codex unavailable", egress: verdict };
   }
   const mode = deps.config.dualVerify.mode;
-  const prompt = mode === "critique" ? buildCritiquePrompt(params.question, params.helixAnswer) : params.question;
+  const prompt = mode === "critique" ? buildCritiquePrompt(params.question, params.helixAnswer) : normalizeUntrusted(params.question);
   const res = await deps.runner(prompt, {
     model: deps.config.dualVerify.model,
     effort: deps.config.dualVerify.effort,
@@ -23336,10 +23350,19 @@ async function handleCodexStatus(deps) {
   return ok(lines.join("\n"));
 }
 function deciderLeg(v) {
-  if (v.legs.includes("secret")) return "secret";
-  if (v.legs.includes("memory_echo")) return "memory_echo";
-  if (v.legs.includes("pii")) return "pii";
-  return void 0;
+  switch (v.decidedBy) {
+    case "named":
+    case "secretHeuristic":
+    case "secretEntropy":
+      return "secret";
+    case "piiHigh":
+    case "piiBulk":
+      return "pii";
+    case "memoryEcho":
+      return "memory_echo";
+    default:
+      return void 0;
+  }
 }
 async function handleDualVerify(args, deps) {
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
