@@ -5,6 +5,7 @@
 
 import { findSecrets } from '../memory/secret-scan.js';
 import { detectPII, type PiiKind } from '../memory/pii-scan.js';
+import { normalizeUntrusted } from '../memory/content-frame.js';
 import type { EgressPolicy, EgressLeg } from '../config.js';
 
 export interface LedgerItem {
@@ -84,6 +85,11 @@ export interface EgressVerdict {
   piiKinds: PiiKind[];
   echoMemoryIds: string[];
   reason: string;                  // content-free: counts / labels only, never a matched span
+  /** The leg that DECIDED (typed, machine-readable): the policy key that blocked or was released,
+   *  or 'named' for the override-proof secret tier; undefined on a clean/audit-only pass. Consumers
+   *  MUST read this instead of re-deriving a decider from `legs` — `legs` reports every DETECTED
+   *  leg (audit), which after the blocked-dominant fold is no longer the leg that decided. */
+  decidedBy?: EgressLeg | 'named';
 }
 
 /** Bulk low-severity PII threshold: >= N distinct low-sev hits is exfiltration-shaped. */
@@ -108,79 +114,120 @@ function nearCredential(text: string, start: number, end: number): boolean {
   return CREDENTIAL_CONTEXT.test(pre) || CREDENTIAL_CONTEXT.test(post);
 }
 
-/**
- * S1 egress classifier. Runs secret -> PII -> echo, then applies the §6 decision table in
- * precedence order (first match wins the decision; all detected legs/kinds/ids are still recorded
- * for audit). `reason` is content-free. Only the NAMED secret tier is override-proof (deny-dominant):
- * no egressPolicy leg can release it. The heuristic/entropy secret tiers and the PII/echo legs are
- * each gated by their own egressPolicy key. When `ledger` is null the echo leg is skipped (explicit
- * EchoSource:'disabled').
- */
-export function classifyEgress(input: EgressInput): EgressVerdict {
-  const text = input.texts.join('\n');
+/** Per-form detector signals. Computed once per scanned FORM of the payload (see classifyEgress). */
+interface Scan {
+  secretHit: boolean;
+  secretNamed: boolean;
+  secretHeuristic: boolean;
+  secretEntropy: boolean;
+  piiKinds: PiiKind[];
+  highKinds: PiiKind[];
+  highPii: boolean;
+  lowPiiCount: number;
+}
 
-  // --- run every detector first; record everything for audit ---
+/** Run every detector over ONE form of the payload. Pure; no policy, no decision. */
+function scanText(text: string): Scan {
   const secretSpans = findSecrets(text);
-  const secretHit = secretSpans.length > 0;
   // Per-tier secret signals (EH-1 Task 2). 'named' is override-proof (deny-dominant); 'heuristic'
   // and 'entropy' are low-confidence and policy-gated by their own legs. An overlapping
   // provider+heuristic span merges to tier='named' (secret-scan.mergeSpans), so secretNamed wins it.
-  const secretNamed = secretSpans.some((s) => s.tier === 'named');
-  const secretHeuristic = secretSpans.some((s) => s.tier === 'heuristic');
   // EH-4: a hex-shaped entropy span (entropyHex) is released on egress UNLESS a credential keyword
   // is in the same statement. Rich-alphabet entropy spans (!entropyHex) still block.
-  const secretEntropy = secretSpans.some(
-    (s) => s.tier === 'entropy' && (!s.entropyHex || nearCredential(text, s.start, s.end)),
-  );
-
   const piiHits = detectPII(text);
-  const piiKinds: PiiKind[] = [...new Set(piiHits.map((h) => h.kind))];
-  const highPii = piiHits.some((h) => h.severity === 'high');
-  const lowPiiCount = piiHits.filter((h) => h.severity === 'low').length;
+  const highHits = piiHits.filter((h) => h.severity === 'high');
+  return {
+    secretHit: secretSpans.length > 0,
+    secretNamed: secretSpans.some((s) => s.tier === 'named'),
+    secretHeuristic: secretSpans.some((s) => s.tier === 'heuristic'),
+    secretEntropy: secretSpans.some(
+      (s) => s.tier === 'entropy' && (!s.entropyHex || nearCredential(text, s.start, s.end)),
+    ),
+    piiKinds: [...new Set(piiHits.map((h) => h.kind))],
+    highKinds: [...new Set(highHits.map((h) => h.kind))],
+    highPii: highHits.length > 0,
+    lowPiiCount: piiHits.filter((h) => h.severity === 'low').length,
+  };
+}
+
+/**
+ * S1 egress classifier. Scans the payload, then applies the §6 decision table BLOCKED-DOMINANTLY
+ * (any hit leg whose policy is 'block' blocks, whatever else is released; precedence only names the
+ * decider). All detected legs/kinds/ids are recorded for audit; `decidedBy` carries the deciding leg.
+ * `reason` is content-free. Only the NAMED secret tier is override-proof (deny-dominant): no
+ * egressPolicy leg can release it. The heuristic/entropy secret tiers and the PII/echo legs are each
+ * gated by their own egressPolicy key. When `ledger` is null the echo leg is skipped (explicit
+ * EchoSource:'disabled').
+ *
+ * SCANS BOTH FORMS. The prompt builder normalizes untrusted text on the way out
+ * (normalizeUntrusted: NFKC + control-strip + fence-break), so scanning only the raw string is
+ * blind to full-width/zero-width confusables that fold back into a live card or API key inside the
+ * outbound prompt — a `pass` verdict on text that leaves as a working secret. Scanning only the
+ * normalized string is not sound either: fence-breaking can destroy a token the raw form reveals.
+ * So both forms are scanned and the signals combined CONSERVATIVELY (any-form hit ⇒ hit), while
+ * counts take the max per form — never the sum, which would double-count an ASCII email that
+ * appears in both forms and could trip the bulk-PII floor on a benign payload.
+ */
+export function classifyEgress(input: EgressInput): EgressVerdict {
+  const raw = input.texts.join('\n');
+  const normalized = normalizeUntrusted(raw);
+  const scans = normalized === raw ? [scanText(raw)] : [scanText(raw), scanText(normalized)];
+  const any = (f: (s: Scan) => boolean): boolean => scans.some(f);
+
+  const secretHit = any((s) => s.secretHit);
+  const secretNamed = any((s) => s.secretNamed);
+  const secretHeuristic = any((s) => s.secretHeuristic);
+  const secretEntropy = any((s) => s.secretEntropy);
+
+  const piiKinds: PiiKind[] = [...new Set(scans.flatMap((s) => s.piiKinds))];
+  const highKinds: PiiKind[] = [...new Set(scans.flatMap((s) => s.highKinds))];
+  const highPii = any((s) => s.highPii);
+  const lowPiiCount = Math.max(...scans.map((s) => s.lowPiiCount));
   const bulkLowPii = lowPiiCount >= BULK_PII_N;
 
+  // detectEcho normalizes internally (normalizeForMatch), so it is confusable-safe already.
   const echo = input.ledger === null ? { memoryIds: [] } : detectEcho(input.texts, input.ledger);
   const echoMemoryIds = echo.memoryIds;
   const echoHit = echoMemoryIds.length > 0;
+  const piiHit = piiKinds.length > 0;            // kinds is empty iff there were no PII hits
 
   const legs: Leg[] = [];
   if (secretHit) legs.push('secret');
-  if (piiHits.length > 0) legs.push('pii');
+  if (piiHit) legs.push('pii');
   if (echoHit) legs.push('memory_echo');
 
-  // Per-leg gate: a leg set to 'allow' releases its hit (allowed_override); otherwise it blocks.
-  // Named secrets never reach a gate — they are deny-dominant (handled above the gates).
-  const gate = (leg: EgressLeg): 'allowed_override' | 'blocked' => (input.policy[leg] === 'allow' ? 'allowed_override' : 'blocked');
-
-  // --- precedence-ordered decision (§6); first match wins ---
-  // Precedence: named > echo > piiHigh > heuristic > entropy > piiBulk > standalone-low-pii.
+  // --- BLOCKED-DOMINANT decision over EVERY applicable leg (§6) ---
   // A NAMED secret (provider pattern, high confidence) is override-proof: no leg can release it.
   // Every other leg is low/medium confidence and gated by its own egressPolicy key, so a false
   // positive cannot permanently wedge dual-verify.
   if (secretNamed) {
-    return { decision: 'blocked', legs, piiKinds, echoMemoryIds, reason: 'blocked: secret token (override-proof)' };
+    return { decision: 'blocked', legs, piiKinds, echoMemoryIds, decidedBy: 'named', reason: 'blocked: secret token (override-proof)' };
   }
-  if (echoHit) {
-    const d = gate('memoryEcho');
-    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: memory-echo (${echoMemoryIds.length} items)` };
+  // Gated legs in PRECEDENCE order (echo > piiHigh > heuristic > entropy > piiBulk > standalone-low-pii).
+  // Precedence decides only WHICH leg is named in the reason — never WHETHER we block. An 'allow'
+  // releases that leg's OWN hit and nothing else: any other hit leg still gated 'block' blocks the
+  // whole payload. This was a first-match-wins chain, so `memoryEcho: allow` silently exfiltrated a
+  // card / keyword-secret / bulk-PII sitting in the same payload (every lower leg was never reached).
+  const gated: Array<{ hit: boolean; key: EgressLeg; label: string }> = [
+    { hit: echoHit, key: 'memoryEcho', label: `memory-echo (${echoMemoryIds.length} items)` },
+    { hit: highPii, key: 'piiHigh', label: `high-severity PII (${highKinds.length} kinds)` },
+    { hit: secretHeuristic, key: 'secretHeuristic', label: 'secret keyword-assignment (low-confidence)' },
+    { hit: secretEntropy, key: 'secretEntropy', label: 'high-entropy token (low-confidence)' },
+    { hit: bulkLowPii, key: 'piiBulk', label: `bulk low-severity PII (${lowPiiCount} hits)` },
+  ];
+  const applicable = gated.filter((g) => g.hit);
+  const blocking = applicable.filter((g) => input.policy[g.key] !== 'allow');
+  if (blocking.length > 0) {
+    // Decider = highest-precedence BLOCKING leg. Released legs are still reported in `legs` for audit.
+    const d = blocking[0]!;
+    return { decision: 'blocked', legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `blocked: ${d.label}` };
   }
-  if (highPii) {
-    const d = gate('piiHigh');
-    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: high-severity PII (${piiKinds.length} kinds)` };
+  if (applicable.length > 0) {
+    // Every hit leg was released by its own policy key. Name the highest-precedence one.
+    const d = applicable[0]!;
+    return { decision: 'allowed_override', legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `allowed_override: ${d.label}` };
   }
-  if (secretHeuristic) {
-    const d = gate('secretHeuristic');
-    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: secret keyword-assignment (low-confidence)` };
-  }
-  if (secretEntropy) {
-    const d = gate('secretEntropy');
-    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: high-entropy token (low-confidence)` };
-  }
-  if (bulkLowPii) {
-    const d = gate('piiBulk');
-    return { decision: d, legs, piiKinds, echoMemoryIds, reason: `${d}: bulk low-severity PII (${lowPiiCount} hits)` };
-  }
-  if (piiHits.length > 0) {
+  if (piiHit) {
     // single low-severity standalone PII (< N, no other leg) -> audit-only pass.
     return { decision: 'pass', legs, piiKinds, echoMemoryIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)` };
   }

@@ -3,7 +3,7 @@ import {
   detectEcho, classifyEgress, classifyEmission,
   type LedgerItem, type EgressInput, type EgressVerdict, type EmissionFlag,
 } from '../../src/risk/trifecta.js';
-import type { EgressPolicy } from '../../src/config.js';
+import type { EgressPolicy, EgressLeg } from '../../src/config.js';
 
 const item = (id: string, content: string): LedgerItem => ({ id, content });
 
@@ -180,6 +180,158 @@ describe('classifyEgress', () => {
     const texts = ['card 4111 1111 1111 1111 on file'];
     expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), piiHigh: 'allow' } })).decision).toBe('allowed_override');
     expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), piiBulk: 'allow' } })).decision).toBe('blocked');
+  });
+});
+
+// The gate must inspect the SAME bytes the prompt builder sends. dual-verify normalizes untrusted
+// text (NFKC + control-strip + fence-break) on the way OUT, so a detector that scans only the raw
+// string is blind to full-width / zero-width confusables that NFKC folds back into a live secret
+// or card — the payload passes as 'pass', then reconstitutes in the outbound prompt. classifyEgress
+// therefore scans BOTH forms and blocks if EITHER is dangerous (a strict superset: fence-breaking
+// can also destroy a token that only the raw form reveals).
+describe('classifyEgress scans what is SENT (confusable normalization)', () => {
+  const FW_CARD = 'card ４１１１１１１１１１１１１１１１ on file';                     // full-width digits
+  const FW_KEY = 'key is ｓｋ－ａｎｔ－ａｐｉ０３－Ａｂ１２Ｃｄ３４Ｅｆ５６Ｇｈ７８Ｉｊ９０Ｋｌ１２Ｍｎ３４';
+  const ZW_KEY = 'key is sk​-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34';   // zero-width split
+
+  const at = (texts: string[], policy: EgressPolicy): EgressVerdict =>
+    classifyEgress({ texts, ledger: [], policy });
+
+  it('a full-width card is blocked (NFKC folds it into a live card in the prompt)', () => {
+    const v = at([FW_CARD], ALL('block'));
+    expect(v.decision).toBe('blocked');
+    expect(v.piiKinds).toContain('credit_card');
+  });
+
+  it('a full-width NAMED secret stays override-proof under ALL legs allow', () => {
+    const v = at([FW_KEY], ALL('allow'));
+    expect(v.decision).toBe('blocked');
+    expect(v.legs).toContain('secret');
+  });
+
+  it('a zero-width-split named secret is blocked (control-strip rejoins it)', () => {
+    expect(at([ZW_KEY], ALL('allow')).decision).toBe('blocked');
+  });
+
+  it('normalization never INFLATES a count: 2 emails + a full-width char stay under the bulk floor', () => {
+    // raw !== normalized (so both forms are scanned), but the two emails must be counted ONCE:
+    // double-counting would reach the bulk-PII floor (N=3) and block a benign payload.
+    const v = at(['ping a@x.com or b@x.com （note）'], ALL('block'));
+    expect(v.decision).toBe('pass');       // audit-only: 2 low-severity hits, under the floor
+    expect(v.piiKinds).toEqual(['email']);
+  });
+
+  it('clean ASCII is unaffected by the second scan', () => {
+    expect(at(['what is the capital of France?'], ALL('block')).decision).toBe('pass');
+  });
+});
+
+// A leg set to 'allow' releases ONLY ITS OWN hit. It must never suppress another leg whose policy
+// is 'block' — the pre-fix precedence chain returned on the first matching leg, so an allowed
+// high-precedence leg (e.g. memoryEcho) silently exfiltrated everything below it (card PII,
+// keyword secrets, bulk PII). Blocked-dominant: ANY blocking leg wins, whatever else is allowed.
+describe('classifyEgress leg dominance (a blocked leg is never suppressed by an allowed one)', () => {
+  const ECHO_ITEM: LedgerItem = { id: 'm_1', content: 'the deploy uses the blue cluster in us-east-1' };
+
+  // One payload fragment per leg, each independently verified by the tests above.
+  const FRAG: Record<Exclude<EgressLeg, never>, string> = {
+    memoryEcho: 'the deploy uses the blue cluster in us-east-1',
+    piiHigh: 'card 4111 1111 1111 1111 on file',
+    secretHeuristic: 'first-impression pass: install steps here',
+    secretEntropy: 'token n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf',
+    piiBulk: 'a@x.com, b@x.com, c@x.com',
+  };
+  // Decision precedence in classifyEgress (named secrets sit above all of these, deny-dominant).
+  const ORDER: EgressLeg[] = ['memoryEcho', 'piiHigh', 'secretHeuristic', 'secretEntropy', 'piiBulk'];
+
+  const input = (legs: EgressLeg[], policy: EgressPolicy): EgressInput => ({
+    texts: ['q: status?', legs.map((l) => FRAG[l]).join(' ')],
+    ledger: legs.includes('memoryEcho') ? [ECHO_ITEM] : [],
+    policy,
+  });
+
+  // Cross-product: for every pair where the ALLOWED leg outranks the BLOCKED one, the block wins.
+  for (const [i, allowed] of ORDER.entries()) {
+    for (const blocked of ORDER.slice(i + 1)) {
+      it(`${allowed}=allow does not release a blocked ${blocked}`, () => {
+        const policy: EgressPolicy = { ...ALL('block'), [allowed]: 'allow' };
+        const v = classifyEgress(input([allowed, blocked], policy));
+        expect(v.decision).toBe('blocked');
+        expect(v.reason.startsWith('blocked:')).toBe(true);
+      });
+    }
+  }
+
+  it('the live dogfood config (memoryEcho:allow) does not exfiltrate a card under piiHigh:block', () => {
+    const v = classifyEgress(input(['memoryEcho', 'piiHigh'], { ...ALL('block'), memoryEcho: 'allow', secretEntropy: 'allow' }));
+    expect(v.decision).toBe('blocked');
+    expect(v.piiKinds).toContain('credit_card');
+    expect(v.echoMemoryIds).toEqual(['m_1']);   // echo still detected + audited, just not decisive
+  });
+
+  it('every leg allowed: multiple hits release together as one allowed_override', () => {
+    const v = classifyEgress(input(ORDER, ALL('allow')));
+    expect(v.decision).toBe('allowed_override');
+    expect(v.legs).toEqual(['secret', 'pii', 'memory_echo']);   // all detected legs still reported
+  });
+
+  it('a named secret still dominates every allowed leg', () => {
+    const v = classifyEgress({
+      texts: ['key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34 ' + FRAG.memoryEcho + ' ' + FRAG.piiHigh],
+      ledger: [ECHO_ITEM],
+      policy: ALL('allow'),
+    });
+    expect(v.decision).toBe('blocked');
+    expect(v.reason).toContain('override-proof');
+  });
+
+  it('the blocked reason names the HIGHEST-PRECEDENCE blocked leg, not just any', () => {
+    // echo allowed; piiHigh AND piiBulk both blocked -> piiHigh (higher precedence) is the decider.
+    const policy: EgressPolicy = { ...ALL('block'), memoryEcho: 'allow' };
+    const v = classifyEgress(input(['memoryEcho', 'piiHigh', 'piiBulk'], policy));
+    expect(v.decision).toBe('blocked');
+    expect(v.reason).toContain('high-severity PII');
+  });
+
+  // The decider label is the operator's attribution signal, so the ORDER itself is a contract —
+  // not an implementation detail. Pin every ADJACENT pair: a reversal test would pass under an
+  // adjacent swap and give false confidence (mutation-testing lesson).
+  const LABEL: Record<EgressLeg, RegExp> = {
+    memoryEcho: /memory-echo/,
+    piiHigh: /high-severity PII/,
+    secretHeuristic: /keyword-assignment/,
+    secretEntropy: /high-entropy/,
+    piiBulk: /bulk low-severity PII/,
+  };
+  for (const [i, higher] of ORDER.slice(0, -1).entries()) {
+    const lower = ORDER[i + 1]!;
+    it(`decider precedence: ${higher} outranks ${lower} when both block`, () => {
+      const v = classifyEgress(input([higher, lower], ALL('block')));
+      expect(v.decision).toBe('blocked');
+      expect(v.reason).toMatch(LABEL[higher]);
+      expect(v.reason).not.toMatch(LABEL[lower]);
+    });
+  }
+
+  it('the deciding leg is a TYPED field, not re-derived from the audit legs array', () => {
+    // audit/handlers must not reconstruct the decider from `legs` — with memoryEcho allowed, the
+    // card is what blocks, and the audit record has to say so.
+    const v = classifyEgress(input(['memoryEcho', 'piiHigh'], { ...ALL('block'), memoryEcho: 'allow' }));
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('piiHigh');
+  });
+
+  it('a named secret reports decidedBy=named (override-proof)', () => {
+    const v = classifyEgress({ texts: ['key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34'], ledger: [], policy: ALL('allow') });
+    expect(v.decidedBy).toBe('named');
+  });
+
+  it('the high-severity label counts HIGH-severity kinds only', () => {
+    // card (high) + a single email (low) -> one high-severity kind, not two.
+    const v = classifyEgress({ texts: ['card 4111 1111 1111 1111 and kim@example.com'], ledger: [], policy: ALL('block') });
+    expect(v.decision).toBe('blocked');
+    expect(v.reason).toContain('high-severity PII (1 kinds)');
+    expect(v.piiKinds).toEqual(expect.arrayContaining(['credit_card', 'email']));   // audit keeps both
   });
 });
 
