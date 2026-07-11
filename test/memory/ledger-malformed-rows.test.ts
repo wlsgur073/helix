@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { parseLedgerText, planCompaction } from '../../src/memory/ledger.js';
+import { parseLedgerText, parseLedger, compactLedger } from '../../src/memory/ledger.js';
 import { MemoryStore } from '../../src/memory/store.js';
 import type { MemoryRecord } from '../../src/types.js';
 
@@ -41,6 +41,31 @@ function recallOver(lines: string[]): { items: unknown[]; threw: string | null }
   }
 }
 
+/** Write a ledger whose lines are given VERBATIM (so a line can be a bare `null`), then compact it
+ *  through the real `compactLedger` entry point — mirroring every production caller. Both
+ *  `store.ts` call sites (maybeAutoCompact and permanent-erase) only ever hand `planCompaction` an
+ *  array that already passed through `parseLedger`/`parseLedgerText`, never a hand-built
+ *  `MemoryRecord[]`; calling `planCompaction` directly with raw `JSON.parse` output — as this file
+ *  used to — exercises a shape no production caller produces, and would stay green even if the real
+ *  guard in `parseLedgerText` were weakened. Returns whether compaction threw and the post-compaction
+ *  records re-read from disk (not the in-memory plan), so a caller can prove the legitimate row
+ *  actually survived the rewrite. */
+function compactOver(lines: string[]): { records: MemoryRecord[]; threw: string | null } {
+  const dir = mkdtempSync(join(tmpdir(), 'helix-malformed-'));
+  try {
+    const path = join(dir, 'memory.jsonl');
+    writeFileSync(path, lines.join('\n') + '\n');
+    try {
+      compactLedger(path, { erasedIds: new Set() });
+      return { records: parseLedger(path), threw: null };
+    } catch (e) {
+      return { records: [], threw: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 describe('N1: a malformed ledger row must never brick a total function', () => {
   it('a bare `null` line does not throw in recall', () => {
     const out = recallOver([JSON.stringify(rec()), 'null']);
@@ -62,13 +87,20 @@ describe('N1: a malformed ledger row must never brick a total function', () => {
   });
 
   it('id: null does not throw in compaction (marker predicate)', () => {
-    const rows = [rec(), JSON.parse('{"id":null,"type":"verify","supersedes":null,"content":"","provenance":{}}')];
-    expect(() => planCompaction(rows as MemoryRecord[], { erasedIds: new Set() })).not.toThrow();
+    const good = rec();
+    const out = compactOver([
+      JSON.stringify(good),
+      '{"id":null,"type":"verify","supersedes":null,"content":"","provenance":{}}',
+    ]);
+    expect(out.threw).toBeNull();          // today: TypeError … reading 'startsWith'
+    expect(out.records.find((r) => r.id === good.id)?.content).toBe(good.content); // legitimate row survives the rewrite
   });
 
   it('a bare `null` row does not throw in compaction', () => {
-    const rows = [rec(), JSON.parse('null')];
-    expect(() => planCompaction(rows as MemoryRecord[], { erasedIds: new Set() })).not.toThrow();
+    const good = rec();
+    const out = compactOver([JSON.stringify(good), 'null']);
+    expect(out.threw).toBeNull();          // today: TypeError … reading 'type'
+    expect(out.records.find((r) => r.id === good.id)?.content).toBe(good.content); // legitimate row survives the rewrite
   });
 
   it('a skipped row does not shift its neighbours out of the projection', () => {

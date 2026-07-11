@@ -109,12 +109,6 @@ export interface CompactOptions {
  *  kept-set and its COUNTS/SIZES, never for record identity — the self-limiting invariant holds
  *  because the markers are fixed-width, not because the function is pure. */
 export function planCompaction(records: MemoryRecord[], opts: CompactOptions): MemoryRecord[] {
-  // Same structural guard as the parse boundary (isWellFormedRecord, above). planCompaction is
-  // exported and callable directly with a MemoryRecord[] that never passed through
-  // parseLedgerText, so a malformed element would otherwise reach buildProjection's unguarded
-  // `r.type` and isHorizonMarker's unguarded `r.id.startsWith` below and throw. Filtering here,
-  // once, before either is used, keeps every downstream use of `records` in this function total.
-  records = records.filter(isWellFormedRecord);
   // The live projection already excludes superseded/invalidated/erased targets and applies
   // verify states, so materializing it yields the canonical current facts.
   const live = buildProjection(records);
