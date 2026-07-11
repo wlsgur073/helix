@@ -36,20 +36,26 @@ export function appendRecord(path: LedgerPath, record: MemoryRecord): void {
  * Structural guard at the parse boundary. `JSON.parse(line) as MemoryRecord` is a lie to the type
  * checker: a ledger-write adversary appends ANY JSON value and every downstream predicate then
  * dereferences it. A bare `null` line, or `content: null`, throws inside recall (TypeError on `.type` /
- * `.normalize`) and PERMANENTLY BRICKS the tool; `id: null` throws inside the marker predicates.
+ * `.normalize`) and PERMANENTLY BRICKS the tool; `id: null` throws inside the marker predicates; a
+ * malformed `tx` throws inside the recall/session-start tie-break sort (`b.rec.tx.localeCompare(a.rec.tx)`
+ * in retrieval.ts, `b.record.tx.localeCompare(...)` in format-context.ts) the instant two rows land on
+ * an equal score.
  *
  * MINIMAL BY DESIGN. It rejects only values that make a TOTAL function throw — a non-object, or a
  * non-string where downstream calls a string method (`id.startsWith` / `safeId(id).replace`,
- * `content.normalize`, `provenance.source`). It deliberately does NOT validate enums (`type`, `state`),
- * timestamps, or `supersedes`: those are only COMPARED, never dereferenced, and rejecting an unknown
- * value there would silently DROP a legitimate row written by a future schema. Data loss is worse than
- * the crash this fixes. Malformed rows are skipped exactly like torn lines (the existing §10 tolerance).
+ * `content.normalize`, `provenance.source`, `tx.localeCompare`). `tx` is validated for that last reason:
+ * it IS dereferenced, not merely compared. It deliberately does NOT validate enums (`type`, `state`),
+ * `validFrom`/`validTo`, or `supersedes`: those are only COMPARED, never dereferenced, and rejecting an
+ * unknown value there would silently DROP a legitimate row written by a future schema. Data loss is
+ * worse than the crash this fixes. Malformed rows are skipped exactly like torn lines (the existing §10
+ * tolerance).
  */
 function isWellFormedRecord(v: unknown): v is MemoryRecord {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   const r = v as Record<string, unknown>;
   return typeof r.id === 'string'
     && typeof r.content === 'string'
+    && typeof r.tx === 'string'
     && typeof r.provenance === 'object' && r.provenance !== null
     && (r.mac === undefined || typeof r.mac === 'string');
 }

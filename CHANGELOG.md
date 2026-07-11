@@ -148,6 +148,25 @@ All notable changes to Helix are documented here. This project follows
   data through the same bounded single-line guard as `mode`/`stakesFloor`/`model`/`effort`, instead of
   interpolating it raw. A crafted value (or key) containing a newline could otherwise forge a second
   line in the stderr diagnostic; an ordinary key/value renders byte-identically to before.
+- A malformed ledger row — a bare `null` line, or a row with a non-string `tx` — could throw inside
+  `helix_memory_recall` and disable memory until the offending line was found and removed by hand
+  (`tx` is dereferenced by a ranking tie-break, `.localeCompare`, the moment two rows land on an equal
+  score). The parse-boundary guard now also validates `tx`, alongside the already-guarded
+  `id`/`content`/`provenance`/`mac`, and skips a structurally invalid row exactly like an existing
+  torn-line, instead of letting a downstream predicate dereference it.
+
+### Security
+- The dual-verify egress firewall now scans the exact normalized bytes it transmits on the
+  memory-echo leg, instead of a differently-normalized copy. Previously, zero-width and confusable
+  padding interleaved into a memory was invisible to the scan but still present on the wire, so it
+  could smuggle an echoed memory past the check.
+- The egress scan now fails **closed** at its size bound instead of open: a payload over 200,000
+  characters, or a dual-verify whose ledger exceeds roughly 8,000,000 content characters, is now
+  **refused** rather than sent to Codex partially scanned. **Availability change:** a call this large
+  previously went through unscanned past the bound; it now errors instead.
+- Codex's stderr on a failed dual-verify run is now rendered inside a nonce-framed, datamarked
+  quarantine block in the host-visible error, instead of interpolated as a plain line — external
+  process output is untrusted content and is now handled like any other.
 
 ## [0.1.0] — 2026-06-18
 

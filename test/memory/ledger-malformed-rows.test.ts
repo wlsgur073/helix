@@ -135,3 +135,31 @@ describe('N1: the guard is MINIMAL — every legitimate shape survives byte-iden
     expect(parseLedgerText(text)).toEqual([future]);
   });
 });
+
+describe('N1 follow-up (CRITICAL): a malformed `tx` still bricks the recall tie-break (`.localeCompare`)', () => {
+  // Two DISTINCT ids with IDENTICAL content tie on relevance, so ranking falls through to
+  // `b.rec.tx.localeCompare(a.rec.tx)` (retrieval.ts). A malformed `tx` on either row makes that
+  // total function throw -- exactly the class of bug isWellFormedRecord exists to close, but `tx`
+  // was never in the guard.
+  it('two distinct tx-omitted rows with identical content do not throw in recall (both structurally invalid, both dropped)', () => {
+    const a = JSON.stringify({ ...rec({ id: 'm_a' }), tx: undefined });
+    const b = JSON.stringify({ ...rec({ id: 'm_b' }), tx: undefined });
+    const out = recallOver([a, b]);
+    expect(out.threw).toBeNull();          // today: TypeError … reading 'localeCompare'
+    expect(out.items).toHaveLength(0);     // both rows are structurally invalid -> neither survives the parse boundary
+  });
+
+  it('two distinct tx: null rows with identical content do not throw in recall (both structurally invalid, both dropped)', () => {
+    const a = JSON.stringify({ ...rec({ id: 'm_a' }), tx: null });
+    const b = JSON.stringify({ ...rec({ id: 'm_b' }), tx: null });
+    const out = recallOver([a, b]);
+    expect(out.threw).toBeNull();          // today: TypeError … reading 'localeCompare'
+    expect(out.items).toHaveLength(0);
+  });
+
+  it('control: two distinct rows with valid tx still recall (tie-break reached, no throw)', () => {
+    const out = recallOver([JSON.stringify(rec({ id: 'm_a' })), JSON.stringify(rec({ id: 'm_b' }))]);
+    expect(out.threw).toBeNull();
+    expect(out.items).toHaveLength(2);     // both well-formed rows survive and recall
+  });
+});
