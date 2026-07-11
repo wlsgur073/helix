@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  detectEcho, classifyEgress, classifyEmission,
+  detectEcho, classifyEgress, classifyEmission, EGRESS_LEG_ORDER,
   type LedgerItem, type EgressInput, type EgressVerdict, type EmissionFlag,
 } from '../../src/risk/trifecta.js';
 import type { EgressPolicy, EgressLeg } from '../../src/config.js';
@@ -63,17 +63,19 @@ describe('detectEcho', () => {
 
 const ALL = (v: 'block' | 'allow'): EgressPolicy => ({ memoryEcho: v, piiHigh: v, piiBulk: v, secretHeuristic: v, secretEntropy: v });
 
-describe('classifyEgress', () => {
-  const clean = (over: Partial<EgressInput> = {}): EgressInput => {
-    const texts = over.texts ?? ['hello', 'world'];
-    return {
-      texts,
-      outbound: over.outbound ?? normalizeUntrusted(texts.join('\n')),
-      ledger: over.ledger ?? [],
-      policy: over.policy ?? ALL('block'),
-    };
+// Module-scoped (not local to `describe('classifyEgress', ...)`) so the D1 describe block below can
+// reuse it too — it has no dependency on anything inside that describe's closure.
+const clean = (over: Partial<EgressInput> = {}): EgressInput => {
+  const texts = over.texts ?? ['hello', 'world'];
+  return {
+    texts,
+    outbound: over.outbound ?? normalizeUntrusted(texts.join('\n')),
+    ledger: over.ledger ?? [],
+    policy: over.policy ?? ALL('block'),
   };
+};
 
+describe('classifyEgress', () => {
   it('passes clean content under both policies with no legs', () => {
     expect(classifyEgress(clean({ policy: ALL('block') })).decision).toBe('pass');
     expect(classifyEgress(clean({ policy: ALL('allow') })).decision).toBe('pass');
@@ -567,5 +569,82 @@ describe('G2: the scan budget fails CLOSED', () => {
   it('a normal-sized payload is unaffected', () => {
     const q = 'a'.repeat(30_000);                       // 30KB: the size of a real design review
     expect(classifyEgress({ texts: [q], outbound: q, ledger, policy: ALL('block') }).decision).toBe('pass');
+  });
+});
+
+describe('D1: classifier reports leg OUTCOMES, not just detections', () => {
+  it('a released piiHigh (card, policy allow) reports releasedLegs=[piiHigh], not the detected legs', () => {
+    const v = classifyEgress(clean({ texts: ['card 4111 1111 1111 1111'], policy: { ...ALL('block'), piiHigh: 'allow' } }));
+    expect(v.decision).toBe('allowed_override');
+    expect(v.releasedLegs).toEqual(['piiHigh']);
+    expect(v.blockedLegs).toEqual([]);
+    expect(v.auditOnlyLegs).toEqual([]);
+  });
+
+  it('a hex-exempt entropy span is auditOnly secret, NEVER released (it was never gated)', () => {
+    // an EH-4-exempt hex digest with no credential keyword => pass, secret detected but not gated
+    const v = classifyEgress(clean({ texts: ['digest a3f5c9d2b7e14608a3f5c9d2b7e14608a3f5c9d2'], policy: ALL('block') }));
+    expect(v.decision).toBe('pass');
+    expect(v.auditOnlyLegs).toEqual(['secret']);
+    expect(v.releasedLegs).toEqual([]);
+    expect(v.blockedLegs).toEqual([]);
+  });
+
+  it('a blocking card + a released echo reports BOTH (blocked-dominant, released still recorded)', () => {
+    const memo = 'PROJECT ORION LAUNCH CODE IS ALPHA';
+    const texts = [`card 4111 1111 1111 1111 and ${memo}`];
+    const v = classifyEgress(clean({ texts, ledger: [{ id: 'm_x', content: memo }], policy: { ...ALL('block'), memoryEcho: 'allow' } }));
+    expect(v.decision).toBe('blocked');
+    expect(v.blockedLegs).toEqual(['piiHigh']);
+    expect(v.releasedLegs).toEqual(['memoryEcho']);
+  });
+
+  it('relational invariants hold: blocked ∩ released = ∅, decidedBy ∈ its list', () => {
+    const v = classifyEgress(clean({ texts: ['card 4111 1111 1111 1111'], policy: { ...ALL('block'), piiHigh: 'allow' } }));
+    for (const l of v.blockedLegs) expect(v.releasedLegs).not.toContain(l);
+    if (v.decidedBy && v.decidedBy !== 'named' && v.decidedBy !== 'scan_limit') {
+      const inBlocked = v.blockedLegs.includes(v.decidedBy);
+      const inReleased = v.releasedLegs.includes(v.decidedBy);
+      expect(inBlocked !== inReleased).toBe(true); // member of exactly one
+    }
+  });
+
+  it('a clean pass reports all three lists empty', () => {
+    const v = classifyEgress(clean({ texts: ['what is the capital of France'], policy: ALL('block') }));
+    expect(v.decision).toBe('pass');
+    expect([v.blockedLegs, v.releasedLegs, v.auditOnlyLegs]).toEqual([[], [], []]);
+  });
+
+  it('scan_limit reports empty lists (nothing was inspected)', () => {
+    const huge = 'z'.repeat(200_001);
+    const v = classifyEgress(clean({ texts: [huge], outbound: huge, policy: ALL('allow') }));
+    expect(v.decidedBy).toBe('scan_limit');
+    expect([v.blockedLegs, v.releasedLegs, v.auditOnlyLegs]).toEqual([[], [], []]);
+  });
+
+  it('every reason matches a closed integer-only template (replaces the unsatisfiable substring fuzz)', () => {
+    // the previous "no >=8-char input substring in reason" property was unsatisfiable: `reason` is a
+    // constant an input can contain verbatim. Lock the closed template set instead.
+    const TEMPLATES = [
+      /^blocked: payload exceeds the egress scan limit \(\d+ chars\)$/,
+      /^blocked: ledger exceeds the egress scan limit \(\d+ chars\)$/,
+      /^blocked: secret token \(override-proof\)$/,
+      /^blocked: memory-echo \(\d+ items\)$/,
+      /^blocked: high-severity PII \(\d+ kinds\)$/,
+      /^blocked: secret keyword-assignment \(low-confidence\)$/,
+      /^blocked: high-entropy token \(low-confidence\)$/,
+      /^blocked: bulk low-severity PII \(\d+ hits\)$/,
+      /^allowed_override: .+$/,   // label only; the label set is the same closed list without the "blocked: " prefix
+      /^pass: low-severity PII \(\d+ hits, audit-only\)$/,
+      /^pass: hex-literal entropy exempt \(audit-only\)$/,
+      /^pass: no egress legs$/,
+    ];
+    const samples: EgressVerdict[] = [
+      classifyEgress(clean({ texts: ['hello world'], policy: ALL('block') })),
+      classifyEgress(clean({ texts: ['card 4111 1111 1111 1111'], policy: ALL('block') })),
+      classifyEgress(clean({ texts: ['card 4111 1111 1111 1111'], policy: { ...ALL('block'), piiHigh: 'allow' } })),
+      classifyEgress(clean({ texts: ['x'.repeat(200_001)], outbound: 'x'.repeat(200_001), policy: ALL('allow') })),
+    ];
+    for (const v of samples) expect(TEMPLATES.some((t) => t.test(v.reason))).toBe(true);
   });
 });

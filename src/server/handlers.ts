@@ -280,6 +280,16 @@ function deciderLeg(v: EgressVerdict): Leg | undefined {
   }
 }
 
+/** The D1 disclosure line, composed EXCLUSIVELY from the verdict's closed typed fields — never from the
+ *  free-form `reason` (a comment that reason is content-free is not a type). Rendered on every SENT
+ *  result (pass / allowed_override only — a blocked verdict never reaches the sent path). */
+function egressLine(v: EgressVerdict | undefined): string {
+  if (!v) return 'egress: unavailable (internal)';   // unreachable: dual-verify sets egress on every sent return
+  if (v.decision === 'allowed_override') return `egress: allowed_override (released: ${v.releasedLegs.join(', ')})`;
+  if (v.auditOnlyLegs.length > 0) return `egress: pass (audit-only; legs: ${v.auditOnlyLegs.join(', ')})`;
+  return 'egress: pass';
+}
+
 export async function handleDualVerify(
   args: { question: string; helixAnswer: string; stakes?: 'low' | 'medium' | 'high' | 'xhigh' },
   deps: DualVerifyHandlerDeps,
@@ -344,6 +354,7 @@ export async function handleDualVerify(
       frameOpen('DUAL-VERIFY', nonce),
       DATA_SEMANTICS,
       'mode: critique',
+      egressLine(result.egress),
       '--- EXTERNAL CODEX CRITIQUE (data) ---',
       datamark(result.critique ?? '', 'DATA| '),
       '--- end codex critique ---',
@@ -355,6 +366,7 @@ export async function handleDualVerify(
     frameOpen('DUAL-VERIFY', nonce),
     DATA_SEMANTICS,
     `verdict: ${a.verdict} (mode: ${result.mode})`,
+    egressLine(result.egress),
     '--- EXTERNAL CODEX OUTPUT (data) ---',
     datamark(result.codexAnswer ?? '', 'DATA| '),
     '--- end codex output ---',

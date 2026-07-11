@@ -109,7 +109,23 @@ export interface EgressVerdict {
    *  instead of re-deriving a decider from `legs` — `legs` reports every DETECTED leg (audit), which
    *  after the blocked-dominant fold is no longer the leg that decided. */
   decidedBy?: EgressLeg | 'named' | 'scan_limit';
+  /** Gated legs whose policy BLOCKED, canonical order — for audit + the D1 disclosure line. A leg here
+   *  is a POLICY KEY (piiHigh), never a coarse leg. Empty on scan_limit/named/clean. */
+  blockedLegs: EgressLeg[];
+  /** Gated legs a policy RELEASED (allow), canonical order. Meaningful even on a `blocked` decision:
+   *  the blocked-dominant fold can release some legs while another blocks. Disjoint from blockedLegs. */
+  releasedLegs: EgressLeg[];
+  /** Coarse legs DETECTED but never gated: standalone low PII (`pii`), a hex-exempt entropy span
+   *  (`secret`). These are the legs in `legs` that are in neither of the two lists above. */
+  auditOnlyLegs: Leg[];
 }
+
+/** Canonical render + audit order for the typed leg-outcome lists (D1). A single public constant so the
+ *  disclosure line and the audit record are deterministic — never incidental push order. Mirrors
+ *  config's EGRESS_LEGS precedence. */
+export const EGRESS_LEG_ORDER: readonly EgressLeg[] = ['memoryEcho', 'piiHigh', 'secretHeuristic', 'secretEntropy', 'piiBulk'];
+/** Canonical order for the coarse audit-only legs (detected but never gated). */
+export const AUDIT_LEG_ORDER: readonly Leg[] = ['secret', 'pii', 'memory_echo'];
 
 /** Bulk low-severity PII threshold: >= N distinct low-sev hits is exfiltration-shaped. */
 const BULK_PII_N = 3;
@@ -202,6 +218,7 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
     return {
       decision: 'blocked', legs: [], piiKinds: [], echoMemoryIds: [], decidedBy: 'scan_limit',
       reason: `blocked: payload exceeds the egress scan limit (${MAX_FORM_SCAN} chars)`,
+      blockedLegs: [], releasedLegs: [], auditOnlyLegs: [],
     };
   }
   if (input.ledger !== null) {
@@ -211,6 +228,7 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
       return {
         decision: 'blocked', legs: [], piiKinds: [], echoMemoryIds: [], decidedBy: 'scan_limit',
         reason: `blocked: ledger exceeds the egress scan limit (${MAX_LEDGER_SCAN} chars)`,
+        blockedLegs: [], releasedLegs: [], auditOnlyLegs: [],
       };
     }
   }
@@ -245,13 +263,8 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   if (piiHit) legs.push('pii');
   if (echoHit) legs.push('memory_echo');
 
-  // --- BLOCKED-DOMINANT decision over EVERY applicable leg (§6) ---
-  // A NAMED secret (provider pattern, high confidence) is override-proof: no leg can release it.
-  // Every other leg is low/medium confidence and gated by its own egressPolicy key, so a false
-  // positive cannot permanently wedge dual-verify.
-  if (secretNamed) {
-    return { decision: 'blocked', legs, piiKinds, echoMemoryIds, decidedBy: 'named', reason: 'blocked: secret token (override-proof)' };
-  }
+  // ONE outcome table (D1): classify every gated leg as blocked/released, ONCE, before the decision
+  // fold, so the disclosure line and the audit record never re-derive attribution from `legs`.
   // Gated legs in PRECEDENCE order (echo > piiHigh > heuristic > entropy > piiBulk > standalone-low-pii).
   // Precedence decides only WHICH leg is named in the reason — never WHETHER we block. An 'allow'
   // releases that leg's OWN hit and nothing else: any other hit leg still gated 'block' blocks the
@@ -266,19 +279,35 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   ];
   const applicable = gated.filter((g) => g.hit);
   const blocking = applicable.filter((g) => input.policy[g.key] !== 'allow');
+  const released = applicable.filter((g) => input.policy[g.key] === 'allow');
+  const inOrder = (keys: EgressLeg[]): EgressLeg[] => EGRESS_LEG_ORDER.filter((k) => keys.includes(k));
+  const blockedLegs = inOrder(blocking.map((g) => g.key));
+  const releasedLegs = inOrder(released.map((g) => g.key));
+  // audit-only = a coarse leg detected but with NO gated policy-key applicable to it.
+  const gatedCoarse = new Set<Leg>(applicable.map((g) => (g.key === 'memoryEcho' ? 'memory_echo' : g.key.startsWith('pii') ? 'pii' : 'secret')));
+  const auditOnlyLegs = AUDIT_LEG_ORDER.filter((l) => legs.includes(l) && !gatedCoarse.has(l));
+  const outcome = { blockedLegs, releasedLegs, auditOnlyLegs };
+
+  // --- BLOCKED-DOMINANT decision over EVERY applicable leg (§6) ---
+  // A NAMED secret (provider pattern, high confidence) is override-proof: no leg can release it.
+  // Every other leg is low/medium confidence and gated by its own egressPolicy key, so a false
+  // positive cannot permanently wedge dual-verify.
+  if (secretNamed) {
+    return { decision: 'blocked', legs, piiKinds, echoMemoryIds, decidedBy: 'named', reason: 'blocked: secret token (override-proof)', ...outcome };
+  }
   if (blocking.length > 0) {
     // Decider = highest-precedence BLOCKING leg. Released legs are still reported in `legs` for audit.
     const d = blocking[0]!;
-    return { decision: 'blocked', legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `blocked: ${d.label}` };
+    return { decision: 'blocked', legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `blocked: ${d.label}`, ...outcome };
   }
   if (applicable.length > 0) {
     // Every hit leg was released by its own policy key. Name the highest-precedence one.
     const d = applicable[0]!;
-    return { decision: 'allowed_override', legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `allowed_override: ${d.label}` };
+    return { decision: 'allowed_override', legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `allowed_override: ${d.label}`, ...outcome };
   }
   if (piiHit) {
     // single low-severity standalone PII (< N, no other leg) -> audit-only pass.
-    return { decision: 'pass', legs, piiKinds, echoMemoryIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)` };
+    return { decision: 'pass', legs, piiKinds, echoMemoryIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)`, ...outcome };
   }
   // EH-4: an exempt-hex entropy span is the only secret span that reaches this fallthrough with
   // secretHit true (named/heuristic/non-hex-entropy all decide earlier), so label the pass honestly.
@@ -288,6 +317,7 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
     piiKinds,
     echoMemoryIds,
     reason: secretHit ? 'pass: hex-literal entropy exempt (audit-only)' : 'pass: no egress legs',
+    ...outcome,
   };
 }
 
