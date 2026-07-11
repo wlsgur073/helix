@@ -319,6 +319,20 @@ export async function handleDualVerify(
     });
   }
   if (!result.ran) {
+    // X4: the 'error' outcome's reason embeds up to 500 chars of RAW Codex stderr (codex.ts -> dual-verify),
+    // which an attacker-shaped payload can influence. Every other outcome's reason is enum/label/count-derived
+    // and content-free (see persistedReason). Untrusted bytes never go in a trusted, unframed line: quarantine
+    // the stderr exactly like model output -- nonce frame + DATA semantics + per-line datamark.
+    if (result.outcome === 'error') {
+      const nonce = (deps.genNonce ?? newNonce)();
+      return ok([
+        'dual-verify did not run: codex run failed. (No Codex answer — nothing fabricated.)',
+        frameOpen('DUAL-VERIFY ERROR', nonce),
+        DATA_SEMANTICS,
+        datamark(result.reason ?? '', 'DATA| '),
+        frameClose(nonce),
+      ].join('\n'));
+    }
     return ok(`dual-verify did not run: ${result.reason}. (No Codex answer — nothing fabricated.)`);
   }
   // Codex output is untrusted DATA: frame it with a per-call nonce delimiter + instruction
