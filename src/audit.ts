@@ -1,6 +1,11 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+/** Schema note (append-only history): `decidedLeg` replaces the mis-named `blockedLeg` (an
+ *  `allowed_override` used to write its DECIDER into a field literally called `blockedLeg`,
+ *  claiming a released leg was blocked). Rows written before this change carry `blockedLeg`
+ *  instead of `decidedLeg` with the same coarse-`Leg` values; audit.jsonl is append-only, so
+ *  those old rows are NEVER migrated — a reader must accept EITHER key as the decider field. */
 export interface DualVerifyAudit {
   kind: 'dual-verify';
   ts: string;
@@ -10,10 +15,11 @@ export interface DualVerifyAudit {
   mode?: 'compare' | 'critique';
   verdict?: 'agree' | 'diverge';
   reason?: string;
-  // --- egress guard fields (2b): enum / ID only — NEVER a matched span, secret, PII value,
+  // --- egress guard fields (2b): enum / ID / policy-key only — NEVER a matched span, secret, PII value,
   // or memory snippet. Both blocked AND allowed-override events are logged. ---
   egressDecision?: 'pass' | 'blocked' | 'allowed_override';
-  blockedLeg?: 'secret' | 'pii' | 'memory_echo';                       // the deciding leg
+  decidedLeg?: 'secret' | 'pii' | 'memory_echo';                       // the coarse leg that DECIDED (renamed from blockedLeg)
+  releasedLegs?: Array<'memoryEcho' | 'piiHigh' | 'piiBulk' | 'secretHeuristic' | 'secretEntropy'>; // policy keys a policy released
   piiKinds?: Array<'email' | 'phone' | 'credit_card' | 'national_id'>; // labels, never values
   echoMemoryIds?: string[];                                            // ledger IDs, never text
 }

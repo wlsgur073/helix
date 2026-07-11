@@ -91,7 +91,7 @@ describe('handleDualVerify egress audit', () => {
     const res = await handleDualVerify({ question: secretFreeEcho, helixAnswer: 'ok' }, d);
     const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
     expect(audit.egressDecision).toBe('blocked');
-    expect(audit.blockedLeg).toBe('memory_echo');
+    expect(audit.decidedLeg).toBe('memory_echo');
     expect(audit.echoMemoryIds).toEqual(['m_1']);
     // INVARIANT: no matched span / snippet leaks into the audit record.
     const raw = readFileSync(d.auditPath, 'utf8');
@@ -107,7 +107,7 @@ describe('handleDualVerify egress audit', () => {
     const raw = readFileSync(d.auditPath, 'utf8');
     const audit = JSON.parse(raw.trim());
     expect(audit.egressDecision).toBe('blocked');
-    expect(audit.blockedLeg).toBe('pii');
+    expect(audit.decidedLeg).toBe('pii');
     expect(audit.piiKinds).toContain('credit_card');
     expect(raw).not.toContain('4111'); // the value never enters the audit
   });
@@ -122,7 +122,7 @@ describe('handleDualVerify egress audit', () => {
     await handleDualVerify({ question: echoText, helixAnswer: 'use postgres' }, d);
     const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
     expect(audit.egressDecision).toBe('allowed_override');
-    expect(audit.blockedLeg).toBe('memory_echo');
+    expect(audit.decidedLeg).toBe('memory_echo');
     expect(audit.spawned).toBe(true);
   });
 
@@ -131,7 +131,7 @@ describe('handleDualVerify egress audit', () => {
     await handleDualVerify({ question: 'what is 2+2?', helixAnswer: 'use postgres' }, d);
     const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
     expect(audit.egressDecision).toBe('pass');
-    expect(audit.blockedLeg).toBeUndefined();
+    expect(audit.decidedLeg).toBeUndefined();
   });
 });
 
@@ -337,5 +337,30 @@ describe('D1: the egress decision is disclosed on every sent result', () => {
     const lines = text(res).split('\n');
     expect(lines).toContain('egress: allowed_override (released: piiHigh)');
     expect(lines.some((l) => l.startsWith('egress:') && l.includes('secret'))).toBe(false);
+  });
+});
+
+describe('X2: audit distinguishes the deciding leg from released legs', () => {
+  it('an allowed_override records decidedLeg (the decider) AND releasedLegs, not "blockedLeg"', async () => {
+    const d = deps({
+      config: { ...DEFAULT_CONFIG, dualVerify: { ...DEFAULT_CONFIG.dualVerify, enabled: true, mode: 'compare', egressPolicy: { ...DEFAULT_CONFIG.dualVerify.egressPolicy, piiHigh: 'allow' } } },
+      runner: async () => ({ ok: true, answer: 'ok' }),
+    });
+    await handleDualVerify({ question: 'ship to 4111 1111 1111 1111?', helixAnswer: 'yes' }, d);
+    const row = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
+    expect(row.egressDecision).toBe('allowed_override');
+    expect(row.decidedLeg).toBe('pii');            // coarse decider
+    expect(row.releasedLegs).toEqual(['piiHigh']); // policy keys
+    expect(row).not.toHaveProperty('blockedLeg');  // the mis-named field is gone
+  });
+
+  it('a genuine block records decidedLeg with the blocker', async () => {
+    const memo = 'PROJECT ORION LAUNCH CODE IS ALPHA';
+    const d = deps({ config: { ...DEFAULT_CONFIG, dualVerify: { ...DEFAULT_CONFIG.dualVerify, enabled: true, stakesFloor: 'low' } }, echo: { mode: 'enforce', ledgerTexts: () => [{ id: 'm_x', content: memo }] } });
+    await handleDualVerify({ question: `leak ${memo}`, helixAnswer: 'n' }, d);
+    const row = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
+    expect(row.egressDecision).toBe('blocked');
+    expect(row.decidedLeg).toBe('memory_echo');
+    expect(row.releasedLegs ?? []).toEqual([]);
   });
 });

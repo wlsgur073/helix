@@ -310,7 +310,8 @@ export async function handleDualVerify(
     verdict: result.agreement?.verdict,
     reason: persisted,
     egressDecision: egress?.decision,
-    blockedLeg: decided ? deciderLeg(egress!) : undefined,
+    decidedLeg: decided ? deciderLeg(egress!) : undefined,
+    releasedLegs: egress && egress.releasedLegs.length ? egress.releasedLegs : undefined,
     piiKinds: egress && egress.piiKinds.length ? egress.piiKinds : undefined,
     echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds : undefined,
   });
