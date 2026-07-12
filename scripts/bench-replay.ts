@@ -213,7 +213,7 @@ export interface ReportSummary {
     latestRows: number | null; latestBytes: number | null;
     forgedDrops: number; state: 'exceeded' | 'below' | 'insufficient';
     /** Populated iff state === 'insufficient' (spec §E2): 'no successful samples' when
-     *  recallOkN === 0, else 'n < 20'. null for 'exceeded'/'below'. */
+     *  recallOkN === 0, else `n < ${SAMPLE_FLOOR}`. null for 'exceeded'/'below'. */
     reason: string | null;
   };
 }
@@ -222,7 +222,7 @@ const TRIGGER_MS = 150; // roadmap 2026-06-13 §2: migrate when measured recall 
 // E2: below this many SUCCESSFUL recall samples the verdict is a confidence judgment, not a trigger
 // verdict — one lucky/unlucky sample must never render an "exceeded"/"below" confident state. Also
 // used by the per-tool "[insufficient samples]" flag in runReport, below.
-const SAMPLE_FLOOR = 20;
+export const SAMPLE_FLOOR = 20;
 
 /** Pure summarizer over metrics JSONL lines (spec §8). Tolerant: malformed / v>1 / unknown kind /
  *  missing-required-field rows are skipped and counted — never a crash, never silent. */
@@ -295,7 +295,7 @@ export function summarizeMetrics(lines: Iterable<string>, opts: { sinceMs: numbe
   const reason: string | null =
     state !== 'insufficient' ? null
     : recallOk.length === 0 ? 'no successful samples'
-    : 'n < 20';
+    : `n < ${SAMPLE_FLOOR}`;
   return {
     ops, replayCurve, skipped,
     verdict: {

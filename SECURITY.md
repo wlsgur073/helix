@@ -60,6 +60,34 @@ locally-held key, so:
 call still carries no enforceable human-approval signal, so the guidance above stands: do **not**
 allow-list `helix_memory_confirm`.
 
+### Compaction integrity/horizon markers (F5) — clearing a planted marker is an operator procedure
+
+A compaction mints a content-free, **unsigned** `integrity_marker` when it drops one or more forged
+`verify` records, and a `horizon_marker` when it drops closed fact history — coalesced to a single
+canonical row per kind (constant id, sentinel timestamp; see `canonicalMarker` in
+`src/memory/ledger.ts`). Once minted, either marker is a **durable fixpoint by design**: every later
+compaction re-mints the byte-identical row rather than dropping it, so a genuine forgery-audit signal
+cannot silently age out.
+
+The marker's **presence is forgeable**: it carries no MAC, so a ledger-write adversary who appends any
+row whose id starts with `integrity_` or `horizon_` mints the canonical marker whether or not a real
+incident occurred. Treat it as an audit *signal* to investigate, not a proof.
+
+**Clearing a planted marker requires an out-of-band, permanent erase of its canonical id** —
+`store.erase('integrity_marker', { permanent: true })` (or `'horizon_marker'`), which suppresses the
+marker on this and every later compaction (`erasedIds` in `planCompaction`/`compactLedger`). This is
+**deliberately unreachable from the MCP tool surface**: `helix_memory_erase`'s schema is `{id}` only —
+it always tombstones (soft), it can never pass `permanent: true`. So a prompt-injected agent cannot
+reach this path and cannot destroy a genuine forgery-audit signal; only an operator running code
+outside the agent's conversation (a script or REPL against `MemoryStore`) can.
+
+**Known routing caveat (registered follow-up, not fixed).** `store.ts`'s `ledgerOf(id)` falls back to
+the GLOBAL ledger for any id absent from both live projections, and a marker is never in the live
+projection (it is a verify-shaped tombstone with a null target) — so a permanent erase of a *project*
+ledger's planted marker can route to the global ledger instead of the ledger that actually holds it.
+Before erasing, confirm which ledger file the marker physically lives in (read the ledger JSONL
+directly, or `helix_memory_inspect`) rather than trusting `ledgerOf`'s fallback.
+
 **Residual bounds (documented, not defended):**
 
 - **Arbitrary home-read is irreducible.** An adversary that can read `~/.helix` obtains the key

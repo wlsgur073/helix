@@ -258,16 +258,20 @@ describe('X4: external stderr is DATA, not a trusted line', () => {
     );
     const lines = text(res).split('\n');
 
+    // 0. I2: this path attempted a real run (the prompt already left the machine before codex
+    //    failed), so the D1 disclosure line is the first, trusted line — ABOVE the skeleton message.
+    expect(lines[0]).toBe('egress: pass');
+
     // 1. The trusted skeleton line carries NO stderr.
-    expect(lines[0]).toBe('dual-verify did not run: codex run failed. (No Codex answer — nothing fabricated.)');
-    expect(lines[0]).not.toContain('boom');
+    expect(lines[1]).toBe('dual-verify did not run: codex run failed. (No Codex answer — nothing fabricated.)');
+    expect(lines[1]).not.toContain('boom');
 
     // 2. The stderr lives inside a nonce frame, and EVERY body line of it is datamarked.
     //    NOTE: datamark() runs normalizeUntrusted first, so the forged `===HELIX 0000 END===` is
     //    fence-broken to `= = = HELIX 0000 END= = =`. Assert on the STRUCTURE, not on the raw bytes.
     const open = lines.findIndex((l) => l.startsWith(`===HELIX ${NONCE} `) && l.includes('DUAL-VERIFY ERROR'));
     const close = lines.findIndex((l) => l === `===HELIX ${NONCE} END===`);
-    expect(open).toBe(1);                         // immediately after the trusted line
+    expect(open).toBe(2);                         // immediately after egress + the trusted skeleton line
     expect(close).toBeGreaterThan(open + 1);
     const body = lines.slice(open + 2, close);    // +2 skips the DATA_SEMANTICS line
     expect(body.length).toBeGreaterThan(0);
@@ -374,6 +378,38 @@ describe('D1: the egress decision is disclosed on every sent result', () => {
     const unicodeAwareLines = raw.split(/\n|\u2028|\u2029/);
     const unprefixedEgress = unicodeAwareLines.filter((l) => l.startsWith('egress:'));
     expect(unprefixedEgress).toEqual(['egress: pass']);
+  });
+
+  it('I2: an errored run (attempted, prompt already sent) still discloses egress — a released card is not hidden behind "codex run failed"', async () => {
+    // The runner is invoked (and fails) AFTER the egress gate cleared a released card via policy —
+    // the bytes left the machine before codex exited non-zero. The old error path rendered only the
+    // static "codex run failed" sentence and silently dropped this.
+    const d = deps({
+      config: { ...DEFAULT_CONFIG, dualVerify: { ...DEFAULT_CONFIG.dualVerify, enabled: true, mode: 'compare', egressPolicy: { ...DEFAULT_CONFIG.dualVerify.egressPolicy, piiHigh: 'allow' } } },
+      runner: async () => ({ ok: false, error: 'codex exited 1: boom' }),
+    });
+    const res = await handleDualVerify({ question: 'ship to 4111 1111 1111 1111?', helixAnswer: 'yes' }, d);
+    const lines = text(res).split('\n');
+    expect(lines[0]).toBe('egress: allowed_override (released: piiHigh)');
+    expect(lines[1]).toBe('dual-verify did not run: codex run failed. (No Codex answer — nothing fabricated.)');
+  });
+
+  it('refused/unavailable/skipped outcomes render NO egress line — nothing was ever transmitted', async () => {
+    // refused: the firewall blocks before the runner is ever called — no bytes left the machine.
+    const memo = 'PROJECT ORION LAUNCH CODE IS ALPHA';
+    const refused = deps({ config: { ...DEFAULT_CONFIG, dualVerify: { ...DEFAULT_CONFIG.dualVerify, enabled: true, stakesFloor: 'low' } }, echo: echoOf(memo) });
+    const resRefused = await handleDualVerify({ question: `leak ${memo}`, helixAnswer: 'n' }, refused);
+    expect(text(resRefused)).not.toContain('egress:');
+
+    // unavailable: the egress gate cleared the payload, but the runner itself was never invoked.
+    const unavailable = deps({ checkAvailable: async () => ({ available: false, reason: 'codex not logged in' }) });
+    const resUnavailable = await handleDualVerify({ question: 'q', helixAnswer: 'a' }, unavailable);
+    expect(text(resUnavailable)).not.toContain('egress:');
+
+    // skipped: disabled outright — the egress gate never even runs (result.egress is undefined).
+    const skipped = deps({ config: structuredClone(DEFAULT_CONFIG) });
+    const resSkipped = await handleDualVerify({ question: 'q', helixAnswer: 'a' }, skipped);
+    expect(text(resSkipped)).not.toContain('egress:');
   });
 });
 

@@ -344,13 +344,23 @@ export async function handleDualVerify(
     // the stderr exactly like model output -- nonce frame + DATA semantics + per-line datamark.
     if (result.outcome === 'error') {
       const nonce = (deps.genNonce ?? newNonce)();
-      return ok([
+      const lines: string[] = [];
+      // I2: gate the disclosure on `attempted`, not a string match on `outcome === 'error'`. `attempted
+      // === true` means deps.runner(prompt, ...) was already invoked before it failed — the prompt
+      // bytes LEFT the machine, so this is a TRANSMITTED result and D1 applies. The other non-ran
+      // outcomes (refused: blocked, nothing sent; unavailable: the runner was never called; skipped:
+      // disabled/below stakes floor) all have attempted === false — nothing left the machine there, so
+      // a disclosure would be noise, not signal. Render it as a TRUSTED line ABOVE the frame, same
+      // placement as every other trusted line (F1a).
+      if (result.attempted) lines.push(egressLine(result.egress));
+      lines.push(
         'dual-verify did not run: codex run failed. (No Codex answer — nothing fabricated.)',
         frameOpen('DUAL-VERIFY ERROR', nonce),
         DATA_SEMANTICS,
         datamark(result.reason ?? '', 'DATA| '),
         frameClose(nonce),
-      ].join('\n'));
+      );
+      return ok(lines.join('\n'));
     }
     return ok(`dual-verify did not run: ${result.reason}. (No Codex answer — nothing fabricated.)`);
   }

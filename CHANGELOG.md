@@ -79,12 +79,17 @@ All notable changes to Helix are documented here. This project follows
   (`stakes` on `helix_memory`-adjacent `helix_dual_verify`, and `dualVerify.stakesFloor` in config).
   With `stakesFloor: "xhigh"`, only calls the agent classifies `xhigh` spend Codex quota — `high`
   and below are skipped. Omitting `stakes` still bypasses the floor (an explicit call signals intent).
-- Every SENT `helix_dual_verify` result now carries an `egress: ...` disclosure line, rendered ABOVE
-  the quarantine frame, so the calling agent can tell a config-valved release from a clean pass instead
-  of crediting the pass to its own prose. Three forms: `pass` (every leg clean), `pass with audit-only
-  legs` (a leg logged the check but did not block), and `allowed_override with released policy keys +
-  audit-only legs` (an otherwise-blocking leg was released by `dualVerify.egressPolicy`). The line is
-  content-free — it names leg outcomes and policy keys, never the scanned content.
+- Every `helix_dual_verify` result whose payload was actually TRANSMITTED — a successful `sent` run
+  AND a run that reached Codex but then errored out — now carries an `egress: ...` disclosure line,
+  rendered ABOVE the quarantine frame, so the calling agent can tell a config-valved release from a
+  clean pass instead of crediting the pass to its own prose. That includes the failure path: the prompt
+  already left the machine before Codex exited non-zero, so the disclosure renders there too, not just
+  on success. A refused (firewall-blocked), unavailable (runner never invoked), or skipped (disabled /
+  below the stakes floor) result carries no disclosure line, because nothing left the machine. Three
+  forms: `pass` (every leg clean), `pass with audit-only legs` (a leg logged the check but did not
+  block), and `allowed_override with released policy keys + audit-only legs` (an otherwise-blocking leg
+  was released by `dualVerify.egressPolicy`). The line is content-free — it names leg outcomes and
+  policy keys, never the scanned content.
 - Replay metrics sensor: content-free op/replay latency records in `~/.helix/metrics.jsonl`
   (default on; `metrics.enabled: false` disables; hook honors the global config only). The
   sensor makes the long-deferred "migrate to SQLite at recall p95 > 150 ms" trigger observable.

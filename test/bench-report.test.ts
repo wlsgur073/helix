@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { summarizeMetrics } from '../scripts/bench-replay.js';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { summarizeMetrics, runReport, SAMPLE_FLOOR } from '../scripts/bench-replay.js';
 
 const NOW = Date.parse('2026-07-05T12:00:00.000Z');
 const IN = '2026-07-05T11:00:00.000Z';   // inside the window
@@ -106,7 +109,7 @@ describe('F4: insufficient requires SAMPLE_FLOOR (20) successful recalls, not ju
     const v = summarizeMetrics([op('helix_memory_recall', 2)], opts).verdict;
     expect(v.state).toBe('insufficient');
     expect(v.recallOkN).toBe(1);
-    expect(v.reason).toBe('n < 20');
+    expect(v.reason).toBe(`n < ${SAMPLE_FLOOR}`);
     expect(v.recallP95).toBe(2);   // provisional value computed, not suppressed just because n < floor
   });
 
@@ -115,7 +118,7 @@ describe('F4: insufficient requires SAMPLE_FLOOR (20) successful recalls, not ju
     const v = summarizeMetrics(lines, opts).verdict;
     expect(v.state).toBe('insufficient');
     expect(v.recallOkN).toBe(19);
-    expect(v.reason).toBe('n < 20');
+    expect(v.reason).toBe(`n < ${SAMPLE_FLOOR}`);
   });
 
   it('20 FAST successful recalls => below (the floor, not one short)', () => {
@@ -137,5 +140,55 @@ describe('F4: insufficient requires SAMPLE_FLOOR (20) successful recalls, not ju
     expect(v.state).toBe('insufficient');
     expect(v.reason).toBe('no successful samples');
     expect(v.recallP95).toBeNull();
+  });
+});
+
+describe('I1: runReport renders the operator-facing report end-to-end (F4 unlocked)', () => {
+  // runReport is imported by NOTHING else in the suite (that was the I1 finding): a mutation that
+  // redacts the provisional render under `insufficient` left all other tests green. These drive the
+  // real CLI entry point end-to-end (temp metrics file -> captured stdout), not just summarizeMetrics.
+  const opRow = (ms: number, ts: string): string =>
+    JSON.stringify({ v: 1, kind: 'op', ts, op_id: 'o_x', 'mcp.method.name': 'tools/call', 'gen_ai.tool.name': 'helix_memory_recall', duration_ms: ms, ok: true, 'error.type': null });
+
+  function writeMetrics(lines: string[]): string {
+    const dir = mkdtempSync(join(tmpdir(), 'helix-bench-report-'));
+    const file = join(dir, 'metrics.jsonl');
+    writeFileSync(file, lines.length ? lines.join('\n') + '\n' : '');
+    return file;
+  }
+
+  /** Spy/replace process.stdout.write for the duration of `run`, always restoring it — even if `run`
+   *  throws — so a failing assertion never leaves stdout silently swallowed for later tests. */
+  async function captureStdout(run: () => Promise<void>): Promise<string> {
+    const chunks: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+      chunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      await run();
+    } finally {
+      process.stdout.write = original;
+    }
+    return chunks.join('');
+  }
+
+  it('15 SLOW successful recalls: the insufficient state AND the provisional p95-vs-trigger comparison both render — the operator is not blinded', async () => {
+    const ts = new Date().toISOString();   // inside runReport's default recency window
+    const file = writeMetrics(Array.from({ length: 15 }, () => opRow(300, ts)));
+    const out = await captureStdout(() => runReport({ file, sinceDays: 14 }));
+    expect(out).toContain(`insufficient evidence (n < ${SAMPLE_FLOOR}) -- no judgment`);
+    // The provisional comparison must carry the REAL computed p95 (300.0ms, nearest-rank over 15
+    // samples all at 300ms) and the real trigger (150ms) -- not a redacted/constant placeholder.
+    expect(out).toContain(`300.0ms (n=15, provisional -- below the ${SAMPLE_FLOOR}-sample floor) vs trigger 150ms`);
+  });
+
+  it('0 successful samples: NO provisional value is rendered', async () => {
+    const file = writeMetrics([]);
+    const out = await captureStdout(() => runReport({ file, sinceDays: 14 }));
+    expect(out).toContain('insufficient evidence (no successful samples) -- no judgment');
+    expect(out).toContain('recall op p95: (no successful samples)');
+    expect(out).not.toMatch(/provisional/);
   });
 });
