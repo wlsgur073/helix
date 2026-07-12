@@ -212,10 +212,17 @@ export interface ReportSummary {
     replayN: number; replayP95: number | null;
     latestRows: number | null; latestBytes: number | null;
     forgedDrops: number; state: 'exceeded' | 'below' | 'insufficient';
+    /** Populated iff state === 'insufficient' (spec §E2): 'no successful samples' when
+     *  recallOkN === 0, else 'n < 20'. null for 'exceeded'/'below'. */
+    reason: string | null;
   };
 }
 
 const TRIGGER_MS = 150; // roadmap 2026-06-13 §2: migrate when measured recall p95 exceeds this
+// E2: below this many SUCCESSFUL recall samples the verdict is a confidence judgment, not a trigger
+// verdict — one lucky/unlucky sample must never render an "exceeded"/"below" confident state. Also
+// used by the per-tool "[insufficient samples]" flag in runReport, below.
+const SAMPLE_FLOOR = 20;
 
 /** Pure summarizer over metrics JSONL lines (spec §8). Tolerant: malformed / v>1 / unknown kind /
  *  missing-required-field rows are skipped and counted — never a crash, never silent. */
@@ -277,11 +284,18 @@ export function summarizeMetrics(lines: Iterable<string>, opts: { sinceMs: numbe
   const replayWin = [...replayWindow].sort((a, b) => a - b);
   const replayP95 = replayWin.length ? percentileNearestRank(replayWin, 95) : null;
   const recallOk = [...recallOkWin].sort((a, b) => a - b);
+  // The percentile is computed over whatever successful samples exist, even below SAMPLE_FLOOR: an
+  // `insufficient` verdict with n > 0 still renders this as a PROVISIONAL comparison (spec §E2) — it
+  // is only the confident exceeded/below judgment that requires n >= SAMPLE_FLOOR.
   const recallP95 = recallOk.length ? percentileNearestRank(recallOk, 95) : null;
   const state: 'exceeded' | 'below' | 'insufficient' =
-    recallOk.length === 0 ? 'insufficient'
+    recallOk.length < SAMPLE_FLOOR ? 'insufficient'
     : recallP95! > TRIGGER_MS ? 'exceeded'
     : 'below';
+  const reason: string | null =
+    state !== 'insufficient' ? null
+    : recallOk.length === 0 ? 'no successful samples'
+    : 'n < 20';
   return {
     ops, replayCurve, skipped,
     verdict: {
@@ -289,7 +303,7 @@ export function summarizeMetrics(lines: Iterable<string>, opts: { sinceMs: numbe
       recallOkN: recallOk.length, recallFailN: recallFailWin.length, recallP95,
       replayN: replayWin.length, replayP95,
       latestRows: latestReplay?.rows ?? null, latestBytes: latestReplay?.bytes ?? null,
-      forgedDrops, state,
+      forgedDrops, state, reason,
     },
   };
 }
@@ -307,7 +321,7 @@ export async function runReport(opts: { file?: string; sinceDays: number }): Pro
 
   process.stdout.write(`\nper-tool op latency (all data)\n`);
   for (const [tool, o] of s.ops) {
-    const flag = o.n < 20 ? '  [insufficient samples]' : '';
+    const flag = o.n < SAMPLE_FLOOR ? '  [insufficient samples]' : '';
     process.stdout.write(`${tool.padEnd(24)} n=${String(o.n).padEnd(5)} p50=${fmt(o.p50)} p95=${fmt(o.p95)} errors=${o.errors}${flag}\n`);
   }
   process.stdout.write(`\nreplay latency vs rows (parse+project ms, all data)\n`);
@@ -320,14 +334,18 @@ export async function runReport(opts: { file?: string; sinceDays: number }): Pro
   const v = s.verdict;
   process.stdout.write(`\nverdict (window: last ${v.windowDays} days; current size: rows=${v.latestRows ?? '?'} bytes=${v.latestBytes ?? '?'})\n`);
   process.stdout.write(`  recall (successful): ${v.recallOkN} samples${v.recallFailN ? `, ${v.recallFailN} failed` : ''}\n`);
-  const cmp = v.recallP95 === null ? '(no successful samples)' : `${v.recallP95.toFixed(1)}ms vs trigger ${TRIGGER_MS}ms`;
+  // Provisional comparison (spec §E2): still rendered under `insufficient` when n > 0 -- the p95 is
+  // real, just below the confidence floor for a trigger verdict. n === 0 has no value to render.
+  const cmp = v.recallP95 === null ? '(no successful samples)'
+    : v.state === 'insufficient' ? `${v.recallP95.toFixed(1)}ms (n=${v.recallOkN}, provisional -- below the ${SAMPLE_FLOOR}-sample floor) vs trigger ${TRIGGER_MS}ms`
+    : `${v.recallP95.toFixed(1)}ms vs trigger ${TRIGGER_MS}ms`;
   process.stdout.write(`  recall op p95: ${cmp}\n`);
   process.stdout.write(`  replay p95:    ${v.replayP95 === null ? 'no samples' : `${v.replayP95.toFixed(1)}ms (n=${v.replayN})`}\n`);
   if (v.forgedDrops > 0) process.stdout.write(`  forged verify rows dropped by compaction (window): ${v.forgedDrops}\n`);
   process.stdout.write(
     v.state === 'exceeded' ? `  TRIGGER EXCEEDED -- evaluate the Stage-B SQLite migration (roadmap 2026-06-13 section 6)\n`
     : v.state === 'below' ? `  below trigger -- no action\n`
-    : `  insufficient evidence (${v.recallOkN} successful recalls) -- no judgment\n`,
+    : `  insufficient evidence (${v.reason}) -- no judgment\n`,
   );
 }
 

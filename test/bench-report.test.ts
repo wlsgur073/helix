@@ -82,4 +82,60 @@ describe('E2: the verdict is tri-state and counts successful recalls only', () =
     expect(s.skipped.malformed).toBe(0);
     expect(s.verdict.forgedDrops).toBe(2);
   });
+
+  // F6: forgedDrops must honor the recency window like every other windowed verdict field. The
+  // ONLY compaction row above is inside the window, so that assertion alone has no witness that the
+  // `ts >= cutoff` guard is even wired up -- an out-of-window row makes the guard observable.
+  it('forgedDrops counts only compaction rows inside the recency window', () => {
+    const lines = [
+      JSON.stringify({ v: 1, kind: 'compaction', ts: OUT, scope: 'global', duration_ms: 3, dropped_rows: 9, reclaimed_bytes: 900, dropped_forged_verifies: 7, ok: true }),
+      JSON.stringify({ v: 1, kind: 'compaction', ts: IN, scope: 'global', duration_ms: 3, dropped_rows: 2, reclaimed_bytes: 100, dropped_forged_verifies: 2, ok: true }),
+      op('helix_memory_recall', 5),
+    ];
+    const s = summarizeMetrics(lines, opts);
+    expect(s.verdict.forgedDrops).toBe(2);   // NOT 9 (out-of-window) and NOT 9+2
+  });
+});
+
+describe('F4: insufficient requires SAMPLE_FLOOR (20) successful recalls, not just n > 0', () => {
+  const op = (tool: string, ms: number, ok = true): string =>
+    JSON.stringify({ v: 1, kind: 'op', ts: '2026-07-11T00:00:00.000Z', 'gen_ai.tool.name': tool, duration_ms: ms, ok });
+  const opts = { sinceMs: 14 * 86_400_000, nowMs: Date.parse('2026-07-11T12:00:00.000Z') };
+
+  it('1 successful recall => insufficient, and the provisional p95-vs-trigger comparison still has a value', () => {
+    const v = summarizeMetrics([op('helix_memory_recall', 2)], opts).verdict;
+    expect(v.state).toBe('insufficient');
+    expect(v.recallOkN).toBe(1);
+    expect(v.reason).toBe('n < 20');
+    expect(v.recallP95).toBe(2);   // provisional value computed, not suppressed just because n < floor
+  });
+
+  it('19 successful recalls => insufficient', () => {
+    const lines = Array.from({ length: 19 }, () => op('helix_memory_recall', 5));
+    const v = summarizeMetrics(lines, opts).verdict;
+    expect(v.state).toBe('insufficient');
+    expect(v.recallOkN).toBe(19);
+    expect(v.reason).toBe('n < 20');
+  });
+
+  it('20 FAST successful recalls => below (the floor, not one short)', () => {
+    const lines = Array.from({ length: 20 }, () => op('helix_memory_recall', 5));
+    const v = summarizeMetrics(lines, opts).verdict;
+    expect(v.state).toBe('below');
+    expect(v.reason).toBeNull();
+  });
+
+  it('20 SLOW successful recalls => exceeded', () => {
+    const lines = Array.from({ length: 20 }, () => op('helix_memory_recall', 999));
+    const v = summarizeMetrics(lines, opts).verdict;
+    expect(v.state).toBe('exceeded');
+    expect(v.reason).toBeNull();
+  });
+
+  it('0 recalls => insufficient with NO provisional value', () => {
+    const v = summarizeMetrics([], opts).verdict;
+    expect(v.state).toBe('insufficient');
+    expect(v.reason).toBe('no successful samples');
+    expect(v.recallP95).toBeNull();
+  });
 });
