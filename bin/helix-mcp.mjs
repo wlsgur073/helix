@@ -13435,10 +13435,10 @@ function planCompaction(records, opts) {
       else droppedForgedVerifies++;
     }
   }
-  if (records.some(isIntegrityMarker) || droppedForgedVerifies > 0) {
+  if ((records.some(isIntegrityMarker) || droppedForgedVerifies > 0) && !opts.erasedIds.has("integrity_marker")) {
     kept.push(canonicalMarker("integrity_marker"));
   }
-  if (records.some(isHorizonMarker) || records.some((r) => (r.type === "assert" || r.type === "supersede") && !live.has(r.id))) {
+  if ((records.some(isHorizonMarker) || records.some((r) => (r.type === "assert" || r.type === "supersede") && !live.has(r.id))) && !opts.erasedIds.has("horizon_marker")) {
     kept.push(canonicalMarker("horizon_marker"));
   }
   return { kept, droppedForgedVerifies };
@@ -13992,9 +13992,11 @@ function frameOpen(label, nonce) {
 function frameClose(nonce) {
   return `===HELIX ${nonce} END===`;
 }
+var LINE_BREAK = /\n|\u2028|\u2029/;
+var TRAILING_LINE_BREAKS = /(?:\n|\u2028|\u2029)+$/;
 function datamark(text, mark, maxChars) {
-  const normalized = normalizeUntrusted(text, maxChars).replace(/\n+$/, "");
-  return normalized.split("\n").map((line) => mark + line).join("\n");
+  const normalized = normalizeUntrusted(text, maxChars).replace(TRAILING_LINE_BREAKS, "");
+  return normalized.split(LINE_BREAK).map((line) => mark + line).join("\n");
 }
 function makeDataFrame(opts) {
   const body = opts.lines.length === 0 ? ["(no relevant memory)"] : opts.lines.map((l) => datamark(l.text, l.mark, opts.maxChars));
@@ -23408,7 +23410,10 @@ function deciderLeg(v) {
 }
 function egressLine(v) {
   if (!v) return "egress: unavailable (internal)";
-  if (v.decision === "allowed_override") return `egress: allowed_override (released: ${v.releasedLegs.join(", ")})`;
+  if (v.decision === "allowed_override") {
+    const auditOnly = v.auditOnlyLegs.length > 0 ? `; audit-only: ${v.auditOnlyLegs.join(", ")}` : "";
+    return `egress: allowed_override (released: ${v.releasedLegs.join(", ")}${auditOnly})`;
+  }
   if (v.auditOnlyLegs.length > 0) return `egress: pass (audit-only; legs: ${v.auditOnlyLegs.join(", ")})`;
   return "egress: pass";
 }
@@ -23459,10 +23464,10 @@ async function handleDualVerify(args, deps) {
   const nonce = (deps.genNonce ?? newNonce)();
   if (result.mode === "critique") {
     return ok([
+      egressLine(result.egress),
       frameOpen("DUAL-VERIFY", nonce),
       DATA_SEMANTICS,
       "mode: critique",
-      egressLine(result.egress),
       "--- EXTERNAL CODEX CRITIQUE (data) ---",
       datamark(result.critique ?? "", "DATA| "),
       "--- end codex critique ---",
@@ -23471,10 +23476,10 @@ async function handleDualVerify(args, deps) {
   }
   const a = result.agreement;
   return ok([
+    egressLine(result.egress),
     frameOpen("DUAL-VERIFY", nonce),
     DATA_SEMANTICS,
     `verdict: ${a.verdict} (mode: ${result.mode})`,
-    egressLine(result.egress),
     "--- EXTERNAL CODEX OUTPUT (data) ---",
     datamark(result.codexAnswer ?? "", "DATA| "),
     "--- end codex output ---",

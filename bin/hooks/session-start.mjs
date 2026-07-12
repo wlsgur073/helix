@@ -43,9 +43,11 @@ function frameOpen(label, nonce) {
 function frameClose(nonce) {
   return `===HELIX ${nonce} END===`;
 }
+var LINE_BREAK = /\n|\u2028|\u2029/;
+var TRAILING_LINE_BREAKS = /(?:\n|\u2028|\u2029)+$/;
 function datamark(text, mark, maxChars) {
-  const normalized = normalizeUntrusted(text, maxChars).replace(/\n+$/, "");
-  return normalized.split("\n").map((line) => mark + line).join("\n");
+  const normalized = normalizeUntrusted(text, maxChars).replace(TRAILING_LINE_BREAKS, "");
+  return normalized.split(LINE_BREAK).map((line) => mark + line).join("\n");
 }
 var safeId = (id) => id.replace(/[^A-Za-z0-9_-]/g, "");
 
