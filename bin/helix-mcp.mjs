@@ -23451,13 +23451,16 @@ async function handleDualVerify(args, deps) {
   if (!result.ran) {
     if (result.outcome === "error") {
       const nonce2 = (deps.genNonce ?? newNonce)();
-      return ok([
+      const lines = [];
+      if (result.attempted) lines.push(egressLine(result.egress));
+      lines.push(
         "dual-verify did not run: codex run failed. (No Codex answer \u2014 nothing fabricated.)",
         frameOpen("DUAL-VERIFY ERROR", nonce2),
         DATA_SEMANTICS,
         datamark(result.reason ?? "", "DATA| "),
         frameClose(nonce2)
-      ].join("\n"));
+      );
+      return ok(lines.join("\n"));
     }
     return ok(`dual-verify did not run: ${result.reason}. (No Codex answer \u2014 nothing fabricated.)`);
   }
