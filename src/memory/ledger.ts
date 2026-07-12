@@ -118,7 +118,10 @@ export function parseLedger(path: LedgerPath): MemoryRecord[] {
 }
 
 export interface CompactOptions {
-  /** Ids whose CONTENT must be physically erased (right-to-erasure / secrets). */
+  /** Ids whose CONTENT must be physically erased (right-to-erasure / secrets). Doubles as the
+   *  escape hatch for a planted/durable marker (F5): include its canonical id (`integrity_marker` /
+   *  `horizon_marker`) to suppress re-minting it on this and every later compaction. Normal
+   *  compactions pass an empty set, so the fixpoint behaviour below is unaffected. */
   erasedIds: Set<string>;
   /**
    * HMAC-aware compaction. When supplied, genuine SIGNED `verify` records whose target survives
@@ -178,14 +181,29 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   // itself drops nothing forged — the D2 bug this closes) OR this compaction dropped >=1 forged
   // verify. Reconstructed via canonicalMarker, so a planted integrity_* row's hostile
   // content/provenance/timestamp cannot survive and 50 planted rows collapse to one.
-  if (records.some(isIntegrityMarker) || droppedForgedVerifies > 0) {
+  //
+  // HONEST RESIDUAL (F5): the marker's PRESENCE is still forgeable — anyone who can append a row
+  // whose id starts with `integrity_` mints one, real incident or not — and once minted it is now a
+  // DURABLE fixpoint: an ordinary compaction re-mints it forever, it does NOT age out like the
+  // pre-D2 randomUUID-stamped rows did. The only way to clear a planted marker is an out-of-band
+  // permanent erase of its canonical id (`integrity_marker` in `erasedIds`, checked below) — the
+  // `some(isIntegrityMarker)` OR-clause is exactly what makes that necessary: once ANY row with the
+  // prefix has ever existed, the canonical id keeps getting re-minted unless explicitly suppressed.
+  // KNOWN LIMITATION (not fixed here; separately tracked follow-up): `store.ts`'s `ledgerOf(id)`
+  // falls back to the GLOBAL ledger for an id absent from both live projections, and a marker is
+  // never in the live projection — so a permanent erase of a PROJECT ledger's planted marker can
+  // route to the global ledger instead of the ledger that actually holds it. This hatch only clears
+  // the marker when the erase call is routed to the right ledger.
+  if ((records.some(isIntegrityMarker) || droppedForgedVerifies > 0) && !opts.erasedIds.has('integrity_marker')) {
     kept.push(canonicalMarker('integrity_marker'));
   }
-  // Horizon marker (spec §4): same fixpoint treatment as the integrity marker — coalesced, never
-  // preserved verbatim, so a planted horizon_* row's hostile bytes cannot be immortalized. Emit one
-  // iff an existing marker is present (signal never reverts) OR this compaction drops a closed FACT
-  // row (an assert/supersede absent from live — covers supersede/invalidate/erase closers).
-  if (records.some(isHorizonMarker) || records.some((r) => (r.type === 'assert' || r.type === 'supersede') && !live.has(r.id))) {
+  // Horizon marker (spec §4): same fixpoint treatment, same escape hatch, and the same honest
+  // residual/known-limitation notes as the integrity marker above — coalesced, never preserved
+  // verbatim, so a planted horizon_* row's hostile bytes cannot be immortalized. Emit one iff an
+  // existing marker is present (signal never reverts) OR this compaction drops a closed FACT row (an
+  // assert/supersede absent from live — covers supersede/invalidate/erase closers), UNLESS its
+  // canonical id has been explicitly erased.
+  if ((records.some(isHorizonMarker) || records.some((r) => (r.type === 'assert' || r.type === 'supersede') && !live.has(r.id))) && !opts.erasedIds.has('horizon_marker')) {
     kept.push(canonicalMarker('horizon_marker'));
   }
   return { kept, droppedForgedVerifies };

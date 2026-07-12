@@ -70,3 +70,39 @@ describe('D2: the integrity marker is a coalesced canonical fixpoint', () => {
     expect(droppedForgedVerifies).toBe(1);
   });
 });
+
+describe('F5: a planted marker is clearable via an explicit permanent erase of its canonical id', () => {
+  // Controller probe: a ledger-write adversary plants ONE row on a CLEAN ledger (no forgery ever
+  // occurred). Before the erasedIds hatch this promoted to a PERMANENT, unremovable canonical marker.
+  const plantedIntegrity = base({ id: 'integrity_planted', type: 'verify', supersedes: null, state: 'Suspect', content: '' });
+
+  it('erasedIds:{integrity_marker} suppresses re-minting a planted integrity marker', () => {
+    const { kept } = planCompaction([base({ id: 'm_1', content: 'fact' }), plantedIntegrity], { erasedIds: new Set(['integrity_marker']), keepValidVerify: () => true });
+    expect(kept.some((r) => r.id.startsWith('integrity_'))).toBe(false);
+  });
+
+  it('erasedIds:{horizon_marker} suppresses re-minting a planted horizon marker', () => {
+    const plantedHorizon = base({ id: 'horizon_planted', type: 'verify', supersedes: null, state: 'Suspect', content: '' });
+    const { kept } = planCompaction([base({ id: 'm_1', content: 'fact' }), plantedHorizon], { erasedIds: new Set(['horizon_marker']) });
+    expect(kept.some((r) => r.id.startsWith('horizon_'))).toBe(false);
+  });
+
+  it('the hatch is symmetric: an unrelated erasedIds entry does NOT suppress the marker', () => {
+    const { kept } = planCompaction([base({ id: 'm_1', content: 'fact' }), plantedIntegrity], { erasedIds: new Set(['some_other_id']), keepValidVerify: () => true });
+    expect(kept.some((r) => r.id.startsWith('integrity_'))).toBe(true);
+  });
+
+  it('regression: a normal compaction (empty erasedIds) still reaches the fixpoint', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'helix-fp-erase-'));
+    try {
+      const path = join(dir, 'm.jsonl');
+      for (const r of forgedLedger()) writeFileSync(path, JSON.stringify(r) + '\n', { flag: 'a' });
+      compactLedger(path, { erasedIds: new Set(), keepValidVerify });
+      const marker1 = parseLedger(path).find((r) => r.id.startsWith('integrity_'));
+      expect(marker1).toBeDefined();
+      compactLedger(path, { erasedIds: new Set(), keepValidVerify });
+      const marker2 = parseLedger(path).find((r) => r.id.startsWith('integrity_'));
+      expect(marker2).toEqual(marker1);   // fixpoint unaffected by the hatch when erasedIds is empty
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
