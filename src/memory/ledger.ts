@@ -72,11 +72,30 @@ export function appendRecord(path: LedgerPath, record: MemoryRecord): void {
  * non-string where downstream calls a string method (`id.startsWith` / `safeId(id).replace`,
  * `content.normalize`, `provenance.source`, `tx.localeCompare`). `tx` is validated for that last reason:
  * it IS dereferenced, not merely compared. It deliberately does NOT validate enums (`type`, `state`),
- * `validFrom`/`validTo`, or `supersedes`: those are only COMPARED, never dereferenced, and rejecting an
- * unknown value there would silently DROP a legitimate row written by a future schema. Data loss is
- * worse than the crash this fixes. Malformed rows are skipped exactly like torn lines (the existing §10
- * tolerance).
+ * `validFrom`/`validTo`, `supersedes`, or `mac` (the `typeof mac === 'string'` clause was REMOVED, T2-e:
+ * `mac` is only ever compared/read by the MAC verifier, never dereferenced here, so a future schema's
+ * object-shaped `mac` must not be data-lost): those are only COMPARED, never dereferenced, and rejecting
+ * an unknown value there would silently DROP a legitimate row written by a future schema. Data loss is
+ * worse than the crash this fixes. The one shape-check that IS added is `withinDepth`: a pathologically
+ * nested value (still crash-only — it would throw inside `JSON.stringify` on rewrite/compaction), capped
+ * at `MAX_PARSE_DEPTH`. Malformed rows are skipped exactly like torn lines (the existing §10 tolerance).
  */
+const MAX_PARSE_DEPTH = 64; // a legitimate record is depth <= ~3; caps pathological nesting that would throw in JSON.stringify. Shape check, not value check.
+
+/** Iterative (never recursive — the probe must not itself overflow) nesting-depth bound. */
+function withinDepth(v: unknown, max: number): boolean {
+  const stack: Array<{ v: unknown; d: number }> = [{ v, d: 0 }];
+  while (stack.length) {
+    const { v: cur, d } = stack.pop()!;
+    if (cur === null || typeof cur !== 'object') continue;
+    if (d >= max) return false;
+    for (const child of Array.isArray(cur) ? cur : Object.values(cur as Record<string, unknown>)) {
+      stack.push({ v: child, d: d + 1 });
+    }
+  }
+  return true;
+}
+
 function isWellFormedRecord(v: unknown): v is MemoryRecord {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   const r = v as Record<string, unknown>;
@@ -84,25 +103,32 @@ function isWellFormedRecord(v: unknown): v is MemoryRecord {
     && typeof r.content === 'string'
     && typeof r.tx === 'string'
     && typeof r.provenance === 'object' && r.provenance !== null
-    && (r.mac === undefined || typeof r.mac === 'string');
+    && withinDepth(v, MAX_PARSE_DEPTH);   // D6 shape cap; `mac` clause REMOVED (T2-e: it over-guarded a try/caught deref and dropped a future object-mac)
+}
+
+/** Parse already-read ledger TEXT into records PLUS a content-free health signal (count of skipped
+ *  non-blank lines — torn JSON or structurally invalid). `parseLedgerText` delegates here and discards
+ *  the count; a caller that wants to report parse health (e.g. a future diagnostics surface) can call
+ *  this directly instead of re-deriving the count by diffing line counts against records.length. */
+export function parseLedgerHealth(text: string): { records: MemoryRecord[]; skippedNonBlank: number } {
+  const records: MemoryRecord[] = [];
+  let skippedNonBlank = 0;
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') continue;
+    let v: unknown;
+    try { v = JSON.parse(line); } catch { skippedNonBlank++; continue; }
+    if (isWellFormedRecord(v)) records.push(v);
+    else skippedNonBlank++;   // structurally invalid OR too-deep — same treatment as a torn line, but counted
+  }
+  return { records, skippedNonBlank };
 }
 
 /** Parse already-read ledger TEXT into records (parseLedger's body minus the file read). Lets a
  *  caller that must read the bytes for another purpose (A4 recall cache: hash the exact bytes) parse
- *  the SAME bytes with no second read. Tolerates torn/corrupt lines (spec §10) — skip, don't crash. */
+ *  the SAME bytes with no second read. Tolerates torn/corrupt lines (spec §10) — skip, don't crash.
+ *  Delegates to parseLedgerHealth and discards the skip count. */
 export function parseLedgerText(text: string): MemoryRecord[] {
-  const out: MemoryRecord[] = [];
-  for (const line of text.split('\n')) {
-    if (line.trim() === '') continue;
-    let v: unknown;
-    try {
-      v = JSON.parse(line);
-    } catch {
-      continue;              // torn line — skip, don't crash (spec §10)
-    }
-    if (isWellFormedRecord(v)) out.push(v);   // structurally invalid — same treatment as a torn line
-  }
-  return out;
+  return parseLedgerHealth(text).records;
 }
 
 /** Read every record from the ledger, in append order. Missing file -> []. */
