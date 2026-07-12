@@ -17,7 +17,7 @@ import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce } from './content-frame.js';
 import { isOwned, stampOwnership } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
-import { buildVerifiedProjection, type VerifiedProjection } from './verified-projection.js';
+import { buildVerifiedProjection, isKnownState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedProjectionWithSubkey } from './verified-read.js';
 import { ledgerDigest, subkeyFingerprint, keyVectorEqual, type ScopeKeyComponent, type RecallCacheEntry } from './recall-cache.js';
 import type { MetricsSink } from '../metrics.js';
@@ -145,7 +145,7 @@ export class MemoryStore {
    *  later). They stay grade-inert (verifyVerify false until a verifier exists) and scan-visible. */
   private keepValidVerifyFor(subkey: Buffer | null): (r: MemoryRecord) => boolean {
     return subkey
-      ? (r) => verifyVerify(r, subkey) || (typeof r.macVersion === 'number' && Number.isSafeInteger(r.macVersion) && r.macVersion > MAC_VERSION)
+      ? (r) => (verifyVerify(r, subkey) && isKnownState(r.state)) || (typeof r.macVersion === 'number' && Number.isSafeInteger(r.macVersion) && r.macVersion > MAC_VERSION)
       : () => true;
   }
 

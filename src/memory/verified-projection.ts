@@ -16,6 +16,15 @@ const isPromotion = (s: MemoryRecord['state']): boolean => s === 'Verified' || s
 // order written most-trusted-first, but the hook module is not importable from the memory layer.
 const TRUST_RANK: Record<MemoryRecord['state'], number> = { Suspect: 0, Fresh: 1, Corroborated: 2, Verified: 3 };
 
+const KNOWN_STATES = new Set<MemoryRecord['state']>(['Fresh', 'Corroborated', 'Verified', 'Suspect']);
+/** True only for a real MemoryState string. A verify carrying anything else (a MAC-valid array-like
+ *  object whose bytes render to an enum name, an unknown future string) must not confer a grade or be
+ *  interpolated/property-keyed downstream (D1). Trust-layer check — NOT the parse guard (an enum check
+ *  at parse would drop a future state enum). */
+export function isKnownState(s: unknown): s is MemoryRecord['state'] {
+  return typeof s === 'string' && KNOWN_STATES.has(s as MemoryRecord['state']);
+}
+
 /** Resolve ONE target's grade from its VALID verifies (caller pre-filters via the verify predicate)
  *  + the live content digest, emitting the full evidence. The single source of the lane-aware fail-low
  *  grade rule (spec A §4.5): buildVerifiedProjection uses {grade,compromised}; buildAsOfEvidence also
@@ -76,7 +85,7 @@ export function buildVerifiedProjection(
   // Group valid verifies by target, choose the winning grade by generation (R2/R3).
   const byTarget = new Map<string, MemoryRecord[]>();
   for (const r of records) {
-    if (r.type !== 'verify' || !r.supersedes || !opts.verify(r)) continue; // R2: invalid verify ignored
+    if (r.type !== 'verify' || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue; // R2 + D1 enum gate
     (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)!).push(r);
   }
 

@@ -1,7 +1,7 @@
 import type { MemoryRecord, AsOfFact } from '../types.js';
 import { buildProjection } from './projection.js';
 import { digestContent } from './ledger-mac.js';
-import { resolveTargetGrade } from './verified-projection.js';
+import { resolveTargetGrade, isKnownState } from './verified-projection.js';
 
 /** Reconstruct the snapshot at system-time `t` with full per-verify evidence (spec C §4). Membership
  *  is DECLARED: filter by raw `tx <= t` (assert/supersede/erase tx is unsigned). Grade + evidence come
@@ -23,7 +23,7 @@ export function buildAsOfEvidence(
 
   const byTarget = new Map<string, MemoryRecord[]>();
   for (const r of asOfRecords) {
-    if (r.type !== 'verify' || !r.supersedes || !opts.verify(r)) continue; // R2: only valid verifies
+    if (r.type !== 'verify' || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue; // R2 + D1
     (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)!).push(r);
   }
 

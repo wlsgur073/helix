@@ -1,4 +1,5 @@
 import type { MemoryRecord } from '../types.js';
+import { isKnownState } from './verified-projection.js';
 
 /** A content-free audit marker — the compaction horizon marker (ledger.ts:141) or the integrity
  *  tombstone (ledger.ts:124): a verify-shaped record with a null target, no MAC, empty content, and
@@ -34,7 +35,7 @@ export function scanLegacyElevated(
   const offenders: string[] = [];
   for (const r of records) {
     if (r.type === 'verify') {
-      if (!verify(r) && !isContentFreeMarker(r)) offenders.push(r.id); // unsigned/forged/edited elevation the replay would drop (content-free markers excluded — B1)
+      if ((!verify(r) || !isKnownState(r.state)) && !isContentFreeMarker(r)) offenders.push(r.id); // MAC-valid but non-enum state: replay ignores it, so surface it (C9)
     } else if ((r.type === 'assert' || r.type === 'supersede') && r.state !== 'Fresh') {
       offenders.push(r.id); // baked content elevation R1 would clamp to Fresh — not tool-minted
     }
