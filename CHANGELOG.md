@@ -45,19 +45,26 @@ All notable changes to Helix are documented here. This project follows
   undo window at all.
 
   Self-limiting: a compacted ledger has *essentially* zero reclaimable rows and bytes, so it will not
-  re-compact until new churn. The one exception is the content-free integrity tombstone minted when a
-  compaction drops a forged verify — unlike every other preserved class it is not a fixpoint, so a later
-  compaction removes it (minting no replacement, which settles it in one pass). It cannot re-trigger the
-  gates on its own: one ~330-byte row satisfies neither the default `dirtyRatio` (at the default
-  `minRows` of 200, `1/200` is far below `0.5`) nor the default `minDirtyBytes` of 1 MiB.
+  re-compact until new churn. The content-free integrity/horizon tombstones a compaction mints (see
+  below) are a **coalesced canonical fixpoint** — constant ids (`integrity_marker` / `horizon_marker`)
+  and fixed sentinel timestamps — so a later compaction *re-mints the byte-identical row*, it does not
+  drop it. That makes the self-limiting argument *stronger*, not weaker: a preserved marker is
+  simultaneously read (in the compaction's input rows) and rewritten (in its kept set) every time, so
+  it contributes exactly **zero** to `reclaimable = records.length - kept.length` — the very count the
+  next compaction's dirty-gate is computed from. It also cannot re-trigger the gates by growth alone:
+  one ~330-byte row satisfies neither the default `dirtyRatio` (at the default `minRows` of 200,
+  `1/200` is far below `0.5`) nor the default `minDirtyBytes` of 1 MiB.
 
   Observable **when metrics are enabled** (`metrics.enabled`, the default): every attempt emits a
   content-free `compaction` record to `~/.helix/metrics.jsonl`, failures included (`ok: false`). Its
   `reclaimed_bytes` is **legitimately negative** when a compaction drops little but mints a content-free
-  horizon/integrity tombstone — the ledger net-grew, and that is reported, not clamped. With
-  `metrics.enabled: false` the sink is a no-op, so **neither a successful nor a failed compaction leaves
-  any trace**: turning compaction on while metrics are off means a destructive operation runs with zero
-  visibility.
+  horizon/integrity tombstone — the ledger net-grew, and that is reported, not clamped. The record also
+  carries `dropped_forged_verifies`: a content-free count of forged `verify` rows this compaction
+  destroyed under HMAC-aware compaction (`0` when compaction ran without a resolvable subkey, or
+  genuinely dropped none) — the forensic counterpart to the integrity marker's mere presence, which is
+  itself forgeable (see below). With `metrics.enabled: false` the sink is a no-op, so **neither a
+  successful nor a failed compaction leaves any trace**: turning compaction on while metrics are off
+  means a destructive operation runs with zero visibility.
 
   Named v1 limitations (spec §7). It does **not** bound total ledger size: preserved audit data (erase
   tombstones, genuine signed verifies on live targets) is never reclaimed. A continuously churny ledger
@@ -72,12 +79,24 @@ All notable changes to Helix are documented here. This project follows
   (`stakes` on `helix_memory`-adjacent `helix_dual_verify`, and `dualVerify.stakesFloor` in config).
   With `stakesFloor: "xhigh"`, only calls the agent classifies `xhigh` spend Codex quota — `high`
   and below are skipped. Omitting `stakes` still bypasses the floor (an explicit call signals intent).
+- Every SENT `helix_dual_verify` result now carries an `egress: ...` disclosure line, rendered ABOVE
+  the quarantine frame, so the calling agent can tell a config-valved release from a clean pass instead
+  of crediting the pass to its own prose. Three forms: `pass` (every leg clean), `pass with audit-only
+  legs` (a leg logged the check but did not block), and `allowed_override with released policy keys +
+  audit-only legs` (an otherwise-blocking leg was released by `dualVerify.egressPolicy`). The line is
+  content-free — it names leg outcomes and policy keys, never the scanned content.
 - Replay metrics sensor: content-free op/replay latency records in `~/.helix/metrics.jsonl`
   (default on; `metrics.enabled: false` disables; hook honors the global config only). The
   sensor makes the long-deferred "migrate to SQLite at recall p95 > 150 ms" trigger observable.
 - Standing replay benchmark `scripts/bench-replay.ts`: synthetic EN/KO sweep with REAL signed
-  verify records (HMAC-era baseline), `--real` read-only mode, and a streaming `--report` mode
-  with a windowed dual verdict against the 150 ms trigger.
+  verify records (HMAC-era baseline), `--real` read-only mode, and a streaming `--report` mode with a
+  windowed, **tri-state** verdict (`exceeded` / `below` / `insufficient`) against the 150 ms trigger,
+  computed from **successful** recalls only — a failed recall carries no latency signal, so it no
+  longer counts toward a confident `below` verdict. `insufficient` requires fewer than 20 successful
+  samples in the window and renders an explicit reason (`no successful samples` vs. `n < 20`); with at
+  least one successful sample it still renders the provisional p95-vs-trigger comparison, just flagged
+  as provisional, so a single lucky/unlucky sample is visible but never mistaken for a confident
+  judgment.
 - Recall index cache (A4): an in-process, single-slot cache keyed by content identity — the ledger
   byte digest, the resolved MAC-subkey fingerprint, and the scope set. On an unchanged ledger a warm
   recall reuses the verified projection and BM25 artifacts instead of re-reading and re-replaying, so
@@ -131,6 +150,12 @@ All notable changes to Helix are documented here. This project follows
   by `dualVerify.egressPolicy`, a per-leg map (`memoryEcho` / `piiHigh` / `piiBulk` /
   `secretHeuristic` / `secretEntropy`), each defaulting to `block`. Provider-format secrets stay
   override-proof. A leftover `memoryEgress` key is ignored with a startup warning.
+- **Breaking audit schema change:** `audit.jsonl`'s `blockedLeg` field is replaced by `decidedLeg` +
+  `releasedLegs` — the old key conflated "the leg that decided the call" with "the leg that would
+  otherwise have blocked it," so a policy-released block was indistinguishable from a leg that never
+  fired. Anyone parsing `audit.jsonl` directly is affected. Existing rows are **not** rewritten (the
+  audit log is append-only history) — they keep the legacy `blockedLeg` key; only new rows carry
+  `decidedLeg`/`releasedLegs`.
 
 ### Removed
 - `dualVerify.effort: 'minimal'`. The CLI still parses it, but no model in `codex debug models`
