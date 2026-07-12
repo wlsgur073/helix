@@ -253,11 +253,17 @@ describe('auto-compaction on recall', () => {
   // Constraint: ONE resolved subkey, shared by the eligibility plan AND the compaction. A second
   // resolution can transiently return null (registry/master read failure), which flips the keep
   // predicate to the key-absent `() => true` and preserves a forgery the plan had counted as dropped.
+  //
+  // F6: this is also the only test in the file that DROPS a forged verify, so it is the sole place
+  // that can lock `droppedForgedVerifies` end to end. Both pass-through hops
+  // (compactLedger's return in ledger.ts, the emitCompaction call in store.ts) are otherwise
+  // unwitnessed: zeroing either one keeps the rest of the suite green.
   it('resolves the subkey ONCE and shares it with compactLedger (a forged verify is still dropped)', () => {
     const home = newHome();
     try {
       const ledger = join(home, 'memory.jsonl');
-      const store = new MemoryStore(ledger, { home, sessionId: 't', now: () => FUTURE, compaction: enabled });
+      const { sink, emitted } = recordingSink();
+      const store = new MemoryStore(ledger, { home, sessionId: 't', now: () => FUTURE, compaction: enabled, metricsSink: sink });
       const live = makeDirty(store);
       store.confirm(live[1]!);                       // mints the master key (+ one genuine verify)
       const subkey = subkeyForScope(home)!;
@@ -286,6 +292,10 @@ describe('auto-compaction on recall', () => {
       expect(after.some((r) => r.id === 'forged_verify')).toBe(false);           // forgery destroyed
       expect(after.filter((r) => r.id.startsWith('integrity_'))).toHaveLength(1); // audit tombstone minted
       expect(after.some((r) => r.type === 'verify' && r.supersedes === live[1]!)).toBe(true); // genuine kept
+      // F6: locks BOTH pass-through hops (ledger.ts's compactLedger return, store.ts's emitCompaction
+      // call) — the real count (1 forged verify dropped above), never the zeroed default.
+      expect(emitted).toHaveLength(1);
+      expect(emitted[0]!.droppedForgedVerifies).toBe(1);
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
