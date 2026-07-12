@@ -45,10 +45,19 @@ export function frameClose(nonce: string): string {
   return `===HELIX ${nonce} END===`;
 }
 
+// Every line terminator datamark's split must treat as a break, not just '\n'. U+2028 LINE SEPARATOR
+// and U+2029 PARAGRAPH SEPARATOR are category Zl/Zp — normalizeUntrusted's \p{Cc}\p{Cf} strip does not
+// touch them, and NFKC does not fold them away — so untrusted text can carry one straight through. A
+// reader that treats them as line breaks (many do: ECMA-262 counts them as LineTerminator for `^`/`$`
+// with the /m flag, and plenty of renderers/log viewers) would see a line this function never marked,
+// letting attacker output forge an un-prefixed line inside an otherwise-quarantined frame (F2).
+const LINE_BREAK = /\n|\u2028|\u2029/;
+const TRAILING_LINE_BREAKS = /(?:\n|\u2028|\u2029)+$/;
+
 /** normalizeUntrusted the text, then prefix EVERY line with `mark` (continuous per-line provenance). */
 export function datamark(text: string, mark: string, maxChars?: number): string {
-  const normalized = normalizeUntrusted(text, maxChars).replace(/\n+$/, '');
-  return normalized.split('\n').map((line) => mark + line).join('\n');
+  const normalized = normalizeUntrusted(text, maxChars).replace(TRAILING_LINE_BREAKS, '');
+  return normalized.split(LINE_BREAK).map((line) => mark + line).join('\n');
 }
 
 /** Assemble a fully-untrusted block: nonce open + semantics + datamarked lines + nonce close. */

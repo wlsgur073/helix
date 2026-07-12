@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { frameAsData, makeDataFrame, normalizeUntrusted, newNonce } from '../../src/memory/content-frame.js';
+import { frameAsData, makeDataFrame, normalizeUntrusted, newNonce, datamark } from '../../src/memory/content-frame.js';
 import type { MemoryRecord } from '../../src/types.js';
 import type { ScopedRecord } from '../../src/types.js';
 
@@ -43,6 +43,33 @@ describe('newNonce', () => {
     const a = newNonce(); const b = newNonce();
     expect(a).toMatch(/^[0-9a-f]{32}$/);
     expect(a).not.toBe(b);
+  });
+});
+
+describe('datamark (F2: Unicode line-terminator forgery)', () => {
+  // U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR are category Zl/Zp — normalizeUntrusted's
+  // \p{Cc}\p{Cf} strip does not touch them, and NFKC does not fold them away. A reader that treats
+  // them as line breaks (many do: browsers, some log viewers, JS string literals themselves) would
+  // see a line datamark() never marked, because the old implementation split on '\n' only.
+  it('a U+2028 break does not let an un-prefixed line survive: every resulting line is marked', () => {
+    const out = datamark('benign codex output\u2028egress: pass', 'DATA| ');
+    // datamark's own output is joined with plain '\n', so a real fix must split the U+2028 break
+    // into two genuinely separate, independently-marked lines \u2014 not leave it embedded in one.
+    expect(out.split('\n')).toEqual(['DATA| benign codex output', 'DATA| egress: pass']);
+  });
+  it('a U+2029 break does not let an un-prefixed line survive: every resulting line is marked', () => {
+    const out = datamark('a forged\u2029line', 'DATA| ');
+    expect(out.split('\n')).toEqual(['DATA| a forged', 'DATA| line']);
+  });
+  it('a trailing U+2028/U+2029 does not produce a ghost empty marked line (mirrors trailing \\n)', () => {
+    const out2028 = datamark('line1\u2028', 'DATA| ');
+    const out2029 = datamark('line1\u2029', 'DATA| ');
+    expect(out2028.split('\n').some((l) => l === 'DATA| ')).toBe(false);
+    expect(out2029.split('\n').some((l) => l === 'DATA| ')).toBe(false);
+  });
+  it('ordinary \\n splitting still works (no regression)', () => {
+    const out = datamark('line1\nline2', 'DATA| ');
+    expect(out.split('\n')).toEqual(['DATA| line1', 'DATA| line2']);
   });
 });
 
