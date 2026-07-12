@@ -13012,12 +13012,11 @@ var StdioServerTransport = class {
 };
 
 // src/memory/store.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync as existsSync2, readFileSync as readFileSync7, statSync as statSync6 } from "node:fs";
 import { dirname as dirname3 } from "node:path";
 
 // src/memory/ledger.ts
-import { randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync, statSync as statSync2 } from "node:fs";
 import { dirname } from "node:path";
 
@@ -13360,7 +13359,26 @@ function withFileLock(target, fn, opts = {}) {
 }
 
 // src/memory/ledger.ts
-var isHorizonMarker = (r) => r.type === "verify" && r.supersedes === null && !r.mac && r.id.startsWith("horizon_");
+var MARKER_SENTINEL_TX = "1970-01-01T00:00:00.000Z";
+var isMarkerShape = (r) => r != null && r.type === "verify" && r.supersedes === null && !r.mac && typeof r.id === "string";
+var isHorizonMarker = (r) => isMarkerShape(r) && r.id.startsWith("horizon_");
+var isIntegrityMarker = (r) => isMarkerShape(r) && r.id.startsWith("integrity_");
+function canonicalMarker(kind) {
+  return {
+    id: kind,
+    tx: MARKER_SENTINEL_TX,
+    validFrom: MARKER_SENTINEL_TX,
+    validTo: null,
+    type: "verify",
+    state: "Suspect",
+    content: "",
+    provenance: { source: "user", sessionId: "compaction" },
+    supersedes: null,
+    blastRadius: null,
+    reverifyTrigger: null,
+    classification: "normal"
+  };
+}
 function appendRecordUnlocked(path, record2) {
   mkdirSync2(dirname(path), { recursive: true });
   appendFileSync(path, JSON.stringify(record2) + "\n");
@@ -13409,52 +13427,21 @@ function planCompaction(records, opts) {
   for (const r of records) {
     if (r.type === "erase") kept.push({ ...r, content: "" });
   }
+  let droppedForgedVerifies = 0;
   if (opts.keepValidVerify) {
-    let droppedForged = 0;
     for (const r of records) {
       if (r.type !== "verify" || !r.supersedes || !live.has(r.supersedes)) continue;
       if (opts.keepValidVerify(r)) kept.push(r);
-      else droppedForged++;
-    }
-    if (droppedForged > 0) {
-      const ts = (/* @__PURE__ */ new Date()).toISOString();
-      kept.push({
-        id: `integrity_${randomUUID()}`,
-        tx: ts,
-        validFrom: ts,
-        validTo: null,
-        type: "verify",
-        state: "Suspect",
-        content: "",
-        provenance: { source: "user", sessionId: "compaction" },
-        supersedes: null,
-        blastRadius: null,
-        reverifyTrigger: null,
-        classification: "normal"
-      });
+      else droppedForgedVerifies++;
     }
   }
-  const existingHorizon = records.find(isHorizonMarker);
-  if (existingHorizon) {
-    kept.push(existingHorizon);
-  } else if (records.some((r) => (r.type === "assert" || r.type === "supersede") && !live.has(r.id))) {
-    const hts = (/* @__PURE__ */ new Date()).toISOString();
-    kept.push({
-      id: `horizon_${randomUUID()}`,
-      tx: hts,
-      validFrom: hts,
-      validTo: null,
-      type: "verify",
-      state: "Suspect",
-      content: "",
-      provenance: { source: "user", sessionId: "compaction" },
-      supersedes: null,
-      blastRadius: null,
-      reverifyTrigger: null,
-      classification: "normal"
-    });
+  if (records.some(isIntegrityMarker) || droppedForgedVerifies > 0) {
+    kept.push(canonicalMarker("integrity_marker"));
   }
-  return kept;
+  if (records.some(isHorizonMarker) || records.some((r) => (r.type === "assert" || r.type === "supersede") && !live.has(r.id))) {
+    kept.push(canonicalMarker("horizon_marker"));
+  }
+  return { kept, droppedForgedVerifies };
 }
 function serializedBytes(records) {
   let n = 0;
@@ -13472,7 +13459,7 @@ function compactLedger(path, opts) {
   return withFileLock(path, () => {
     const beforeBytes = fileSize(path);
     const records = parseLedger(path);
-    const kept = planCompaction(records, opts);
+    const { kept, droppedForgedVerifies } = planCompaction(records, opts);
     const tmp = `${path}.${process.pid}.tmp`;
     const fd = openSync(tmp, "w");
     try {
@@ -13482,7 +13469,7 @@ function compactLedger(path, opts) {
       closeSync(fd);
     }
     renameSync(tmp, path);
-    return { droppedRows: records.length - kept.length, reclaimedBytes: beforeBytes - fileSize(path) };
+    return { droppedRows: records.length - kept.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
   });
 }
 
@@ -14160,7 +14147,7 @@ var MemoryStore = class {
     return (this.opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   }
   id() {
-    return (this.opts.genId ?? (() => `m_${randomUUID2()}`))();
+    return (this.opts.genId ?? (() => `m_${randomUUID()}`))();
   }
   nonce() {
     return (this.opts.genNonce ?? newNonce)();
@@ -14412,7 +14399,7 @@ var MemoryStore = class {
       const gate = cheapGate({ rows: records.length, totalBytes, mtimeMs, nowMs, cfg });
       if (!gate.proceed) continue;
       const keepValidVerify = this.keepValidVerifyFor(r.subkey);
-      const kept = planCompaction(records, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
+      const { kept } = planCompaction(records, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
       const reclaimable = records.length - kept.length;
       const reclaimableBytes = serializedBytes(records) - serializedBytes(kept);
       if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
@@ -14430,6 +14417,7 @@ var MemoryStore = class {
         durationMs,
         droppedRows: stats?.droppedRows ?? 0,
         reclaimedBytes: stats?.reclaimedBytes ?? 0,
+        droppedForgedVerifies: stats?.droppedForgedVerifies ?? 0,
         ok: stats !== null
       });
     }
@@ -23015,6 +23003,8 @@ function detectEcho(forms, ledger, opts = {}) {
   }
   return { memoryIds: ids };
 }
+var EGRESS_LEG_ORDER = ["memoryEcho", "piiHigh", "secretHeuristic", "secretEntropy", "piiBulk"];
+var AUDIT_LEG_ORDER = ["secret", "pii", "memory_echo"];
 var BULK_PII_N = 3;
 var CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[_-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token)/i;
 var CRED_WINDOW = 24;
@@ -23055,7 +23045,10 @@ function classifyEgress(input) {
       piiKinds: [],
       echoMemoryIds: [],
       decidedBy: "scan_limit",
-      reason: `blocked: payload exceeds the egress scan limit (${MAX_FORM_SCAN} chars)`
+      reason: `blocked: payload exceeds the egress scan limit (${MAX_FORM_SCAN} chars)`,
+      blockedLegs: [],
+      releasedLegs: [],
+      auditOnlyLegs: []
     };
   }
   if (input.ledger !== null) {
@@ -23068,7 +23061,10 @@ function classifyEgress(input) {
         piiKinds: [],
         echoMemoryIds: [],
         decidedBy: "scan_limit",
-        reason: `blocked: ledger exceeds the egress scan limit (${MAX_LEDGER_SCAN} chars)`
+        reason: `blocked: ledger exceeds the egress scan limit (${MAX_LEDGER_SCAN} chars)`,
+        blockedLegs: [],
+        releasedLegs: [],
+        auditOnlyLegs: []
       };
     }
   }
@@ -23092,9 +23088,6 @@ function classifyEgress(input) {
   if (secretHit) legs.push("secret");
   if (piiHit) legs.push("pii");
   if (echoHit) legs.push("memory_echo");
-  if (secretNamed) {
-    return { decision: "blocked", legs, piiKinds, echoMemoryIds, decidedBy: "named", reason: "blocked: secret token (override-proof)" };
-  }
   const gated = [
     { hit: echoHit, key: "memoryEcho", label: `memory-echo (${echoMemoryIds.length} items)` },
     { hit: highPii, key: "piiHigh", label: `high-severity PII (${highKinds.length} kinds)` },
@@ -23104,23 +23097,34 @@ function classifyEgress(input) {
   ];
   const applicable = gated.filter((g) => g.hit);
   const blocking = applicable.filter((g) => input.policy[g.key] !== "allow");
+  const released = applicable.filter((g) => input.policy[g.key] === "allow");
+  const inOrder = (keys) => EGRESS_LEG_ORDER.filter((k) => keys.includes(k));
+  const blockedLegs = inOrder(blocking.map((g) => g.key));
+  const releasedLegs = inOrder(released.map((g) => g.key));
+  const gatedCoarse = new Set(applicable.map((g) => g.key === "memoryEcho" ? "memory_echo" : g.key.startsWith("pii") ? "pii" : "secret"));
+  const auditOnlyLegs = AUDIT_LEG_ORDER.filter((l) => legs.includes(l) && !gatedCoarse.has(l));
+  const outcome = { blockedLegs, releasedLegs, auditOnlyLegs };
+  if (secretNamed) {
+    return { decision: "blocked", legs, piiKinds, echoMemoryIds, decidedBy: "named", reason: "blocked: secret token (override-proof)", ...outcome };
+  }
   if (blocking.length > 0) {
     const d = blocking[0];
-    return { decision: "blocked", legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `blocked: ${d.label}` };
+    return { decision: "blocked", legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `blocked: ${d.label}`, ...outcome };
   }
   if (applicable.length > 0) {
     const d = applicable[0];
-    return { decision: "allowed_override", legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `allowed_override: ${d.label}` };
+    return { decision: "allowed_override", legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `allowed_override: ${d.label}`, ...outcome };
   }
   if (piiHit) {
-    return { decision: "pass", legs, piiKinds, echoMemoryIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)` };
+    return { decision: "pass", legs, piiKinds, echoMemoryIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)`, ...outcome };
   }
   return {
     decision: "pass",
     legs,
     piiKinds,
     echoMemoryIds,
-    reason: secretHit ? "pass: hex-literal entropy exempt (audit-only)" : "pass: no egress legs"
+    reason: secretHit ? "pass: hex-literal entropy exempt (audit-only)" : "pass: no egress legs",
+    ...outcome
   };
 }
 var EGRESS_VERB = /\b(send|post|upload|email|exfiltrate|transmit|leak|forward|fetch)\b/;
@@ -23402,6 +23406,12 @@ function deciderLeg(v) {
       return void 0;
   }
 }
+function egressLine(v) {
+  if (!v) return "egress: unavailable (internal)";
+  if (v.decision === "allowed_override") return `egress: allowed_override (released: ${v.releasedLegs.join(", ")})`;
+  if (v.auditOnlyLegs.length > 0) return `egress: pass (audit-only; legs: ${v.auditOnlyLegs.join(", ")})`;
+  return "egress: pass";
+}
 async function handleDualVerify(args, deps) {
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   const result = await dualVerify(args, deps);
@@ -23417,7 +23427,8 @@ async function handleDualVerify(args, deps) {
     verdict: result.agreement?.verdict,
     reason: persisted,
     egressDecision: egress?.decision,
-    blockedLeg: decided ? deciderLeg(egress) : void 0,
+    decidedLeg: decided ? deciderLeg(egress) : void 0,
+    releasedLegs: egress && egress.releasedLegs.length ? egress.releasedLegs : void 0,
     piiKinds: egress && egress.piiKinds.length ? egress.piiKinds : void 0,
     echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds : void 0
   });
@@ -23451,6 +23462,7 @@ async function handleDualVerify(args, deps) {
       frameOpen("DUAL-VERIFY", nonce),
       DATA_SEMANTICS,
       "mode: critique",
+      egressLine(result.egress),
       "--- EXTERNAL CODEX CRITIQUE (data) ---",
       datamark(result.critique ?? "", "DATA| "),
       "--- end codex critique ---",
@@ -23462,6 +23474,7 @@ async function handleDualVerify(args, deps) {
     frameOpen("DUAL-VERIFY", nonce),
     DATA_SEMANTICS,
     `verdict: ${a.verdict} (mode: ${result.mode})`,
+    egressLine(result.egress),
     "--- EXTERNAL CODEX OUTPUT (data) ---",
     datamark(result.codexAnswer ?? "", "DATA| "),
     "--- end codex output ---",
@@ -23738,7 +23751,7 @@ var realCodexRunner = createCodexRunner();
 // src/metrics.ts
 import { appendFileSync as appendFileSync4, mkdirSync as mkdirSync8 } from "node:fs";
 import { dirname as dirname7 } from "node:path";
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 var noopMetricsSink = {
   emitReplay: () => {
   },
@@ -23753,7 +23766,7 @@ function createMetricsSink(path, enabled, deps = {}) {
     appendFileSync4(p, line, { mode: 384 });
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
-  const genId = deps.genId ?? (() => `o_${randomUUID3()}`);
+  const genId = deps.genId ?? (() => `o_${randomUUID2()}`);
   let currentOpId = null;
   let buffer = null;
   const safeAppend = (line) => {
@@ -23795,6 +23808,7 @@ function createMetricsSink(path, enabled, deps = {}) {
           duration_ms: c.durationMs,
           dropped_rows: c.droppedRows,
           reclaimed_bytes: c.reclaimedBytes,
+          dropped_forged_verifies: c.droppedForgedVerifies,
           ok: c.ok
         }) + "\n";
         if (buffer) buffer.push(line);
