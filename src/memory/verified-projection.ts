@@ -35,8 +35,9 @@ export function resolveTargetGrade(
   liveDigest: string,
 ): { grade: MemoryRecord['state'] | null; compromised: boolean; evidence: AsOfVerify[] } {
   const laneOf = (v: MemoryRecord): 0 | 1 | 2 => (v.macVersion === 1 ? 1 : v.macVersion === 2 ? 2 : 0);
-  const byGen = new Map<number, MemoryRecord[]>();
-  for (const v of verifies) { const g = v.gen ?? 0; (byGen.get(g) ?? byGen.set(g, []).get(g)!).push(v); }
+  const canonGen = (g: MemoryRecord['gen']): bigint => BigInt((g ?? 0) as number); // exact 64-bit match to the MAC's int(gen ?? 0); inputs are verify-filtered so this cannot throw
+  const byGen = new Map<bigint, MemoryRecord[]>();
+  for (const v of verifies) { const g = canonGen(v.gen); (byGen.get(g) ?? byGen.set(g, []).get(g)!).push(v); }
   let conflict = false;
   const active: MemoryRecord[] = [];
   for (const slot of byGen.values()) {
@@ -63,7 +64,7 @@ export function resolveTargetGrade(
     winner, lane: laneOf(v),
   });
   if (conflict) return { grade: null, compromised: true, evidence: verifies.map((v) => toEvidence(v, false)) };
-  const sorted = [...active].sort((a, b) => (a.gen ?? 0) - (b.gen ?? 0));
+  const sorted = [...active].sort((a, b) => { const ga = canonGen(a.gen), gb = canonGen(b.gen); return ga < gb ? -1 : ga > gb ? 1 : 0; });
   let winner: MemoryRecord | null = null;
   for (const v of sorted) { if (!isPromotion(v.state) || v.targetDigest === liveDigest) winner = v; }
   return { grade: winner ? winner.state : null, compromised: false, evidence: verifies.map((v) => toEvidence(v, v === winner)) };
