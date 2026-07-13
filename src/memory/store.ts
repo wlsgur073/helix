@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerText, compactLedger, planCompaction, serializedBytes, type CompactionStats, type LedgerPath } from './ledger.js';
+import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerText, parseLedgerHealth, compactLedger, planCompaction, serializedBytes, type CompactionStats, type LedgerPath } from './ledger.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated } from './history.js';
@@ -570,18 +570,63 @@ export class MemoryStore {
     ensureMaster(this.homeDir());
   }
 
+  /** Which marker family a canonical marker id belongs to, or null for a normal id. */
+  private markerFamilyOf(id: string): 'integrity_' | 'horizon_' | null {
+    return id === 'integrity_marker' ? 'integrity_' : id === 'horizon_marker' ? 'horizon_' : null;
+  }
+
+  /** Is `id` present in `ledger` — family-prefix for a marker (C10), else live-or-raw. */
+  private presentIn(ledger: LedgerPath, id: string): boolean {
+    const fam = this.markerFamilyOf(id);
+    const records = parseLedger(ledger);
+    if (fam) return records.some((r) => typeof r.id === 'string' && r.id.startsWith(fam));
+    if (this.verifiedOf(ledger).live.has(id)) return true;
+    return records.some((r) => r.id === id);
+  }
+
+  /** Resolve the single ledger an erase acts on, or null for a clean-and-absent no-scope no-op. Throws
+   *  on: unowned project scope; explicit scope where the id is absent (C4/D7); no-scope over a ledger
+   *  with any skipped line (C5/C6); or a no-scope id live/present in more than one scope (D9). */
+  private resolveEraseTarget(id: string, scope: MemoryScope | undefined): LedgerPath | null {
+    const p = this.opts.project;
+    const projectActive = !!p && isOwned(p.root, p.home);
+    if (scope) {
+      const ledger = scope === 'global' || !p ? this.global
+        : (projectActive ? p.ledger : (() => { throw new Error('erase: project ledger not owned — adopt it (helix_memory_adopt) then erase, or remove it'); })());
+      if (!this.presentIn(ledger, id)) throw new Error(`erase: id not found in scope ${scope}`);
+      return ledger;
+    }
+    const candidates: LedgerPath[] = [this.global, ...(projectActive ? [p!.ledger] : [])];
+    for (const c of candidates) {
+      if (existsSync(c) && parseLedgerHealth(readFileSync(c, 'utf8')).skippedNonBlank > 0) {
+        throw new Error('erase: a ledger has skipped (corrupt/torn) lines — pass an explicit scope');
+      }
+    }
+    const hits = candidates.filter((c) => this.presentIn(c, id));
+    if (hits.length > 1) throw new Error('erase: id present in more than one scope — pass an explicit scope');
+    return hits[0] ?? null;
+  }
+
   /** Remove an item from the live projection. Soft by default (tombstone only — recoverable until
    *  compaction, so an erroneous/poisoned erase can be undone). `permanent` compacts immediately for
-   *  genuine right-to-erasure. */
-  erase(id: string, opts: { permanent?: boolean } = {}): void {
-    const ts = this.now();
-    const ledger = this.ledgerOf(id);
-    appendRecord(ledger, {
-      id: this.id(), tx: ts, validFrom: ts, validTo: null,
-      type: 'erase', content: '', state: 'Suspect',
-      provenance: { source: 'user', sessionId: this.session() },
-      supersedes: id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
-    });
+   *  genuine right-to-erasure. Scope-aware routing (D5/D7/C4/C10): never falls back to a ledger the id
+   *  does not live in — an explicit scope must contain the id or this throws; with no scope, exactly
+   *  one candidate ledger may hold the id (else throws ambiguity), and a corrupt/torn line on ANY
+   *  candidate throws rather than silently risking a wrong-file compaction. */
+  erase(id: string, opts: { permanent?: boolean; scope?: MemoryScope } = {}): void {
+    const ledger = this.resolveEraseTarget(id, opts.scope);
+    if (ledger === null) { this.rankCache = null; return; }   // clean + absent → idempotent no-op success
+    const isMarker = this.markerFamilyOf(id) !== null;
+    const alreadyDead = !this.verifiedOf(ledger).live.has(id);
+    if (!isMarker && !alreadyDead) {                          // skip tombstone for markers (T1-g) + already-dead ids (D8)
+      const ts = this.now();
+      appendRecord(ledger, {
+        id: this.id(), tx: ts, validFrom: ts, validTo: null,
+        type: 'erase', content: '', state: 'Suspect',
+        provenance: { source: 'user', sessionId: this.session() },
+        supersedes: id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+      });
+    }
     if (opts.permanent) {
       // HMAC-aware compaction: preserve genuine signed verifies for this ledger, drop forgeries.
       // Resolve the subkey ONCE (see keepValidVerifyFor) so the whole compaction makes one atomic
