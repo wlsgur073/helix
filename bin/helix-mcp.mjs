@@ -13395,7 +13395,7 @@ function withinDepth(v, max) {
     if (cur === null || typeof cur !== "object") continue;
     if (d >= max) return false;
     for (const child of Array.isArray(cur) ? cur : Object.values(cur)) {
-      stack.push({ v: child, d: d + 1 });
+      if (child !== null && typeof child === "object") stack.push({ v: child, d: d + 1 });
     }
   }
   return true;
@@ -14415,44 +14415,40 @@ var MemoryStore = class {
     if (!cfg || this.compactedThisSession) return;
     const nowMs = Date.parse(this.now());
     for (const r of reads) {
+      let mtimeMs = 0;
+      let totalBytes = 0;
       try {
-        let mtimeMs = 0;
-        let totalBytes = 0;
-        try {
-          const st = statSync6(r.ledger);
-          mtimeMs = st.mtimeMs;
-          totalBytes = st.size;
-        } catch {
-          continue;
-        }
-        const records = parseLedgerText(r.text);
-        const gate = cheapGate({ rows: records.length, totalBytes, mtimeMs, nowMs, cfg });
-        if (!gate.proceed) continue;
-        const keepValidVerify = this.keepValidVerifyFor(r.subkey);
-        const { kept } = planCompaction(records, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
-        const reclaimable = records.length - kept.length;
-        const reclaimableBytes = serializedBytes(records) - serializedBytes(kept);
-        if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
-        this.compactedThisSession = true;
-        const started = performance.now();
-        let stats = null;
-        try {
-          stats = compactLedger(r.ledger, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
-        } catch {
-        }
-        const durationMs = performance.now() - started;
-        this.rankCache = null;
-        this.opts.metricsSink?.emitCompaction({
-          scope: r.root ? "project" : "global",
-          durationMs,
-          droppedRows: stats?.droppedRows ?? 0,
-          reclaimedBytes: stats?.reclaimedBytes ?? 0,
-          droppedForgedVerifies: stats?.droppedForgedVerifies ?? 0,
-          ok: stats !== null
-        });
+        const st = statSync6(r.ledger);
+        mtimeMs = st.mtimeMs;
+        totalBytes = st.size;
       } catch {
         continue;
       }
+      const records = parseLedgerText(r.text);
+      const gate = cheapGate({ rows: records.length, totalBytes, mtimeMs, nowMs, cfg });
+      if (!gate.proceed) continue;
+      const keepValidVerify = this.keepValidVerifyFor(r.subkey);
+      const { kept } = planCompaction(records, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
+      const reclaimable = records.length - kept.length;
+      const reclaimableBytes = serializedBytes(records) - serializedBytes(kept);
+      if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
+      this.compactedThisSession = true;
+      const started = performance.now();
+      let stats = null;
+      try {
+        stats = compactLedger(r.ledger, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
+      } catch {
+      }
+      const durationMs = performance.now() - started;
+      this.rankCache = null;
+      this.opts.metricsSink?.emitCompaction({
+        scope: r.root ? "project" : "global",
+        durationMs,
+        droppedRows: stats?.droppedRows ?? 0,
+        reclaimedBytes: stats?.reclaimedBytes ?? 0,
+        droppedForgedVerifies: stats?.droppedForgedVerifies ?? 0,
+        ok: stats !== null
+      });
     }
   }
   recall(query, opts = {}) {
@@ -14647,14 +14643,17 @@ var MemoryStore = class {
   presentIn(ledger, id) {
     const fam = this.markerFamilyOf(id);
     const records = parseLedger(ledger);
-    if (fam) return records.some((r) => typeof r.id === "string" && r.id.startsWith(fam));
+    if (fam) return records.some((r) => isMarkerShape(r) && r.id.startsWith(fam));
     if (this.verifiedOf(ledger).live.has(id)) return true;
     return records.some((r) => r.id === id);
   }
   /** Resolve the single ledger an erase acts on, or null for a clean-and-absent no-scope no-op. Throws
-   *  on: unowned project scope; explicit scope where the id is absent (C4/D7); no-scope over a ledger
-   *  with any skipped line (C5/C6); or a no-scope id live/present in more than one scope (D9). */
-  resolveEraseTarget(id, scope) {
+   *  on: unowned project scope; explicit scope where the id is absent (C4/D7); a no-scope PERMANENT
+   *  erase over a ledger with any skipped line (C5/C6); or a no-scope id live/present in more than one
+   *  scope (D9). `permanent` gates the corruption check: a physical purge must not silently miss a
+   *  secret hiding in a skipped line, but a SOFT erase only tombstones (parseLedger tolerates a torn
+   *  line as §10 specifies), so an unrelated corrupt line must never brick it (finding 2). */
+  resolveEraseTarget(id, scope, permanent) {
     const p = this.opts.project;
     const projectActive2 = !!p && isOwned(p.root, p.home);
     if (scope) {
@@ -14665,16 +14664,18 @@ var MemoryStore = class {
       return ledger;
     }
     const candidates = [this.global, ...projectActive2 ? [p.ledger] : []];
-    for (const c of candidates) {
-      let text;
-      try {
-        text = readFileSync7(c, "utf8");
-      } catch (err) {
-        if (err.code === "ENOENT") continue;
-        throw err;
-      }
-      if (parseLedgerHealth(text).skippedNonBlank > 0) {
-        throw new Error("erase: a ledger has skipped (corrupt/torn) lines \u2014 pass an explicit scope");
+    if (permanent) {
+      for (const c of candidates) {
+        let text;
+        try {
+          text = readFileSync7(c, "utf8");
+        } catch (err) {
+          if (err.code === "ENOENT") continue;
+          throw err;
+        }
+        if (parseLedgerHealth(text).skippedNonBlank > 0) {
+          throw new Error("erase: a ledger has skipped (corrupt/torn) lines \u2014 pass an explicit scope");
+        }
       }
     }
     const hits = candidates.filter((c) => this.presentIn(c, id));
@@ -14688,7 +14689,7 @@ var MemoryStore = class {
    *  one candidate ledger may hold the id (else throws ambiguity), and a corrupt/torn line on ANY
    *  candidate throws rather than silently risking a wrong-file compaction. */
   erase(id, opts = {}) {
-    const ledger = this.resolveEraseTarget(id, opts.scope);
+    const ledger = this.resolveEraseTarget(id, opts.scope, opts.permanent ?? false);
     if (ledger === null) {
       this.rankCache = null;
       return;
@@ -14714,11 +14715,7 @@ var MemoryStore = class {
     }
     if (opts.permanent) {
       const sk = this.subkeyForLedger(ledger);
-      try {
-        compactLedger(ledger, { erasedIds: /* @__PURE__ */ new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk) });
-      } catch (e) {
-        throw new Error(`erase: permanent compaction failed (ledger may contain a malformed row): ${e.message}`);
-      }
+      compactLedger(ledger, { erasedIds: /* @__PURE__ */ new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk) });
     }
     this.rankCache = null;
   }

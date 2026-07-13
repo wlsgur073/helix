@@ -211,7 +211,7 @@ function withinDepth(v, max) {
     if (cur === null || typeof cur !== "object") continue;
     if (d >= max) return false;
     for (const child of Array.isArray(cur) ? cur : Object.values(cur)) {
-      stack.push({ v: child, d: d + 1 });
+      if (child !== null && typeof child === "object") stack.push({ v: child, d: d + 1 });
     }
   }
   return true;
