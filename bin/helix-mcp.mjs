@@ -13387,24 +13387,43 @@ function appendRecord(path, record2) {
   mkdirSync2(dirname(path), { recursive: true });
   withFileLock(path, () => appendRecordUnlocked(path, record2));
 }
+var MAX_PARSE_DEPTH = 64;
+function withinDepth(v, max) {
+  const stack = [{ v, d: 0 }];
+  while (stack.length) {
+    const { v: cur, d } = stack.pop();
+    if (cur === null || typeof cur !== "object") continue;
+    if (d >= max) return false;
+    for (const child of Array.isArray(cur) ? cur : Object.values(cur)) {
+      stack.push({ v: child, d: d + 1 });
+    }
+  }
+  return true;
+}
 function isWellFormedRecord(v) {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
   const r = v;
-  return typeof r.id === "string" && typeof r.content === "string" && typeof r.tx === "string" && typeof r.provenance === "object" && r.provenance !== null && (r.mac === void 0 || typeof r.mac === "string");
+  return typeof r.id === "string" && typeof r.content === "string" && typeof r.tx === "string" && typeof r.provenance === "object" && r.provenance !== null && withinDepth(v, MAX_PARSE_DEPTH);
 }
-function parseLedgerText(text) {
-  const out = [];
+function parseLedgerHealth(text) {
+  const records = [];
+  let skippedNonBlank = 0;
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
     let v;
     try {
       v = JSON.parse(line);
     } catch {
+      skippedNonBlank++;
       continue;
     }
-    if (isWellFormedRecord(v)) out.push(v);
+    if (isWellFormedRecord(v)) records.push(v);
+    else skippedNonBlank++;
   }
-  return out;
+  return { records, skippedNonBlank };
+}
+function parseLedgerText(text) {
+  return parseLedgerHealth(text).records;
 }
 function parseLedger(path) {
   let text;
@@ -13690,11 +13709,16 @@ function verifyVerify(record2, subkey) {
 // src/memory/verified-projection.ts
 var isPromotion = (s) => s === "Verified" || s === "Corroborated";
 var TRUST_RANK = { Suspect: 0, Fresh: 1, Corroborated: 2, Verified: 3 };
+var KNOWN_STATES = /* @__PURE__ */ new Set(["Fresh", "Corroborated", "Verified", "Suspect"]);
+function isKnownState(s) {
+  return typeof s === "string" && KNOWN_STATES.has(s);
+}
 function resolveTargetGrade(verifies, liveDigest) {
   const laneOf = (v) => v.macVersion === 1 ? 1 : v.macVersion === 2 ? 2 : 0;
+  const canonGen = (g) => BigInt(g ?? 0);
   const byGen = /* @__PURE__ */ new Map();
   for (const v of verifies) {
-    const g = v.gen ?? 0;
+    const g = canonGen(v.gen);
     (byGen.get(g) ?? byGen.set(g, []).get(g)).push(v);
   }
   let conflict = false;
@@ -13730,7 +13754,10 @@ function resolveTargetGrade(verifies, liveDigest) {
     lane: laneOf(v)
   });
   if (conflict) return { grade: null, compromised: true, evidence: verifies.map((v) => toEvidence(v, false)) };
-  const sorted = [...active].sort((a, b) => (a.gen ?? 0) - (b.gen ?? 0));
+  const sorted = [...active].sort((a, b) => {
+    const ga = canonGen(a.gen), gb = canonGen(b.gen);
+    return ga < gb ? -1 : ga > gb ? 1 : 0;
+  });
   let winner = null;
   for (const v of sorted) {
     if (!isPromotion(v.state) || v.targetDigest === liveDigest) winner = v;
@@ -13745,7 +13772,7 @@ function buildVerifiedProjection(records, opts) {
   if (!opts.keyAvailable) return { live, compromised, keyAvailable: false };
   const byTarget = /* @__PURE__ */ new Map();
   for (const r of records) {
-    if (r.type !== "verify" || !r.supersedes || !opts.verify(r)) continue;
+    if (r.type !== "verify" || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue;
     (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)).push(r);
   }
   for (const [target, verifies] of byTarget) {
@@ -13772,7 +13799,7 @@ function buildAsOfEvidence(records, t, opts) {
   }
   const byTarget = /* @__PURE__ */ new Map();
   for (const r of asOfRecords) {
-    if (r.type !== "verify" || !r.supersedes || !opts.verify(r)) continue;
+    if (r.type !== "verify" || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue;
     (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)).push(r);
   }
   for (const rec of liveAt.values()) {
@@ -14202,7 +14229,7 @@ var MemoryStore = class {
    *  destroy what a newer binary signed (the pre-A -> v2 destructive-compaction class, one bump
    *  later). They stay grade-inert (verifyVerify false until a verifier exists) and scan-visible. */
   keepValidVerifyFor(subkey) {
-    return subkey ? (r) => verifyVerify(r, subkey) || typeof r.macVersion === "number" && Number.isSafeInteger(r.macVersion) && r.macVersion > MAC_VERSION : () => true;
+    return subkey ? (r) => verifyVerify(r, subkey) && isKnownState(r.state) || typeof r.macVersion === "number" && Number.isSafeInteger(r.macVersion) && r.macVersion > MAC_VERSION : () => true;
   }
   /** Verifying projection for one ledger (R1 clamp / R2 MAC gate / R3 content binding). When no
    *  subkey is available every state is clamped to Fresh and keyAvailable is false. Delegates to the
@@ -14388,40 +14415,44 @@ var MemoryStore = class {
     if (!cfg || this.compactedThisSession) return;
     const nowMs = Date.parse(this.now());
     for (const r of reads) {
-      let mtimeMs = 0;
-      let totalBytes = 0;
       try {
-        const st = statSync6(r.ledger);
-        mtimeMs = st.mtimeMs;
-        totalBytes = st.size;
+        let mtimeMs = 0;
+        let totalBytes = 0;
+        try {
+          const st = statSync6(r.ledger);
+          mtimeMs = st.mtimeMs;
+          totalBytes = st.size;
+        } catch {
+          continue;
+        }
+        const records = parseLedgerText(r.text);
+        const gate = cheapGate({ rows: records.length, totalBytes, mtimeMs, nowMs, cfg });
+        if (!gate.proceed) continue;
+        const keepValidVerify = this.keepValidVerifyFor(r.subkey);
+        const { kept } = planCompaction(records, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
+        const reclaimable = records.length - kept.length;
+        const reclaimableBytes = serializedBytes(records) - serializedBytes(kept);
+        if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
+        this.compactedThisSession = true;
+        const started = performance.now();
+        let stats = null;
+        try {
+          stats = compactLedger(r.ledger, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
+        } catch {
+        }
+        const durationMs = performance.now() - started;
+        this.rankCache = null;
+        this.opts.metricsSink?.emitCompaction({
+          scope: r.root ? "project" : "global",
+          durationMs,
+          droppedRows: stats?.droppedRows ?? 0,
+          reclaimedBytes: stats?.reclaimedBytes ?? 0,
+          droppedForgedVerifies: stats?.droppedForgedVerifies ?? 0,
+          ok: stats !== null
+        });
       } catch {
         continue;
       }
-      const records = parseLedgerText(r.text);
-      const gate = cheapGate({ rows: records.length, totalBytes, mtimeMs, nowMs, cfg });
-      if (!gate.proceed) continue;
-      const keepValidVerify = this.keepValidVerifyFor(r.subkey);
-      const { kept } = planCompaction(records, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
-      const reclaimable = records.length - kept.length;
-      const reclaimableBytes = serializedBytes(records) - serializedBytes(kept);
-      if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
-      this.compactedThisSession = true;
-      const started = performance.now();
-      let stats = null;
-      try {
-        stats = compactLedger(r.ledger, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
-      } catch {
-      }
-      const durationMs = performance.now() - started;
-      this.rankCache = null;
-      this.opts.metricsSink?.emitCompaction({
-        scope: r.root ? "project" : "global",
-        durationMs,
-        droppedRows: stats?.droppedRows ?? 0,
-        reclaimedBytes: stats?.reclaimedBytes ?? 0,
-        droppedForgedVerifies: stats?.droppedForgedVerifies ?? 0,
-        ok: stats !== null
-      });
     }
   }
   recall(query, opts = {}) {
@@ -14448,11 +14479,15 @@ var MemoryStore = class {
       integrityAvailable: available
     };
   }
-  /** Which ledger currently holds `id` (project iff owned and present); defaults to global. */
+  /** Which ledger currently holds `id` (project iff owned and present); defaults to global.
+   *  D9: an id live in BOTH scopes at once (only reachable via a hand-planted/forged ledger row)
+   *  is ambiguous — silently binding global would ignore the project duplicate. Throw instead. */
   ledgerOf(id) {
-    if (this.verifiedOf(this.global).live.has(id)) return this.global;
     const p = this.opts.project;
-    if (p && isOwned(p.root, p.home) && this.verifiedOf(p.ledger).live.has(id)) return p.ledger;
+    const inGlobal = this.verifiedOf(this.global).live.has(id);
+    const inProject = !!p && isOwned(p.root, p.home) && this.verifiedOf(p.ledger).live.has(id);
+    if (inGlobal && inProject) throw new Error("ledgerOf: id live in more than one scope \u2014 ambiguous");
+    if (inProject) return p.ledger;
     return this.global;
   }
   /** Live projected record for `id` across scopes, or throw. */
@@ -14604,29 +14639,86 @@ var MemoryStore = class {
     stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
     ensureMaster(this.homeDir());
   }
+  /** Which marker family a canonical marker id belongs to, or null for a normal id. */
+  markerFamilyOf(id) {
+    return id === "integrity_marker" ? "integrity_" : id === "horizon_marker" ? "horizon_" : null;
+  }
+  /** Is `id` present in `ledger` — family-prefix for a marker (C10), else live-or-raw. */
+  presentIn(ledger, id) {
+    const fam = this.markerFamilyOf(id);
+    const records = parseLedger(ledger);
+    if (fam) return records.some((r) => typeof r.id === "string" && r.id.startsWith(fam));
+    if (this.verifiedOf(ledger).live.has(id)) return true;
+    return records.some((r) => r.id === id);
+  }
+  /** Resolve the single ledger an erase acts on, or null for a clean-and-absent no-scope no-op. Throws
+   *  on: unowned project scope; explicit scope where the id is absent (C4/D7); no-scope over a ledger
+   *  with any skipped line (C5/C6); or a no-scope id live/present in more than one scope (D9). */
+  resolveEraseTarget(id, scope) {
+    const p = this.opts.project;
+    const projectActive2 = !!p && isOwned(p.root, p.home);
+    if (scope) {
+      const ledger = scope === "global" || !p ? this.global : projectActive2 ? p.ledger : (() => {
+        throw new Error("erase: project ledger not owned \u2014 adopt it (helix_memory_adopt) then erase, or remove it");
+      })();
+      if (!this.presentIn(ledger, id)) throw new Error(`erase: id not found in scope ${scope}`);
+      return ledger;
+    }
+    const candidates = [this.global, ...projectActive2 ? [p.ledger] : []];
+    for (const c of candidates) {
+      let text;
+      try {
+        text = readFileSync7(c, "utf8");
+      } catch (err) {
+        if (err.code === "ENOENT") continue;
+        throw err;
+      }
+      if (parseLedgerHealth(text).skippedNonBlank > 0) {
+        throw new Error("erase: a ledger has skipped (corrupt/torn) lines \u2014 pass an explicit scope");
+      }
+    }
+    const hits = candidates.filter((c) => this.presentIn(c, id));
+    if (hits.length > 1) throw new Error("erase: id present in more than one scope \u2014 pass an explicit scope");
+    return hits[0] ?? null;
+  }
   /** Remove an item from the live projection. Soft by default (tombstone only — recoverable until
    *  compaction, so an erroneous/poisoned erase can be undone). `permanent` compacts immediately for
-   *  genuine right-to-erasure. */
+   *  genuine right-to-erasure. Scope-aware routing (D5/D7/C4/C10): never falls back to a ledger the id
+   *  does not live in — an explicit scope must contain the id or this throws; with no scope, exactly
+   *  one candidate ledger may hold the id (else throws ambiguity), and a corrupt/torn line on ANY
+   *  candidate throws rather than silently risking a wrong-file compaction. */
   erase(id, opts = {}) {
-    const ts = this.now();
-    const ledger = this.ledgerOf(id);
-    appendRecord(ledger, {
-      id: this.id(),
-      tx: ts,
-      validFrom: ts,
-      validTo: null,
-      type: "erase",
-      content: "",
-      state: "Suspect",
-      provenance: { source: "user", sessionId: this.session() },
-      supersedes: id,
-      blastRadius: null,
-      reverifyTrigger: null,
-      classification: "normal"
-    });
+    const ledger = this.resolveEraseTarget(id, opts.scope);
+    if (ledger === null) {
+      this.rankCache = null;
+      return;
+    }
+    const isMarker = this.markerFamilyOf(id) !== null;
+    const alreadyDead = !this.verifiedOf(ledger).live.has(id);
+    if (!isMarker && !alreadyDead) {
+      const ts = this.now();
+      appendRecord(ledger, {
+        id: this.id(),
+        tx: ts,
+        validFrom: ts,
+        validTo: null,
+        type: "erase",
+        content: "",
+        state: "Suspect",
+        provenance: { source: "user", sessionId: this.session() },
+        supersedes: id,
+        blastRadius: null,
+        reverifyTrigger: null,
+        classification: "normal"
+      });
+    }
     if (opts.permanent) {
       const sk = this.subkeyForLedger(ledger);
-      compactLedger(ledger, { erasedIds: /* @__PURE__ */ new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk) });
+      try {
+        compactLedger(ledger, { erasedIds: /* @__PURE__ */ new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk) });
+      } catch (e) {
+        throw new Error(`erase: permanent compaction failed (ledger may contain a malformed row): ${e.message}`);
+      }
     }
     this.rankCache = null;
   }
@@ -14638,7 +14730,7 @@ function scanLegacyElevated(records, verify) {
   const offenders = [];
   for (const r of records) {
     if (r.type === "verify") {
-      if (!verify(r) && !isContentFreeMarker(r)) offenders.push(r.id);
+      if ((!verify(r) || !isKnownState(r.state)) && !isContentFreeMarker(r)) offenders.push(r.id);
     } else if ((r.type === "assert" || r.type === "supersede") && r.state !== "Fresh") {
       offenders.push(r.id);
     }

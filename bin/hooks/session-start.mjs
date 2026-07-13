@@ -203,24 +203,43 @@ function buildProjection(records) {
 }
 
 // src/memory/ledger.ts
+var MAX_PARSE_DEPTH = 64;
+function withinDepth(v, max) {
+  const stack = [{ v, d: 0 }];
+  while (stack.length) {
+    const { v: cur, d } = stack.pop();
+    if (cur === null || typeof cur !== "object") continue;
+    if (d >= max) return false;
+    for (const child of Array.isArray(cur) ? cur : Object.values(cur)) {
+      stack.push({ v: child, d: d + 1 });
+    }
+  }
+  return true;
+}
 function isWellFormedRecord(v) {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
   const r = v;
-  return typeof r.id === "string" && typeof r.content === "string" && typeof r.tx === "string" && typeof r.provenance === "object" && r.provenance !== null && (r.mac === void 0 || typeof r.mac === "string");
+  return typeof r.id === "string" && typeof r.content === "string" && typeof r.tx === "string" && typeof r.provenance === "object" && r.provenance !== null && withinDepth(v, MAX_PARSE_DEPTH);
 }
-function parseLedgerText(text) {
-  const out = [];
+function parseLedgerHealth(text) {
+  const records = [];
+  let skippedNonBlank = 0;
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
     let v;
     try {
       v = JSON.parse(line);
     } catch {
+      skippedNonBlank++;
       continue;
     }
-    if (isWellFormedRecord(v)) out.push(v);
+    if (isWellFormedRecord(v)) records.push(v);
+    else skippedNonBlank++;
   }
-  return out;
+  return { records, skippedNonBlank };
+}
+function parseLedgerText(text) {
+  return parseLedgerHealth(text).records;
 }
 function parseLedger(path) {
   let text;
@@ -334,11 +353,16 @@ var isIsoInstant = (s) => {
 // src/memory/verified-projection.ts
 var isPromotion = (s) => s === "Verified" || s === "Corroborated";
 var TRUST_RANK = { Suspect: 0, Fresh: 1, Corroborated: 2, Verified: 3 };
+var KNOWN_STATES = /* @__PURE__ */ new Set(["Fresh", "Corroborated", "Verified", "Suspect"]);
+function isKnownState(s) {
+  return typeof s === "string" && KNOWN_STATES.has(s);
+}
 function resolveTargetGrade(verifies, liveDigest) {
   const laneOf = (v) => v.macVersion === 1 ? 1 : v.macVersion === 2 ? 2 : 0;
+  const canonGen = (g) => BigInt(g ?? 0);
   const byGen = /* @__PURE__ */ new Map();
   for (const v of verifies) {
-    const g = v.gen ?? 0;
+    const g = canonGen(v.gen);
     (byGen.get(g) ?? byGen.set(g, []).get(g)).push(v);
   }
   let conflict = false;
@@ -374,7 +398,10 @@ function resolveTargetGrade(verifies, liveDigest) {
     lane: laneOf(v)
   });
   if (conflict) return { grade: null, compromised: true, evidence: verifies.map((v) => toEvidence(v, false)) };
-  const sorted = [...active].sort((a, b) => (a.gen ?? 0) - (b.gen ?? 0));
+  const sorted = [...active].sort((a, b) => {
+    const ga = canonGen(a.gen), gb = canonGen(b.gen);
+    return ga < gb ? -1 : ga > gb ? 1 : 0;
+  });
   let winner = null;
   for (const v of sorted) {
     if (!isPromotion(v.state) || v.targetDigest === liveDigest) winner = v;
@@ -389,7 +416,7 @@ function buildVerifiedProjection(records, opts) {
   if (!opts.keyAvailable) return { live, compromised, keyAvailable: false };
   const byTarget = /* @__PURE__ */ new Map();
   for (const r of records) {
-    if (r.type !== "verify" || !r.supersedes || !opts.verify(r)) continue;
+    if (r.type !== "verify" || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue;
     (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)).push(r);
   }
   for (const [target, verifies] of byTarget) {
