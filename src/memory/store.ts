@@ -405,12 +405,16 @@ export class MemoryStore {
     };
   }
 
-  /** Which ledger currently holds `id` (project iff owned and present); defaults to global. */
+  /** Which ledger currently holds `id` (project iff owned and present); defaults to global.
+   *  D9: an id live in BOTH scopes at once (only reachable via a hand-planted/forged ledger row)
+   *  is ambiguous — silently binding global would ignore the project duplicate. Throw instead. */
   private ledgerOf(id: string): LedgerPath {
-    if (this.verifiedOf(this.global).live.has(id)) return this.global;
     const p = this.opts.project;
-    if (p && isOwned(p.root, p.home) && this.verifiedOf(p.ledger).live.has(id)) return p.ledger;
-    return this.global;
+    const inGlobal = this.verifiedOf(this.global).live.has(id);
+    const inProject = !!p && isOwned(p.root, p.home) && this.verifiedOf(p.ledger).live.has(id);
+    if (inGlobal && inProject) throw new Error('ledgerOf: id live in more than one scope — ambiguous');
+    if (inProject) return p!.ledger;
+    return this.global; // global, or fall through for a non-live id (callers re-gate liveness and throw)
   }
 
   /** Live projected record for `id` across scopes, or throw. */

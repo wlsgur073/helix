@@ -98,4 +98,11 @@ describe('erase routing', () => {
     expect(readFileSync(global, 'utf8')).toBe(globalBefore);       // global untouched — no partial compaction
     expect(readFileSync(projLedger, 'utf8')).toBe(projBefore);     // project untouched — no partial compaction
   });
+  it('D9: a supersede of an id live in BOTH scopes throws ambiguity instead of silently binding global', () => {
+    const { store, projLedger } = projectStore();
+    const g = store.commit({ content: 'dup', source: 'user', scope: 'global' });
+    // hand-plant the SAME id live in the project ledger (only reachable via a forged/edited ledger)
+    appendFileSync(projLedger, JSON.stringify({ id: g.id, tx: '2026-01-05T00:00:00.000Z', validFrom: '2026-01-05T00:00:00.000Z', validTo: null, type: 'assert', state: 'Fresh', content: 'dup', provenance: { source: 'user', sessionId: 's' }, supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal' }) + '\n');
+    expect(() => store.commit({ content: 'replacement', source: 'user', supersedes: g.id, scope: 'global' })).toThrow(/more than one scope|ambiguous/);
+  });
 });
