@@ -14,7 +14,7 @@ const MARKER_SENTINEL_TX = '1970-01-01T00:00:00.000Z';
 /** A verify-shaped, unsigned, content-free tombstone with a null target. Both marker kinds share this
  *  shape; the id PREFIX distinguishes them. Predicates are TOTAL (typeof-guarded) so a malformed row
  *  that slipped a parse boundary can never throw here. */
-const isMarkerShape = (r: MemoryRecord): boolean =>
+export const isMarkerShape = (r: MemoryRecord): boolean =>
   r != null && r.type === 'verify' && r.supersedes === null && !r.mac && typeof r.id === 'string';
 
 /** A compaction-horizon marker: a content-free, unsigned, verify-shaped tombstone (mirrors the
@@ -89,8 +89,12 @@ function withinDepth(v: unknown, max: number): boolean {
     const { v: cur, d } = stack.pop()!;
     if (cur === null || typeof cur !== 'object') continue;
     if (d >= max) return false;
+    // Push ONLY object/array children: a primitive contributes nothing to depth, and pushing every
+    // element of a huge flat array would hold O(width) wrappers live on the stack — a wide-but-shallow
+    // line (e.g. a 20M-element array) would then OOM the guard itself (the very crash it exists to
+    // prevent). Skipping primitives keeps the traversal O(depth), not O(width).
     for (const child of Array.isArray(cur) ? cur : Object.values(cur as Record<string, unknown>)) {
-      stack.push({ v: child, d: d + 1 });
+      if (child !== null && typeof child === 'object') stack.push({ v: child, d: d + 1 });
     }
   }
   return true;

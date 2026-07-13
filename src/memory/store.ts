@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerText, parseLedgerHealth, compactLedger, planCompaction, serializedBytes, type CompactionStats, type LedgerPath } from './ledger.js';
+import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerText, parseLedgerHealth, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated } from './history.js';
@@ -341,48 +341,46 @@ export class MemoryStore {
     if (!cfg || this.compactedThisSession) return;
     const nowMs = Date.parse(this.now());
     for (const r of reads) {
-      // D6: a hostile row can slip a future parse-guard change and still throw inside
-      // serialize/plan (e.g. JSON.stringify RangeError on pathological nesting). This outer
-      // try/catch wraps the ENTIRE per-scope eligibility body so such a throw is swallowed
-      // like the compaction call already is — a bad row must never brick a recall. `continue`
-      // just skips this scope; other scopes in `reads` still get evaluated.
+      let mtimeMs = 0; let totalBytes = 0;
+      try { const st = statSync(r.ledger); mtimeMs = st.mtimeMs; totalBytes = st.size; } catch { continue; }
+      // Serialization is total here: every parsed record passed isWellFormedRecord's depth cap
+      // (MAX_PARSE_DEPTH), which is far below JSON.stringify's overflow depth, so a deep row is dropped
+      // at parse and never reaches serializedBytes/planCompaction — the depth cap (not a wrap) is the
+      // load-bearing D6 protection for this path. (A prior outer try/catch here was dead code: nothing
+      // in the eligibility body can throw on a cap-passed record.)
+      const records = parseLedgerText(r.text);
+      // `rows` is the TOTAL PHYSICAL row count for BOTH gates (never liveRows), and `reclaimable` /
+      // `reclaimableBytes` come from ONE planCompaction pass over that SAME array — dirtyGate's
+      // `0 <= reclaimable <= rows` precondition is the caller's to keep.
+      const gate = cheapGate({ rows: records.length, totalBytes, mtimeMs, nowMs, cfg });
+      if (!gate.proceed) continue;
+      // Resolve-once: `r.subkey` was resolved by the read loop and is shared by the eligibility plan
+      // AND the compaction below, so the counted keep-set is the written keep-set. A second resolution
+      // could transiently return null (registry/master read failure), flipping the predicate to the
+      // key-absent `() => true` and preserving forgeries the plan counted as dropped.
+      const keepValidVerify = this.keepValidVerifyFor(r.subkey);
+      const { kept } = planCompaction(records, { erasedIds: new Set(), keepValidVerify });
+      const reclaimable = records.length - kept.length;
+      const reclaimableBytes = serializedBytes(records) - serializedBytes(kept);
+      if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
+      // Eligible: guard on ATTEMPT (before the call), fire, emit a metric, swallow errors.
+      this.compactedThisSession = true;
+      const started = performance.now();
+      let stats: CompactionStats | null = null;   // null <=> the compaction threw <=> nothing happened
       try {
-        let mtimeMs = 0; let totalBytes = 0;
-        try { const st = statSync(r.ledger); mtimeMs = st.mtimeMs; totalBytes = st.size; } catch { continue; }
-        const records = parseLedgerText(r.text);
-        // `rows` is the TOTAL PHYSICAL row count for BOTH gates (never liveRows), and `reclaimable` /
-        // `reclaimableBytes` come from ONE planCompaction pass over that SAME array — dirtyGate's
-        // `0 <= reclaimable <= rows` precondition is the caller's to keep.
-        const gate = cheapGate({ rows: records.length, totalBytes, mtimeMs, nowMs, cfg });
-        if (!gate.proceed) continue;
-        // Resolve-once: `r.subkey` was resolved by the read loop and is shared by the eligibility plan
-        // AND the compaction below, so the counted keep-set is the written keep-set. A second resolution
-        // could transiently return null (registry/master read failure), flipping the predicate to the
-        // key-absent `() => true` and preserving forgeries the plan counted as dropped.
-        const keepValidVerify = this.keepValidVerifyFor(r.subkey);
-        const { kept } = planCompaction(records, { erasedIds: new Set(), keepValidVerify });
-        const reclaimable = records.length - kept.length;
-        const reclaimableBytes = serializedBytes(records) - serializedBytes(kept);
-        if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
-        // Eligible: guard on ATTEMPT (before the call), fire, emit a metric, swallow errors.
-        this.compactedThisSession = true;
-        const started = performance.now();
-        let stats: CompactionStats | null = null;   // null <=> the compaction threw <=> nothing happened
-        try {
-          stats = compactLedger(r.ledger, { erasedIds: new Set(), keepValidVerify });
-        } catch { /* swallowed: compaction must never break a recall */ }
-        const durationMs = performance.now() - started;   // capture BEFORE any metrics I/O
-        // Drop the entry this recall just installed. On SUCCESS the ledger bytes changed, so the
-        // content-identity key would miss anyway (belt and braces). On FAILURE the bytes did NOT change,
-        // and clearing is what forces the next recall to MISS and re-enter this method — where the
-        // once-per-session guard, not a cache hit, then suppresses the retry. Defensive on both paths.
-        this.rankCache = null;
-        this.opts.metricsSink?.emitCompaction({
-          scope: r.root ? 'project' : 'global', durationMs,
-          droppedRows: stats?.droppedRows ?? 0, reclaimedBytes: stats?.reclaimedBytes ?? 0,
-          droppedForgedVerifies: stats?.droppedForgedVerifies ?? 0, ok: stats !== null,
-        });
-      } catch { continue; /* D6: a serialization/plan throw on a hostile row must never break a recall */ }
+        stats = compactLedger(r.ledger, { erasedIds: new Set(), keepValidVerify });
+      } catch { /* swallowed: compaction must never break a recall */ }
+      const durationMs = performance.now() - started;   // capture BEFORE any metrics I/O
+      // Drop the entry this recall just installed. On SUCCESS the ledger bytes changed, so the
+      // content-identity key would miss anyway (belt and braces). On FAILURE the bytes did NOT change,
+      // and clearing is what forces the next recall to MISS and re-enter this method — where the
+      // once-per-session guard, not a cache hit, then suppresses the retry. Defensive on both paths.
+      this.rankCache = null;
+      this.opts.metricsSink?.emitCompaction({
+        scope: r.root ? 'project' : 'global', durationMs,
+        droppedRows: stats?.droppedRows ?? 0, reclaimedBytes: stats?.reclaimedBytes ?? 0,
+        droppedForgedVerifies: stats?.droppedForgedVerifies ?? 0, ok: stats !== null,
+      });
     }
   }
 
@@ -583,15 +581,23 @@ export class MemoryStore {
   private presentIn(ledger: LedgerPath, id: string): boolean {
     const fam = this.markerFamilyOf(id);
     const records = parseLedger(ledger);
-    if (fam) return records.some((r) => typeof r.id === 'string' && r.id.startsWith(fam));
+    // A marker id is present iff a row of that family that compaction would ACTUALLY purge is here —
+    // i.e. a canonical marker SHAPE (verify-shaped, null target, no mac) with the family prefix, exactly
+    // what isIntegrityMarker/isHorizonMarker recognize. Matching the bare prefix would count an
+    // unrelated non-marker row (e.g. an `assert` with an `integrity_`-prefixed id), making erase report
+    // success + compact a scope where no marker lives (finding 1).
+    if (fam) return records.some((r) => isMarkerShape(r) && r.id.startsWith(fam));
     if (this.verifiedOf(ledger).live.has(id)) return true;
     return records.some((r) => r.id === id);
   }
 
   /** Resolve the single ledger an erase acts on, or null for a clean-and-absent no-scope no-op. Throws
-   *  on: unowned project scope; explicit scope where the id is absent (C4/D7); no-scope over a ledger
-   *  with any skipped line (C5/C6); or a no-scope id live/present in more than one scope (D9). */
-  private resolveEraseTarget(id: string, scope: MemoryScope | undefined): LedgerPath | null {
+   *  on: unowned project scope; explicit scope where the id is absent (C4/D7); a no-scope PERMANENT
+   *  erase over a ledger with any skipped line (C5/C6); or a no-scope id live/present in more than one
+   *  scope (D9). `permanent` gates the corruption check: a physical purge must not silently miss a
+   *  secret hiding in a skipped line, but a SOFT erase only tombstones (parseLedger tolerates a torn
+   *  line as §10 specifies), so an unrelated corrupt line must never brick it (finding 2). */
+  private resolveEraseTarget(id: string, scope: MemoryScope | undefined, permanent: boolean): LedgerPath | null {
     const p = this.opts.project;
     const projectActive = !!p && isOwned(p.root, p.home);
     if (scope) {
@@ -601,17 +607,20 @@ export class MemoryStore {
       return ledger;
     }
     const candidates: LedgerPath[] = [this.global, ...(projectActive ? [p!.ledger] : [])];
-    for (const c of candidates) {
-      let text: string;
-      try { text = readFileSync(c, 'utf8'); }
-      catch (err) {
-        // ENOENT (never existed, or vanished between existsSync and this read) => no ledger, no
-        // corruption — same tolerance as parseLedger's own ENOENT handling. Any other error still throws.
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
-        throw err;
-      }
-      if (parseLedgerHealth(text).skippedNonBlank > 0) {
-        throw new Error('erase: a ledger has skipped (corrupt/torn) lines — pass an explicit scope');
+    // Corruption gate — PERMANENT (destructive) erase only. The only production caller (the MCP tool)
+    // issues soft, no-scope erases and cannot pass a scope, so gating this on `permanent` keeps
+    // right-to-erasure via the tool available even when a candidate has a torn/partial line.
+    if (permanent) {
+      for (const c of candidates) {
+        let text: string;
+        try { text = readFileSync(c, 'utf8'); }
+        catch (err) {
+          if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue; // no ledger => no corruption
+          throw err;
+        }
+        if (parseLedgerHealth(text).skippedNonBlank > 0) {
+          throw new Error('erase: a ledger has skipped (corrupt/torn) lines — pass an explicit scope');
+        }
       }
     }
     const hits = candidates.filter((c) => this.presentIn(c, id));
@@ -626,7 +635,7 @@ export class MemoryStore {
    *  one candidate ledger may hold the id (else throws ambiguity), and a corrupt/torn line on ANY
    *  candidate throws rather than silently risking a wrong-file compaction. */
   erase(id: string, opts: { permanent?: boolean; scope?: MemoryScope } = {}): void {
-    const ledger = this.resolveEraseTarget(id, opts.scope);
+    const ledger = this.resolveEraseTarget(id, opts.scope, opts.permanent ?? false);
     if (ledger === null) { this.rankCache = null; return; }   // clean + absent → idempotent no-op success
     const isMarker = this.markerFamilyOf(id) !== null;
     const alreadyDead = !this.verifiedOf(ledger).live.has(id);
@@ -645,14 +654,7 @@ export class MemoryStore {
       // keep/drop decision, and share that predicate with the auto-compaction trigger so the two
       // paths can never diverge.
       const sk = this.subkeyForLedger(ledger);
-      // D6: a hostile/malformed row must surface a clean, catchable Error here rather than a raw
-      // RangeError from JSON.stringify inside compactLedger's serialize step — permanent erase is
-      // user-invoked and callers should get a diagnosable failure, not an uncaught crash.
-      try {
-        compactLedger(ledger, { erasedIds: new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk) });
-      } catch (e) {
-        throw new Error(`erase: permanent compaction failed (ledger may contain a malformed row): ${(e as Error).message}`);
-      }
+      compactLedger(ledger, { erasedIds: new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk) });
     }
     this.rankCache = null;   // I8: self-erase gives zero in-memory retention window
   }

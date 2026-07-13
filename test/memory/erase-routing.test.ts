@@ -38,11 +38,22 @@ function plantedMarker(id: string) {
 }
 
 describe('erase routing', () => {
-  it('D5/C6: no-scope erase throws when a candidate ledger has any skipped line', () => {
+  it('D5/C6: a no-scope PERMANENT erase throws when a candidate ledger has any skipped line', () => {
     const { store, projLedger } = projectStore();
     store.commit({ content: 'proj fact', source: 'user', scope: 'project' });
     appendFileSync(projLedger, '{bad torn line\n');
-    expect(() => store.erase('m_absent', {})).toThrow(/skipped lines|explicit scope/);
+    // A physical purge must not silently miss a secret hiding in a corrupt line -> throw, ask for scope.
+    expect(() => store.erase('m_absent', { permanent: true })).toThrow(/skipped lines|explicit scope/);
+  });
+  it('finding 2: a SOFT erase of a live id is NOT bricked by an unrelated torn line', () => {
+    const { store, global } = projectStore();
+    const a = store.commit({ content: 'erase me', source: 'user', scope: 'global' });
+    appendFileSync(global, '{"id":"torn_partial\n'); // a torn/partial line (e.g. a crash mid-append)
+    // The MCP tool only ever issues soft, no-scope erases and cannot pass a scope; an unrelated torn
+    // line must never make right-to-erasure unavailable. Soft erase only tombstones (parseLedger
+    // tolerates the torn line), so this must succeed, not throw.
+    expect(() => store.erase(a.id)).not.toThrow();
+    expect(readFileSync(global, 'utf8')).toMatch(/"type":"erase"/); // the tombstone was appended
   });
   it('D7/C4: explicit wrong scope on a clean ledger throws instead of compacting it', () => {
     const { store, global } = projectStore();
@@ -50,6 +61,30 @@ describe('erase routing', () => {
     const before = readFileSync(global, 'utf8');
     expect(() => store.erase(g.id, { permanent: true, scope: 'project' })).toThrow(/not found in scope/);
     expect(readFileSync(global, 'utf8')).toBe(before); // global untouched
+  });
+  it('finding 1: erase(integrity_marker, scope) with a NON-marker integrity_-prefixed row throws not-found (no false success)', () => {
+    const { store, global } = projectStore();
+    store.commit({ content: 'real fact', source: 'user', scope: 'global' });
+    // a NON-marker row (type assert) whose id merely SHARES the marker family prefix
+    appendFileSync(global, JSON.stringify({ id: 'integrity_x', tx: '2026-01-01T00:00:00.000Z', validFrom: '2026-01-01T00:00:00.000Z', validTo: null, type: 'assert', state: 'Fresh', content: 'not a marker', provenance: { source: 'user', sessionId: 's' }, supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal' }) + '\n');
+    const before = readFileSync(global, 'utf8');
+    // presence is marker-SHAPE, not family-prefix: no canonical marker lives here, so this must throw
+    // rather than report success + compact a scope where the marker does not live.
+    expect(() => store.erase('integrity_marker', { permanent: true, scope: 'global' })).toThrow(/not found in scope/);
+    expect(readFileSync(global, 'utf8')).toBe(before); // untouched — no compaction ran
+  });
+  it('finding 1: a non-marker integrity_-prefixed row in global does NOT cause a false no-scope ambiguity for a real project marker', () => {
+    const { store, global, projLedger } = projectStore();
+    store.commit({ content: 'g', source: 'user', scope: 'global' });
+    store.commit({ content: 'p', source: 'user', scope: 'project' });
+    appendFileSync(global, JSON.stringify({ id: 'integrity_x', tx: '2026-01-01T00:00:00.000Z', validFrom: '2026-01-01T00:00:00.000Z', validTo: null, type: 'assert', state: 'Fresh', content: 'not a marker', provenance: { source: 'user', sessionId: 's' }, supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal' }) + '\n');
+    appendFileSync(projLedger, JSON.stringify(plantedMarker('integrity_planted')) + '\n'); // a REAL marker, project only
+    const globalBefore = readFileSync(global, 'utf8');
+    // the non-marker integrity_x must NOT count as a marker present in global, so the real project
+    // marker is a UNIQUE hit and clears without demanding an explicit scope; global stays untouched.
+    expect(() => store.erase('integrity_marker', { permanent: true })).not.toThrow();
+    expect(readFileSync(global, 'utf8')).toBe(globalBefore);
+    expect(readFileSync(projLedger, 'utf8')).not.toMatch(/integrity_/); // real marker cleared
   });
   it('byte-identity: clearing a project marker leaves the global ledger byte-for-byte unchanged', () => {
     const { store, global, projLedger } = projectStore();
