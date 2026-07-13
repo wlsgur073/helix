@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
+import { isOwned } from '../../src/memory/ownership.js';
 
 function projectStore() {
   const home = mkdtempSync(join(tmpdir(), 'helix-er-'));
@@ -12,6 +13,28 @@ function projectStore() {
   const store = new MemoryStore(global, { sessionId: 's', home, project: { ledger: projLedger, root, home } });
   store.adopt();
   return { store, global, projLedger, home };
+}
+
+/** Same shape as projectStore(), but WITHOUT the store.adopt() call — the project layer is active
+ *  (an `opts.project` is configured) but unowned, for testing the unowned-project throw path. */
+function unownedProjectStore() {
+  const home = mkdtempSync(join(tmpdir(), 'helix-er-'));
+  const root = mkdtempSync(join(tmpdir(), 'helix-proj-'));
+  const global = join(home, 'memory.jsonl');
+  const projLedger = join(root, '.helix', 'memory.jsonl');
+  const store = new MemoryStore(global, { sessionId: 's', home, project: { ledger: projLedger, root, home } });
+  return { store, global, projLedger, home, root };
+}
+
+/** A canonical-marker-shaped, unsigned verify row — same shape planted by the existing
+ *  byte-identity test above, factored out so both new tests below can reuse it verbatim. */
+function plantedMarker(id: string) {
+  return {
+    id, tx: '1970-01-01T00:00:00.000Z', validFrom: '1970-01-01T00:00:00.000Z', validTo: null,
+    type: 'verify', state: 'Suspect', content: '',
+    provenance: { source: 'user', sessionId: 'x' },
+    supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+  };
 }
 
 describe('erase routing', () => {
@@ -56,5 +79,23 @@ describe('erase routing', () => {
     const { store, global } = projectStore();
     expect(() => store.erase('m_nope', {})).not.toThrow();
     expect(existsSync(global)).toBe(false);
+  });
+  it('store.ts:595 — explicit project scope on an UNOWNED project throws and never auto-adopts', () => {
+    const { store, root, home } = unownedProjectStore();
+    expect(isOwned(root, home)).toBe(false); // sanity: genuinely unowned before the call
+    expect(() => store.erase('anything', { scope: 'project' }))
+      .toThrow(/not owned.*helix_memory_adopt/); // erase must never silently adopt to satisfy itself
+    expect(isOwned(root, home)).toBe(false); // still unowned — the throw did not adopt as a side effect
+  });
+  it('store.ts:606 — no-scope erase throws when the id is present in more than one scope, and touches neither ledger', () => {
+    const { store, global, projLedger } = projectStore();
+    const marker = plantedMarker('integrity_planted');
+    appendFileSync(global, JSON.stringify(marker) + '\n');
+    appendFileSync(projLedger, JSON.stringify(marker) + '\n');
+    const globalBefore = readFileSync(global, 'utf8');
+    const projBefore = readFileSync(projLedger, 'utf8');
+    expect(() => store.erase('integrity_marker', {})).toThrow(/more than one scope|ambiguous/);
+    expect(readFileSync(global, 'utf8')).toBe(globalBefore);       // global untouched — no partial compaction
+    expect(readFileSync(projLedger, 'utf8')).toBe(projBefore);     // project untouched — no partial compaction
   });
 });

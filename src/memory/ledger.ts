@@ -215,11 +215,13 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   // permanent erase of its canonical id (`integrity_marker` in `erasedIds`, checked below) — the
   // `some(isIntegrityMarker)` OR-clause is exactly what makes that necessary: once ANY row with the
   // prefix has ever existed, the canonical id keeps getting re-minted unless explicitly suppressed.
-  // KNOWN LIMITATION (not fixed here; separately tracked follow-up): `store.ts`'s `ledgerOf(id)`
-  // falls back to the GLOBAL ledger for an id absent from both live projections, and a marker is
-  // never in the live projection — so a permanent erase of a PROJECT ledger's planted marker can
-  // route to the global ledger instead of the ledger that actually holds it. This hatch only clears
-  // the marker when the erase call is routed to the right ledger.
+  // FIXED (was a known limitation): `store.ts`'s erase now routes through `resolveEraseTarget`,
+  // which is scope-aware and never falls back to the global ledger for an id it didn't find there —
+  // an explicit `scope: 'project'` (or C10's family-prefix presence check for a marker id) resolves
+  // to the ledger that actually holds it. This hatch clears the marker as long as the erase call
+  // carries the right scope; residual (F5, still true): the marker's PRESENCE is forgeable by
+  // anyone who can append an `integrity_`-prefixed row, real incident or not — only its clearing is
+  // now correctly routed.
   if ((records.some(isIntegrityMarker) || droppedForgedVerifies > 0) && !opts.erasedIds.has('integrity_marker')) {
     kept.push(canonicalMarker('integrity_marker'));
   }

@@ -598,7 +598,15 @@ export class MemoryStore {
     }
     const candidates: LedgerPath[] = [this.global, ...(projectActive ? [p!.ledger] : [])];
     for (const c of candidates) {
-      if (existsSync(c) && parseLedgerHealth(readFileSync(c, 'utf8')).skippedNonBlank > 0) {
+      let text: string;
+      try { text = readFileSync(c, 'utf8'); }
+      catch (err) {
+        // ENOENT (never existed, or vanished between existsSync and this read) => no ledger, no
+        // corruption — same tolerance as parseLedger's own ENOENT handling. Any other error still throws.
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw err;
+      }
+      if (parseLedgerHealth(text).skippedNonBlank > 0) {
         throw new Error('erase: a ledger has skipped (corrupt/torn) lines — pass an explicit scope');
       }
     }
