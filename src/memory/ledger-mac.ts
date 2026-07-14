@@ -2,6 +2,7 @@ import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from '
 import { openSync, writeSync, fsyncSync, closeSync, readFileSync, renameSync, statSync, chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { withFileLock } from './lock.js';
+import { fsyncDir } from './fs-ops.js';
 import type { MemoryRecord } from '../types.js';
 
 export const MAC_VERSION = 2;                             // version NEW signatures carry
@@ -16,16 +17,6 @@ export class LedgerMacError extends Error {}
 
 const MASTER_LEN = 32;
 function masterPath(home: string): string { return join(home, 'ledger-mac-master.key'); }
-
-/** Best-effort fsync of a directory fd so a create/rename is durably persisted. Pure durability
- *  nit: on Windows (and some FS) a directory cannot be opened/fsync'd — ignore it, never a
- *  correctness issue (a lost master just makes elevations replay Fresh). */
-function fsyncDir(dir: string): void {
-  let dfd: number;
-  try { dfd = openSync(dir, 'r'); } catch { return; }   // Windows EISDIR/EPERM/EACCES -> skip
-  try { fsyncSync(dfd); } catch { /* EINVAL/EISDIR on some FS for a dir fd — durability only */ }
-  finally { closeSync(dfd); }
-}
 
 /** Atomic, idempotent: return the 32-byte master, creating it (mode 0600) under a lock on first use. */
 export function ensureMaster(home: string): Buffer {
