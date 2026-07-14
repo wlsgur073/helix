@@ -24,6 +24,9 @@ describe('classifyHolder precedence (spec Layer 2)', () => {
   it('bootId mismatch is dead EVEN IF kill0 says alive (recycled across reboot) — rule 2 outranks probing', () => {
     expect(classifyHolder(mk({ bootId: 'other-boot' }), self(), probeOf({ kill0: () => 'alive' }))).toBe('dead');
   });
+  it('compound mismatch (platform AND bootId both foreign) is alive-unknown — platform outranks bootId', () => {
+    expect(classifyHolder(mk({ platform: 'win32-other', bootId: 'other-boot' }), self(), probeOf({ kill0: () => 'alive' }))).toBe('alive-unknown');
+  });
   it('bootId null-vs-nonnull asymmetry is alive-unknown (cannot reason)', () => {
     expect(classifyHolder(mk({ bootId: null }), { ...self(), bootId: 'ours' }, probeOf({ kill0: () => 'dead' }))).toBe('alive-unknown');
   });
