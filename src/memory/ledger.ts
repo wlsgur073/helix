@@ -1,8 +1,10 @@
-import { appendFileSync, readFileSync, mkdirSync, openSync, fsyncSync, closeSync, writeSync, renameSync, statSync } from 'node:fs';
+import { readFileSync, mkdirSync, openSync, fsyncSync, closeSync, writeSync, renameSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
 import { withFileLock } from './lock.js';
+import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
+import { sweepOrphanTmps } from './ledger-sweep.js';
 
 export type LedgerPath = string;
 
@@ -41,19 +43,38 @@ function canonicalMarker(kind: 'integrity_marker' | 'horizon_marker'): MemoryRec
   };
 }
 
-/** Append one record as a single JSONL line WITHOUT taking the ledger lock. Creates parent dirs
- *  as needed. For callers that ALREADY hold the ledger lock (withFileLock is not re-entrant), e.g.
- *  the store's signing writeVerify reads the verified projection and appends under one lock. */
-export function appendRecordUnlocked(path: LedgerPath, record: MemoryRecord): void {
+/** Append one record as a single JSONL line WITHOUT taking the ledger lock — for callers that
+ *  ALREADY hold it (withFileLock is not re-entrant), e.g. the store's signing writeVerify.
+ *  Durable + self-repairing (spec Layer 5): sweeps orphan tmps (the fence — a sweep failure ABORTS
+ *  the append: an unfenceable predecessor must block us), refuses hard-linked ledgers (two alias
+ *  names would carry two locks — no mutual exclusion), repairs a newline-less torn tail by
+ *  prefixing its own separator (at-least-once: a complete-but-unacked prior record commits; a torn
+ *  fragment is isolated into its own malformed line that parse-health counts), then writes the
+ *  whole line, fsyncs the fd, and fsyncs the parent dir so an acknowledged append survives power
+ *  loss. */
+export function appendRecordUnlocked(path: LedgerPath, record: MemoryRecord, fsOps: DurableFsOps = realFsOps): void {
   mkdirSync(dirname(path), { recursive: true });
-  appendFileSync(path, JSON.stringify(record) + '\n');
+  sweepOrphanTmps(path, { fsOps });
+  const fd = fsOps.openSync(path, 'a+');
+  try {
+    const st = fsOps.fstatSync(fd);
+    if (st.nlink !== 1) throw new Error(`appendRecord: ledger has ${st.nlink} hard links — aliased ledgers are unsupported (see SECURITY.md); refusing to write`);
+    let line = JSON.stringify(record) + '\n';
+    if (st.size > 0) {
+      const tail = Buffer.alloc(1);
+      fsOps.readSync(fd, tail, 0, 1, st.size - 1);
+      if (tail[0] !== 0x0a) line = '\n' + line;   // tail repair: separator + record share one write+fsync
+    }
+    writeAll(fsOps, fd, line);
+    fsOps.fsyncSync(fd);
+  } finally {
+    fsOps.closeSync(fd);
+  }
+  fsOps.fsyncDir(dirname(path));
 }
 
-/** Append one record as a single JSONL line. Creates parent dirs as needed.
- *  Locked so a concurrent compaction (rewrite+rename) in another process can't drop it.
- *  Parent dir is created BEFORE the lock: withFileLock does a NON-recursive mkdir of `<path>.lock`,
- *  which throws ENOENT if the parent doesn't exist yet (e.g. a clean-install first global commit
- *  where neither ensureMaster nor stampOwnership has pre-created the home dir). */
+/** Locked append (see appendRecordUnlocked for the write contract). Parent dir is created BEFORE
+ *  the lock: the lock artifact lives next to the ledger, whose directory must exist. */
 export function appendRecord(path: LedgerPath, record: MemoryRecord): void {
   mkdirSync(dirname(path), { recursive: true });
   withFileLock(path, () => appendRecordUnlocked(path, record));
