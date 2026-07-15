@@ -1,5 +1,5 @@
 // src/hooks/session-start.ts
-import { writeSync as writeSync3 } from "node:fs";
+import { writeSync as writeSync2 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join4, resolve as resolve2 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -176,7 +176,7 @@ function globalScopeNonce(home) {
 import { statSync as statSync3 } from "node:fs";
 
 // src/memory/ledger.ts
-import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync, statSync } from "node:fs";
+import { readFileSync as readFileSync2, mkdirSync as mkdirSync2, statSync } from "node:fs";
 
 // src/memory/projection.ts
 function buildProjection(records) {
@@ -254,7 +254,7 @@ function parseLedger(path) {
 
 // src/memory/ledger-mac.ts
 import { createHash, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, renameSync as renameSync2, statSync as statSync2, chmodSync, mkdirSync as mkdirSync3 } from "node:fs";
+import { openSync, writeSync, fsyncSync, closeSync, readFileSync as readFileSync3, linkSync, unlinkSync, statSync as statSync2, chmodSync, mkdirSync as mkdirSync3 } from "node:fs";
 import { dirname, join as join2 } from "node:path";
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 function digestContent(content) {
@@ -473,7 +473,7 @@ function verifiedLiveStats(ledger, home, projectRoot) {
 }
 
 // src/metrics.ts
-import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync4 } from "node:fs";
+import { appendFileSync, mkdirSync as mkdirSync4 } from "node:fs";
 import { dirname as dirname2 } from "node:path";
 import { randomUUID } from "node:crypto";
 var noopMetricsSink = {
@@ -487,7 +487,7 @@ function createMetricsSink(path, enabled, deps = {}) {
   if (!enabled) return noopMetricsSink;
   const append = deps.append ?? ((p, line) => {
     mkdirSync4(dirname2(p), { recursive: true });
-    appendFileSync2(p, line, { mode: 384 });
+    appendFileSync(p, line, { mode: 384 });
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const genId = deps.genId ?? (() => `o_${randomUUID()}`);
@@ -638,7 +638,7 @@ async function main() {
     }
     const { records, integrityAvailable, replays } = gatherScopedRecords({ home, globalLedger, cwd });
     const text = formatSessionStartContext(records, newNonce(), { integrityAvailable });
-    if (text !== "") writeSync3(1, text + "\n");
+    if (text !== "") writeSync2(1, text + "\n");
     const sink = createMetricsSink(join4(home, "metrics.jsonl"), metricsEnabledFromGlobalConfig(home));
     for (const rp of replays) {
       sink.emitReplay({

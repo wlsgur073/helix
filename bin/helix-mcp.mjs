@@ -6887,7 +6887,7 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join8, resolve as resolve2 } from "node:path";
+import { join as join9, resolve as resolve2 } from "node:path";
 import { existsSync as existsSync6 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
@@ -13013,12 +13013,13 @@ var StdioServerTransport = class {
 
 // src/memory/store.ts
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync2, readFileSync as readFileSync7, statSync as statSync6 } from "node:fs";
-import { dirname as dirname3 } from "node:path";
+import { existsSync as existsSync2, readFileSync as readFileSync8, statSync as statSync5 } from "node:fs";
+import { dirname as dirname5 } from "node:path";
 
 // src/memory/ledger.ts
-import { appendFileSync, readFileSync as readFileSync2, mkdirSync as mkdirSync2, openSync, fsyncSync, closeSync, writeSync, renameSync, statSync as statSync2 } from "node:fs";
-import { dirname } from "node:path";
+import { readFileSync as readFileSync3, mkdirSync, statSync } from "node:fs";
+import { randomBytes as randomBytes2 } from "node:crypto";
+import { dirname as dirname3 } from "node:path";
 
 // src/memory/firewall.ts
 var VERIFYING_SOURCES = /* @__PURE__ */ new Set(["user", "reality-check"]);
@@ -13297,65 +13298,326 @@ function buildProjection(records) {
 }
 
 // src/memory/lock.ts
-import { mkdirSync, rmSync, statSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { join } from "node:path";
-var DEFAULT_STALE_MS = 1e4;
-var DEFAULT_MAX_WAIT_MS = 5e3;
+import { dirname, basename, join } from "node:path";
+
+// src/memory/lock-liveness.ts
+import { readFileSync, readlinkSync } from "node:fs";
+import { threadId } from "node:worker_threads";
+function parseAfterLastParen(stat) {
+  const i = stat.lastIndexOf(")");
+  if (i < 0) return null;
+  return stat.slice(i + 2).split(" ");
+}
+var realProbe = {
+  kill0(pid) {
+    try {
+      process.kill(pid, 0);
+      return "alive";
+    } catch (e) {
+      const c = e.code;
+      return c === "ESRCH" ? "dead" : c === "EPERM" ? "eperm" : "unknown";
+    }
+  },
+  startTicksOf(pid) {
+    try {
+      return parseAfterLastParen(readFileSync(`/proc/${pid}/stat`, "utf8"))?.[19] ?? null;
+    } catch {
+      return null;
+    }
+  },
+  stateOf(pid) {
+    try {
+      return parseAfterLastParen(readFileSync(`/proc/${pid}/stat`, "utf8"))?.[0] ?? null;
+    } catch {
+      return null;
+    }
+  },
+  bootId() {
+    try {
+      return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    } catch {
+      return null;
+    }
+  },
+  pidNs() {
+    try {
+      return readlinkSync("/proc/self/ns/pid");
+    } catch {
+      return null;
+    }
+  },
+  bootInstantMs() {
+    try {
+      return Date.now() - Number(readFileSync("/proc/uptime", "utf8").split(" ")[0]) * 1e3;
+    } catch {
+      return null;
+    }
+  }
+};
+function selfIdentity(token, probe = realProbe) {
+  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform };
+}
+function tryParsePayload(raw) {
+  try {
+    const p = JSON.parse(raw);
+    if (p === null || typeof p !== "object" || p.v !== 1) return null;
+    if (typeof p.token !== "string" || typeof p.pid !== "number" || typeof p.threadId !== "number" || typeof p.platform !== "string") return null;
+    return p;
+  } catch {
+    return null;
+  }
+}
+function classifyHolder(recorded, self, probe) {
+  if (recorded.platform !== self.platform) return "alive-unknown";
+  if (recorded.bootId !== null && self.bootId !== null && recorded.bootId !== self.bootId) return "dead";
+  if (recorded.bootId === null !== (self.bootId === null)) return "alive-unknown";
+  if (recorded.pidNs !== self.pidNs) return "alive-unknown";
+  if (!Number.isSafeInteger(recorded.pid) || recorded.pid <= 0) return "alive-unknown";
+  if (recorded.pid === self.pid && recorded.startTicks === self.startTicks) {
+    return recorded.threadId === self.threadId ? "reentrant-self" : "alive";
+  }
+  const k = probe.kill0(recorded.pid);
+  if (k === "dead") return "dead";
+  if (k === "unknown") return "alive-unknown";
+  if (recorded.startTicks !== null) {
+    const cur = probe.startTicksOf(recorded.pid);
+    if (cur !== null && cur !== recorded.startTicks) return "dead";
+    if (cur === null && k === "alive") return "alive-unknown";
+  }
+  const st = probe.stateOf(recorded.pid);
+  if (st === "Z" || st === "X") return "dead";
+  return "alive";
+}
+
+// src/memory/lock.ts
 var RETRY_MS = 25;
+var DEFAULT_MAX_WAIT_MS = 5e3;
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
+function canonical(target) {
+  try {
+    return realpathSync(target);
+  } catch {
+    return join(realpathSync(dirname(target)), basename(target));
+  }
+}
+function timeoutMessage(lockPath, holder, waitedMs) {
+  const who = holder ? `held by pid ${holder.pid} (started ticks ${holder.startTicks ?? "unknown"})` : "holder unreadable (never auto-reclaimed)";
+  return `withFileLock: timed out after ${waitedMs}ms acquiring ${lockPath} \u2014 ${who}. Verify liveness with: kill -0 <pid>. If (and only if) the holder is truly gone, remove the lock file manually.`;
+}
 function withFileLock(target, fn, opts = {}) {
-  const lockDir = target + ".lock";
-  const ownerFile2 = join(lockDir, "owner");
-  const token = `${process.pid}-${randomBytes(8).toString("hex")}`;
-  const staleMs = opts.staleMs ?? DEFAULT_STALE_MS;
+  const probe = opts.probe ?? realProbe;
+  const canon = canonical(target);
+  const lockPath = canon + ".lock";
+  const token = randomBytes(16).toString("hex");
+  const self = selfIdentity(token, probe);
+  const payloadText = JSON.stringify(self);
+  if (tryParsePayload(payloadText) === null) throw new Error("withFileLock: internal \u2014 payload failed its own well-formedness check");
   const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   let waited = 0;
+  let lastHolder = null;
   for (; ; ) {
-    let acquired = false;
+    const srcTmp = `${canon}.lk-${randomBytes(16).toString("hex")}.tmp`;
     try {
-      mkdirSync(lockDir);
-      acquired = true;
-      writeFileSync(ownerFile2, token);
-      break;
-    } catch (e) {
-      if (!acquired) {
-        if (e.code !== "EEXIST") throw e;
-        let ageMs = 0;
-        try {
-          ageMs = Date.now() - statSync(lockDir).mtimeMs;
-        } catch {
-          ageMs = 0;
-        }
-        if (ageMs > staleMs) {
-          try {
-            rmSync(lockDir, { recursive: true, force: true });
-          } catch {
-          }
-          continue;
-        }
-        if (waited >= maxWaitMs) throw new Error(`withFileLock: timed out acquiring ${lockDir} after ${maxWaitMs}ms`);
-        sleepSync(RETRY_MS);
-        waited += RETRY_MS;
-        continue;
-      }
+      writeFileSync(srcTmp, payloadText, { flag: "wx" });
       try {
-        rmSync(lockDir, { recursive: true, force: true });
-      } catch {
+        linkSync(srcTmp, lockPath);
+        break;
+      } finally {
+        try {
+          unlinkSync(srcTmp);
+        } catch {
+        }
       }
-      throw e;
+    } catch (e) {
+      const code = e.code;
+      if (code === "EPERM" || code === "EOPNOTSUPP" || code === "ENOTSUP")
+        throw new Error(`withFileLock: filesystem refuses hard links for ${lockPath}; ledger locking is unsupported on this filesystem`);
+      if (code === "ENOENT") continue;
+      if (code !== "EEXIST") throw e;
     }
+    let holder;
+    lastHolder = null;
+    try {
+      const st = lstatSync(lockPath);
+      if (st.isDirectory()) {
+        holder = classifyLegacyDir(lockPath, probe);
+      } else {
+        const raw = readFileSync2(lockPath, "utf8");
+        const parsed = tryParsePayload(raw);
+        if (parsed === null) {
+          const boot = probe.bootInstantMs();
+          holder = boot !== null && st.mtimeMs < boot ? "dead" : "alive-unknown";
+        } else {
+          lastHolder = parsed;
+          holder = classifyHolder(parsed, self, probe);
+        }
+      }
+    } catch {
+      continue;
+    }
+    if (holder === "reentrant-self")
+      throw new Error(`withFileLock: re-entrant acquisition of ${lockPath} from the same thread (pid ${process.pid}) \u2014 withFileLock is not re-entrant`);
+    if (holder === "dead") stealUnderGate(lockPath, probe);
+    if (waited >= maxWaitMs) throw new Error(timeoutMessage(lockPath, lastHolder, waited));
+    sleepSync(RETRY_MS);
+    waited += RETRY_MS;
   }
+  const ctx = {
+    stillOwned() {
+      try {
+        return tryParsePayload(readFileSync2(lockPath, "utf8"))?.token === token;
+      } catch {
+        return false;
+      }
+    }
+  };
   try {
-    return fn();
+    return fn(ctx);
   } finally {
     try {
-      if (readFileSync(ownerFile2, "utf8") === token) rmSync(lockDir, { recursive: true, force: true });
+      if (!lstatSync(lockPath).isDirectory() && tryParsePayload(readFileSync2(lockPath, "utf8"))?.token === token) unlinkSync(lockPath);
     } catch {
     }
   }
+}
+function classifyLegacyDir(lockPath, probe) {
+  let raw;
+  try {
+    raw = readFileSync2(join(lockPath, "owner"), "utf8");
+  } catch {
+    return "alive-unknown";
+  }
+  const pid = Number(raw.split("-")[0]);
+  if (!Number.isSafeInteger(pid) || pid <= 0) return "alive-unknown";
+  const k = probe.kill0(pid);
+  if (k === "dead") return "dead";
+  if (k === "unknown") return "alive-unknown";
+  const st = probe.stateOf(pid);
+  return st === "Z" || st === "X" ? "dead" : "alive";
+}
+function stealUnderGate(lockPath, probe) {
+  const bootId = probe.bootId() ?? "noboot";
+  const gatePath = `${lockPath}.reap.${bootId}`;
+  const dir = dirname(lockPath);
+  const prefix = `${basename(lockPath)}.reap.`;
+  for (const name of readdirSyncSafe(dir)) {
+    if (name.startsWith(prefix) && name !== basename(gatePath)) {
+      try {
+        unlinkSync(join(dir, name));
+      } catch {
+      }
+    }
+  }
+  const gateToken = randomBytes(16).toString("hex");
+  const gateSrc = `${gatePath}.src-${gateToken}.tmp`;
+  try {
+    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: "wx" });
+    try {
+      linkSync(gateSrc, gatePath);
+    } finally {
+      try {
+        unlinkSync(gateSrc);
+      } catch {
+      }
+    }
+  } catch {
+    return;
+  }
+  try {
+    const st = lstatSync(lockPath);
+    if (st.isDirectory()) {
+      if (classifyLegacyDir(lockPath, probe) !== "dead") return;
+      rmSync(lockPath, { recursive: true, force: true });
+    } else {
+      const raw = readFileSync2(lockPath, "utf8");
+      const parsed = tryParsePayload(raw);
+      if (parsed !== null) {
+        if (classifyHolder(parsed, selfIdentity(gateToken, probe), probe) !== "dead") return;
+      } else {
+        const boot = probe.bootInstantMs();
+        if (boot === null || st.mtimeMs >= boot) return;
+      }
+      unlinkSync(lockPath);
+    }
+  } catch {
+  } finally {
+    try {
+      if (tryParsePayload(readFileSync2(gatePath, "utf8"))?.token === gateToken) unlinkSync(gatePath);
+    } catch {
+    }
+  }
+}
+function readdirSyncSafe(dir) {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+// src/memory/fs-ops.ts
+import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, renameSync, unlinkSync as unlinkSync2, linkSync as linkSync2, fchmodSync, readdirSync as readdirSync2 } from "node:fs";
+function fsyncDir(dir) {
+  let dfd;
+  try {
+    dfd = openSync(dir, "r");
+  } catch {
+    return;
+  }
+  try {
+    fsyncSync(dfd);
+  } catch {
+  } finally {
+    closeSync(dfd);
+  }
+}
+var realFsOps = {
+  openSync,
+  readSync,
+  writeSync,
+  fsyncSync,
+  closeSync,
+  fstatSync: (fd) => {
+    const s = fstatSync(fd);
+    return { size: s.size, nlink: s.nlink, mode: s.mode };
+  },
+  renameSync,
+  unlinkSync: unlinkSync2,
+  linkSync: linkSync2,
+  fchmodSync,
+  readdirSync: (d) => readdirSync2(d),
+  fsyncDir
+};
+function writeAll(fs, fd, text) {
+  const buf = Buffer.from(text, "utf8");
+  let off = 0;
+  while (off < buf.length) off += fs.writeSync(fd, buf, off, buf.length - off);
+}
+
+// src/memory/ledger-sweep.ts
+import { dirname as dirname2, basename as basename2, join as join2 } from "node:path";
+var HEX32 = "[0-9a-f]{32}";
+function orphanTmpPattern(base) {
+  const esc2 = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${esc2}\\.(c-${HEX32}|lk-${HEX32}|k-${HEX32}|\\d+)\\.tmp$`);
+}
+function sweepOrphanTmps(artifactPath, opts = {}) {
+  const fs = opts.fsOps ?? realFsOps;
+  const dir = dirname2(artifactPath);
+  const pat = orphanTmpPattern(basename2(artifactPath));
+  const keepName = opts.keep ? basename2(opts.keep) : null;
+  let removed = 0;
+  for (const name of fs.readdirSync(dir)) {
+    if (!pat.test(name) || name === keepName) continue;
+    fs.unlinkSync(join2(dir, name));
+    removed++;
+  }
+  if (removed > 0) fs.fsyncDir(dir);
+  return removed;
 }
 
 // src/memory/ledger.ts
@@ -13379,12 +13641,28 @@ function canonicalMarker(kind) {
     classification: "normal"
   };
 }
-function appendRecordUnlocked(path, record2) {
-  mkdirSync2(dirname(path), { recursive: true });
-  appendFileSync(path, JSON.stringify(record2) + "\n");
+function appendRecordUnlocked(path, record2, fsOps = realFsOps) {
+  mkdirSync(dirname3(path), { recursive: true });
+  sweepOrphanTmps(path, { fsOps });
+  const fd = fsOps.openSync(path, "a+");
+  try {
+    const st = fsOps.fstatSync(fd);
+    if (st.nlink !== 1) throw new Error(`appendRecord: ledger has ${st.nlink} hard links \u2014 aliased ledgers are unsupported (see SECURITY.md); refusing to write`);
+    let line = JSON.stringify(record2) + "\n";
+    if (st.size > 0) {
+      const tail = Buffer.alloc(1);
+      fsOps.readSync(fd, tail, 0, 1, st.size - 1);
+      if (tail[0] !== 10) line = "\n" + line;
+    }
+    writeAll(fsOps, fd, line);
+    fsOps.fsyncSync(fd);
+  } finally {
+    fsOps.closeSync(fd);
+  }
+  fsOps.fsyncDir(dirname3(path));
 }
 function appendRecord(path, record2) {
-  mkdirSync2(dirname(path), { recursive: true });
+  mkdirSync(dirname3(path), { recursive: true });
   withFileLock(path, () => appendRecordUnlocked(path, record2));
 }
 var MAX_PARSE_DEPTH = 64;
@@ -13428,7 +13706,7 @@ function parseLedgerText(text) {
 function parseLedger(path) {
   let text;
   try {
-    text = readFileSync2(path, "utf8");
+    text = readFileSync3(path, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") return [];
     throw err;
@@ -13469,27 +13747,65 @@ function serializedBytes(records) {
 }
 function fileSize(path) {
   try {
-    return statSync2(path).size;
+    return statSync(path).size;
   } catch {
     return 0;
   }
 }
 function compactLedger(path, opts) {
-  return withFileLock(path, () => {
-    const beforeBytes = fileSize(path);
-    const records = parseLedger(path);
-    const { kept, droppedForgedVerifies } = planCompaction(records, opts);
-    const tmp = `${path}.${process.pid}.tmp`;
-    const fd = openSync(tmp, "w");
+  const fsOps = opts.fsOps ?? realFsOps;
+  return withFileLock(path, (ctx) => {
+    assertSingleLink(path);
+    const tmp = `${path}.c-${randomBytes2(16).toString("hex")}.tmp`;
+    sweepOrphanTmps(path, { fsOps, keep: tmp });
+    const fd = fsOps.openSync(tmp, "wx");
+    let closed = false;
     try {
-      for (const r of kept) writeSync(fd, JSON.stringify(r) + "\n");
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
+      if (!ctx.stillOwned()) throw new Error("compactLedger: lock lost after tmp creation");
+      const mode = modeOf(path);
+      if (mode !== null) fsOps.fchmodSync(fd, mode);
+      const beforeBytes = fileSize(path);
+      const records = parseLedger(path);
+      const { kept, droppedForgedVerifies } = planCompaction(records, opts);
+      for (const r of kept) writeAll(fsOps, fd, JSON.stringify(r) + "\n");
+      fsOps.fsyncSync(fd);
+      fsOps.closeSync(fd);
+      closed = true;
+      assertSingleLink(path);
+      if (!ctx.stillOwned()) throw new Error("compactLedger: lock lost before rename");
+      fsOps.renameSync(tmp, path);
+      fsOps.fsyncDir(dirname3(path));
+      return { droppedRows: records.length - kept.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
+    } catch (e) {
+      if (!closed) {
+        try {
+          fsOps.closeSync(fd);
+        } catch {
+        }
+      }
+      try {
+        fsOps.unlinkSync(tmp);
+      } catch {
+      }
+      throw e;
     }
-    renameSync(tmp, path);
-    return { droppedRows: records.length - kept.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
   });
+}
+function assertSingleLink(path) {
+  let nlink;
+  try {
+    nlink = statSync(path).nlink;
+  } catch {
+    return;
+  }
+  if (nlink !== 1) throw new Error(`compactLedger: ledger has ${nlink} hard links \u2014 aliased ledgers are unsupported (see SECURITY.md); refusing to rewrite`);
+}
+function modeOf(path) {
+  try {
+    return statSync(path).mode & 511;
+  } catch {
+    return null;
+  }
 }
 
 // src/memory/compaction-trigger.ts
@@ -13575,9 +13891,9 @@ function buildHistory(records) {
 }
 
 // src/memory/ledger-mac.ts
-import { createHash, createHmac, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, renameSync as renameSync2, statSync as statSync3, chmodSync, mkdirSync as mkdirSync3 } from "node:fs";
-import { dirname as dirname2, join as join2 } from "node:path";
+import { createHash, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
+import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync4, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync as statSync2, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
+import { dirname as dirname4, join as join3 } from "node:path";
 var MAC_VERSION = 2;
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 function digestContent(content) {
@@ -13587,55 +13903,58 @@ var LedgerMacError = class extends Error {
 };
 var MASTER_LEN = 32;
 function masterPath(home2) {
-  return join2(home2, "ledger-mac-master.key");
-}
-function fsyncDir(dir) {
-  let dfd;
-  try {
-    dfd = openSync2(dir, "r");
-  } catch {
-    return;
-  }
-  try {
-    fsyncSync2(dfd);
-  } catch {
-  } finally {
-    closeSync2(dfd);
-  }
+  return join3(home2, "ledger-mac-master.key");
 }
 function ensureMaster(home2) {
   const path = masterPath(home2);
   const existing = tryReadMasterStrict(path);
   if (existing) return existing;
-  mkdirSync3(home2, { recursive: true });
+  mkdirSync2(home2, { recursive: true });
   return withFileLock(path, () => {
     const again = tryReadMasterStrict(path);
     if (again) return again;
-    const key = randomBytes2(MASTER_LEN);
-    const tmp = `${path}.${process.pid}.tmp`;
+    sweepOrphanTmps(path, {});
+    const key = randomBytes3(MASTER_LEN);
+    const tmp = `${path}.k-${randomBytes3(16).toString("hex")}.tmp`;
     const fd = openSync2(tmp, "wx", 384);
+    let published = false;
     try {
-      writeSync2(fd, key);
-      fsyncSync2(fd);
+      try {
+        writeSync2(fd, key);
+        fsyncSync2(fd);
+      } finally {
+        closeSync2(fd);
+      }
+      try {
+        linkSync3(tmp, path);
+        published = true;
+      } catch (e) {
+        if (e.code !== "EEXIST") throw e;
+      }
     } finally {
-      closeSync2(fd);
+      try {
+        unlinkSync3(tmp);
+      } catch {
+      }
     }
-    renameSync2(tmp, path);
-    fsyncDir(dirname2(path));
-    return key;
+    fsyncDir(dirname4(path));
+    if (published) return key;
+    const winner = tryReadMasterStrict(path);
+    if (!winner) throw new LedgerMacError("master key vanished during concurrent mint");
+    return winner;
   });
 }
 function tryReadMasterStrict(path) {
   let buf;
   try {
-    buf = readFileSync3(path);
+    buf = readFileSync4(path);
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
   }
   if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
   try {
-    if ((statSync3(path).mode & 63) !== 0) chmodSync(path, 384);
+    if ((statSync2(path).mode & 63) !== 0) chmodSync(path, 384);
   } catch {
   }
   return buf;
@@ -13903,7 +14222,7 @@ function redactSecrets(content, spans) {
 }
 
 // src/memory/reality-check.ts
-import { existsSync, readFileSync as readFileSync4, statSync as statSync4 } from "node:fs";
+import { existsSync, readFileSync as readFileSync5, statSync as statSync3 } from "node:fs";
 var INDETERMINATE = { ran: false, indeterminate: true, passed: false };
 var MAX_FILE_BYTES = 5e6;
 function runRealityCheck(check2) {
@@ -13916,8 +14235,8 @@ function runRealityCheck(check2) {
       case "file-contains": {
         if (typeof check2.path !== "string" || typeof check2.pattern !== "string") return INDETERMINATE;
         if (!existsSync(check2.path)) return INDETERMINATE;
-        if (statSync4(check2.path).size > MAX_FILE_BYTES) return INDETERMINATE;
-        const text = readFileSync4(check2.path, "utf8");
+        if (statSync3(check2.path).size > MAX_FILE_BYTES) return INDETERMINATE;
+        const text = readFileSync5(check2.path, "utf8");
         return { ran: true, indeterminate: false, passed: text.includes(check2.pattern) };
       }
       default:
@@ -13937,7 +14256,7 @@ function checkBinding(content, check2) {
 }
 
 // src/memory/expansion.ts
-import { readFileSync as readFileSync5 } from "node:fs";
+import { readFileSync as readFileSync6 } from "node:fs";
 import { fileURLToPath } from "node:url";
 var EXP_THETA = 0.5;
 var EXP_K = 8;
@@ -13969,7 +14288,7 @@ function defaultExpansion() {
   let txt;
   for (const u of candidates) {
     try {
-      txt = readFileSync5(fileURLToPath(u), "utf8");
+      txt = readFileSync6(fileURLToPath(u), "utf8");
       break;
     } catch {
     }
@@ -13996,9 +14315,9 @@ function requiresReverifyBeforeUse(item) {
 }
 
 // src/memory/content-frame.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
+import { randomBytes as randomBytes4 } from "node:crypto";
 function newNonce() {
-  return randomBytes3(16).toString("hex");
+  return randomBytes4(16).toString("hex");
 }
 var FENCE_RUN = /[=\-~`*_‐‑‒–—―−─-╿]{3,}/gu;
 function breakFenceRuns(s) {
@@ -14039,26 +14358,26 @@ function frameAsData(scoped, nonce) {
 }
 
 // src/memory/ownership.ts
-import { randomBytes as randomBytes4 } from "node:crypto";
-import { mkdirSync as mkdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync2 } from "node:fs";
-import { join as join3, resolve } from "node:path";
+import { randomBytes as randomBytes5 } from "node:crypto";
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync7, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join4, resolve } from "node:path";
 var GLOBAL_KEY = "@global";
 function registryPath(home2) {
-  return join3(home2, "projects.json");
+  return join4(home2, "projects.json");
 }
 function ownerFile(projectRoot2) {
-  return join3(projectRoot2, ".helix", ".owner");
+  return join4(projectRoot2, ".helix", ".owner");
 }
 function readRegistry(home2) {
   try {
-    return JSON.parse(readFileSync6(registryPath(home2), "utf8"));
+    return JSON.parse(readFileSync7(registryPath(home2), "utf8"));
   } catch {
     return {};
   }
 }
 function readOwner(projectRoot2) {
   try {
-    return readFileSync6(ownerFile(projectRoot2), "utf8").trim();
+    return readFileSync7(ownerFile(projectRoot2), "utf8").trim();
   } catch {
     return null;
   }
@@ -14070,15 +14389,15 @@ function isOwned(projectRoot2, home2) {
   return stamp !== null && stamp === entry.stamp;
 }
 function stampOwnership(projectRoot2, home2, opts = {}) {
-  const gen = opts.genStamp ?? (() => randomBytes4(16).toString("hex"));
+  const gen = opts.genStamp ?? (() => randomBytes5(16).toString("hex"));
   const stamp = gen();
   const macNonce = gen();
   const adoptedAt = (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
-  mkdirSync4(join3(projectRoot2, ".helix"), { recursive: true });
+  mkdirSync3(join4(projectRoot2, ".helix"), { recursive: true });
   writeFileSync2(ownerFile(projectRoot2), stamp);
   const reg = readRegistry(home2);
   reg[resolve(projectRoot2)] = { stamp, adoptedAt, macNonce };
-  mkdirSync4(home2, { recursive: true });
+  mkdirSync3(home2, { recursive: true });
   writeFileSync2(registryPath(home2), JSON.stringify(reg, null, 2));
 }
 function scopeNonce(projectRoot2, home2) {
@@ -14089,15 +14408,15 @@ function globalScopeNonce(home2) {
   const reg = readRegistry(home2);
   const existing = reg[GLOBAL_KEY]?.macNonce;
   if (existing) return existing;
-  const macNonce = randomBytes4(16).toString("hex");
+  const macNonce = randomBytes5(16).toString("hex");
   reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
-  mkdirSync4(home2, { recursive: true });
+  mkdirSync3(home2, { recursive: true });
   writeFileSync2(registryPath(home2), JSON.stringify(reg, null, 2));
   return macNonce;
 }
 
 // src/memory/verified-read.ts
-import { statSync as statSync5 } from "node:fs";
+import { statSync as statSync4 } from "node:fs";
 function subkeyForScope(home2, projectRoot2) {
   const master = tryReadMaster(home2);
   if (!master) return null;
@@ -14116,7 +14435,7 @@ function verifiedLiveOf(records, home2, projectRoot2) {
 function verifiedLiveStats(ledger, home2, projectRoot2) {
   let bytes = 0;
   try {
-    bytes = statSync5(ledger).size;
+    bytes = statSync4(ledger).size;
   } catch {
   }
   const t0 = performance.now();
@@ -14186,7 +14505,7 @@ var MemoryStore = class {
   }
   /** Where the ledger-MAC master key + scope-nonce registry live (defaults next to the global ledger). */
   homeDir() {
-    return this.opts.home ?? dirname3(this.global);
+    return this.opts.home ?? dirname5(this.global);
   }
   /** Which scope (project root, or undefined for global) a ledger path belongs to. */
   scopeRootOf(ledger) {
@@ -14351,7 +14670,7 @@ var MemoryStore = class {
       let buf;
       const rt0 = performance.now();
       try {
-        buf = readFileSync7(s.ledger);
+        buf = readFileSync8(s.ledger);
       } catch (e) {
         if (e.code === "ENOENT") buf = Buffer.alloc(0);
         else throw e;
@@ -14418,7 +14737,7 @@ var MemoryStore = class {
       let mtimeMs = 0;
       let totalBytes = 0;
       try {
-        const st = statSync6(r.ledger);
+        const st = statSync5(r.ledger);
         mtimeMs = st.mtimeMs;
         totalBytes = st.size;
       } catch {
@@ -14668,7 +14987,7 @@ var MemoryStore = class {
       for (const c of candidates) {
         let text;
         try {
-          text = readFileSync7(c, "utf8");
+          text = readFileSync8(c, "utf8");
         } catch (err) {
           if (err.code === "ENOENT") continue;
           throw err;
@@ -14736,7 +15055,7 @@ function scanLegacyElevated(records, verify) {
 }
 
 // src/server/helix-server.ts
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // node_modules/zod/v3/external.js
@@ -22831,9 +23150,9 @@ var EMPTY_COMPLETION_RESULT = {
 };
 
 // src/config.ts
-import { readFileSync as readFileSync8 } from "node:fs";
+import { readFileSync as readFileSync9 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join4 } from "node:path";
+import { join as join5 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
 var DEFAULT_COMPACTION = {
   auto: false,
@@ -22882,14 +23201,14 @@ var DEFAULT_CONFIG = {
 };
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync8(path, "utf8"));
+    return JSON.parse(readFileSync9(path, "utf8"));
   } catch {
     return null;
   }
 }
 function loadConfig(opts = {}) {
-  const projectPath = opts.projectPath ?? join4(process.cwd(), ".helix", "config.json");
-  const globalPath = opts.globalPath ?? join4(homedir(), ".helix", "config.json");
+  const projectPath = opts.projectPath ?? join5(process.cwd(), ".helix", "config.json");
+  const globalPath = opts.globalPath ?? join5(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
   const seen = /* @__PURE__ */ new Set();
   const warn = (msg) => {
@@ -22960,7 +23279,7 @@ function mergeCompaction(raw) {
   return c;
 }
 function compactionConfigFromGlobal(home2) {
-  return mergeCompaction(readJson(join4(home2, "config.json"))?.compaction);
+  return mergeCompaction(readJson(join5(home2, "config.json"))?.compaction);
 }
 
 // src/verify/agreement-map.ts
@@ -23280,32 +23599,32 @@ async function dualVerify(params, deps) {
 }
 
 // src/audit.ts
-import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync5 } from "node:fs";
-import { dirname as dirname4 } from "node:path";
+import { appendFileSync, mkdirSync as mkdirSync4 } from "node:fs";
+import { dirname as dirname6 } from "node:path";
 function appendAudit(path, event) {
-  mkdirSync5(dirname4(path), { recursive: true });
-  appendFileSync2(path, JSON.stringify(event) + "\n");
+  mkdirSync4(dirname6(path), { recursive: true });
+  appendFileSync(path, JSON.stringify(event) + "\n");
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync10 } from "node:fs";
+import { readFileSync as readFileSync11 } from "node:fs";
 
 // src/codex-log.ts
-import { appendFileSync as appendFileSync3, chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync6, readFileSync as readFileSync9, writeFileSync as writeFileSync3 } from "node:fs";
-import { dirname as dirname5 } from "node:path";
+import { appendFileSync as appendFileSync2, chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync5, readFileSync as readFileSync10, writeFileSync as writeFileSync3 } from "node:fs";
+import { dirname as dirname7 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
   try {
     const fresh = !existsSync3(path);
-    mkdirSync6(dirname5(path), { recursive: true });
-    appendFileSync3(path, JSON.stringify(entry) + "\n");
+    mkdirSync5(dirname7(path), { recursive: true });
+    appendFileSync2(path, JSON.stringify(entry) + "\n");
     if (fresh) {
       try {
         chmodSync2(path, 384);
       } catch {
       }
     }
-    const lines = readFileSync9(path, "utf8").split("\n").filter((l) => l !== "");
+    const lines = readFileSync10(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
       writeFileSync3(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
@@ -23431,7 +23750,7 @@ function handleConfirm(store2, args, deps) {
 }
 function codexLogCount(path) {
   try {
-    return readFileSync10(path, "utf8").split("\n").filter((l) => l !== "").length;
+    return readFileSync11(path, "utf8").split("\n").filter((l) => l !== "").length;
   } catch {
     return 0;
   }
@@ -23583,14 +23902,14 @@ async function handleDualVerify(args, deps) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync5, mkdirSync as mkdirSync7, mkdtempSync, readFileSync as readFileSync11, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync5, mkdirSync as mkdirSync6, mkdtempSync, readFileSync as readFileSync12, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join6, win32 as winPath } from "node:path";
+import { join as join7, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync4, readdirSync, lstatSync, statSync as statSync7, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
-import { join as join5 } from "node:path";
+import { existsSync as existsSync4, readdirSync as readdirSync3, lstatSync as lstatSync2, statSync as statSync6, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { join as join6 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
 var SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
@@ -23606,26 +23925,26 @@ function shouldSweep(stampMtimeMs, nowMs, intervalMs) {
 function sweepScratchRoot(root, nowMs = Date.now()) {
   try {
     if (!existsSync4(root)) return;
-    const stampPath = join5(root, STAMP_NAME);
+    const stampPath = join6(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
-      stampMtimeMs = statSync7(stampPath).mtimeMs;
+      stampMtimeMs = statSync6(stampPath).mtimeMs;
     } catch {
       stampMtimeMs = null;
     }
     if (!shouldSweep(stampMtimeMs, nowMs, SWEEP_INTERVAL_MS)) return;
     const entries = [];
-    for (const d of readdirSync(root, { withFileTypes: true })) {
+    for (const d of readdirSync3(root, { withFileTypes: true })) {
       if (!d.name.startsWith(SCRATCH_PREFIX)) continue;
       try {
-        const st = lstatSync(join5(root, d.name));
+        const st = lstatSync2(join6(root, d.name));
         entries.push({ name: d.name, isDir: st.isDirectory(), mtimeMs: st.mtimeMs });
       } catch {
       }
     }
     for (const name of selectStaleScratch(entries, nowMs, FLOOR_MS)) {
       try {
-        rmSync2(join5(root, name), { recursive: true, force: true });
+        rmSync2(join6(root, name), { recursive: true, force: true });
       } catch {
       }
     }
@@ -23816,11 +24135,11 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
-    const scratchRoot = join6(tmpdir(), "helix");
-    mkdirSync7(scratchRoot, { recursive: true });
+    const scratchRoot = join7(tmpdir(), "helix");
+    mkdirSync6(scratchRoot, { recursive: true });
     sweepScratchRoot(scratchRoot);
-    const dir = mkdtempSync(join6(scratchRoot, "codex-"));
-    const outFile = join6(dir, "out.txt");
+    const dir = mkdtempSync(join7(scratchRoot, "codex-"));
+    const outFile = join7(dir, "out.txt");
     try {
       const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
       const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, timeoutMs);
@@ -23829,7 +24148,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
       }
       let answer = "";
       try {
-        answer = readFileSync11(outFile, "utf8").trim();
+        answer = readFileSync12(outFile, "utf8").trim();
       } catch {
       }
       return answer ? { ok: true, answer } : { ok: false, error: "codex produced no output" };
@@ -23846,8 +24165,8 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
 var realCodexRunner = createCodexRunner();
 
 // src/metrics.ts
-import { appendFileSync as appendFileSync4, mkdirSync as mkdirSync8 } from "node:fs";
-import { dirname as dirname7 } from "node:path";
+import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync7 } from "node:fs";
+import { dirname as dirname9 } from "node:path";
 import { randomUUID as randomUUID2 } from "node:crypto";
 var noopMetricsSink = {
   emitReplay: () => {
@@ -23859,8 +24178,8 @@ var noopMetricsSink = {
 function createMetricsSink(path, enabled, deps = {}) {
   if (!enabled) return noopMetricsSink;
   const append = deps.append ?? ((p, line) => {
-    mkdirSync8(dirname7(p), { recursive: true });
-    appendFileSync4(p, line, { mode: 384 });
+    mkdirSync7(dirname9(p), { recursive: true });
+    appendFileSync3(p, line, { mode: 384 });
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const genId = deps.genId ?? (() => `o_${randomUUID2()}`);
@@ -23957,14 +24276,14 @@ function createMetricsSink(path, enabled, deps = {}) {
 function buildServer(store2, dualDeps, metrics2) {
   const m = metrics2 ?? noopMetricsSink;
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
-  const home2 = process.env.HELIX_HOME ?? join7(homedir2(), ".helix");
+  const home2 = process.env.HELIX_HOME ?? join8(homedir2(), ".helix");
   const dv = dualDeps ?? {
-    config: loadConfig({ globalPath: join7(home2, "config.json") }),
+    config: loadConfig({ globalPath: join8(home2, "config.json") }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
     echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-    auditPath: join7(home2, "audit.jsonl"),
-    codexLogPath: join7(home2, "codex-log.jsonl")
+    auditPath: join8(home2, "audit.jsonl"),
+    codexLogPath: join8(home2, "codex-log.jsonl")
   };
   const codexStatusDeps = {
     inspect: () => checkCodexStatus(),
@@ -24067,14 +24386,14 @@ function installSelfTermination(deps) {
 }
 
 // src/server/index.ts
-var home = process.env.HELIX_HOME ?? join8(homedir3(), ".helix");
-var globalLedger = process.env.HELIX_LEDGER ?? join8(home, "memory.jsonl");
+var home = process.env.HELIX_HOME ?? join9(homedir3(), ".helix");
+var globalLedger = process.env.HELIX_LEDGER ?? join9(home, "memory.jsonl");
 var projectRoot = process.cwd();
-var projectLedger = join8(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync6(join8(projectRoot, ".helix")) && resolve2(projectLedger) !== resolve2(globalLedger);
+var projectLedger = join9(projectRoot, ".helix", "memory.jsonl");
+var projectActive = existsSync6(join9(projectRoot, ".helix")) && resolve2(projectLedger) !== resolve2(globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
-var config2 = loadConfig({ globalPath: join8(home, "config.json") });
-var metrics = createMetricsSink(join8(home, "metrics.jsonl"), config2.metrics.enabled);
+var config2 = loadConfig({ globalPath: join9(home, "config.json") });
+var metrics = createMetricsSink(join9(home, "metrics.jsonl"), config2.metrics.enabled);
 var store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
 var scanScopes = [
   { ledger: globalLedger },
@@ -24094,8 +24413,8 @@ var server = buildServer(store, {
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
   echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-  auditPath: join8(home, "audit.jsonl"),
-  codexLogPath: join8(home, "codex-log.jsonl")
+  auditPath: join9(home, "audit.jsonl"),
+  codexLogPath: join9(home, "codex-log.jsonl")
 }, metrics);
 var transport = new StdioServerTransport();
 await server.connect(transport);
