@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname, basename, join } from 'node:path';
 import { classifyHolder, selfIdentity, tryParsePayload, realProbe, type HolderClass, type LivenessProbe, type LockPayload } from './lock-liveness.js';
@@ -79,7 +79,7 @@ export function withFileLock<T>(target: string, fn: (ctx: LockContext) => T, opt
     try {
       const st = lstatSync(lockPath);
       if (st.isDirectory()) {
-        holder = 'alive-unknown';                           // legacy dir: Task 4 adds pid-gated reclaim
+        holder = classifyLegacyDir(lockPath, probe);         // legacy dir: pid-gated reclaim (owner file)
       } else {
         const raw = readFileSync(lockPath, 'utf8');
         const parsed = tryParsePayload(raw);
@@ -95,7 +95,13 @@ export function withFileLock<T>(target: string, fn: (ctx: LockContext) => T, opt
 
     if (holder === 'reentrant-self')
       throw new Error(`withFileLock: re-entrant acquisition of ${lockPath} from the same thread (pid ${process.pid}) — withFileLock is not re-entrant`);
-    // Task 4 replaces this: if (holder === 'dead') { stealUnderGate(...); continue; }
+    // A provably-dead holder gets ONE gated reclaim attempt, then we fall through to the normal
+    // retry cadence (budget check + sleep) rather than continue-ing: a contended/stuck gate makes
+    // stealUnderGate a no-op, and an unconditional continue there would spin without ever advancing
+    // `waited` — a non-yielding infinite loop. Falling through means a stuck gate simply times out
+    // (automatic reclaim disabled until repair, the documented fail-closed residue). The steal
+    // grants nothing: the loop still re-publishes from scratch on the next pass.
+    if (holder === 'dead') stealUnderGate(lockPath, probe);
     if (waited >= maxWaitMs) throw new Error(timeoutMessage(lockPath, lastHolder, waited));
     sleepSync(RETRY_MS);
     waited += RETRY_MS;
@@ -115,4 +121,65 @@ export function withFileLock<T>(target: string, fn: (ctx: LockContext) => T, opt
       if (!lstatSync(lockPath).isDirectory() && tryParsePayload(readFileSync(lockPath, 'utf8'))?.token === token) unlinkSync(lockPath);
     } catch { /* gone/unreadable — cannot prove ownership — leave it */ }
   }
+}
+
+/** Legacy (pre-redesign) lock DIRECTORY: owner file carries `pid-hex`. kill0-only classification —
+ *  no ticks/boot/ns were recorded. An OWNERLESS dir is permanently alive-unknown: the old holder
+ *  may sit suspended between its mkdir and its owner stamp, and no evidence can distinguish that
+ *  from a crash — manual removal only (the timeout error names the path). */
+function classifyLegacyDir(lockPath: string, probe: LivenessProbe): HolderClass {
+  let raw: string;
+  try { raw = readFileSync(join(lockPath, 'owner'), 'utf8'); } catch { return 'alive-unknown'; }
+  const pid = Number(raw.split('-')[0]);
+  if (!Number.isSafeInteger(pid) || pid <= 0) return 'alive-unknown';
+  const k = probe.kill0(pid);
+  if (k === 'dead') return 'dead';
+  if (k === 'unknown') return 'alive-unknown';
+  const st = probe.stateOf(pid);
+  return st === 'Z' || st === 'X' ? 'dead' : 'alive';
+}
+
+/** Serialize EVERY reclaim through a per-boot gate so two reapers can never both act on the same
+ *  victim: the second reaper's delayed unlink removing the first one's FRESH lock was the last
+ *  double-hold execution left (Codex round 2). The gate is never auto-stolen within its own boot —
+ *  a reaper crash inside this tiny section disables automatic reclaim until reboot or manual
+ *  repair (documented fail-closed residue). Gates from other boots are inert litter: removable. */
+function stealUnderGate(lockPath: string, probe: LivenessProbe): void {
+  const bootId = probe.bootId() ?? 'noboot';
+  const gatePath = `${lockPath}.reap.${bootId}`;
+  const dir = dirname(lockPath);
+  const prefix = `${basename(lockPath)}.reap.`;
+  for (const name of readdirSyncSafe(dir)) {                       // other-boot gate litter
+    if (name.startsWith(prefix) && name !== basename(gatePath)) { try { unlinkSync(join(dir, name)); } catch { /* raced */ } }
+  }
+  const gateToken = randomBytes(16).toString('hex');
+  const gateSrc = `${gatePath}.src-${gateToken}.tmp`;
+  try {
+    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: 'wx' });
+    try { linkSync(gateSrc, gatePath); } finally { try { unlinkSync(gateSrc); } catch { /* raced */ } }
+  } catch { return; }                                              // gate busy (same boot) — no steal this round
+  try {
+    const st = lstatSync(lockPath);
+    if (st.isDirectory()) {
+      if (classifyLegacyDir(lockPath, probe) !== 'dead') return;   // re-verify under the gate
+      rmSync(lockPath, { recursive: true, force: true });
+    } else {
+      const raw = readFileSync(lockPath, 'utf8');
+      const parsed = tryParsePayload(raw);
+      if (parsed !== null) {
+        if (classifyHolder(parsed, selfIdentity(gateToken, probe), probe) !== 'dead') return; // changed/alive — abandon
+      } else {
+        const boot = probe.bootInstantMs();
+        if (boot === null || st.mtimeMs >= boot) return;           // malformed but same-boot — abandon
+      }
+      unlinkSync(lockPath);
+    }
+  } catch { /* victim vanished or fs error — abandon; outer loop re-evaluates */ }
+  finally {
+    try { if (tryParsePayload(readFileSync(gatePath, 'utf8'))?.token === gateToken) unlinkSync(gatePath); } catch { /* leave */ }
+  }
+}
+
+function readdirSyncSafe(dir: string): string[] {
+  try { return readdirSync(dir); } catch { return []; }
 }
