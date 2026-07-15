@@ -39,8 +39,12 @@ describe('tail repair (torn-tail-swallow regression, probe-confirmed pre-existin
   });
   it('a cut inside a multi-byte UTF-8 sequence stays malformed and isolated', () => {
     const f = join(dir(), 'memory.jsonl');
-    const utf8 = Buffer.from(JSON.stringify({ ...rec('m_ko'), content: '한국어 내용' }), 'utf8');
-    writeFileSync(f, Buffer.concat([Buffer.from(JSON.stringify(rec('m_a')) + '\n'), utf8.subarray(0, utf8.length - 4)]));
+    const full = Buffer.from(JSON.stringify({ ...rec('m_ko'), content: '한국어 내용' }), 'utf8');
+    const hangulStart = full.indexOf(Buffer.from('한', 'utf8'));
+    expect(hangulStart).toBeGreaterThan(0);                       // fixture premise: the char exists
+    const torn = full.subarray(0, hangulStart + 1);               // 1 byte INTO the 3-byte sequence
+    expect(torn[torn.length - 1]).toBe(0xed);                     // premise pinned: ends on the lead byte of U+D55C
+    writeFileSync(f, Buffer.concat([Buffer.from(JSON.stringify(rec('m_a')) + '\n'), torn]));
     appendRecord(f, rec('m_b'));
     const ids = parseLedgerText(readFileSync(f, 'utf8')).map((r) => r.id);
     expect(ids).toEqual(['m_a', 'm_b']);
