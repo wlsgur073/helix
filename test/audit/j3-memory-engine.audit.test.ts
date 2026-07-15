@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { parseLedger } from '../../src/memory/ledger.js';
-import { withFileLock } from '../../src/memory/lock.js';
+import { withFileLock, lockPathOf, writeLockFileForTest } from '../../src/memory/lock.js';
+import { selfIdentity } from '../../src/memory/lock-liveness.js';
 import { rankRecords } from '../../src/memory/retrieval.js';
 import type { MemoryRecord, MemoryState } from '../../src/types.js';
 
@@ -42,15 +43,14 @@ describe('J3 audit — secret-scan FP no longer causes whole-record data loss (J
 });
 
 describe('J3 audit — lock release verifies ownership (J3-1 FIXED)', () => {
-  it('release does NOT free the lock when the owner token no longer matches (stolen-lock safety)', () => {
-    // Simulate the steal-while-holding race: our lock was stolen and a new holder re-stamped the
-    // owner file while our fn ran. Release must see the token mismatch and leave the lock alone.
-    const t = join(mkdtempSync(join(tmpdir(), 'helix-audit-lock-')), 'ledger.jsonl');
+  it('J3-1 (new form): release never unlinks a lock it cannot prove it owns', () => {
+    const t = join(mkdtempSync(join(tmpdir(), 'helix-j3-')), 'ledger.jsonl');
+    writeFileSync(t, '');
     withFileLock(t, () => {
-      writeFileSync(join(t + '.lock', 'owner'), 'stolen-by-another-process');
+      writeFileSync(lockPathOf(t), JSON.stringify({ ...selfIdentity('f'.repeat(32)), threadId: 41 }));
     });
-    expect(existsSync(t + '.lock')).toBe(true); // we did NOT delete a lock we no longer own
-    rmSync(t + '.lock', { recursive: true, force: true }); // test cleanup
+    expect(existsSync(lockPathOf(t))).toBe(true);  // we did NOT delete a lock we no longer own
+    rmSync(lockPathOf(t), { force: true });
   });
 
   it('normal release (token intact) still removes the lock', () => {
@@ -59,12 +59,14 @@ describe('J3 audit — lock release verifies ownership (J3-1 FIXED)', () => {
     expect(existsSync(t + '.lock')).toBe(false);
   });
 
-  it('maxWaitMs < staleMs (the defaults are 5000 < 10000): a waiter throws before it can steal (J3-2)', () => {
-    const t = join(mkdtempSync(join(tmpdir(), 'helix-audit-lock-')), 'ledger.jsonl');
-    mkdirSync(t + '.lock'); // a FRESH live holder (mtime = now)
-    // staleMs=1000 but maxWaitMs=150 -> the waiter gives up at 150ms, long before the 1000ms
-    // staleness window opens, so it can neither acquire nor steal. Same shape as the defaults.
-    expect(() => withFileLock(t, () => 1, { staleMs: 1000, maxWaitMs: 150 })).toThrow(/timed out/i);
+  it('J3-2 (REPLACED invariant): a LIVE holder is never stolen regardless of lock age', () => {
+    const t = join(mkdtempSync(join(tmpdir(), 'helix-j3-')), 'ledger.jsonl');
+    writeFileSync(t, '');
+    writeLockFileForTest(lockPathOf(t), { ...selfIdentity('9'.repeat(32)), threadId: 40 }); // alive: our pid+ticks, other thread
+    const old = new Date(Date.now() - 86_400_000);
+    utimesSync(lockPathOf(t), old, old);                                     // a DAY old
+    expect(() => withFileLock(t, () => 1, { maxWaitMs: 150 })).toThrow(/timed out/i);
+    expect(existsSync(lockPathOf(t))).toBe(true);
   });
 });
 
