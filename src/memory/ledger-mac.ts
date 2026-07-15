@@ -1,8 +1,9 @@
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
-import { openSync, writeSync, fsyncSync, closeSync, readFileSync, renameSync, statSync, chmodSync, mkdirSync } from 'node:fs';
+import { openSync, writeSync, fsyncSync, closeSync, readFileSync, linkSync, unlinkSync, statSync, chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { withFileLock } from './lock.js';
 import { fsyncDir } from './fs-ops.js';
+import { sweepOrphanTmps } from './ledger-sweep.js';
 import type { MemoryRecord } from '../types.js';
 
 export const MAC_VERSION = 2;                             // version NEW signatures carry
@@ -18,22 +19,40 @@ export class LedgerMacError extends Error {}
 const MASTER_LEN = 32;
 function masterPath(home: string): string { return join(home, 'ledger-mac-master.key'); }
 
-/** Atomic, idempotent: return the 32-byte master, creating it (mode 0600) under a lock on first use. */
+/** Atomic, idempotent: return the 32-byte master, creating it (mode 0600) under a lock on first
+ *  use. Publication is linkSync — it can NEVER overwrite an existing key (create-once; there is no
+ *  rotation feature), so even a double-held lock cannot rotate a key someone already signed with:
+ *  the EEXIST loser adopts the winner's bytes. Source is fsynced BEFORE the link and the dir after,
+ *  so no contender returns before the key durably exists. */
 export function ensureMaster(home: string): Buffer {
   const path = masterPath(home);
   const existing = tryReadMasterStrict(path);
   if (existing) return existing;
   mkdirSync(home, { recursive: true });
   return withFileLock(path, () => {
-    const again = tryReadMasterStrict(path); // re-check inside the lock (another process may have won)
+    const again = tryReadMasterStrict(path);   // re-check inside the lock (another process may have won)
     if (again) return again;
+    sweepOrphanTmps(path, {});                 // a crashed prior mint's key-material tmp dies here
     const key = randomBytes(MASTER_LEN);
-    const tmp = `${path}.${process.pid}.tmp`;
+    const tmp = `${path}.k-${randomBytes(16).toString('hex')}.tmp`;
     const fd = openSync(tmp, 'wx', 0o600);
-    try { writeSync(fd, key); fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(tmp, path);   // atomic on the same filesystem
-    fsyncDir(dirname(path)); // persist the new directory entry too (spec §7: fsync file AND dir)
-    return key;
+    let published = false;
+    try {
+      try { writeSync(fd, key); fsyncSync(fd); } finally { closeSync(fd); }
+      try {
+        linkSync(tmp, path);
+        published = true;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      }
+    } finally {
+      try { unlinkSync(tmp); } catch { /* already gone (linked+cleaned), or swept concurrently */ }
+    }
+    fsyncDir(dirname(path));                   // winner AND loser: the key entry is durable before use
+    if (published) return key;
+    const winner = tryReadMasterStrict(path);  // loser: adopt the winner's key
+    if (!winner) throw new LedgerMacError('master key vanished during concurrent mint');
+    return winner;
   });
 }
 
