@@ -1,4 +1,5 @@
-import { readFileSync, mkdirSync, openSync, fsyncSync, closeSync, writeSync, renameSync, statSync } from 'node:fs';
+import { readFileSync, mkdirSync, statSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
@@ -186,6 +187,9 @@ export interface CompactOptions {
    * Omitted => legacy behaviour (bake state, drop all verifies) is unchanged.
    */
   keepValidVerify?: (r: MemoryRecord) => boolean;
+  /** Injectable durable-fs seam: tests assert the fsync TARGET/ORDER and simulate write failures
+   *  (ENOSPC, an unremovable orphan). Production omits it => `realFsOps`. */
+  fsOps?: DurableFsOps;
 }
 
 /** Keep-set planner: the exact set of records compactLedger writes for `records` + `opts`.
@@ -299,8 +303,10 @@ function fileSize(path: LedgerPath): number {
 }
 
 /**
- * Rewrite the ledger to the canonical current state. Crash-safe: writes <path>.tmp,
- * fsyncs, then atomically renames over <path>.
+ * Rewrite the ledger to the canonical current state. Crash-safe + self-fencing: writes
+ * `<path>.c-<hex32>.tmp` (created BEFORE the read so a successor's sweep can fence a lost-lock
+ * compactor — see the fence note in the body), fsyncs the tmp, atomically renames over <path>, then
+ * fsyncs the parent dir. The lock is HELD through the final dir fsync.
  *
  * Output = the live projection (superseded/invalidated/erased targets already excluded,
  * verify states applied) MINUS any `erasedIds`, PLUS one content-free tombstone per erase
@@ -315,24 +321,49 @@ function fileSize(path: LedgerPath): number {
  * it needs a real concurrent appender — so the invariant lives here, in the code that must hold it.
  */
 export function compactLedger(path: LedgerPath, opts: CompactOptions): CompactionStats {
-  // Hold the lock across read -> rewrite -> rename so a concurrent append can't be lost and a
-  // stale snapshot can't resurrect erased content. parseLedger runs INSIDE the lock, so we
-  // always compact the latest committed state.
-  return withFileLock(path, () => {
-    const beforeBytes = fileSize(path);   // inside the lock, BEFORE the read (see above)
-    const records = parseLedger(path);
-    const { kept, droppedForgedVerifies } = planCompaction(records, opts);
-    // Per-process tmp name: even if the lock is ever stolen, two processes never share a
-    // half-written tmp file (the rename stays atomic on the same filesystem).
-    const tmp = `${path}.${process.pid}.tmp`;
-    const fd = openSync(tmp, 'w');
+  const fsOps = opts.fsOps ?? realFsOps;
+  // Hold the lock across read -> rewrite -> rename -> dir fsync so a concurrent append can't be
+  // lost and a stale snapshot can't resurrect erased content. The tmp is created BEFORE the read
+  // (fence sentinel): any successor's sweep unlinks it, so if OUR lock is ever lost, the final
+  // rename-by-pathname fails ENOENT instead of overwriting the successor's state.
+  return withFileLock(path, (ctx) => {
+    assertSingleLink(path);
+    const tmp = `${path}.c-${randomBytes(16).toString('hex')}.tmp`;
+    sweepOrphanTmps(path, { fsOps, keep: tmp });
+    const fd = fsOps.openSync(tmp, 'wx');
+    let closed = false;
     try {
-      for (const r of kept) writeSync(fd, JSON.stringify(r) + '\n');
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
+      if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost after tmp creation');
+      const mode = modeOf(path);
+      if (mode !== null) fsOps.fchmodSync(fd, mode);              // umask-proof: rename replaces the inode
+      const beforeBytes = fileSize(path);                          // inside the lock, BEFORE the read
+      const records = parseLedger(path);
+      const { kept, droppedForgedVerifies } = planCompaction(records, opts);
+      for (const r of kept) writeAll(fsOps, fd, JSON.stringify(r) + '\n');
+      fsOps.fsyncSync(fd);
+      fsOps.closeSync(fd);
+      closed = true;
+      assertSingleLink(path);                                      // re-check immediately before the rename
+      if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost before rename');
+      fsOps.renameSync(tmp, path);                                 // atomic on the same filesystem
+      fsOps.fsyncDir(dirname(path));                               // rename gives visibility, not durability
+      return { droppedRows: records.length - kept.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
+    } catch (e) {
+      if (!closed) { try { fsOps.closeSync(fd); } catch { /* already closed by a throwing close */ } }
+      try { fsOps.unlinkSync(tmp); } catch { /* a successor's sweep may have taken it */ }
+      throw e;
     }
-    renameSync(tmp, path); // atomic on the same filesystem
-    return { droppedRows: records.length - kept.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
   });
+}
+
+/** Missing ledger counts as a single link (first-write paths stay legal). */
+function assertSingleLink(path: LedgerPath): void {
+  let nlink: number;
+  try { nlink = statSync(path).nlink; } catch { return; }
+  if (nlink !== 1) throw new Error(`compactLedger: ledger has ${nlink} hard links — aliased ledgers are unsupported (see SECURITY.md); refusing to rewrite`);
+}
+
+/** Permission bits of the current ledger, or null when it does not exist yet. */
+function modeOf(path: LedgerPath): number | null {
+  try { return statSync(path).mode & 0o777; } catch { return null; }
 }
