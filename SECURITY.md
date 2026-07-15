@@ -101,6 +101,28 @@ directly, or `helix_memory_inspect`) rather than trusting `ledgerOf`'s fallback.
   not transfer to another machine (e.g. a Windows vs. WSL clone) — elevations signed elsewhere
   replay as `Fresh` until you re-`confirm` on that machine.
 
+## Ledger locking, erasure, and durability boundaries
+
+- **What the lock defends:** accidental concurrency among helix's own processes, OS scheduling
+  (suspension is ALIVE, never stolen), and crashes (a provably-dead holder is reclaimed through a
+  serialized, per-boot reaper gate). It does not defend against an adversary with code execution,
+  and it presumes ONE kernel/boot-id domain on a LOCAL filesystem — a ledger reached from two
+  kernels (e.g. a path under /mnt/c used by both WSL and native Windows) is out of scope.
+- **What erase guarantees:** durable namespace removal by helix's own write paths (compaction
+  fsyncs its temp AND the directory; a lock-losing compactor is fenced by orphan-temp sweeps so a
+  stale snapshot cannot resurrect erased plaintext). It is NOT media sanitization: freed blocks,
+  SSD remapping, filesystem snapshots, external backups/copies (`cp`, `ln`), and already-open file
+  descriptors are all outside any userspace design's reach.
+- **Hard-linked ledgers are refused:** every write path throws when the ledger's link count is not
+  one — two alias names would carry two independent locks (no mutual exclusion) and a compaction
+  through one name would leave the other name holding the entire pre-rewrite plaintext.
+- **Appends are durable:** every append fsyncs the line and the directory before success is
+  reported; a torn tail (power cut mid-append) is isolated by the next writer's tail repair and
+  counted by parse health, and a complete-but-unacknowledged record commits (at-least-once).
+- **Rollout launch barrier (normative):** old bundles age-steal locks and do not sweep — while any
+  old helix-mcp process runs, the new guarantees do not hold. Upgrade procedure: close every Claude
+  session, verify no helix-mcp processes remain, reinstall the plugin, then reopen sessions.
+
 ## Scope / non-goals
 
 The dual-verify echo check is a **verbatim-copy tripwire, not a robust exfiltration

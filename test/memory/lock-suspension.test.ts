@@ -35,7 +35,7 @@ posixOnly('suspension and death across real processes', () => {
     process.kill(w.pid!, 'SIGSTOP');
     await waitFor(() => procState(w.pid!) === 'T', 2_000);           // provably suspended
     const old = new Date(Date.now() - 60_000);
-    utimesSync(lockPathOf(target), old, old);                        // pre-age FAR past the old 10 s staleMs:
+    utimesSync(lockPathOf(target), old, old);                        // pre-age FAR past the old 10 s stale-age threshold:
     // an age-steal mutant steals instantly here (RED); the fixed code respects the live holder.
     expect(() => withFileLock(target, () => 1, { maxWaitMs: 1_500 })).toThrow(/timed out/i);
     expect(existsSync(lockPathOf(target))).toBe(true);
@@ -56,7 +56,7 @@ posixOnly('suspension and death across real processes', () => {
     expect(ran).toBe(true);
   }, 20_000);
 
-  it('mixed window pinned: the FROZEN legacy binary age-steals a new-format lock after its staleMs — the documented exposure', async () => {
+  it('mixed window pinned: the FROZEN legacy binary age-steals a new-format lock after its stale-age threshold — the documented exposure', async () => {
     const d = mkdtempSync(join(tmpdir(), 'helix-mixed-'));
     const target = join(d, 'ledger.jsonl'); writeFileSync(target, '');
     // A new-format lock held by a live-but-idle owner: fabricate with OUR pid (alive) and age it.
