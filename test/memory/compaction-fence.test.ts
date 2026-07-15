@@ -58,6 +58,22 @@ describe('compaction fence', () => {
     expect(i('close')).toBeLessThan(i('rename'));
     expect(ops.lastIndexOf('fsyncDir')).toBeGreaterThan(i('rename'));   // dir fsync AFTER rename
   });
+  it('tmp exists BEFORE the ledger read: a record appended at tmp-open time is included in the compaction', () => {
+    const d = mkdtempSync(join(tmpdir(), 'fence7-'));
+    const ledger = join(d, 'memory.jsonl');
+    seed(ledger, rec('m_a'));
+    const sentinel = rec('m_sentinel', 'landed between tmp-open and read');
+    const trapOps: DurableFsOps = { ...realFsOps,
+      openSync: (p, fl, m) => {
+        if (p.endsWith('.tmp')) writeFileSync(ledger, JSON.stringify(sentinel) + '\n', { flag: 'a' }); // lands AT tmp-open
+        return realFsOps.openSync(p, fl, m);
+      },
+    };
+    compactLedger(ledger, { erasedIds: new Set(), ...noKeep, fsOps: trapOps });
+    const ids = parseLedgerText(readFileSync(ledger, 'utf8')).map((r) => r.id);
+    expect(ids).toContain('m_sentinel'); // read happened AFTER tmp-open, so the sentinel was parsed and kept
+    expect(ids).toContain('m_a');
+  });
   it('mode preservation: a 0600 ledger stays 0600 through compaction (umask-proof fchmod)', () => {
     const d = mkdtempSync(join(tmpdir(), 'fence3-'));
     const ledger = join(d, 'memory.jsonl');
