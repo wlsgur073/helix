@@ -24,10 +24,16 @@ function sleepSync(ms: number): void {
 export interface LockContext { stillOwned(): boolean; }
 export interface LockOptions { maxWaitMs?: number; probe?: LivenessProbe; }
 
-/** Canonicalize the TARGET so every spelling of the same ledger (symlinked cwd, etc.) maps to one
- *  lock path. realpath resolves symlinks, not hard links — hard-link aliases are refused at the
- *  write layer (nlink guard), not here. The parent dir must exist (callers mkdir it first). */
-function canonical(target: string): string {
+/** THE shared path-identity rule for BOTH the lock layer AND the ledger write layer (append +
+ *  compaction) — export it so ledger.ts resolves the SAME identity the lock does. Every spelling of
+ *  one ledger (a symlinked cwd, or a symlink standing in for the ledger FILE itself) must map to one
+ *  path, or the lock would guard a different inode than the writes touch: a compaction renaming over
+ *  a symlink alias turns the alias into a regular file while appends follow the link to the real
+ *  inode, and the pre-compaction plaintext (incl. permanently-erased content) survives on that inode
+ *  — the erase claim broken. realpath resolves symlinks, not hard links — hard-link aliases are
+ *  refused at the write layer (nlink guard), not here. The parent dir must exist (callers mkdir it
+ *  first). */
+export function canonical(target: string): string {
   try { return realpathSync(target); }
   catch { return join(realpathSync(dirname(target)), basename(target)); }
 }
@@ -69,7 +75,12 @@ export function withFileLock<T>(target: string, fn: (ctx: LockContext) => T, opt
       const code = (e as NodeJS.ErrnoException).code;
       if (code === 'EPERM' || code === 'EOPNOTSUPP' || code === 'ENOTSUP')
         throw new Error(`withFileLock: filesystem refuses hard links for ${lockPath}; ledger locking is unsupported on this filesystem`);
-      if (code === 'ENOENT') continue;                      // our source tmp was swept — retry
+      if (code === 'ENOENT') {                              // srcTmp swept mid-flight, OR the ledger's dir vanished mid-acquire — retry ON THE BUDGET
+        if (waited >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, waited)); // a vanished dir throws ENOENT every pass; a bare non-yielding `continue` would spin at 100% CPU forever (the stealUnderGate fall-through class), so route it through the normal cadence
+        sleepSync(RETRY_MS);
+        waited += RETRY_MS;
+        continue;
+      }
       if (code !== 'EEXIST') throw e;                       // real error (perms/disk) — bubble up untouched
     }
 

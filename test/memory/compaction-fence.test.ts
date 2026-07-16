@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { build } from 'esbuild';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, statSync, linkSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, statSync, linkSync, rmSync, symlinkSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compactLedger, parseLedgerText } from '../../src/memory/ledger.js';
+import { compactLedger, parseLedgerText, appendRecord } from '../../src/memory/ledger.js';
 import { lockPathOf } from '../../src/memory/lock.js';
 import { realFsOps, type DurableFsOps } from '../../src/memory/fs-ops.js';
 import type { MemoryRecord } from '../../src/types.js';
@@ -98,6 +98,27 @@ describe('compaction fence', () => {
     const failing = { ...realFsOps, fsyncSync: () => { throw new Error('ENOSPC fake'); } };
     expect(() => compactLedger(ledger, { erasedIds: new Set(), ...noKeep, fsOps: failing })).toThrow(/ENOSPC fake/);
     expect(realFsOps.readdirSync(d).filter((n) => n.includes('.c-'))).toHaveLength(0);
+  });
+  it('symlink-coherent writes: compaction rewrites the TARGET inode and never replaces the symlink alias (erase lands on the real plaintext)', () => {
+    // The ledger's FINAL path component is a symlink (dirB/memory.jsonl -> dirA/memory.jsonl). Before
+    // the write layer shared the lock's canonicalization, compaction's renameSync(tmp, path) replaced
+    // the SYMLINK with a fresh compacted file while the erased plaintext lived on undisturbed on the
+    // link's target inode — SECURITY.md's erase claim broken. The write layer now resolves the same
+    // path identity the lock does, so compaction touches the real inode.
+    const dirA = mkdtempSync(join(tmpdir(), 'fence-sym-real-'));
+    const dirB = mkdtempSync(join(tmpdir(), 'fence-sym-link-'));
+    const realLedger = join(dirA, 'memory.jsonl');
+    const symlink = join(dirB, 'memory.jsonl');
+    symlinkSync(realLedger, symlink);
+    seed(symlink, rec('m_keep'), rec('m_secret', 'THE SECRET'));   // writeFileSync follows the link -> bytes land on the REAL inode
+    compactLedger(symlink, { erasedIds: new Set(['m_secret']), ...noKeep });
+    expect(lstatSync(symlink).isSymbolicLink()).toBe(true);        // (1) alias intact — not replaced by a regular compacted file
+    expect(readFileSync(realLedger, 'utf8')).not.toContain('THE SECRET'); // (2) erase landed on the REAL inode
+    appendRecord(symlink, rec('m_after', 'AFTER'));               // (3) coherence: append via the alias is visible through the target
+    const idsViaTarget = parseLedgerText(readFileSync(realLedger, 'utf8')).map((r) => r.id);
+    expect(idsViaTarget).toContain('m_keep');
+    expect(idsViaTarget).toContain('m_after');
+    expect(idsViaTarget).not.toContain('m_secret');
   });
   it('permanent-erase honesty: an unremovable plaintext orphan makes the compaction THROW (sweep aborts it)', () => {
     const d = mkdtempSync(join(tmpdir(), 'fence6-'));

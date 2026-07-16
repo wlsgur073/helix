@@ -85,4 +85,13 @@ describe('tryParsePayload', () => {
     expect(tryParsePayload(JSON.stringify(me))).toEqual(me);
     for (const junk of ['', '{', 'null', '{"v":2,"token":"x"}', '{"v":1}']) expect(tryParsePayload(junk)).toBeNull();
   });
+  it('rejects a full-shaped payload whose startTicks/bootId/pidNs is NUMERIC (fail-CLOSED: string|null only — the lone fail-open cell)', () => {
+    // A well-formed-JSON payload with a numeric startTicks (e.g. 42) passing here would later make
+    // `cur !== recorded.startTicks` compare a /proc string against a number — always true — and
+    // classify a LIVE holder 'dead', letting the gate steal it. Everything else fails closed (waits).
+    for (const field of ['startTicks', 'bootId', 'pidNs'] as const) {
+      const payload = JSON.stringify({ ...selfIdentity('x'.repeat(32)), [field]: 42 });
+      expect(tryParsePayload(payload), `${field}=42 must be rejected as malformed`).toBeNull();
+    }
+  });
 });

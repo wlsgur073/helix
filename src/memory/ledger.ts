@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
-import { withFileLock } from './lock.js';
+import { withFileLock, canonical } from './lock.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 
@@ -53,8 +53,9 @@ function canonicalMarker(kind: 'integrity_marker' | 'horizon_marker'): MemoryRec
  *  fragment is isolated into its own malformed line that parse-health counts), then writes the
  *  whole line, fsyncs the fd, and fsyncs the parent dir so an acknowledged append survives power
  *  loss. */
-export function appendRecordUnlocked(path: LedgerPath, record: MemoryRecord, fsOps: DurableFsOps = realFsOps): void {
-  mkdirSync(dirname(path), { recursive: true });
+export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, fsOps: DurableFsOps = realFsOps): void {
+  mkdirSync(dirname(rawPath), { recursive: true });
+  const path = canonical(rawPath);   // resolve the FINAL-component symlink to the real inode's path (write-layer identity, the SAME rule the lock uses) so append and compaction never diverge onto different inodes
   sweepOrphanTmps(path, { fsOps });
   const fd = fsOps.openSync(path, 'a+');
   try {
@@ -320,13 +321,14 @@ function fileSize(path: LedgerPath): number {
  * negative reclaim for a compaction that in fact freed space). No unit test can catch that inversion —
  * it needs a real concurrent appender — so the invariant lives here, in the code that must hold it.
  */
-export function compactLedger(path: LedgerPath, opts: CompactOptions): CompactionStats {
+export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): CompactionStats {
   const fsOps = opts.fsOps ?? realFsOps;
   // Hold the lock across read -> rewrite -> rename -> dir fsync so a concurrent append can't be
   // lost and a stale snapshot can't resurrect erased content. The tmp is created BEFORE the read
   // (fence sentinel): any successor's sweep unlinks it, so if OUR lock is ever lost, the final
   // rename-by-pathname fails ENOENT instead of overwriting the successor's state.
-  return withFileLock(path, (ctx) => {
+  return withFileLock(rawPath, (ctx) => {                   // lock target stays raw — withFileLock canonicalizes internally to the same lock file
+    const path = canonical(rawPath);                        // resolve ONCE, under the lock: EVERYTHING below (nlink, tmp, sweep, mode, read, rename, dir fsync) targets the real inode, so a compaction can never replace a symlink alias and strand the erased plaintext on the link's target
     assertSingleLink(path);
     const tmp = `${path}.c-${randomBytes(16).toString('hex')}.tmp`;
     sweepOrphanTmps(path, { fsOps, keep: tmp });

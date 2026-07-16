@@ -50,11 +50,19 @@ export function selfIdentity(token: string, probe: LivenessProbe = realProbe): L
   return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform };
 }
 
+/** A LockPayload identity field that must be `string | null`. A well-formed-JSON payload carrying a
+ *  NUMERIC startTicks/bootId/pidNs (e.g. 42) would otherwise pass and later make `cur !== recorded.
+ *  startTicks` compare a /proc string against a number — always true — mis-classifying a LIVE holder
+ *  'dead' and letting the gate steal it. Every other malformed cell already fails CLOSED (waits);
+ *  this was the lone fail-OPEN one. Reject => alive-unknown (never stolen). */
+const isStringOrNull = (x: unknown): boolean => x === null || typeof x === 'string';
+
 export function tryParsePayload(raw: string): LockPayload | null {
   try {
     const p = JSON.parse(raw) as LockPayload;
     if (p === null || typeof p !== 'object' || p.v !== 1) return null;
     if (typeof p.token !== 'string' || typeof p.pid !== 'number' || typeof p.threadId !== 'number' || typeof p.platform !== 'string') return null;
+    if (!isStringOrNull(p.startTicks) || !isStringOrNull(p.bootId) || !isStringOrNull(p.pidNs)) return null;
     return p;
   } catch { return null; }
 }

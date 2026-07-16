@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, existsSync, writeFileSync, readFileSync, symlinkSync, lstatSync, readdirSync, utimesSync, rmSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withFileLock, lockPathOf, writeLockFileForTest } from '../../src/memory/lock.js';
@@ -62,6 +63,26 @@ describe('withFileLock (link-published)', () => {
     withFileLock(t, () => { writeFileSync(lockPathOf(t), foreign); });      // someone replaced us mid-hold
     expect(readFileSync(lockPathOf(t), 'utf8')).toBe(foreign);              // left in place — we could not prove ownership
     rmSync(lockPathOf(t));
+  });
+  it('an ENOENT in the acquire loop is BUDGETED: a ledger dir vanishing mid-acquire times out on schedule, never an unbudgeted 100% CPU spin', () => {
+    // A fully-missing path cannot exercise this: canonical() throws ENOENT before the loop is ever
+    // reached. The loop's ENOENT is only reachable when the dir vanishes AFTER canonical() resolved
+    // it — a mid-acquire race. So: a LIVE holder pins us in the acquire loop (EEXIST path), then a
+    // SEPARATE process removes the whole dir (this thread is blocked in Atomics.wait, so a same-thread
+    // timer can't fire). Every subsequent publish attempt then throws ENOENT and MUST still budget out.
+    // Mutation guard: reverting the fix to a bare `continue` spins ENOENT with no sleep/no budget —
+    // the test then hangs to vitest's default 5s kill (RED) instead of timing out here at ~maxWaitMs.
+    const d = mkdtempSync(join(tmpdir(), 'helix-lock-enoent-'));
+    const ledger = join(d, 'ledger.jsonl');
+    writeFileSync(ledger, '');
+    const liveHolder = { ...selfIdentity('f'.repeat(32)), threadId: 99 }; // same pid+ticks, diff thread => alive => never stolen
+    writeLockFileForTest(lockPathOf(ledger), liveHolder);
+    const killer = spawn(process.execPath, ['-e', `require('fs').rmSync(${JSON.stringify(d)}, { recursive: true, force: true })`], { stdio: 'ignore' });
+    const t0 = Date.now();
+    expect(() => withFileLock(ledger, () => 1, { maxWaitMs: 500 })).toThrow(/timed out/);
+    const elapsed = Date.now() - t0;
+    killer.kill();
+    expect(elapsed).toBeLessThan(2000); // budgeted (~maxWaitMs); a non-yielding spin would only end at the 5s hard-kill
   });
   it('ctx.stillOwned() is true while held and false after a foreign replacement', () => {
     const t = target();
