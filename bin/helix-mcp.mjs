@@ -13359,11 +13359,13 @@ var realProbe = {
 function selfIdentity(token, probe = realProbe) {
   return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform };
 }
+var isStringOrNull = (x) => x === null || typeof x === "string";
 function tryParsePayload(raw) {
   try {
     const p = JSON.parse(raw);
     if (p === null || typeof p !== "object" || p.v !== 1) return null;
     if (typeof p.token !== "string" || typeof p.pid !== "number" || typeof p.threadId !== "number" || typeof p.platform !== "string") return null;
+    if (!isStringOrNull(p.startTicks) || !isStringOrNull(p.bootId) || !isStringOrNull(p.pidNs)) return null;
     return p;
   } catch {
     return null;
@@ -13436,7 +13438,12 @@ function withFileLock(target, fn, opts = {}) {
       const code = e.code;
       if (code === "EPERM" || code === "EOPNOTSUPP" || code === "ENOTSUP")
         throw new Error(`withFileLock: filesystem refuses hard links for ${lockPath}; ledger locking is unsupported on this filesystem`);
-      if (code === "ENOENT") continue;
+      if (code === "ENOENT") {
+        if (waited >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, waited));
+        sleepSync(RETRY_MS);
+        waited += RETRY_MS;
+        continue;
+      }
       if (code !== "EEXIST") throw e;
     }
     let holder;
@@ -13641,8 +13648,9 @@ function canonicalMarker(kind) {
     classification: "normal"
   };
 }
-function appendRecordUnlocked(path, record2, fsOps = realFsOps) {
-  mkdirSync(dirname3(path), { recursive: true });
+function appendRecordUnlocked(rawPath, record2, fsOps = realFsOps) {
+  mkdirSync(dirname3(rawPath), { recursive: true });
+  const path = canonical(rawPath);
   sweepOrphanTmps(path, { fsOps });
   const fd = fsOps.openSync(path, "a+");
   try {
@@ -13752,9 +13760,10 @@ function fileSize(path) {
     return 0;
   }
 }
-function compactLedger(path, opts) {
+function compactLedger(rawPath, opts) {
   const fsOps = opts.fsOps ?? realFsOps;
-  return withFileLock(path, (ctx) => {
+  return withFileLock(rawPath, (ctx) => {
+    const path = canonical(rawPath);
     assertSingleLink(path);
     const tmp = `${path}.c-${randomBytes2(16).toString("hex")}.tmp`;
     sweepOrphanTmps(path, { fsOps, keep: tmp });
