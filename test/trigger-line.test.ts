@@ -19,6 +19,7 @@ import {
 } from '../scripts/trigger-measure.js';
 import { realFsOps, type DurableFsOps } from '../src/memory/fs-ops.js';
 import { stampOwnership, projectLedgerPath } from '../src/memory/ownership.js';
+import { parseTriggerRecord } from './helpers/trigger-record.js';
 
 const tmpHome = (): string => mkdtempSync(join(tmpdir(), 'helix-trigger-home-'));
 const tmpProj = (): string => mkdtempSync(join(tmpdir(), 'helix-trigger-proj-'));
@@ -178,8 +179,8 @@ describe('validateRecordLine (pure self-validation)', () => {
     unknownLines: 0, unknownMaxOps: 0,
   });
 
-  it('accepts a well-formed record and returns the parsed object', () => {
-    expect(validateRecordLine(JSON.stringify(good()))).toEqual(good());
+  it('accepts a well-formed record and returns the parsed object (via the shared parseTriggerRecord grammar helper, which both this file and the Task A4 adapter spawn tests import)', () => {
+    expect(parseTriggerRecord(JSON.stringify(good()))).toEqual(good());
   });
 
   it('rejects a non-ASCII byte anywhere in the line (JSON.stringify does not escape it)', () => {
