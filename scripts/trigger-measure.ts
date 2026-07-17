@@ -123,40 +123,65 @@ function readTwoParticipants(
   return [global, project];
 }
 
-/** The op-shape parse bench-replay.ts:246-254 uses, reimplemented (not imported, per the task's own
- *  module boundary) over raw bytes: kind:'op' + gen_ai.tool.name==='helix_memory_recall' + numeric
- *  duration_ms is a recall event — failed-but-completed ops (ok:false) count too; `ok` is never
- *  checked here. Every other line (malformed JSON, or JSON that fails the shape check) is 'unknown',
- *  carrying a byte-bounded maxOps estimate the evaluator uses to bound how many ops a
- *  torn-then-repaired physical line could be hiding. */
-function parseMetricsLine(lineBuf: Buffer): MetricsEvent {
+/** Classifies one physical metrics line, mirroring bench-replay.ts's acceptance taxonomy
+ *  (bench-replay.ts:246-269) at the CATEGORY level — 'op'/'replay'/'compaction' are the three
+ *  recognized row kinds — without needing bench-replay's own per-field strictness for replay/
+ *  compaction (that strictness exists there because it aggregates those rows' numeric fields for
+ *  percentile stats; this module only asks "is this line a recall, a recognized non-recall we can
+ *  safely ignore, or genuinely unreadable").
+ *
+ *  Returns:
+ *   - {kind:'recall', ms}   — a helix_memory_recall op with a numeric duration_ms (ok:false included,
+ *                             `ok` is never checked).
+ *   - null                  — a RECOGNIZED non-recall row: excluded from the event list entirely, so
+ *                             it contributes NOTHING to events, unknownLines, or unknownMaxOps. This
+ *                             is any other-tool 'op' row with a valid (string tool name, numeric
+ *                             duration_ms) shape, any 'replay' row, or any 'compaction' row. A real
+ *                             metrics file is MOSTLY these rows; treating them as 'unknown' would
+ *                             flood the evaluator's trailing-200 window with maxOps-expanded
+ *                             pseudo-unknowns and degrade the latency leg toward permanently
+ *                             'unavailable' under completely normal traffic.
+ *   - {kind:'unknown', ...} — genuinely unreadable: JSON.parse failure; a NEWER schema (v present and
+ *                             > 1 — could hide a recall this reader cannot interpret, mirroring
+ *                             bench-replay's own newer-schema skip, checked before kind dispatch); an
+ *                             'op' row with a missing/non-numeric duration_ms or a non-string tool
+ *                             name (could be a recall with unreadable fields); or any unrecognized
+ *                             kind. Carries a byte-bounded maxOps estimate the evaluator uses to bound
+ *                             how many ops a torn-then-repaired physical line could be hiding. */
+function parseMetricsLine(lineBuf: Buffer): MetricsEvent | null {
   const maxOps = Math.max(1, Math.floor(lineBuf.length / 64));
+  const unknown = (): MetricsEvent => ({ kind: 'unknown', maxOps });
   let row: unknown;
   try {
     row = JSON.parse(lineBuf.toString('utf8'));
   } catch {
-    return { kind: 'unknown', maxOps };
+    return unknown();
   }
-  if (row !== null && typeof row === 'object') {
-    const r = row as Record<string, unknown>;
-    if (r.kind === 'op' && r['gen_ai.tool.name'] === 'helix_memory_recall' && typeof r.duration_ms === 'number') {
-      return { kind: 'recall', ms: r.duration_ms };
-    }
+  if (row === null || typeof row !== 'object') return unknown();
+  const r = row as Record<string, unknown>;
+  if (typeof r.v === 'number' && r.v > 1) return unknown(); // newer schema — could hide an unreadable recall
+  if (r.kind === 'op' && typeof r['gen_ai.tool.name'] === 'string' && typeof r.duration_ms === 'number') {
+    return r['gen_ai.tool.name'] === 'helix_memory_recall' ? { kind: 'recall', ms: r.duration_ms } : null;
   }
-  return { kind: 'unknown', maxOps };
+  if (r.kind === 'replay' || r.kind === 'compaction') return null;
+  return unknown();
 }
 
 /** Splits on physical newlines at the BYTE level (maxOps needs byte length, not decoded char length,
  *  so this slices the Buffer directly, never a decoded string). Empty lines (consecutive/trailing
  *  newlines) are skipped entirely — never counted as unknown. A trailing line with no terminating
  *  newline is still attempted (mirrors readline's behavior, which is what bench-replay.ts's own
- *  --report reader uses). File order is preserved, oldest-first. */
+ *  --report reader uses). File order is preserved, oldest-first. A recognized non-recall line
+ *  (parseMetricsLine returning null) is dropped here, not pushed as any kind of event. */
 export function parseMetricsBuffer(buf: Buffer): MetricsEvent[] {
   const events: MetricsEvent[] = [];
   let start = 0;
   for (let i = 0; i <= buf.length; i++) {
     if (i === buf.length || buf[i] === 0x0a) {
-      if (i > start) events.push(parseMetricsLine(buf.subarray(start, i)));
+      if (i > start) {
+        const event = parseMetricsLine(buf.subarray(start, i));
+        if (event !== null) events.push(event);
+      }
       start = i + 1;
     }
   }

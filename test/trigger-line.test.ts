@@ -123,8 +123,34 @@ describe('parseMetricsBuffer (pure)', () => {
     const buf = Buffer.from(JSON.stringify({ kind: 'op', 'gen_ai.tool.name': 'helix_memory_recall', duration_ms: 1 }), 'utf8');
     expect(parseMetricsBuffer(buf)).toEqual([{ kind: 'recall', ms: 1 }]);
   });
-  it('a line with the wrong tool name is unknown, not a recall', () => {
-    const buf = Buffer.from(JSON.stringify({ kind: 'op', 'gen_ai.tool.name': 'other_tool', duration_ms: 1 }) + '\n', 'utf8');
+  // A well-formed non-recall op row is RECOGNIZED, not unknown: it is understood and known not to be
+  // a recall, so it must not inflate the uncertain bucket. (Superseded 2026-07-17: this test used to
+  // assert 'unknown' here -- a real ~70KB metrics file is MOSTLY non-recall rows, so classifying them
+  // as pseudo-unknowns flooded the evaluator's trailing-200 window and degraded the latency leg toward
+  // permanently 'unavailable' under completely normal traffic.)
+  it('a well-formed OTHER-TOOL op row is EXCLUDED entirely -- not a recall, not an unknown', () => {
+    const buf = Buffer.from(JSON.stringify({ kind: 'op', 'gen_ai.tool.name': 'helix_memory_commit', duration_ms: 1 }) + '\n', 'utf8');
+    expect(parseMetricsBuffer(buf)).toEqual([]);
+  });
+  it('a kind:"replay" row is EXCLUDED entirely', () => {
+    const buf = Buffer.from(JSON.stringify({ v: 1, kind: 'replay', ts: '2026-07-17T00:00:00.000Z', scope: 'global', rows: 10, bytes: 100, parse_ms: 1, project_ms: 1 }) + '\n', 'utf8');
+    expect(parseMetricsBuffer(buf)).toEqual([]);
+  });
+  it('a kind:"compaction" row is EXCLUDED entirely', () => {
+    const buf = Buffer.from(JSON.stringify({ v: 1, kind: 'compaction', ts: '2026-07-17T00:00:00.000Z', scope: 'global', duration_ms: 3, dropped_rows: 1, reclaimed_bytes: 10, ok: true }) + '\n', 'utf8');
+    expect(parseMetricsBuffer(buf)).toEqual([]);
+  });
+  it('a newer-schema row (v>1) is unknown -- it could hide an unreadable recall, even if it otherwise looks like one', () => {
+    const line = JSON.stringify({ v: 2, kind: 'op', 'gen_ai.tool.name': 'helix_memory_recall', duration_ms: 1 });
+    const buf = Buffer.from(line + '\n', 'utf8');
+    expect(parseMetricsBuffer(buf)).toEqual([{ kind: 'unknown', maxOps: Math.max(1, Math.floor(Buffer.byteLength(line, 'utf8') / 64)) }]);
+  });
+  it('an op row with a MISSING duration_ms is unknown -- could be an unreadable recall', () => {
+    const buf = Buffer.from(JSON.stringify({ kind: 'op', 'gen_ai.tool.name': 'helix_memory_recall' }) + '\n', 'utf8');
+    expect(parseMetricsBuffer(buf)).toEqual([{ kind: 'unknown', maxOps: 1 }]);
+  });
+  it('a recall-tool op row with a NON-NUMERIC duration_ms is unknown, not a recall', () => {
+    const buf = Buffer.from(JSON.stringify({ kind: 'op', 'gen_ai.tool.name': 'helix_memory_recall', duration_ms: '42' }) + '\n', 'utf8');
     expect(parseMetricsBuffer(buf)).toEqual([{ kind: 'unknown', maxOps: 1 }]);
   });
   it('maxOps scales with BYTE length (>64 bytes -> maxOps > 1), not string char length', () => {
@@ -367,31 +393,62 @@ describe('measureAndRecord (end-to-end)', () => {
     expect(record.legs.bytes.min).toBe(Buffer.byteLength(content, 'utf8')); // but its bytes still count
   });
 
-  it('unknown-line accounting end-to-end: byte-bounded maxOps, empty lines skipped, ok:false recalls counted', () => {
+  it('unknown-line accounting end-to-end: recognized non-recall rows are EXCLUDED (not unknown); malformed rows are unknown; empty lines skipped; ok:false recalls counted', () => {
     const home = tmpHome();
     const root = tmpProj();
+    const ts = '2026-07-17T00:00:00.000Z';
     const malformed = '{not json';
-    const wrongTool = JSON.stringify({ v: 1, kind: 'op', ts: '2026-07-17T00:00:00.000Z', 'gen_ai.tool.name': 'other_tool', duration_ms: 5, ok: true });
+    const otherToolOp = JSON.stringify({ v: 1, kind: 'op', ts, 'gen_ai.tool.name': 'helix_memory_commit', duration_ms: 5, ok: true });
+    const replayRow = JSON.stringify({ v: 1, kind: 'replay', ts, scope: 'global', rows: 10, bytes: 100, parse_ms: 1, project_ms: 1 });
+    const compactionRow = JSON.stringify({ v: 1, kind: 'compaction', ts, scope: 'global', duration_ms: 3, dropped_rows: 1, reclaimed_bytes: 10, ok: true });
     const lines = [
-      JSON.stringify({ v: 1, kind: 'op', ts: '2026-07-17T00:00:00.000Z', 'gen_ai.tool.name': 'helix_memory_recall', duration_ms: 200, ok: true }), // slow recall
+      JSON.stringify({ v: 1, kind: 'op', ts, 'gen_ai.tool.name': 'helix_memory_recall', duration_ms: 200, ok: true }), // slow recall
       '', // empty -> skipped, not unknown
       malformed, // -> unknown
-      wrongTool, // -> unknown
-      JSON.stringify({ v: 1, kind: 'op', ts: '2026-07-17T00:00:00.000Z', 'gen_ai.tool.name': 'helix_memory_recall', duration_ms: 50, ok: false }), // fast, FAILED but completed -> still a recall
+      otherToolOp, // -> EXCLUDED (recognized non-recall op)
+      replayRow, // -> EXCLUDED (recognized replay row)
+      compactionRow, // -> EXCLUDED (recognized compaction row)
+      JSON.stringify({ v: 1, kind: 'op', ts, 'gen_ai.tool.name': 'helix_memory_recall', duration_ms: 50, ok: false }), // fast, FAILED but completed -> still a recall
     ];
     writeFileSync(join(home, 'metrics.jsonl'), lines.join('\n') + '\n');
     const line = captureStdout(() =>
       measureAndRecord({ root, run: 'r', serviceResult: null, exitCode: null, exitStatus: null }, { env: { HELIX_HOME: home } }),
     );
     const record = JSON.parse(line);
-    const expectedUnknownMaxOps =
-      Math.max(1, Math.floor(Buffer.byteLength(malformed, 'utf8') / 64)) + Math.max(1, Math.floor(Buffer.byteLength(wrongTool, 'utf8') / 64));
+    const expectedUnknownMaxOps = Math.max(1, Math.floor(Buffer.byteLength(malformed, 'utf8') / 64));
     expect(record.metricsState).toBe('present');
-    expect(record.unknownLines).toBe(2);
+    expect(record.unknownLines).toBe(1); // only the malformed line -- the 3 recognized rows are excluded, not unknown
     expect(record.unknownMaxOps).toBe(expectedUnknownMaxOps);
-    expect(record.latencyN).toBe(2); // exactly 2 kind:'recall' entries (ok:false still counts)
+    expect(record.latencyN).toBe(2); // exactly 2 kind:'recall' entries (ok:false still counts; excluded rows aren't in the event list)
     expect(record.legs.latency.min).toBe(1); // only the 200ms one is genuinely slow
-    expect(record.legs.latency.max).toBe(1 + expectedUnknownMaxOps); // + both unknowns assumed slow
+    expect(record.legs.latency.max).toBe(1 + expectedUnknownMaxOps); // + the one real unknown assumed slow
+  });
+
+  // Regression lock for the reviewed defect: a real metrics file is MOSTLY non-recall rows. Before the
+  // fix, each was misclassified 'unknown' and flooded the evaluator's trailing-200 window, so 3
+  // genuinely slow recalls sitting further back in the file could be pushed entirely out of the
+  // window (their replacement pseudo-unknowns would then split the bound across the threshold,
+  // degrading the leg to 'unavailable' instead of 'true'). With the fix, none of the 250 recognized
+  // rows below occupy a window slot at all.
+  it('a realistic-traffic metrics file (mostly replay/other-tool rows) still fires the latency leg -- the exact bug this fix closes', () => {
+    const home = tmpHome();
+    const root = tmpProj();
+    const ts = '2026-07-17T00:00:00.000Z';
+    const slowRecall = JSON.stringify({ v: 1, kind: 'op', ts, 'gen_ai.tool.name': 'helix_memory_recall', duration_ms: 999, ok: true });
+    const otherToolOp = JSON.stringify({ v: 1, kind: 'op', ts, 'gen_ai.tool.name': 'helix_memory_commit', duration_ms: 5, ok: true });
+    const replayRow = JSON.stringify({ v: 1, kind: 'replay', ts, scope: 'global', rows: 10, bytes: 100, parse_ms: 1, project_ms: 1 });
+    // 3 slow recalls FIRST (oldest), then 250 recognized non-recall rows AFTER them (newest) -- under
+    // the old buggy classification those 250 rows alone would exceed the 200-wide window, pushing
+    // these 3 recalls out of it entirely.
+    const lines = [slowRecall, slowRecall, slowRecall, ...Array.from({ length: 250 }, (_, i) => (i % 2 === 0 ? otherToolOp : replayRow))];
+    writeFileSync(join(home, 'metrics.jsonl'), lines.join('\n') + '\n');
+    const line = captureStdout(() =>
+      measureAndRecord({ root, run: 'r', serviceResult: null, exitCode: null, exitStatus: null }, { env: { HELIX_HOME: home } }),
+    );
+    const record = JSON.parse(line);
+    expect(record.unknownLines).toBe(0); // every non-recall row was RECOGNIZED, not unknown
+    expect(record.legs.latency).toEqual({ min: 3, max: 3, threshold: 3, status: 'true' });
+    expect(record.overall).toBe('fired');
   });
 
   it('the record never contains the --root or HELIX_HOME filesystem paths (content-free discipline)', () => {
