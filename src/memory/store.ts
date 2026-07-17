@@ -232,6 +232,31 @@ export class MemoryStore {
     return p.ledger;
   }
 
+  /** Snapshot the project layer's disposition, for the READ side (recall/inspect/history/asOf — see
+   *  each call site below). Computed once per public read call and reused for every project-inclusion
+   *  decision that call makes, so a single call can never disagree with itself about whether the
+   *  project layer participates (Codex R2 #7). isOwned reads two files (the home registry + the
+   *  repo-side .owner file), so this is a SNAPSHOT, not a lock: a concurrent adopt() between two
+   *  SEPARATE calls — or mid-read within this one — can still change the answer. That race is accepted,
+   *  not solved, here: each NEW call re-invokes this method (nothing is memoized on the instance), so
+   *  the next call still sees a fresh, current answer (I4) — only a single call's internal
+   *  self-consistency is what this method buys.
+   *
+   *  - 'owned': isOwned(p.root, p.home) — true regardless of whether the ledger FILE exists yet (an
+   *    owned project with no ledger file still participates, matching pre-existing behavior).
+   *  - 'unadopted-present': project configured, NOT owned, and a ledger file exists at p.ledger — the
+   *    exact condition targetLedger() (above) already throws on for commit. The write side keeps its
+   *    OWN independent, fresh isOwned/existsSync check — targetLedger's auto-stamp claim-on-first-use
+   *    and fail-loud-on-foreign-ledger behavior is unaffected by this method or its caller.
+   *  - 'inactive': no project layer configured, OR configured but neither owned nor a ledger file
+   *    present — nothing to read, nothing to disclose. */
+  private projectDisposition(): 'inactive' | 'owned' | 'unadopted-present' {
+    const p = this.opts.project;
+    if (!p) return 'inactive';
+    if (isOwned(p.root, p.home)) return 'owned';
+    return existsSync(p.ledger) ? 'unadopted-present' : 'inactive';
+  }
+
   /** Verified live records from global + (project iff owned), each tagged with scope + integrity,
    *  plus whether a master key was available for EVERY scope read (integrityAvailable). */
   private scopedVerified(): { records: ScopedRecord[]; available: boolean } {
@@ -246,7 +271,7 @@ export class MemoryStore {
     };
     add(this.global, 'global');
     const p = this.opts.project;
-    if (p && isOwned(p.root, p.home)) add(p.ledger, 'project');
+    if (p && this.projectDisposition() === 'owned') add(p.ledger, 'project');
     return { records: out, available };
   }
 
@@ -258,13 +283,15 @@ export class MemoryStore {
   /** Read-once, content-identity-keyed recall input (spec §5). Reads each participating ledger's bytes
    *  ONCE (I1), keys a single slot on (digest, fresh subkey fingerprint, scopeId) per scope (I2/I3),
    *  and reuses the cached scoped projection + rank artifacts on an exact match; else rebuilds from the
-   *  SAME bytes. Ownership is checked fresh here, upstream of the key (I4). */
+   *  SAME bytes. Project participation is snapshotted fresh here via projectDisposition(), upstream of
+   *  the key (I4) — still a fresh isOwned read every call, just routed through the shared tri-state
+   *  predicate so this decision and scopedVerified's can never disagree within one call. */
   private recallInput(): { scoped: ScopedRecord[]; available: boolean; artifacts: ReturnType<typeof buildRankArtifacts> } {
     const scopes: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined }> = [
       { ledger: this.global, scope: 'global', root: undefined },
     ];
     const p = this.opts.project;
-    if (p && isOwned(p.root, p.home)) scopes.push({ ledger: p.ledger, scope: 'project', root: p.root });
+    if (p && this.projectDisposition() === 'owned') scopes.push({ ledger: p.ledger, scope: 'project', root: p.root });
 
     const key: ScopeKeyComponent[] = [];
     const reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; text: string; bytes: number; subkey: Buffer | null; readMs: number }> = [];
@@ -528,7 +555,7 @@ export class MemoryStore {
     };
     addScope(this.global, 'global');
     const p = this.opts.project;
-    if (p && isOwned(p.root, p.home)) addScope(p.ledger, 'project');
+    if (p && this.projectDisposition() === 'owned') addScope(p.ledger, 'project');
 
     return { rows, anomalies, truncated, integrityAvailable };
   }
@@ -555,7 +582,7 @@ export class MemoryStore {
     };
     addScope(this.global, 'global');                       // exact project block copied from historyView
     const p = this.opts.project;
-    if (p && isOwned(p.root, p.home)) addScope(p.ledger, 'project');
+    if (p && this.projectDisposition() === 'owned') addScope(p.ledger, 'project');
     return { facts, keyAvailable, truncated };
   }
 
