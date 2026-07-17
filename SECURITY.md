@@ -81,12 +81,23 @@ it always tombstones (soft), it can never pass `permanent: true`. So a prompt-in
 reach this path and cannot destroy a genuine forgery-audit signal; only an operator running code
 outside the agent's conversation (a script or REPL against `MemoryStore`) can.
 
-**Known routing caveat (registered follow-up, not fixed).** `store.ts`'s `ledgerOf(id)` falls back to
-the GLOBAL ledger for any id absent from both live projections, and a marker is never in the live
-projection (it is a verify-shaped tombstone with a null target) — so a permanent erase of a *project*
-ledger's planted marker can route to the global ledger instead of the ledger that actually holds it.
-Before erasing, confirm which ledger file the marker physically lives in (read the ledger JSONL
-directly, or `helix_memory_inspect`) rather than trusting `ledgerOf`'s fallback.
+**Marker-erase routing (fixed); general non-live-id fallback (narrower residual).** A permanent erase
+of a *project* ledger's planted marker no longer risks landing on the global ledger: `erase()` resolves
+its target through `resolveEraseTarget`, which recognizes a marker by its canonical family
+(`markerFamilyOf` + a family-prefix presence check in `presentIn`) rather than by live-projection
+membership, and the `scope` parameter (`erase(id, { permanent: true, scope: 'project' })`) lets a
+caller pin the ledger explicitly. A committed probe
+(`test/memory/provenance-audit/marker-erase-routing.test.ts`) confirms a project-ledger marker's
+permanent erase with `scope: 'project'` empties it from that ledger, not global.
+
+This does not retire every non-live-id routing question. `ledgerOf(id)` — the separate routine that
+resolves an *existing* target's ledger for `confirm`/`recheck` (signed-verify writes) and for
+`commit`'s supersede-target lookup — still falls back to the GLOBAL ledger for any id absent from both
+live projections. Both of its call sites re-check liveness immediately afterward and throw rather than
+act on a mismatch, so this is not a silent-corruption path today, but the "default to global when not
+found" pattern is not eliminated everywhere, only hardened for erase. For a non-live, non-marker id,
+still confirm which ledger it physically lives in (read the ledger JSONL directly, or
+`helix_memory_inspect`), or pass an explicit `scope` where the API offers one.
 
 **Residual bounds (documented, not defended):**
 
