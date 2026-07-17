@@ -34,3 +34,10 @@ await build({
   outdir: join(OUT, 'hooks'),
   outExtension: { '.js': '.mjs' },
 });
+
+await build({
+  ...common,
+  entryPoints: { 'helix-trigger': 'scripts/trigger-cli.ts' },
+  outdir: OUT,
+  outExtension: { '.js': '.mjs' },
+});
