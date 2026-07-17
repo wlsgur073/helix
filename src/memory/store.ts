@@ -15,7 +15,7 @@ import { rankWithArtifacts, buildRankArtifacts, type Expansion } from './retriev
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce } from './content-frame.js';
-import { isOwned, stampOwnership } from './ownership.js';
+import { isOwned, stampOwnership, projectDispositionOf, type ProjectDisposition } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedProjectionWithSubkey } from './verified-read.js';
@@ -73,6 +73,11 @@ export interface RecallResult {
   /** False when no master key is available — every state is conservatively clamped to Fresh and
    *  no elevation can be trusted (the verifying replay ran in key-absent mode). */
   integrityAvailable: boolean;
+  /** B2: this call's single project-disposition snapshot (B1), for the caller's unadopted-ledger
+   *  disclosure note. Computed ONCE per call, outside the A4 rank cache (recallInput's key vector
+   *  only covers PARTICIPATING scopes, so a foreign file's appearance never changes the key — this
+   *  field is what lets the note still flip under a cache HIT). */
+  projectDisposition: ProjectDisposition;
 }
 
 export interface RecheckResult {
@@ -249,17 +254,21 @@ export class MemoryStore {
    *    OWN independent, fresh isOwned/existsSync check — targetLedger's auto-stamp claim-on-first-use
    *    and fail-loud-on-foreign-ledger behavior is unaffected by this method or its caller.
    *  - 'inactive': no project layer configured, OR configured but neither owned nor a ledger file
-   *    present — nothing to read, nothing to disclose. */
-  private projectDisposition(): 'inactive' | 'owned' | 'unadopted-present' {
-    const p = this.opts.project;
-    if (!p) return 'inactive';
-    if (isOwned(p.root, p.home)) return 'owned';
-    return existsSync(p.ledger) ? 'unadopted-present' : 'inactive';
+   *    present — nothing to read, nothing to disclose.
+   *
+   *  B2: the tri-state RULES above now live in the shared, pure projectDispositionOf (ownership.ts) —
+   *  this method is a one-line delegate. What stays HERE is the call-site contract: invoke it ONCE per
+   *  public read call (recall/currentView/historyView/asOfView each do so, then thread the snapshot as
+   *  a parameter into every private helper that needs it, never re-invoking this within that call). */
+  private projectDisposition(): ProjectDisposition {
+    return projectDispositionOf(this.opts.project);
   }
 
-  /** Verified live records from global + (project iff owned), each tagged with scope + integrity,
-   *  plus whether a master key was available for EVERY scope read (integrityAvailable). */
-  private scopedVerified(): { records: ScopedRecord[]; available: boolean } {
+  /** Verified live records from global + (project iff `disposition === 'owned'`), each tagged with
+   *  scope + integrity, plus whether a master key was available for EVERY scope read
+   *  (integrityAvailable). `disposition` is the caller's ALREADY-computed snapshot (B2) — this method
+   *  never calls projectDisposition() itself, so one public call can never disagree with itself. */
+  private scopedVerified(disposition: ProjectDisposition): { records: ScopedRecord[]; available: boolean } {
     const out: ScopedRecord[] = [];
     let available = true;
     const add = (ledger: LedgerPath, scope: MemoryScope) => {
@@ -271,27 +280,32 @@ export class MemoryStore {
     };
     add(this.global, 'global');
     const p = this.opts.project;
-    if (p && this.projectDisposition() === 'owned') add(p.ledger, 'project');
+    if (p && disposition === 'owned') add(p.ledger, 'project');
     return { records: out, available };
   }
 
-  /** Live records from global + (project iff owned), each tagged with its scope. */
-  private scopedProjection(): ScopedRecord[] {
-    return this.scopedVerified().records;
+  /** Live records from global + (project iff `disposition === 'owned'`), each tagged with its scope. */
+  private scopedProjection(disposition: ProjectDisposition): ScopedRecord[] {
+    return this.scopedVerified(disposition).records;
   }
 
   /** Read-once, content-identity-keyed recall input (spec §5). Reads each participating ledger's bytes
    *  ONCE (I1), keys a single slot on (digest, fresh subkey fingerprint, scopeId) per scope (I2/I3),
    *  and reuses the cached scoped projection + rank artifacts on an exact match; else rebuilds from the
-   *  SAME bytes. Project participation is snapshotted fresh here via projectDisposition(), upstream of
-   *  the key (I4) — still a fresh isOwned read every call, just routed through the shared tri-state
-   *  predicate so this decision and scopedVerified's can never disagree within one call. */
-  private recallInput(): { scoped: ScopedRecord[]; available: boolean; artifacts: ReturnType<typeof buildRankArtifacts> } {
+   *  SAME bytes. `disposition` is the caller's (recall's) single per-call snapshot (B2), threaded in
+   *  rather than re-read here — it gates project participation (I4) exactly as before, but a stale
+   *  disposition can never disagree with scopedVerified's because there is only one evaluation per
+   *  call. NOTE: `disposition` participates ONLY in the `scopes` decision below, never in `key` — the
+   *  cache stays keyed on participating-scope content identity alone, so an unadopted-present foreign
+   *  file (not a participating scope) can appear/disappear across calls without forcing a rebuild; the
+   *  caller (recall) re-computes `disposition` fresh every call regardless of cache hit/miss, which is
+   *  what lets the disclosure note still flip under a cache HIT. */
+  private recallInput(disposition: ProjectDisposition): { scoped: ScopedRecord[]; available: boolean; artifacts: ReturnType<typeof buildRankArtifacts> } {
     const scopes: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined }> = [
       { ledger: this.global, scope: 'global', root: undefined },
     ];
     const p = this.opts.project;
-    if (p && this.projectDisposition() === 'owned') scopes.push({ ledger: p.ledger, scope: 'project', root: p.root });
+    if (p && disposition === 'owned') scopes.push({ ledger: p.ledger, scope: 'project', root: p.root });
 
     const key: ScopeKeyComponent[] = [];
     const reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; text: string; bytes: number; subkey: Buffer | null; readMs: number }> = [];
@@ -412,7 +426,12 @@ export class MemoryStore {
   }
 
   recall(query: string, opts: RecallOptions = {}): RecallResult {
-    const { scoped, available, artifacts } = this.recallInput();
+    // B2: ONE disposition snapshot for this whole call, computed BEFORE consulting the rank cache and
+    // never memoized in it — recallInput's key vector covers only PARTICIPATING scopes, so a foreign
+    // unadopted ledger appearing/disappearing never changes the key and can serve a cache HIT; this
+    // fresh-every-call read is what still lets the disclosure note flip under that HIT.
+    const disposition = this.projectDisposition();
+    const { scoped, available, artifacts } = this.recallInput(disposition);
     const byId = new Map(scoped.map((s) => [s.record.id, s]));
     const expansion = this.opts.expansion ?? defaultExpansion();
     const hits = rankWithArtifacts(scoped.map((s) => s.record), artifacts, query,
@@ -427,6 +446,7 @@ export class MemoryStore {
       items,
       framed: frameAsData(items.map(({ record, scope }) => ({ record, scope })), this.nonce()),  // I7: fresh nonce per call
       integrityAvailable: available,
+      projectDisposition: disposition,
     };
   }
 
@@ -442,9 +462,10 @@ export class MemoryStore {
     return this.global; // global, or fall through for a non-live id (callers re-gate liveness and throw)
   }
 
-  /** Live projected record for `id` across scopes, or throw. */
+  /** Live projected record for `id` across scopes, or throw. Its own single disposition snapshot
+   *  (this call is not a note-rendering surface, so nothing needs it threaded further). */
   private liveTarget(id: string): MemoryRecord {
-    const found = this.scopedProjection().find((s) => s.record.id === id);
+    const found = this.scopedProjection(this.projectDisposition()).find((s) => s.record.id === id);
     if (!found) throw new Error('target not found (dead or unknown id)');
     return found.record;
   }
@@ -513,7 +534,16 @@ export class MemoryStore {
   }
 
   inspect(): ScopedRecord[] {
-    return this.scopedProjection();
+    return this.currentView().records;
+  }
+
+  /** Current live projection PLUS the single disposition snapshot (B2) used to gate it — the
+   *  disposition-threaded counterpart of `inspect()`, for the current-view MCP surface's
+   *  unadopted-ledger disclosure note. `inspect()` itself stays array-shaped (unchanged, many
+   *  call sites); this is the one entry a caller uses when it also needs to render the note. */
+  currentView(): { records: ScopedRecord[]; projectDisposition: ProjectDisposition } {
+    const disposition = this.projectDisposition();
+    return { records: this.scopedProjection(disposition), projectDisposition: disposition };
   }
 
   /** Live + closed rows across scopes for the bitemporal history view. Live rows come WHOLESALE from
@@ -530,7 +560,10 @@ export class MemoryStore {
    *  the graded live rows are byte-identical to the prior scopedVerified()-sourced ones. Atomicity
    *  here is intra-scope (one snapshot, two projections); it needs no lock — global+project remain two
    *  independent reads, and a forged cross-scope id stays distinguished by its scope tag. */
-  historyView(): { rows: ScopedHistoricalRecord[]; anomalies: Set<string>; truncated: boolean; integrityAvailable: boolean } {
+  historyView(): { rows: ScopedHistoricalRecord[]; anomalies: Set<string>; truncated: boolean; integrityAvailable: boolean; projectDisposition: ProjectDisposition } {
+    // B2: ONE disposition snapshot for this call, computed up front and reused below — never a second
+    // this.projectDisposition() call within this method.
+    const disposition = this.projectDisposition();
     const rows: ScopedHistoricalRecord[] = [];
     const anomalies = new Set<string>();
     let truncated = false;
@@ -555,16 +588,18 @@ export class MemoryStore {
     };
     addScope(this.global, 'global');
     const p = this.opts.project;
-    if (p && this.projectDisposition() === 'owned') addScope(p.ledger, 'project');
+    if (p && disposition === 'owned') addScope(p.ledger, 'project');
 
-    return { rows, anomalies, truncated, integrityAvailable };
+    return { rows, anomalies, truncated, integrityAvailable, projectDisposition: disposition };
   }
 
   /** Point-in-time forensic snapshot at system-time `t` (spec C §5). Mirrors historyView's ATOMIC
    *  single-parse-per-scope: each scope's ledger is parsed ONCE and the single array feeds
    *  buildAsOfEvidence + ledgerTruncated. `t` is assumed canonical (the surface validates). Membership
    *  and v1 verify timing are DECLARED; only v2 verify tx is authenticated (per-evidence flag). */
-  asOfView(t: string): { facts: ScopedAsOfFact[]; keyAvailable: boolean; truncated: boolean } {
+  asOfView(t: string): { facts: ScopedAsOfFact[]; keyAvailable: boolean; truncated: boolean; projectDisposition: ProjectDisposition } {
+    // B2: ONE disposition snapshot for this call (see historyView's identical comment).
+    const disposition = this.projectDisposition();
     const facts: ScopedAsOfFact[] = [];
     let keyAvailable = true;
     let truncated = false;
@@ -582,8 +617,8 @@ export class MemoryStore {
     };
     addScope(this.global, 'global');                       // exact project block copied from historyView
     const p = this.opts.project;
-    if (p && this.projectDisposition() === 'owned') addScope(p.ledger, 'project');
-    return { facts, keyAvailable, truncated };
+    if (p && disposition === 'owned') addScope(p.ledger, 'project');
+    return { facts, keyAvailable, truncated, projectDisposition: disposition };
   }
 
   /** Explicitly adopt the active project ledger (trust its current contents). For team-shared

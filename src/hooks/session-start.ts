@@ -13,7 +13,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatSessionStartContext } from './format-context.js';
 import { newNonce } from '../memory/content-frame.js';
-import { isOwned, projectLedgerPath } from '../memory/ownership.js';
+import { projectDispositionOf, projectLedgerPath, type ProjectDisposition } from '../memory/ownership.js';
 import { verifiedLiveStats, type ReplayStats } from '../memory/verified-read.js';
 import { createMetricsSink } from '../metrics.js';
 import { metricsEnabledFromGlobalConfig } from '../config.js';
@@ -39,6 +39,10 @@ export interface GatherResult {
   integrityAvailable: boolean;
   /** Per-scope replay decomposition, in read order. Pure data — main() decides to emit. */
   replays: Array<{ scope: MemoryScope } & ReplayStats>;
+  /** B2: this call's single project-disposition snapshot (the SAME shared tri-state predicate
+   *  MemoryStore's read paths use — see ownership.ts's projectDispositionOf), for the caller's
+   *  unadopted-ledger disclosure note. 'inactive' when no cwd was given. */
+  projectDisposition: ProjectDisposition;
 }
 
 /**
@@ -61,22 +65,30 @@ export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): G
   for (const r of g.projection.live.values()) records.push({ record: r, scope: 'global' });
 
   // Project root comes ONLY from the hook's stdin cwd (canonical). No process.cwd() fallback —
-  // a hook's own cwd is unreliable. No cwd -> global only.
+  // a hook's own cwd is unreliable. No cwd -> global only (disposition stays 'inactive').
+  let projectDisposition: ProjectDisposition = 'inactive';
   if (cwd) {
-    try {
-      if (isOwned(cwd, home)) {
-        const projLedger = projectLedgerPath(cwd);
-        // guard: never read the global ledger as a "project" layer (cwd == ~ collision)
-        if (resolve(projLedger) !== resolve(globalLedger)) {
+    const projLedger = projectLedgerPath(cwd);
+    // guard: never read the global ledger as a "project" layer (cwd == ~ collision) — the SAME guard
+    // gates both the disposition snapshot and the read below, so the two can never disagree.
+    if (resolve(projLedger) !== resolve(globalLedger)) {
+      try {
+        // B2: the SAME shared tri-state predicate the store uses, from the same descriptor shape —
+        // computed ONCE and reused to gate the read immediately below (mirrors store.ts's
+        // projectDisposition()-then-route pattern: one evaluation per call, never a second isOwned
+        // read for the same decision). projectDispositionOf never throws (isOwned/existsSync are
+        // already safe), so an exception here can only come from the read that follows.
+        projectDisposition = projectDispositionOf({ root: cwd, home, ledger: projLedger });
+        if (projectDisposition === 'owned') {
           const project = verifiedLiveStats(projLedger, home, cwd);
           replays.push({ scope: 'project', ...project.stats });
           if (!project.projection.keyAvailable) integrityAvailable = false;
           for (const r of project.projection.live.values()) records.push({ record: r, scope: 'project' });
         }
-      }
-    } catch { /* unreadable/foreign project ledger → global only */ }
+      } catch { /* unreadable/foreign project ledger → global only */ }
+    }
   }
-  return { records, integrityAvailable, replays };
+  return { records, integrityAvailable, replays, projectDisposition };
 }
 
 async function main(): Promise<void> {
@@ -90,8 +102,10 @@ async function main(): Promise<void> {
       if (typeof j.cwd === 'string') cwd = j.cwd;
     } catch { /* no/garbage stdin -> global only */ }
 
-    const { records, integrityAvailable, replays } = gatherScopedRecords({ home, globalLedger, cwd });
-    const text = formatSessionStartContext(records, newNonce(), { integrityAvailable });
+    const { records, integrityAvailable, replays, projectDisposition } = gatherScopedRecords({ home, globalLedger, cwd });
+    const text = formatSessionStartContext(records, newNonce(), {
+      integrityAvailable, unadoptedPresent: projectDisposition === 'unadopted-present',
+    });
     // Synchronous write to fd 1: process exit must not drop a buffered async pipe write on
     // Windows (which would inject an unterminated DATA block). No explicit exit() needed —
     // natural exit yields code 0 and there are no open handles to keep the loop alive.

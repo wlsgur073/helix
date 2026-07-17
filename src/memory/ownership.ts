@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 /** The in-repo project ledger path for a project root. */
@@ -33,6 +33,34 @@ export function isOwned(projectRoot: string, home: string): boolean {
   if (!entry) return false;
   const stamp = readOwner(projectRoot);
   return stamp !== null && stamp === entry.stamp;
+}
+
+/** A project layer's read-side participation state (B1/B2). 'unadopted-present' is the disclosure
+ *  trigger: a foreign, un-owned ledger file sits where Helix would read one, and is excluded from
+ *  every read surface. */
+export type ProjectDisposition = 'inactive' | 'owned' | 'unadopted-present';
+
+/** Shared, side-effect-free tri-state snapshot of a project layer's disposition — the SAME predicate
+ *  MemoryStore (read paths) and the SessionStart hook (which does not go through MemoryStore) both
+ *  route through, so the two surfaces can never disagree about what 'unadopted-present' means. Pure:
+ *  two file reads (isOwned's registry+.owner, then existsSync), no writes, never throws (isOwned
+ *  already swallows its own read errors; existsSync never throws).
+ *
+ *  - 'owned': isOwned(project.root, project.home) — true regardless of whether the ledger FILE exists
+ *    yet (an owned project with no ledger file still participates).
+ *  - 'unadopted-present': a descriptor is given, NOT owned, and a ledger file exists at project.ledger
+ *    — the exact condition MemoryStore's targetLedger() throws the adopt-hint error on for commit.
+ *  - 'inactive': no descriptor (no project layer configured), OR configured but neither owned nor a
+ *    ledger file present — nothing to read, nothing to disclose.
+ *
+ *  A SNAPSHOT, not a lock: call fresh each time — see MemoryStore.projectDisposition's doc-comment for
+ *  the full per-call self-consistency rationale (B1). */
+export function projectDispositionOf(
+  project: { root: string; home: string; ledger: string } | undefined,
+): ProjectDisposition {
+  if (!project) return 'inactive';
+  if (isOwned(project.root, project.home)) return 'owned';
+  return existsSync(project.ledger) ? 'unadopted-present' : 'inactive';
 }
 
 /** Stamp a project as owned: write the repo-side .owner and the home-side registry entry. */

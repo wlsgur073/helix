@@ -1,6 +1,6 @@
 import type { MemoryState, ScopedRecord } from '../types.js';
 import { requiresReverifyBeforeUse } from '../memory/state-machine.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, safeId } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS, safeId, UNADOPTED_LEDGER_NOTE } from '../memory/content-frame.js';
 import { classifyEmission } from '../risk/trifecta.js';
 import { isVerifyingSource } from '../memory/firewall.js';
 
@@ -12,6 +12,13 @@ export interface FormatOptions {
    *  can be trusted. Appends a trusted out-of-band note after the frame (mirrors recall's signal).
    *  Default true (no note) keeps the signature backward-compatible. */
   integrityAvailable?: boolean;
+  /** B2: true iff this call's project-disposition snapshot is 'unadopted-present' — a foreign,
+   *  un-owned project ledger sits where Helix would read one, and is silently excluded. When true the
+   *  trusted, constant UNADOPTED_LEDGER_NOTE ALWAYS renders — even with zero usable records, where an
+   *  empty auto-load IS the misdiagnosis surface (a silent '' looks identical to "no project memory
+   *  exists" and "one exists but isn't trusted") — and is reserved outside the maxChars truncation
+   *  accounting so the budget can never drop it. Default false (no note, backward-compatible). */
+  unadoptedPresent?: boolean;
 }
 
 const INTEGRITY_UNAVAILABLE_NOTE = '(integrity verification unavailable — trust grades shown are unverified)';
@@ -25,18 +32,22 @@ const RESERVE = 6; // floor of item slots guaranteed to current-authoritative re
 /**
  * Render the live projection as a SessionStart context block: nonce-delimited, semantics-headed,
  * per-line DATA[state:scope]| datamarked, most-trusted first, re-verify flags surfaced, bounded in
- * items and characters. Empty memory renders '' (inject nothing). `nonce` is supplied by the caller.
+ * items and characters. Empty memory renders '' (inject nothing) UNLESS `unadoptedPresent` is set, in
+ * which case the constant disclosure note renders alone (B2 — the empty auto-load IS the misdiagnosis
+ * surface an attacker-planted-but-unadopted ledger would otherwise hide behind). `nonce` is supplied
+ * by the caller.
  */
 export function formatSessionStartContext(records: ScopedRecord[], nonce: string, opts: FormatOptions = {}): string {
   const maxItems = opts.maxItems ?? 30;
   const maxChars = opts.maxChars ?? 4000;
   const maxItemChars = opts.maxItemChars ?? 240;
   const integrityAvailable = opts.integrityAvailable ?? true;
+  const unadoptedNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : null;
 
   const usable = records
     .filter(({ record }) => record.content.trim() !== '')
     .sort((a, b) => STATE_ORDER[a.record.state] - STATE_ORDER[b.record.state] || b.record.tx.localeCompare(a.record.tx));
-  if (usable.length === 0) return '';
+  if (usable.length === 0) return unadoptedNote ?? '';
 
   // Crowd-out protection: guarantee up to RESERVE current-authoritative (verifying source, not
   // Suspect) records survive the item cap, even if newer non-authoritative records would fill every
@@ -101,5 +112,9 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
     dropped += 1;
     out = assemble();
   }
-  return out;
+  // B2: appended AFTER the budget loop has already settled `out` against maxChars — reserved, i.e.
+  // EXCLUDED from truncation accounting (the loop above never sees it, so it is never a line-drop
+  // candidate and the budget can never suppress it; a saturated context may end up a little over
+  // maxChars rather than lose the note).
+  return unadoptedNote ? out + '\n' + unadoptedNote : out;
 }
