@@ -191,4 +191,26 @@ describe('I1: runReport renders the operator-facing report end-to-end (F4 unlock
     expect(out).toContain('recall op p95: (no successful samples)');
     expect(out).not.toMatch(/provisional/);
   });
+
+  // Relabel (2026-07-17): this report is a DIAGNOSTIC, never the authoritative trigger -- that
+  // authority moved to the helix-trigger daily snapshot (Phase 2 Track 2a). Neither prior test above
+  // ever reached the 'exceeded' state, so the old "TRIGGER EXCEEDED" wording had NO test pinning its
+  // actual rendered stdout (only summarizeMetrics().verdict.state was checked elsewhere in this file).
+  it('25 SLOW successful recalls (exceeded state): no "TRIGGER EXCEEDED" wording anywhere; the non-authoritative diagnostic wording renders instead', async () => {
+    const ts = new Date().toISOString();
+    const file = writeMetrics(Array.from({ length: 25 }, () => opRow(999, ts)));
+    const out = await captureStdout(() => runReport({ file, sinceDays: 14 }));
+    expect(out).not.toContain('TRIGGER EXCEEDED');
+    expect(out).toContain('windowed p95 diagnostic (non-authoritative)');
+    expect(out).toContain('p95 over 150ms -- non-authoritative diagnostic; the authoritative trigger is the helix-trigger snapshot');
+  });
+
+  it('25 FAST successful recalls (below state): the retitled block header still renders (the title change applies to every state, not just exceeded)', async () => {
+    const ts = new Date().toISOString();
+    const file = writeMetrics(Array.from({ length: 25 }, () => opRow(5, ts)));
+    const out = await captureStdout(() => runReport({ file, sinceDays: 14 }));
+    expect(out).not.toContain('TRIGGER EXCEEDED');
+    expect(out).toContain('windowed p95 diagnostic (non-authoritative)');
+    expect(out).toContain('below trigger -- no action');
+  });
 });

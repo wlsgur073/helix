@@ -332,7 +332,7 @@ export async function runReport(opts: { file?: string; sinceDays: number }): Pro
     process.stdout.write(`\nskipped: ${s.skipped.malformed + s.skipped.newerSchema} rows (${s.skipped.newerSchema} newer-schema)\n`);
   }
   const v = s.verdict;
-  process.stdout.write(`\nverdict (window: last ${v.windowDays} days; current size: rows=${v.latestRows ?? '?'} bytes=${v.latestBytes ?? '?'})\n`);
+  process.stdout.write(`\nwindowed p95 diagnostic (non-authoritative) (window: last ${v.windowDays} days; current size: rows=${v.latestRows ?? '?'} bytes=${v.latestBytes ?? '?'})\n`);
   process.stdout.write(`  recall (successful): ${v.recallOkN} samples${v.recallFailN ? `, ${v.recallFailN} failed` : ''}\n`);
   // Provisional comparison (spec §E2): still rendered under `insufficient` when n > 0 -- the p95 is
   // real, just below the confidence floor for a trigger verdict. n === 0 has no value to render.
@@ -343,7 +343,7 @@ export async function runReport(opts: { file?: string; sinceDays: number }): Pro
   process.stdout.write(`  replay p95:    ${v.replayP95 === null ? 'no samples' : `${v.replayP95.toFixed(1)}ms (n=${v.replayN})`}\n`);
   if (v.forgedDrops > 0) process.stdout.write(`  forged verify rows dropped by compaction (window): ${v.forgedDrops}\n`);
   process.stdout.write(
-    v.state === 'exceeded' ? `  TRIGGER EXCEEDED -- evaluate the Stage-B SQLite migration (roadmap 2026-06-13 section 6)\n`
+    v.state === 'exceeded' ? `  p95 over 150ms -- non-authoritative diagnostic; the authoritative trigger is the helix-trigger snapshot\n`
     : v.state === 'below' ? `  below trigger -- no action\n`
     : `  insufficient evidence (${v.reason}) -- no judgment\n`,
   );
