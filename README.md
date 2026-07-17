@@ -152,7 +152,7 @@ Helix keeps two ledgers that it always reads together:
 
 **Activation.** The project layer switches on automatically when the server is launched from a directory that has a `.helix/` folder. In the absence of that folder the server operates in global-only mode — it will never create a `.helix/` directory on its own.
 
-**Trust model (ownership gate).** A project ledger is read and written only if it is *owned*: a dual-key check matches a home-side registry entry (`~/.helix/projects.json`) against an in-repo stamp file (`.helix/.owner`). The registry lives in the user's home directory, so a freshly cloned repo cannot forge it. A foreign (cloned) ledger is silently ignored on recall and refused on write until you explicitly call `helix_memory_adopt` — after which the ledger's existing content becomes visible and future writes are accepted.
+**Trust model (ownership gate).** A project ledger is read and written only if it is *owned*: a dual-key check matches a home-side registry entry (`~/.helix/projects.json`) against an in-repo stamp file (`.helix/.owner`). The registry lives in the user's home directory, so a freshly cloned repo cannot forge it. A foreign (cloned) ledger's content is excluded from reads — though a constant note discloses its presence — and writes to it are refused until you explicitly call `helix_memory_adopt`, after which the ledger's existing content becomes visible and future writes are accepted.
 
 **Privacy by default.** `.helix/` is gitignored, so project memory stays private to each developer. To share project memory across a team, un-ignore `.helix/` in your repo and have each team member run `helix_memory_adopt` after cloning. This is intentionally opt-in.
 

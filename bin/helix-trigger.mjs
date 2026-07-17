@@ -1,5 +1,5 @@
 // scripts/trigger-measure.ts
-import { existsSync, mkdirSync as mkdirSync2, readFileSync as readFileSync3 } from "node:fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3 } from "node:fs";
 import { dirname, join as join3, resolve as resolve2 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
@@ -43,7 +43,7 @@ function writeAll(fs, fd, text) {
 }
 
 // src/memory/ownership.ts
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 function projectLedgerPath(projectRoot) {
   return join(projectRoot, ".helix", "memory.jsonl");
@@ -278,7 +278,7 @@ function toParticipant(id, outcome) {
   return outcome.state === "read" ? { id, state: "read", rows: outcome.rows, bytes: outcome.bytes } : { id, state: outcome.state };
 }
 function resolveProjectDisposition(root, home, globalLedger) {
-  if (!existsSync(join3(root, ".helix"))) return "absent";
+  if (!existsSync2(join3(root, ".helix"))) return "absent";
   const distinctFromGlobal = resolve2(projectLedgerPath(root)) !== resolve2(globalLedger);
   return distinctFromGlobal && isOwned(root, home) ? "owned" : "unowned";
 }
@@ -376,7 +376,7 @@ function validateRecordLine(line) {
 function appendToSink(home, line, fs = realFsOps) {
   const path = join3(home, SINK_FILE);
   mkdirSync2(dirname(path), { recursive: true });
-  const existedBefore = existsSync(path);
+  const existedBefore = existsSync2(path);
   const fd = fs.openSync(path, "a", 384);
   try {
     writeAll(fs, fd, line + "\n");
