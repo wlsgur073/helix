@@ -111,6 +111,16 @@ still confirm which ledger it physically lives in (read the ledger JSONL directl
 - **Trust is machine-local.** The signing key never leaves `~/.helix`, so a `Verified` grade does
   not transfer to another machine (e.g. a Windows vs. WSL clone) — elevations signed elsewhere
   replay as `Fresh` until you re-`confirm` on that machine.
+- **A `Corroborated` grade can originate from, and be lost to, a non-authoritative source.**
+  `recheck`'s mechanical reality-check can raise an `agent-inference`/`user-relayed` record to
+  `Corroborated` because the checked evidence (e.g. a file's contents) is plantable by the same
+  agent — deliberately so: `Corroborated` is the weaker, mechanical grade, only a `user`-sourced,
+  human-approved `confirm` reaches `Verified`, and `requiresReverifyBeforeUse` still flags any
+  non-authoritative source regardless of grade. Symmetrically, the supersede guard protects only a
+  target that is `Verified` or already has a verifying source, so that same `Corroborated` record
+  can still be superseded or evicted by a later Fresh non-authoritative commit; the replacement is
+  honestly `Fresh` — no grade is forged — so this is a within-model crowd-out property, not a
+  trust-forgery.
 
 ## Ledger locking, erasure, and durability boundaries
 

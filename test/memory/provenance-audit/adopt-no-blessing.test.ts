@@ -29,4 +29,28 @@ describe('probe (a): adopt() blesses nothing pre-existing', () => {
     const live = store.inspect().find((s) => s.record.id === 'planted');
     expect(live?.record.state).toBe('Fresh'); // clamped: no valid MAC exists for it
   });
+
+  it('positive control: a fresh user commit + confirm in the same setup DOES reach Verified', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-a-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-a-proj-'));
+    const global = join(home, 'memory.jsonl');
+    const projLedger = join(root, '.helix', 'memory.jsonl');
+    mkdirSync(dirname(projLedger), { recursive: true });
+    writeFileSync(projLedger, JSON.stringify(seededVerified('planted')) + '\n');
+
+    // Distinct ids per call (unlike probe (a)'s fixed 'm_1'): this test also mints a signed verify
+    // record via confirm(), which draws its own id — a fixed genId would collide the two.
+    let n = 0;
+    const store = new MemoryStore(global, {
+      sessionId: 's', home, now: () => CLK, genId: () => 'm_' + (++n),
+      project: { ledger: projLedger, root, home },
+    });
+    store.adopt(); // same setup as probe (a): stamps ownership + ensures master
+
+    const a = store.commit({ content: 'authored here', source: 'user' });
+    store.confirm(a.id);
+    // Proves the elevation machinery genuinely works in this fixture (signing is not broken) —
+    // which is what makes probe (a)'s Fresh-clamp on 'planted' meaningful rather than accidental.
+    expect(store.inspect().find((s) => s.record.id === a.id)!.record.state).toBe('Verified');
+  });
 });
