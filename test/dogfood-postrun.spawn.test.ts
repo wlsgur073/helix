@@ -8,8 +8,12 @@
 // the ADAPTER's process-management/reporting contract, treating the artifact as a black box.
 //
 // Matrix (pairwise-reduced, kept lean -- node spawns are slow): artifact {exit 0, crash, hang after a
-// partial stdout write, crash-with-unwritable-sink, unreachable-node}. Every cell asserts the adapter
-// itself exits 0 (a nonzero ExecStopPost can mark the systemd unit failed).
+// partial stdout write, crash-with-unwritable-sink, unreachable-node, missing-root-argument}, plus a
+// dedicated SIGPIPE cell (closed stdout reader on the adapter's own final echo). Every cell asserts
+// the adapter itself exits 0 (a nonzero ExecStopPost can mark the systemd unit failed). The
+// missing-root and SIGPIPE cells lock two fixes made after the initial review: bare `$1`/`$HOME`
+// under `set -u`, and bash's default SIGPIPE disposition killing the script (exit 141) on the final
+// echo if the stdout reader closes early.
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, copyFileSync, accessSync, constants as fsConstants } from 'node:fs';
@@ -28,6 +32,20 @@ const STUB_CRASH = `process.exit(3);\n`;
 // this stub exists to prove a truncated artifact write can never reach the sink (the adapter never
 // reads/forwards the artifact's stdout; only the SINK's own content is asserted for this cell).
 const STUB_HANG = `process.stdout.write('{"v":1,"kind":"eval'); setInterval(() => {}, 1_000_000_000);\n`;
+// Mirrors trigger-cli.ts's own usage-error check (`if (!parsed.root ...) exit(2)`): exits 2 when
+// `--root` is present but empty (or has no following value at all), else exits 0. Used only by the
+// no-root cell, so that cell exercises the SAME contract shape the real artifact takes on a
+// genuinely missing dogfood-root argument, not an ad hoc stand-in reason.
+const STUB_USAGE_ON_EMPTY_ROOT = `
+const args = process.argv.slice(2);
+const rootIndex = args.indexOf('--root');
+const root = rootIndex >= 0 ? args[rootIndex + 1] : undefined;
+process.exit(root ? 0 : 2);
+`;
+// Stays alive ~300ms (well past the adapter's own scripted work) then exits 3 -- gives a SIGPIPE
+// reader time to close the pipe long before the adapter's final stdout echo, making that cell's
+// failure window deterministic instead of a race.
+const STUB_SLOW_CRASH = `setTimeout(() => process.exit(3), 300);\n`;
 
 /** Fresh <tmp>/{scripts/dogfood-postrun.sh, bin/helix-trigger.mjs} tree per test -- copies the REAL
  *  committed script (not a rewritten copy) so $(dirname "$0") resolves against a genuine sibling
@@ -189,5 +207,43 @@ describe('scripts/dogfood-postrun.sh (ExecStopPost adapter spawn tests)', () => 
     expect(record.kind).toBe('reporter-failure');
     if (record.kind !== 'reporter-failure') throw new Error('unreachable');
     expect(record.reason).toBe('launch-failure');
+  });
+
+  it('no positional argument at all (missing dogfood-root) -> adapter exit 0; the artifact degrades via its own usage-error path; exactly one reporter-failure record, reason "crash"', () => {
+    const { scriptPath } = buildTree(STUB_USAGE_ON_EMPTY_ROOT);
+    const home = mkdtempSync(join(tmpdir(), 'helix-postrun-home-'));
+    const env = { ...baseEnv(home), INVOCATION_ID: 'inv-noroot', SERVICE_RESULT: 'success', EXIT_CODE: '0', EXIT_STATUS: '0/SUCCESS' };
+
+    // No root argument at all -- `$1` is entirely unset in the adapter, exercising the `${1:-}` fix.
+    const res = spawnSync('bash', [scriptPath], { env, encoding: 'utf8', timeout: 10_000 });
+
+    expect(res.status).toBe(0);
+    const lines = sinkLines(home);
+    expect(lines).toHaveLength(1);
+    const record = parseTriggerRecord(lines[0]!);
+    expect(record.kind).toBe('reporter-failure');
+    if (record.kind !== 'reporter-failure') throw new Error('unreachable');
+    expect(record.reason).toBe('crash');
+  });
+
+  it("SIGPIPE on the final stdout echo does not kill the adapter -- trap '' PIPE holds, PIPESTATUS[0] is 0", () => {
+    const { scriptPath } = buildTree(STUB_SLOW_CRASH);
+    const home = mkdtempSync(join(tmpdir(), 'helix-postrun-home-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-postrun-root-'));
+    // `head -c 0` wants zero bytes and exits almost immediately, closing the pipe's read end long
+    // before the stub's 300ms sleep elapses -- by the time the adapter's trailing `printf` writes its
+    // reporter-failure line to stdout, the reader is guaranteed gone. PIPESTATUS[0] is the ADAPTER's
+    // own exit status (the left side of the pipe), not head's. Without the `trap '' PIPE` fix, bash's
+    // default SIGPIPE disposition kills the script outright and this would be 141 (128+SIGPIPE) --
+    // verified separately against the pre-fix script.
+    const env: NodeJS.ProcessEnv = { ...baseEnv(home), INVOCATION_ID: 'inv-sigpipe', script: scriptPath, root };
+
+    const res = spawnSync('bash', ['-c', '"$script" "$root" | head -c 0; printf %s "${PIPESTATUS[0]}"'], {
+      env,
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+
+    expect(res.stdout).toBe('0'); // the expected stderr noise ("printf: write error: Broken pipe") is not asserted -- status only
   });
 });

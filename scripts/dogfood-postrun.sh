@@ -5,9 +5,10 @@
 # (clean exit, non-zero exit, signal kill, failed startup -- man-verified, systemd 255). ExecStart's
 # shell state is NOT inherited by ExecStopPost -- everything this script needs arrives via argv ($1)
 # and systemd-provided env (SERVICE_RESULT / EXIT_CODE / EXIT_STATUS / INVOCATION_ID), any of which
-# MAY BE UNSET (e.g. a startup-resource failure never reaches the point where systemd sets them).
-# Every expansion of those vars below is nullable-defaulted (`${VAR:-...}`) so `set -u` never aborts
-# this script on a missing one.
+# MAY BE UNSET (e.g. a startup-resource failure never reaches the point where systemd sets them, or a
+# broken ExecStopPost= invocation omits the dogfood-root argument entirely). Every expansion below --
+# $1 included -- is nullable-defaulted (`${VAR:-...}`) so `set -u` never aborts this script on a
+# missing one.
 #
 # Single writer per record kind: the measurement artifact (bin/helix-trigger.mjs, Tasks A2/A3) is the
 # ONLY writer of `kind:"evaluation"` records -- it self-validates before its one sink append, so a
@@ -18,9 +19,14 @@
 # stdout passes straight through to journald, untouched, exactly as the artifact wrote it.
 #
 # This adapter ALWAYS exits 0. Every step below is guarded so that no failure -- of the artifact, of
-# the sink append, or of this script's own bookkeeping -- can propagate a nonzero exit: a nonzero
-# ExecStopPost exit marks the systemd unit "failed", which would pollute the dogfood agent's own run
-# result with an unrelated reporting-path failure.
+# the sink append, of this script's own bookkeeping, or of the final stdout echo itself -- can
+# propagate a nonzero exit: a nonzero ExecStopPost exit marks the systemd unit "failed", which would
+# pollute the dogfood agent's own run result with an unrelated reporting-path failure. SIGPIPE is
+# trapped (ignored) below, before `set -u`, because bash's default SIGPIPE disposition would otherwise
+# kill this script outright (exit 141) if the final echo's reader goes away early (e.g. a journald
+# hiccup) -- with the trap, that `printf` simply returns a normal nonzero status and execution still
+# reaches the trailing `exit 0`.
+trap '' PIPE
 set -u
 
 # Run id: INVOCATION_ID (a systemd-minted id, stable for this unit invocation) when available, else a
@@ -34,13 +40,16 @@ run_id="${INVOCATION_ID:-p$$-$(date +%s)}"
 artifact="$(cd "$(dirname "$0")" && pwd)/../bin/helix-trigger.mjs"
 
 # Sink path mirrors the artifact's own resolution (scripts/trigger-measure.ts resolveHome): HELIX_HOME
-# when set, else ~/.helix.
-sink="${HELIX_HOME:-$HOME/.helix}/trigger.jsonl"
+# when set, else ~/.helix. HOME is itself nullable-defaulted here too -- if both HELIX_HOME and HOME
+# are unset, this collapses to the literal path "/.helix/trigger.jsonl" (normally unwritable for a
+# non-root user); the mkdir/append below then fail exactly like any other unwritable-sink case, and
+# the stdout echo is the journald-only trace (the already-tested sink-unwritable path).
+sink="${HELIX_HOME:-${HOME:-}/.helix}/trigger.jsonl"
 
 # HELIX_POSTRUN_TIMEOUT / HELIX_POSTRUN_KILL_AFTER override the production 45s/5s budget. They exist
 # ONLY so tests can avoid real 45-second waits -- production always runs with the defaults.
 timeout -k "${HELIX_POSTRUN_KILL_AFTER:-5}" "${HELIX_POSTRUN_TIMEOUT:-45}" \
-  node "$artifact" --root "$1" --run "$run_id" \
+  node "$artifact" --root "${1:-}" --run "$run_id" \
   --service-result "${SERVICE_RESULT:-}" --exit-code "${EXIT_CODE:-}" --exit-status "${EXIT_STATUS:-}"
 status=$?
 
