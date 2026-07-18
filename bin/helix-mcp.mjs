@@ -13610,7 +13610,7 @@ import { dirname as dirname2, basename as basename2, join as join2 } from "node:
 var HEX32 = "[0-9a-f]{32}";
 function orphanTmpPattern(base) {
   const esc2 = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`^${esc2}\\.(c-${HEX32}|lk-${HEX32}|k-${HEX32}|\\d+)\\.tmp$`);
+  return new RegExp(`^${esc2}\\.(c-${HEX32}|lk-${HEX32}|k-${HEX32}|w-${HEX32}|\\d+)\\.tmp$`);
 }
 function sweepOrphanTmps(artifactPath, opts = {}) {
   const fs = opts.fsOps ?? realFsOps;
