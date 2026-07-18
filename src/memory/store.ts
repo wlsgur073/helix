@@ -634,9 +634,16 @@ export class MemoryStore {
     ensureMaster(this.homeDir());
   }
 
-  /** Which marker family a canonical marker id belongs to, or null for a normal id. */
-  private markerFamilyOf(id: string): 'integrity_' | 'horizon_' | null {
-    return id === 'integrity_marker' ? 'integrity_' : id === 'horizon_marker' ? 'horizon_' : null;
+  /** Which marker family an id belongs to, or null for a normal id. `integrity_marker`/
+   *  `horizon_marker` are single canonical fixpoint ids (exact match); a witness fence has no
+   *  single canonical id — one exists per epoch+nonce (witnessFenceRecord, ledger.ts) — so it
+   *  routes by PREFIX instead, the same way presentIn's family-prefix check (below) already
+   *  treats the other two families once matched. */
+  private markerFamilyOf(id: string): 'integrity_' | 'horizon_' | 'witness_fence_' | null {
+    if (id === 'integrity_marker') return 'integrity_';
+    if (id === 'horizon_marker') return 'horizon_';
+    if (id.startsWith('witness_fence_')) return 'witness_fence_';
+    return null;
   }
 
   /** Is `id` present in `ledger` — family-prefix for a marker (C10), else live-or-raw. */

@@ -13746,7 +13746,8 @@ function planCompaction(records, opts) {
   if ((records.some(isHorizonMarker) || records.some((r) => (r.type === "assert" || r.type === "supersede") && !live.has(r.id))) && !opts.erasedIds.has("horizon_marker")) {
     kept.push(canonicalMarker("horizon_marker"));
   }
-  return { kept, droppedForgedVerifies };
+  const withoutStaleFences = kept.filter((r) => !r.id.startsWith("witness_fence_"));
+  return { kept: withoutStaleFences, droppedForgedVerifies };
 }
 function serializedBytes(records) {
   let n = 0;
@@ -15017,9 +15018,16 @@ var MemoryStore = class {
     stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
     ensureMaster(this.homeDir());
   }
-  /** Which marker family a canonical marker id belongs to, or null for a normal id. */
+  /** Which marker family an id belongs to, or null for a normal id. `integrity_marker`/
+   *  `horizon_marker` are single canonical fixpoint ids (exact match); a witness fence has no
+   *  single canonical id — one exists per epoch+nonce (witnessFenceRecord, ledger.ts) — so it
+   *  routes by PREFIX instead, the same way presentIn's family-prefix check (below) already
+   *  treats the other two families once matched. */
   markerFamilyOf(id) {
-    return id === "integrity_marker" ? "integrity_" : id === "horizon_marker" ? "horizon_" : null;
+    if (id === "integrity_marker") return "integrity_";
+    if (id === "horizon_marker") return "horizon_";
+    if (id.startsWith("witness_fence_")) return "witness_fence_";
+    return null;
   }
   /** Is `id` present in `ledger` — family-prefix for a marker (C10), else live-or-raw. */
   presentIn(ledger, id) {

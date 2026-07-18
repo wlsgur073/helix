@@ -6,6 +6,7 @@ import { buildProjection } from './projection.js';
 import { withFileLock, canonical } from './lock.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
+import { fenceId } from './witness-core.js';
 
 export type LedgerPath = string;
 
@@ -40,6 +41,25 @@ function canonicalMarker(kind: 'integrity_marker' | 'horizon_marker'): MemoryRec
     id: kind, tx: MARKER_SENTINEL_TX, validFrom: MARKER_SENTINEL_TX, validTo: null,
     type: 'verify', state: 'Suspect', content: '',
     provenance: { source: 'user', sessionId: 'compaction' },
+    supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+  };
+}
+
+/** A content-free epoch fence: the marker-shaped final row of every ledger rewrite (spec §4.9,
+ *  witness feature). Unlike canonicalMarker's fixed-id fixpoints, a fence carries its OWN real
+ *  transition `tx` (never MARKER_SENTINEL_TX — the fence's chronology IS meaningful: it anchors
+ *  which epoch a rewrite belongs to) and a random per-mint nonce (fenceId), so its bytes are
+ *  unpredictable and a restored old-era file can never be a byte-prefix of a new one. It is
+ *  marker-shaped (isMarkerShape: verify-typed, null target, no mac) so it is excluded from every
+ *  live projection with ZERO read-path changes — the same structural exclusion the horizon/
+ *  integrity markers already rely on (buildProjection never surfaces a `verify`-typed row as a
+ *  fact, regardless of id). Never minted here — planCompaction stays pure; minting a fresh fence
+ *  per rewrite is the caller's job (a later task's compactLedger integration). */
+export function witnessFenceRecord(epoch: number, nonce: string, tx: string): MemoryRecord {
+  return {
+    id: fenceId(epoch, nonce), tx, validFrom: tx, validTo: null,
+    type: 'verify', state: 'Suspect', content: '',
+    provenance: { source: 'user', sessionId: 'witness' },
     supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
   };
 }
@@ -264,7 +284,17 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   if ((records.some(isHorizonMarker) || records.some((r) => (r.type === 'assert' || r.type === 'supersede') && !live.has(r.id))) && !opts.erasedIds.has('horizon_marker')) {
     kept.push(canonicalMarker('horizon_marker'));
   }
-  return { kept, droppedForgedVerifies };
+  // Epoch fence (spec §4.9, witness feature): each rewrite ends with its OWN fresh fence, minted
+  // by the CALLER (a later task's compactLedger integration) — never here, so this function stays
+  // pure. A stale `witness_fence_*` row is therefore simply reclaimable, unlike the integrity/
+  // horizon fixpoints above (which persist forever once triggered): it is never re-minted, and it
+  // cannot reach `kept` via any path above it either — it is `type: 'verify'` so buildProjection
+  // never puts it in `live`, it is not `type: 'erase'`, and its null `supersedes` short-circuits
+  // the HMAC-aware verify-preserve loop before `keepValidVerify` is ever consulted. The drop is
+  // made EXPLICIT here too regardless, so it does not silently depend on the incidental
+  // interaction of those two unrelated guards elsewhere in this function.
+  const withoutStaleFences = kept.filter((r) => !r.id.startsWith('witness_fence_'));
+  return { kept: withoutStaleFences, droppedForgedVerifies };
 }
 
 /** UTF-8 serialized byte length of a record array as written to the ledger (one JSON line + newline each). */
