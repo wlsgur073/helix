@@ -171,15 +171,51 @@ export function advanceWitness(home: string, scopeKey: string, bytes: Buffer, he
   });
 }
 
+/** The minted-but-not-yet-written plan for the next transition (spec §4.9 "Ordering resolution"):
+ *  epoch + nonce + predecessor + supersedes, computed from the CURRENT scope state WITHOUT any witness
+ *  write. Split out of openTransition so the caller (compactLedger) can mint the fence — which needs
+ *  the epoch+nonce — and thereby the `expected` digest BEFORE journaling, breaking the fence<->journal
+ *  cycle. A pure read: never mints a master (tryReadMaster via readScopeWitness), never writes.
+ *  macInvalid degrades entry/journal to null, exactly as openTransition/advanceWitness do. `kind` is
+ *  part of the plan the caller carries to openTransition (it does not affect epoch/nonce here). The
+ *  plan is only ADVISORY — openTransition re-reads under the lock and re-asserts consistency, so a
+ *  concurrent writer moving the witness between plan and open is caught (WitnessAdvanceError), never
+ *  silently applied over a moved state. */
+export function planTransition(
+  home: string, scopeKey: string, kind: JournalEntry['kind'],
+): { epoch: number; nonce: string; predecessor: { byteLength: number; prefixHash: string } | null; supersedes: string | null } {
+  void kind; // carried by the caller into openTransition; epoch/nonce do not depend on it
+  const state = readScopeWitness(home, scopeKey);
+  const entry = state.macInvalid ? null : state.entry;
+  const pending = state.macInvalid ? null : state.journal;
+  const epoch = Math.max((entry?.epoch ?? 0) + 1, pending ? pending.epoch + 1 : 0);
+  const nonce = randomBytes(16).toString('hex');
+  const predecessor = entry ? { byteLength: entry.byteLength, prefixHash: entry.prefixHash } : null;
+  const supersedes = pending?.nonce ?? null;
+  return { epoch, nonce, predecessor, supersedes };
+}
+
 /** Under the witness lock; single-slot atomic supersession — a pending journal is REPLACED by the
  *  new one, its nonce recorded in `supersedes`, so there is never a cleared gap and never two
- *  stacked entries (spec §4.3, Codex round 4). Target epoch never reuses or lowers: it is at least
- *  one past both the current entry AND any journal being superseded. Appends the witness-log line
- *  BEFORE the journal write lands, so incident response sees the intent even if the journal write
- *  itself never completes. */
+ *  stacked entries (spec §4.3, Codex round 4). Takes the fully-formed `plan` (from planTransition)
+ *  PLUS the `expected` digest the caller computed over the fenced rewrite bytes — it no longer mints
+ *  epoch/nonce itself (the fence<->journal ordering resolution). RE-READS the scope state under the
+ *  lock and ASSERTS the plan is still consistent — the current entry's epoch is strictly below the
+ *  plan's, AND the pending journal's nonce is exactly what the plan expects to supersede — else the
+ *  witness moved after the plan was taken and this throws WitnessAdvanceError (the caller must
+ *  re-plan). Appends the witness-log line BEFORE the journal write lands, so incident response sees
+ *  the intent even if the journal write itself never completes. */
 export function openTransition(
   home: string, scopeKey: string,
-  t: { kind: JournalEntry['kind']; expected: { byteLength: number; prefixHash: string }; tx: string },
+  plan: {
+    kind: JournalEntry['kind'];
+    epoch: number;
+    nonce: string;
+    predecessor: { byteLength: number; prefixHash: string } | null;
+    supersedes: string | null;
+    expected: { byteLength: number; prefixHash: string };
+    tx: string;
+  },
 ): JournalEntry {
   mkdirSync(home, { recursive: true });
   const master = ensureMaster(home);
@@ -190,15 +226,21 @@ export function openTransition(
     const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
     const entry = state.macInvalid ? null : state.entry;
     const pending = state.macInvalid ? null : state.journal;
-    const epoch = Math.max((entry?.epoch ?? 0) + 1, pending ? pending.epoch + 1 : 0);
-    const predecessor = entry ? { byteLength: entry.byteLength, prefixHash: entry.prefixHash } : null;
-    const nonce = randomBytes(16).toString('hex');
+    const pendingNonce = pending ? pending.nonce : null;
+    if (!((entry?.epoch ?? 0) < plan.epoch && pendingNonce === plan.supersedes)) {
+      throw new WitnessAdvanceError(
+        'openTransition: plan is inconsistent with the current witness state (entry epoch not below ' +
+        'plan epoch, or the pending journal to supersede changed) — the witness moved, re-plan',
+      );
+    }
+    // Field ORDER is load-bearing (the MAC payload is JSON.stringify of these keys in this order —
+    // macOf, above): keep it byte-identical to the plan/JournalEntry field order.
     const unsigned = {
-      kind: t.kind, epoch, predecessor, expected: t.expected,
-      nonce, tx: t.tx, supersedes: pending ? pending.nonce : null,
+      kind: plan.kind, epoch: plan.epoch, predecessor: plan.predecessor, expected: plan.expected,
+      nonce: plan.nonce, tx: plan.tx, supersedes: plan.supersedes,
     };
     const journal = signedJournal(scopeKey, master, unsigned);
-    appendWitnessLogLine(home, { v: 1, scope: scopeKey, epoch, kind: t.kind, tx: t.tx, nonce });
+    appendWitnessLogLine(home, { v: 1, scope: scopeKey, epoch: plan.epoch, kind: plan.kind, tx: plan.tx, nonce: plan.nonce });
     const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry, journal } } };
     writeStoreFileAt(path, nextStore);
     return journal;

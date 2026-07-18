@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import {
-  readScopeWitness, scopeKeyOf, openTransition, classifyScope, WitnessBlockedError,
+  readScopeWitness, scopeKeyOf, planTransition, openTransition, classifyScope, WitnessBlockedError,
 } from '../../src/memory/witness-store.js';
 import { sha256Hex } from '../../src/memory/witness-core.js';
 
@@ -105,8 +105,9 @@ describe('appendWitnessed via MemoryStore.commit', () => {
       store.commit({ content: 'fact one', source: 'user' });
       const bytes = readFileSync(ledger);
       const key = scopeKeyOf(home);
+      const p = planTransition(home, key, 'compaction');
       const journal = openTransition(home, key, {
-        kind: 'compaction',
+        kind: 'compaction', epoch: p.epoch, nonce: p.nonce, predecessor: p.predecessor, supersedes: p.supersedes,
         expected: { byteLength: bytes.length, prefixHash: sha256Hex(bytes) },
         tx: '2026-07-18T00:00:30.000Z',
       });
@@ -129,8 +130,9 @@ describe('appendWitnessed via MemoryStore.commit', () => {
     try {
       store.commit({ content: 'fact one', source: 'user' });
       const key = scopeKeyOf(home);
+      const p = planTransition(home, key, 'erase');
       openTransition(home, key, {
-        kind: 'erase',
+        kind: 'erase', epoch: p.epoch, nonce: p.nonce, predecessor: p.predecessor, supersedes: p.supersedes,
         expected: { byteLength: 999, prefixHash: sha256Hex(Buffer.from('nonsense-not-on-disk')) },
         tx: '2026-07-18T00:00:30.000Z',
       });
@@ -170,8 +172,9 @@ describe('WitnessBlockedError propagation out of store.erase (context point 6)',
     try {
       const a = store.commit({ content: 'db is postgres', source: 'user' });
       const key = scopeKeyOf(home);
+      const p = planTransition(home, key, 'erase');
       openTransition(home, key, {
-        kind: 'erase',
+        kind: 'erase', epoch: p.epoch, nonce: p.nonce, predecessor: p.predecessor, supersedes: p.supersedes,
         expected: { byteLength: 999, prefixHash: sha256Hex(Buffer.from('nonsense-not-on-disk')) },
         tx: '2026-07-18T00:00:30.000Z',
       });

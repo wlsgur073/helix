@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   witnessPath, witnessLogPath, scopeKeyOf, readScopeWitness, classifyScope, classifyState,
-  advanceWitness, openTransition, completeTransition, maybeCleanupClear,
+  advanceWitness, planTransition, openTransition, completeTransition, maybeCleanupClear,
   WitnessAdvanceError, WitnessBlockedError,
 } from '../../src/memory/witness-store.js';
 import { sha256Hex } from '../../src/memory/witness-core.js';
@@ -158,15 +158,17 @@ describe('classifyScope ≡ readScopeWitness + classifyState (Fix loop 1 parity)
 });
 
 describe('openTransition / completeTransition', () => {
-  it('openTransition supersession: open T1, then T2 without resolving -> single slot, T2.supersedes === T1.nonce, T2.epoch === T1.epoch + 1; witness-log has BOTH lines', () => {
+  it('planTransition->openTransition supersession: plan/open T1, then plan (sees T1 pending)/open T2 -> single slot, T2.supersedes === T1.nonce, T2.epoch === T1.epoch + 1; witness-log has BOTH lines', () => {
     const home = tmpHome();
     try {
       const expected1 = { byteLength: 5, prefixHash: sha256Hex(Buffer.from('aaaaa')) };
-      const t1 = openTransition(home, '@global', { kind: 'erase', expected: expected1, tx: '2026-07-18T00:00:00.000Z' });
+      const p1 = planTransition(home, '@global', 'erase');
+      const t1 = openTransition(home, '@global', { kind: 'erase', epoch: p1.epoch, nonce: p1.nonce, predecessor: p1.predecessor, supersedes: p1.supersedes, expected: expected1, tx: '2026-07-18T00:00:00.000Z' });
       expect(t1.supersedes).toBeNull();
 
       const expected2 = { byteLength: 6, prefixHash: sha256Hex(Buffer.from('bbbbbb')) };
-      const t2 = openTransition(home, '@global', { kind: 'compaction', expected: expected2, tx: '2026-07-18T00:01:00.000Z' });
+      const p2 = planTransition(home, '@global', 'compaction');   // sees T1 pending -> supersedes it
+      const t2 = openTransition(home, '@global', { kind: 'compaction', epoch: p2.epoch, nonce: p2.nonce, predecessor: p2.predecessor, supersedes: p2.supersedes, expected: expected2, tx: '2026-07-18T00:01:00.000Z' });
 
       expect(t2.supersedes).toBe(t1.nonce);
       expect(t2.epoch).toBe(t1.epoch + 1);
@@ -189,8 +191,9 @@ describe('openTransition / completeTransition', () => {
     const home = tmpHome();
     try {
       const target = Buffer.from('row1\nrow2\n', 'utf8');
+      const p = planTransition(home, '@global', 'compaction');
       const journal = openTransition(home, '@global', {
-        kind: 'compaction',
+        kind: 'compaction', epoch: p.epoch, nonce: p.nonce, predecessor: p.predecessor, supersedes: p.supersedes,
         expected: { byteLength: target.length, prefixHash: sha256Hex(target) },
         tx: '2026-07-18T00:00:00.000Z',
       });
@@ -216,16 +219,20 @@ describe('journal never lowers (R1-F2 stale-journal replay / R4-F1 two-part clea
     try {
       // Reach epoch 1 via a completed transition to targetA.
       const targetA = Buffer.from('row1\nfenceA\n', 'utf8');
+      const pA = planTransition(home, '@global', 'erase');
       const j1 = openTransition(home, '@global', {
-        kind: 'erase', expected: { byteLength: targetA.length, prefixHash: sha256Hex(targetA) }, tx: 'tx-1',
+        kind: 'erase', epoch: pA.epoch, nonce: pA.nonce, predecessor: pA.predecessor, supersedes: pA.supersedes,
+        expected: { byteLength: targetA.length, prefixHash: sha256Hex(targetA) }, tx: 'tx-1',
       });
       completeTransition(home, '@global', targetA, 'tx-1');
       expect(readScopeWitness(home, '@global').entry!.epoch).toBe(j1.epoch);
 
       // Advance PAST j1 via a second completed transition to targetB (same length, different content — a fork).
       const targetB = Buffer.from('row1\nfenceB\n', 'utf8');
+      const pB = planTransition(home, '@global', 'compaction');
       const j2 = openTransition(home, '@global', {
-        kind: 'compaction', expected: { byteLength: targetB.length, prefixHash: sha256Hex(targetB) }, tx: 'tx-2',
+        kind: 'compaction', epoch: pB.epoch, nonce: pB.nonce, predecessor: pB.predecessor, supersedes: pB.supersedes,
+        expected: { byteLength: targetB.length, prefixHash: sha256Hex(targetB) }, tx: 'tx-2',
       });
       completeTransition(home, '@global', targetB, 'tx-2');
       const afterB = readScopeWitness(home, '@global');

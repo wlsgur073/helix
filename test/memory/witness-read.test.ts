@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MemoryRecord } from '../../src/types.js';
 import { parseLedger, readLedgerRaw } from '../../src/memory/ledger.js';
-import { advanceWitness, openTransition, scopeKeyOf, witnessPath } from '../../src/memory/witness-store.js';
+import { advanceWitness, planTransition, openTransition, scopeKeyOf, witnessPath } from '../../src/memory/witness-store.js';
 import { sha256Hex } from '../../src/memory/witness-core.js';
 import { readLedgerWitnessed } from '../../src/memory/witness-read.js';
 import { gatherScopedRecords } from '../../src/hooks/session-start.js';
@@ -131,8 +131,9 @@ describe('readLedgerWitnessed verdict (Step 1b)', () => {
       advanceWitness(home, scopeKeyOf(home), bytes, null);
 
       const target = Buffer.from(bytes.toString('utf8') + JSON.stringify(rec({ id: 'm_2' })) + '\n', 'utf8');
+      const p = planTransition(home, scopeKeyOf(home), 'compaction');
       openTransition(home, scopeKeyOf(home), {
-        kind: 'compaction',
+        kind: 'compaction', epoch: p.epoch, nonce: p.nonce, predecessor: p.predecessor, supersedes: p.supersedes,
         expected: { byteLength: target.length, prefixHash: sha256Hex(target) },
         tx: '2026-07-18T00:00:00.000Z',
       });

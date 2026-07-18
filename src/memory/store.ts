@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
 import { parseLedger, parseLedgerHealth, readLedgerBytes, readLedgerRaw, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
 import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
+import { scopeKeyOf, readScopeWitness, classifyState, completeTransition } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated } from './history.js';
@@ -406,15 +407,28 @@ export class MemoryStore {
       // key-absent `() => true` and preserving forgeries the plan counted as dropped.
       const keepValidVerify = this.keepValidVerifyFor(r.subkey);
       const { kept } = planCompaction(records, { erasedIds: new Set(), keepValidVerify });
-      const reclaimable = records.length - kept.length;
-      const reclaimableBytes = serializedBytes(records) - serializedBytes(kept);
+      // Fence-net the reclaim estimate: a witnessed compaction ALWAYS re-plants exactly one epoch
+      // fence, and planCompaction ALWAYS drops any existing fence from `kept`. So a lone stale fence is
+      // NOT net-reclaimable — it is dropped and immediately re-added. Counting it would make a
+      // witnessed compaction non-idempotent, re-firing the trigger every session on the fence alone and
+      // breaking the self-limiting invariant (spec §4.5). Measuring reclaim against the NON-fence input
+      // rows nets it out (on a fence-free ledger this is identical to `records`, so a genuinely dirty
+      // ledger is unaffected). `rows` for the gate stays the total PHYSICAL count (dirtyGate contract).
+      const inputNonFence = records.filter((rec) => !rec.id.startsWith('witness_fence_'));
+      const reclaimable = inputNonFence.length - kept.length;
+      const reclaimableBytes = serializedBytes(inputNonFence) - serializedBytes(kept);
       if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
       // Eligible: guard on ATTEMPT (before the call), fire, emit a metric, swallow errors.
       this.compactedThisSession = true;
       const started = performance.now();
       let stats: CompactionStats | null = null;   // null <=> the compaction threw <=> nothing happened
       try {
-        stats = compactLedger(r.ledger, { erasedIds: new Set(), keepValidVerify });
+        stats = compactLedger(r.ledger, {
+          erasedIds: new Set(), keepValidVerify,
+          // Witnessed rewrite (spec §4.9): the auto-compaction is a prefix-changing rewrite, so it
+          // advances the witness (plants a fence) — otherwise the next witnessed read would false-alarm.
+          witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), r.root), now: () => this.now(), kind: 'compaction' },
+        });
       } catch { /* swallowed: compaction must never break a recall */ }
       const durationMs = performance.now() - started;   // capture BEFORE any metrics I/O
       // Drop the entry this recall just installed. On SUCCESS the ledger bytes changed, so the
@@ -726,10 +740,44 @@ export class MemoryStore {
       // HMAC-aware compaction: preserve genuine signed verifies for this ledger, drop forgeries.
       // Resolve the subkey ONCE (see keepValidVerifyFor) so the whole compaction makes one atomic
       // keep/drop decision, and share that predicate with the auto-compaction trigger so the two
-      // paths can never diverge.
+      // paths can never diverge. A permanent erase is a ledger REWRITE (prefix change), so it drives
+      // the witness transition (kind:'erase') — otherwise the next witnessed read would false-alarm.
       const sk = this.subkeyForLedger(ledger);
-      compactLedger(ledger, { erasedIds: new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk) });
+      compactLedger(ledger, {
+        erasedIds: new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk),
+        witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), this.scopeRootOf(ledger)), now: () => this.now(), kind: 'erase' },
+      });
     }
     this.rankCache = null;   // I8: self-erase gives zero in-memory retention window
+  }
+
+  /** WRITE-side startup step (spec §4.9): complete any transition whose new bytes already landed
+   *  before a crash (crash window B — verdict transition-heal) for every scope this store owns, so a
+   *  half-finished rewrite is resolved before the first read rather than lingering as a pending
+   *  journal. Global always; project only when owned (the same disposition gate every read path uses).
+   *  Each scope's heal runs under that scope's LEDGER lock; completeTransition then nests the witness
+   *  lock (a different path — legal). BEST-EFFORT: a scope that is interrupted, stale, or mismatched is
+   *  LEFT as-is (it re-surfaces as transition-interrupted / blocked on the next witnessed write, Task
+   *  5) — healing must never block server startup, so per-scope failures are swallowed. Wired ONCE in
+   *  src/server/index.ts after construction, NEVER from a hook (a read-only surface must not advance
+   *  the witness). */
+  healWitness(): void {
+    const p = this.opts.project;
+    const scopes: Array<{ ledger: LedgerPath; root: string | undefined }> = [{ ledger: this.global, root: undefined }];
+    if (p && isOwned(p.root, p.home)) scopes.push({ ledger: p.ledger, root: p.root });
+    const home = this.homeDir();
+    for (const s of scopes) {
+      if (!existsSync(dirname(s.ledger))) continue;   // no scope dir => no witness state => nothing to heal
+      const scopeKey = scopeKeyOf(home, s.root);
+      try {
+        withFileLock(s.ledger, () => {
+          const bytes = readLedgerBytes(s.ledger);
+          const verdict = classifyState(readScopeWitness(home, scopeKey), bytes);
+          if (verdict.kind === 'transition-heal') {
+            completeTransition(home, scopeKey, bytes, verdict.journal.tx);
+          }
+        });
+      } catch { /* best-effort: a stale/rejected/broken heal stays pending; never block startup */ }
+    }
   }
 }

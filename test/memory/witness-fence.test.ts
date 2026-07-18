@@ -150,7 +150,14 @@ describe('erase routing — witness_fence_ family (markerFamilyOf)', () => {
     appendFileSync(ledger, JSON.stringify(onDisk) + '\n');
     const queried = fenceId(2, 'bbbb'); // a DIFFERENT epoch/nonce — never written to this ledger
     expect(() => store.erase(queried, { permanent: true, scope: 'global' })).not.toThrow();
-    expect(readFileSync(ledger, 'utf8')).not.toMatch(/witness_fence_/); // the on-disk fence is gone
+    // The permanent erase resolves via the on-disk fence's family and rewrites the ledger, dropping
+    // the pre-existing fence. The witnessed rewrite itself re-plants a FRESH epoch fence as its final
+    // row (spec §4.9 / Task 6), so the ledger is NOT fence-free afterward — but the SPECIFIC queried
+    // fence (epoch 1 / nonce aaaa) is gone, replaced by exactly one new fence.
+    expect(readFileSync(ledger, 'utf8')).not.toMatch(/witness_fence_1_aaaa/); // the pre-existing fence is gone
+    const fences = parseLedger(ledger).filter((r) => r.id.startsWith('witness_fence_'));
+    expect(fences).toHaveLength(1);
+    expect(fences[0]!.id).not.toBe('witness_fence_1_aaaa'); // a fresh rewrite fence, not the erased one
   });
 
   it('a fence-shaped id absent from the ledger still throws not-found (family presence is not unconditional)', () => {

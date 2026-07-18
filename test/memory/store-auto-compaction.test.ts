@@ -119,8 +119,11 @@ describe('auto-compaction on recall', () => {
       const now = (): string => {
         if (armed) {
           armed = false;
-          // A late supersede: +1 physical row, and it kills a live record. The lock-free plan (11 rows)
-          // projects 4 drops; the locked compaction (12 rows) actually performs 5.
+          // A late supersede: +1 physical row, and it kills a live record. What matters here is that
+          // the metric reflects the LOCKED file (12 rows), not the eligibility plan's snapshot (11):
+          // dropping over 12 rows (6 live + horizon + one re-planted epoch fence = 8 written) is 4
+          // physical drops; over the 11-row snapshot it would be only 3. The +1 vs the pre-witness
+          // count is exactly the epoch fence every witnessed rewrite plants as its final row.
           appendFileSync(ledger, JSON.stringify({
             id: 'late_1', tx: FUTURE, validFrom: FUTURE, validTo: null,
             type: 'supersede', state: 'Fresh', content: 'late deploy timeout fact',
@@ -146,9 +149,9 @@ describe('auto-compaction on recall', () => {
       const bytesAfter = statSync(ledger).size;
       const m = emitted[0]!;
       expect(m.ok).toBe(true);
-      expect(m.droppedRows).toBe(rowsAtLock - rowsAfter);      // 5 (measured), not 4 (planned)
-      expect(m.droppedRows).toBe(5);
-      expect(m.reclaimedBytes).toBe(bytesAtLock - bytesAfter); // measured from the locked file
+      expect(m.droppedRows).toBe(rowsAtLock - rowsAfter);      // 4 (measured over 12 locked rows), not 3 (over the 11-row plan)
+      expect(m.droppedRows).toBe(4);                           // 5 logical drops minus the 1 re-planted epoch fence
+      expect(m.reclaimedBytes).toBe(bytesAtLock - bytesAfter); // measured from the locked file (fence bytes included)
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 

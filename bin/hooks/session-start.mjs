@@ -180,7 +180,7 @@ function globalScopeNonce(home) {
 }
 
 // src/memory/ledger.ts
-import { readFileSync as readFileSync2, mkdirSync as mkdirSync2, statSync } from "node:fs";
+import { readFileSync as readFileSync3, mkdirSync as mkdirSync3, statSync as statSync2 } from "node:fs";
 
 // src/memory/projection.ts
 function buildProjection(records) {
@@ -206,57 +206,9 @@ function buildProjection(records) {
   return live;
 }
 
-// src/memory/ledger.ts
-var MAX_PARSE_DEPTH = 64;
-function withinDepth(v, max) {
-  const stack = [{ v, d: 0 }];
-  while (stack.length) {
-    const { v: cur, d } = stack.pop();
-    if (cur === null || typeof cur !== "object") continue;
-    if (d >= max) return false;
-    for (const child of Array.isArray(cur) ? cur : Object.values(cur)) {
-      if (child !== null && typeof child === "object") stack.push({ v: child, d: d + 1 });
-    }
-  }
-  return true;
-}
-function isWellFormedRecord(v) {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
-  const r = v;
-  return typeof r.id === "string" && typeof r.content === "string" && typeof r.tx === "string" && typeof r.provenance === "object" && r.provenance !== null && withinDepth(v, MAX_PARSE_DEPTH);
-}
-function parseLedgerHealth(text) {
-  const records = [];
-  let skippedNonBlank = 0;
-  for (const line of text.split("\n")) {
-    if (line.trim() === "") continue;
-    let v;
-    try {
-      v = JSON.parse(line);
-    } catch {
-      skippedNonBlank++;
-      continue;
-    }
-    if (isWellFormedRecord(v)) records.push(v);
-    else skippedNonBlank++;
-  }
-  return { records, skippedNonBlank };
-}
-function readLedgerRaw(path) {
-  let bytes;
-  try {
-    bytes = readFileSync2(path);
-  } catch (err) {
-    if (err.code === "ENOENT") return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
-    throw err;
-  }
-  const { records, skippedNonBlank } = parseLedgerHealth(bytes.toString("utf8"));
-  return { bytes, records, skippedNonBlank };
-}
-
 // src/memory/ledger-mac.ts
 import { createHash, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
-import { openSync, writeSync, fsyncSync, closeSync, readFileSync as readFileSync3, linkSync, unlinkSync, statSync as statSync2, chmodSync, mkdirSync as mkdirSync3 } from "node:fs";
+import { openSync, writeSync, fsyncSync, closeSync, readFileSync as readFileSync2, linkSync, unlinkSync, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
 import { dirname, join as join2 } from "node:path";
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 function digestContent(content) {
@@ -271,14 +223,14 @@ function masterPath(home) {
 function tryReadMasterStrict(path) {
   let buf;
   try {
-    buf = readFileSync3(path);
+    buf = readFileSync2(path);
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
   }
   if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
   try {
-    if ((statSync2(path).mode & 63) !== 0) chmodSync(path, 384);
+    if ((statSync(path).mode & 63) !== 0) chmodSync(path, 384);
   } catch {
   }
   return buf;
@@ -342,6 +294,54 @@ function verifyVerify(record, subkey) {
     return false;
   }
   return got.length === want.length && timingSafeEqual(got, want);
+}
+
+// src/memory/ledger.ts
+var MAX_PARSE_DEPTH = 64;
+function withinDepth(v, max) {
+  const stack = [{ v, d: 0 }];
+  while (stack.length) {
+    const { v: cur, d } = stack.pop();
+    if (cur === null || typeof cur !== "object") continue;
+    if (d >= max) return false;
+    for (const child of Array.isArray(cur) ? cur : Object.values(cur)) {
+      if (child !== null && typeof child === "object") stack.push({ v: child, d: d + 1 });
+    }
+  }
+  return true;
+}
+function isWellFormedRecord(v) {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const r = v;
+  return typeof r.id === "string" && typeof r.content === "string" && typeof r.tx === "string" && typeof r.provenance === "object" && r.provenance !== null && withinDepth(v, MAX_PARSE_DEPTH);
+}
+function parseLedgerHealth(text) {
+  const records = [];
+  let skippedNonBlank = 0;
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    let v;
+    try {
+      v = JSON.parse(line);
+    } catch {
+      skippedNonBlank++;
+      continue;
+    }
+    if (isWellFormedRecord(v)) records.push(v);
+    else skippedNonBlank++;
+  }
+  return { records, skippedNonBlank };
+}
+function readLedgerRaw(path) {
+  let bytes;
+  try {
+    bytes = readFileSync3(path);
+  } catch (err) {
+    if (err.code === "ENOENT") return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
+    throw err;
+  }
+  const { records, skippedNonBlank } = parseLedgerHealth(bytes.toString("utf8"));
+  return { bytes, records, skippedNonBlank };
 }
 
 // src/memory/history.ts

@@ -6,7 +6,8 @@ import { buildProjection } from './projection.js';
 import { withFileLock, canonical } from './lock.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
-import { fenceId } from './witness-core.js';
+import { fenceId, sha256Hex } from './witness-core.js';
+import { planTransition, openTransition, completeTransition } from './witness-store.js';
 
 export type LedgerPath = string;
 
@@ -250,6 +251,14 @@ export interface CompactOptions {
   /** Injectable durable-fs seam: tests assert the fsync TARGET/ORDER and simulate write failures
    *  (ENOSPC, an unremovable orphan). Production omits it => `realFsOps`. */
   fsOps?: DurableFsOps;
+  /** Witness integration (spec §4.9). When present, this rewrite plants a fresh epoch fence as its
+   *  final row and drives the witness transition INSIDE the existing ledger lock: planTransition ->
+   *  openTransition (journal durable BEFORE the file changes) -> write+rename -> completeTransition
+   *  (after the new bytes land). So a crash before the rename is diagnosable as transition-interrupted
+   *  (re-drive supersedes it) and a crash after it heals to the new bytes. `now` sources the fence's
+   *  own transition tx; `kind` defaults to 'compaction' (the erase path passes 'erase'). Omitted =>
+   *  an un-witnessed rewrite (unchanged legacy behavior — used by direct-compaction unit tests). */
+  witness?: { home: string; scopeKey: string; now: () => string; kind?: 'compaction' | 'erase' };
 }
 
 /** Keep-set planner: the exact set of records compactLedger writes for `records` + `opts`.
@@ -410,7 +419,31 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       const beforeBytes = fileSize(path);                          // inside the lock, BEFORE the read
       const records = parseLedger(path);
       const { kept, droppedForgedVerifies } = planCompaction(records, opts);
-      for (const r of kept) writeAll(fsOps, fd, JSON.stringify(r) + '\n');
+      // Witness integration (spec §4.9), ALL inside this existing ledger lock — planTransition/
+      // openTransition/completeTransition each take the WITNESS lock (a different path, so nesting is
+      // safe), never a second ledger lock. Ordering resolution: mint epoch+nonce (planTransition) ->
+      // build the fence and the EXACT final bytes -> journal (openTransition) BEFORE the file is
+      // written -> write+rename -> completeTransition AFTER the new bytes are durable.
+      const w = opts.witness;
+      let rows = kept;
+      let fenceTx: string | null = null;
+      if (w) {
+        const kind = w.kind ?? 'compaction';
+        const plan = planTransition(w.home, w.scopeKey, kind);
+        const fence = witnessFenceRecord(plan.epoch, plan.nonce, w.now());   // the fence's own real tx
+        rows = kept.concat(fence);                                           // fence is the LAST row
+        fenceTx = fence.tx;
+        // `expected` MUST be computed over byte-identical serialization to what the tmp write below
+        // produces (per-row `JSON.stringify(r) + '\n'`, fence last) — completeTransition's exact-bytes
+        // assert (below) doubles as a serialization-drift guard if these ever diverge.
+        const finalText = rows.map((r) => JSON.stringify(r) + '\n').join('');
+        const expected = { byteLength: Buffer.byteLength(finalText), prefixHash: sha256Hex(Buffer.from(finalText)) };
+        openTransition(w.home, w.scopeKey, {
+          kind, epoch: plan.epoch, nonce: plan.nonce, predecessor: plan.predecessor,
+          supersedes: plan.supersedes, expected, tx: fenceTx,
+        });
+      }
+      for (const r of rows) writeAll(fsOps, fd, JSON.stringify(r) + '\n');
       fsOps.fsyncSync(fd);
       fsOps.closeSync(fd);
       closed = true;
@@ -418,7 +451,17 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost before rename');
       fsOps.renameSync(tmp, path);                                 // atomic on the same filesystem
       fsOps.fsyncDir(dirname(path));                               // rename gives visibility, not durability
-      return { droppedRows: records.length - kept.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
+      if (w && fenceTx !== null) {
+        // New bytes are durable; complete the transition (still under the ledger lock). re-read the
+        // exact on-disk bytes and hand them to completeTransition — its expected-equality check is the
+        // serialization-drift guard: finalBytes MUST equal the finalText that produced `expected`.
+        completeTransition(w.home, w.scopeKey, readLedgerBytes(path), fenceTx);
+      }
+      // droppedRows/reclaimedBytes are PHYSICAL (rows read minus rows WRITTEN, file size delta): the
+      // fence is one of the rows written, so it reduces droppedRows and its bytes count against
+      // reclaimedBytes — symmetric with the horizon/integrity markers planCompaction already folds
+      // into `kept`, and honoring CompactionStats' "rows read at lock entry minus rows written".
+      return { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
     } catch (e) {
       if (!closed) { try { fsOps.closeSync(fd); } catch { /* already closed by a throwing close */ } }
       try { fsOps.unlinkSync(tmp); } catch { /* a successor's sweep may have taken it */ }

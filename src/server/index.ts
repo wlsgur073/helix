@@ -37,6 +37,11 @@ const metrics = createMetricsSink(join(home, 'metrics.jsonl'), config.metrics.en
 // able to enable or tune it. Default OFF; the store's own gates decide whether it ever fires.
 const store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? 'cli', project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
 
+// WRITE-side witness startup heal (spec §4.9): complete any rewrite that crashed after its bytes
+// landed but before the journal cleared (crash window B), for global + an owned project. Best-effort,
+// runs once here — NEVER from a hook (a read-only surface must not advance the witness).
+store.healWitness();
+
 // Verifying integrity scan (spec §7): surface only records the verifying replay would NOT honour —
 // a `verify` whose MAC fails under the scope subkey (forged/legacy-unsigned) or a baked non-Fresh
 // assert/supersede (R1 clamps it to Fresh). A genuine SIGNED verify (which confirm/recheck now mint
