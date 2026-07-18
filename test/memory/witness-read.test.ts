@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MemoryRecord } from '../../src/types.js';
 import { parseLedger, readLedgerRaw } from '../../src/memory/ledger.js';
-import { advanceWitness, openTransition, scopeKeyOf } from '../../src/memory/witness-store.js';
+import { advanceWitness, openTransition, scopeKeyOf, witnessPath } from '../../src/memory/witness-store.js';
 import { sha256Hex } from '../../src/memory/witness-core.js';
 import { readLedgerWitnessed } from '../../src/memory/witness-read.js';
 import { gatherScopedRecords } from '../../src/hooks/session-start.js';
@@ -140,6 +140,41 @@ describe('readLedgerWitnessed verdict (Step 1b)', () => {
       const w = readLedgerWitnessed(ledger, home); // on-disk bytes are still the OLD head
       expect(w.journalPending).toBe(true);
       expect(w.verdict.kind).toBe('transition-interrupted');
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+});
+
+// Fix loop 1: readLedgerWitnessed now takes exactly ONE witness.json snapshot (readScopeWitness) and
+// derives verdict/witnessIdentity/journalPending all from that SAME state object, rather than
+// classifyScope's own internal second read. A macInvalid scope is the discriminating case: BEFORE the
+// fix, `verdict` came from a fresh classifyScope(...) call and `witnessIdentity`/`journalPending` came
+// from a SEPARATE readScopeWitness(...) call — two independent lock-free reads of the same file. This
+// test cannot observe a genuine cross-call race (that needs a real concurrent writer), but it pins the
+// CONTRACT: all three fields must agree with what ONE state snapshot says, which is what makes the
+// two-read version and the one-read version behaviorally indistinguishable on this fixture — and what
+// a future reviewer can rely on when reasoning about consistency.
+describe('Fix loop 1: single witness.json snapshot — consistent triplet under macInvalid', () => {
+  it('a tampered entry mac degrades verdict, witnessIdentity, AND journalPending together', () => {
+    const home = tmpHome();
+    try {
+      const ledger = join(home, 'memory.jsonl');
+      writeFileSync(ledger, JSON.stringify(rec({ id: 'm_1' })) + '\n');
+      const bytes = readFileSync(ledger);
+      const scopeKey = scopeKeyOf(home);
+      advanceWitness(home, scopeKey, bytes, null);
+
+      // Tamper the stored entry's mac on disk (same technique as witness-store.test.ts's tamper test).
+      const raw = JSON.parse(readFileSync(witnessPath(home), 'utf8')) as {
+        scopes: Record<string, { entry: { mac: string } }>;
+      };
+      const mac = raw.scopes[scopeKey]!.entry.mac;
+      raw.scopes[scopeKey]!.entry.mac = (mac[0] === 'a' ? 'b' : 'a') + mac.slice(1);
+      writeFileSync(witnessPath(home), JSON.stringify(raw));
+
+      const w = readLedgerWitnessed(ledger, home);
+      expect(w.verdict).toEqual({ kind: 'first-contact', reason: 'mac-invalid' });
+      expect(w.witnessIdentity).toBe('witness-absent');
+      expect(w.journalPending).toBe(false);
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });

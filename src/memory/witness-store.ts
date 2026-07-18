@@ -104,11 +104,6 @@ function deriveState(scopeKey: string, master: Buffer | null, raw: ScopeFile | u
   return { entry, journal, macInvalid };
 }
 
-function verdictFor(state: ScopeWitnessState, bytes: Buffer): WitnessVerdict {
-  if (state.macInvalid) return { kind: 'first-contact', reason: 'mac-invalid' };
-  return classifyWitness(bytes, state.entry, state.journal);
-}
-
 /** Lock-free read; MAC-invalid entry/journal reported via `macInvalid`, returned as null. */
 export function readScopeWitness(home: string, scopeKey: string): ScopeWitnessState {
   const path = canonical(witnessPath(home));
@@ -116,11 +111,26 @@ export function readScopeWitness(home: string, scopeKey: string): ScopeWitnessSt
   return deriveState(scopeKey, tryReadMaster(home), store.scopes[scopeKey]);
 }
 
-/** readScopeWitness + classifyWitness; macInvalid short-circuits to first-contact/mac-invalid
+/** Classify `bytes` against an ALREADY-DERIVED scope state (readScopeWitness) — the core mapping
+ *  classifyScope composes from readScopeWitness + this function (DRY: extracted, Fix loop 1, so a
+ *  caller that already holds one ScopeWitnessState snapshot — e.g. witness-read.ts's
+ *  readLedgerWitnessed, which also needs witnessIdentity/journalPending off the SAME state — can
+ *  derive its verdict directly, without classifyScope's own internal second witness.json read).
+ *  `macInvalid` short-circuits to first-contact/mac-invalid WITHOUT consulting classifyWitness at
+ *  all — a corrupt journal degrades the whole scope even if the entry alone would still verify
+ *  (semantics row 4). */
+export function classifyState(state: ScopeWitnessState, bytes: Buffer): WitnessVerdict {
+  if (state.macInvalid) return { kind: 'first-contact', reason: 'mac-invalid' };
+  return classifyWitness(bytes, state.entry, state.journal);
+}
+
+/** readScopeWitness + classifyState; macInvalid short-circuits to first-contact/mac-invalid
  *  WITHOUT consulting classifyWitness at all — a corrupt journal degrades the whole scope even if
- *  the entry alone would still verify (semantics row 4). */
+ *  the entry alone would still verify (semantics row 4). Thin composition, unchanged behavior — a
+ *  caller that needs the intermediate ScopeWitnessState too calls readScopeWitness + classifyState
+ *  directly instead, to avoid this function's own internal second witness.json read. */
 export function classifyScope(home: string, scopeKey: string, bytes: Buffer): WitnessVerdict {
-  return verdictFor(readScopeWitness(home, scopeKey), bytes);
+  return classifyState(readScopeWitness(home, scopeKey), bytes);
 }
 
 function appendWitnessLogLine(home: string, line: { v: 1; scope: string; epoch: number; kind: JournalEntry['kind']; tx: string; nonce: string }): void {
@@ -145,7 +155,7 @@ export function advanceWitness(home: string, scopeKey: string, bytes: Buffer, he
     const path = canonical(rawPath);
     const store = readStoreFileAt(path);
     const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
-    const verdict = verdictFor(state, bytes);
+    const verdict = classifyState(state, bytes);
     if (!advanceAllowed(verdict)) {
       throw new WitnessAdvanceError(`advanceWitness: blocked for scope — verdict '${verdict.kind}' does not permit advance`);
     }

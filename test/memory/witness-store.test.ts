@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, statSync, existsSync 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  witnessPath, witnessLogPath, scopeKeyOf, readScopeWitness, classifyScope,
+  witnessPath, witnessLogPath, scopeKeyOf, readScopeWitness, classifyScope, classifyState,
   advanceWitness, openTransition, completeTransition, maybeCleanupClear,
   WitnessAdvanceError, WitnessBlockedError,
 } from '../../src/memory/witness-store.js';
@@ -100,6 +100,59 @@ describe('round-trip / tamper / anti-laundering / key-absent', () => {
       expect(after.macInvalid).toBe(false);
       expect(after.entry!.epoch).toBe(1);
       expect(existsSync(join(home, 'ledger-mac-master.key'))).toBe(true);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+});
+
+// Fix loop 1: classifyScope was refactored into readScopeWitness + classifyState (DRY extraction, so
+// a caller holding one ScopeWitnessState snapshot — witness-read.ts's readLedgerWitnessed — can derive
+// a verdict WITHOUT classifyScope's own internal second witness.json read). Pins that the two
+// compositions are STILL byte-for-byte equivalent across the three verdict shapes classifyScope's own
+// existing tests above already exercise individually (in-sync, mismatch, mac-invalid).
+describe('classifyScope ≡ readScopeWitness + classifyState (Fix loop 1 parity)', () => {
+  it('in-sync: both compositions agree', () => {
+    const home = tmpHome();
+    try {
+      const bytes = Buffer.from('row1\nrow2\n', 'utf8');
+      advanceWitness(home, '@global', bytes, null);
+
+      const viaScope = classifyScope(home, '@global', bytes);
+      const viaState = classifyState(readScopeWitness(home, '@global'), bytes);
+      expect(viaScope).toEqual(viaState);
+      expect(viaScope.kind).toBe('in-sync');
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('mismatch: both compositions agree', () => {
+    const home = tmpHome();
+    try {
+      const witnessed = Buffer.from('row1\nrow2\n', 'utf8');
+      advanceWitness(home, '@global', witnessed, null);
+      const forked = Buffer.from('row1\nrowX\n', 'utf8'); // same length, different content -> fork
+
+      const viaScope = classifyScope(home, '@global', forked);
+      const viaState = classifyState(readScopeWitness(home, '@global'), forked);
+      expect(viaScope).toEqual(viaState);
+      expect(viaScope.kind).toBe('mismatch');
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('mac-invalid: both compositions agree (tampered entry mac on disk)', () => {
+    const home = tmpHome();
+    try {
+      const bytes = Buffer.from('a\n', 'utf8');
+      advanceWitness(home, '@global', bytes, null);
+      const raw = JSON.parse(readFileSync(witnessPath(home), 'utf8')) as {
+        scopes: Record<string, { entry: { mac: string } }>;
+      };
+      const mac = raw.scopes['@global']!.entry.mac;
+      raw.scopes['@global']!.entry.mac = (mac[0] === 'a' ? 'b' : 'a') + mac.slice(1);
+      writeFileSync(witnessPath(home), JSON.stringify(raw));
+
+      const viaScope = classifyScope(home, '@global', bytes);
+      const viaState = classifyState(readScopeWitness(home, '@global'), bytes);
+      expect(viaScope).toEqual(viaState);
+      expect(viaScope).toEqual({ kind: 'first-contact', reason: 'mac-invalid' });
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });

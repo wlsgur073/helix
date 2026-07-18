@@ -190,6 +190,22 @@ export function parseLedger(path: LedgerPath): MemoryRecord[] {
   return parseLedgerText(text);
 }
 
+/** Read the ledger's raw bytes ONLY — no parse. For a caller whose pre-parse phase needs nothing but
+ *  bytes (e.g. MemoryStore.recallInput's cache-key digest + subkey fingerprint, computed BEFORE the
+ *  cache-hit check), this pays a read cost but a ZERO parse cost — a cache HIT never reaches a parse
+ *  at all. The caller re-decodes these SAME bytes only if the key check turns out to be a MISS (Fix
+ *  loop 1: restores the A4 cache's original zero-parse-on-HIT invariant, which readLedgerRaw's
+ *  eager-parse-every-call composition had traded away). Same ENOENT convention as parseLedger/
+ *  readLedgerRaw below: missing file -> an empty buffer, never a throw. */
+export function readLedgerBytes(path: LedgerPath): Buffer {
+  try {
+    return readFileSync(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0);
+    throw err;
+  }
+}
+
 /** Read the ledger's raw bytes ONCE and parse them (parseLedgerHealth) — the single seam every
  *  grade-assigning reader converges on (witness feature, spec §4). Byte-hashing (the witness's
  *  prefix-hash) is only sound over the EXACT raw bytes, never a re-encoded string, so a caller that
@@ -197,7 +213,10 @@ export function parseLedger(path: LedgerPath): MemoryRecord[] {
  *  (which decodes internally and never exposes the bytes) or hand-rolling a second readFileSync risks
  *  hashing bytes that differ from the ones that were actually parsed. Missing file -> the same empty
  *  convention parseLedger uses, spelled out over both return channels. Deliberately NOT rewritten in
- *  terms of parseLedger (or vice versa): parseLedger stays untouched for its existing callers. */
+ *  terms of parseLedger (or vice versa): parseLedger stays untouched for its existing callers. Used
+ *  where a caller genuinely wants records unconditionally (historyView/asOfView/verifiedLiveStats —
+ *  not a cache-gated path, so there is no HIT to keep parse-free). recallInput is NOT one of these
+ *  sites (Fix loop 1) — see readLedgerBytes above. */
 export function readLedgerRaw(path: LedgerPath): { bytes: Buffer; records: MemoryRecord[]; skippedNonBlank: number } {
   let bytes: Buffer;
   try {

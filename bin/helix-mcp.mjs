@@ -13721,6 +13721,14 @@ function parseLedger(path) {
   }
   return parseLedgerText(text);
 }
+function readLedgerBytes(path) {
+  try {
+    return readFileSync3(path);
+  } catch (err) {
+    if (err.code === "ENOENT") return Buffer.alloc(0);
+    throw err;
+  }
+}
 function readLedgerRaw(path) {
   let bytes;
   try {
@@ -14724,21 +14732,24 @@ var MemoryStore = class {
     const reads = [];
     for (const s of scopes) {
       const rt0 = performance.now();
-      const { bytes: buf, records } = readLedgerRaw(s.ledger);
+      const bytes = readLedgerBytes(s.ledger);
       const readMs = performance.now() - rt0;
       const subkey = this.subkeyForLedger(s.ledger);
-      key.push({ scopeId: s.ledger, digest: ledgerDigest(buf), fingerprint: subkeyFingerprint(subkey) });
-      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, records, bytes: buf.length, subkey, readMs });
+      key.push({ scopeId: s.ledger, digest: ledgerDigest(bytes), fingerprint: subkeyFingerprint(subkey) });
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs });
     }
     if (this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
       return { scoped: this.rankCache.scoped, available: this.rankCache.available, artifacts: this.rankCache.artifacts };
     }
+    const parsed = [];
     const scoped = [];
     let available = true;
     for (const r of reads) {
       const t0 = performance.now();
-      const proj = verifiedProjectionWithSubkey(r.records, r.subkey);
+      const { records } = parseLedgerHealth(r.bytes.toString("utf8"));
       const t1 = performance.now();
+      const proj = verifiedProjectionWithSubkey(records, r.subkey);
+      const t2 = performance.now();
       if (!proj.keyAvailable) available = false;
       for (const rec of proj.live.values()) {
         scoped.push({ record: rec, scope: r.scope, integrity: proj.compromised.has(rec.id) ? "compromised" : "ok" });
@@ -14746,17 +14757,18 @@ var MemoryStore = class {
       this.opts.metricsSink?.emitReplay({
         scope: r.root ? "project" : "global",
         caller: "store",
-        rows: r.records.length,
+        rows: records.length,
         liveRows: proj.live.size,
-        bytes: r.bytes,
-        parseMs: r.readMs,
-        projectMs: t1 - t0,
+        bytes: r.bytes.length,
+        parseMs: r.readMs + (t1 - t0),
+        projectMs: t2 - t1,
         keyAvailable: proj.keyAvailable
       });
+      parsed.push({ ledger: r.ledger, scope: r.scope, root: r.root, records, subkey: r.subkey });
     }
     const artifacts = buildRankArtifacts(scoped.map((s) => s.record));
     this.rankCache = { key, scoped, available, artifacts };
-    this.maybeAutoCompact(reads);
+    this.maybeAutoCompact(parsed);
     return { scoped, available, artifacts };
   }
   /** Auto-compaction (spec 2026-07-09): once per session, on the first ELIGIBLE recall MISS. Evaluates

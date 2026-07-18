@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerHealth, readLedgerRaw, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
+import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerHealth, readLedgerBytes, readLedgerRaw, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated } from './history.js';
@@ -307,47 +307,57 @@ export class MemoryStore {
     const p = this.opts.project;
     if (p && disposition === 'owned') scopes.push({ ledger: p.ledger, scope: 'project', root: p.root });
 
+    // Bytes-only pass (Fix loop 1): digest + subkey fingerprint need nothing but the raw bytes, so the
+    // cache-key check below runs BEFORE any parse — a HIT pays a read cost but ZERO parse cost, the A4
+    // cache's original invariant. readLedgerRaw (which parses eagerly) is deliberately NOT used here;
+    // it stays reserved for non-cache-gated sites (historyView/asOfView/verifiedLiveStats).
     const key: ScopeKeyComponent[] = [];
-    const reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; records: MemoryRecord[]; bytes: number; subkey: Buffer | null; readMs: number }> = [];
+    const reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; bytes: Buffer; subkey: Buffer | null; readMs: number }> = [];
     for (const s of scopes) {
       const rt0 = performance.now();
-      const { bytes: buf, records } = readLedgerRaw(s.ledger);  // I1: owned immutable buffer + parsed records — single raw-read seam (read+decode+parse timed together, replacing the old two-step buffer-then-lazy-parse)
+      const bytes = readLedgerBytes(s.ledger);        // I1: owned immutable buffer, read once — NO parse yet
       const readMs = performance.now() - rt0;
       const subkey = this.subkeyForLedger(s.ledger);  // I3: resolved fresh from disk, never memoized
-      key.push({ scopeId: s.ledger, digest: ledgerDigest(buf), fingerprint: subkeyFingerprint(subkey) });
-      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, records, bytes: buf.length, subkey, readMs });
+      key.push({ scopeId: s.ledger, digest: ledgerDigest(bytes), fingerprint: subkeyFingerprint(subkey) });
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs });
     }
 
     if (this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
       return { scoped: this.rankCache.scoped, available: this.rankCache.available, artifacts: this.rankCache.artifacts };
     }
 
-    // MISS: project the records already read+parsed above (readLedgerRaw, in the per-scope loop) — no
-    // second parse. r.readMs is already read+decode+parse-inclusive, matching verifiedLiveStats'
-    // read-inclusive parseMs so the A3 replay curve stays comparable across the store/hook emitters;
-    // projectMs below is just the verifying replay, exactly as verifiedOf emits.
+    // MISS: parse the SAME bytes already read above (readLedgerBytes, in the per-scope loop) — ONE
+    // parse per scope, reached only on a MISS. parseMs = read (r.readMs, captured above) + parse
+    // (captured here), matching verifiedLiveStats' read-inclusive parseMs so the A3 replay curve stays
+    // comparable across the store/hook emitters; projectMs is just the verifying replay. `parsed`
+    // carries the records this loop just parsed, threaded into maybeAutoCompact below so IT never
+    // re-parses either (the Task-4 double-parse-on-MISS-with-compaction-enabled fix, preserved).
+    const parsed: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; records: MemoryRecord[]; subkey: Buffer | null }> = [];
     const scoped: ScopedRecord[] = [];
     let available = true;
     for (const r of reads) {
       const t0 = performance.now();
-      const proj = verifiedProjectionWithSubkey(r.records, r.subkey);
+      const { records } = parseLedgerHealth(r.bytes.toString('utf8'));
       const t1 = performance.now();
+      const proj = verifiedProjectionWithSubkey(records, r.subkey);
+      const t2 = performance.now();
       if (!proj.keyAvailable) available = false;
       for (const rec of proj.live.values()) {
         scoped.push({ record: rec, scope: r.scope, integrity: proj.compromised.has(rec.id) ? 'compromised' : 'ok' });
       }
       this.opts.metricsSink?.emitReplay({
         scope: r.root ? 'project' : 'global', caller: 'store',
-        rows: r.records.length, liveRows: proj.live.size, bytes: r.bytes,
-        parseMs: r.readMs, projectMs: t1 - t0, keyAvailable: proj.keyAvailable,
+        rows: records.length, liveRows: proj.live.size, bytes: r.bytes.length,
+        parseMs: r.readMs + (t1 - t0), projectMs: t2 - t1, keyAvailable: proj.keyAvailable,
       });
+      parsed.push({ ledger: r.ledger, scope: r.scope, root: r.root, records, subkey: r.subkey });
     }
     const artifacts = buildRankArtifacts(scoped.map((s) => s.record));
     this.rankCache = { key, scoped, available, artifacts };   // I5: single slot, atomic replace
     // Fire the once-per-session auto-compaction on the MISS path only. It returns the projection
     // computed ABOVE (locals, not the cache), so compaction cannot change what this recall answers:
     // compactLedger preserves the live projection by construction.
-    this.maybeAutoCompact(reads);
+    this.maybeAutoCompact(parsed);
     return { scoped, available, artifacts };
   }
 
@@ -375,9 +385,10 @@ export class MemoryStore {
     for (const r of reads) {
       let mtimeMs = 0; let totalBytes = 0;
       try { const st = statSync(r.ledger); mtimeMs = st.mtimeMs; totalBytes = st.size; } catch { continue; }
-      // records already read+parsed once by recallInput's per-scope loop (readLedgerRaw) — reused
-      // here instead of re-parsed, so a MISS with auto-compaction enabled no longer parses the same
-      // bytes twice. Serialization is still total: every parsed record passed isWellFormedRecord's
+      // records already read+parsed once by recallInput's own MISS-branch parse loop — reused here
+      // instead of re-parsed, so a MISS with auto-compaction enabled still parses each scope's bytes
+      // only once (Task 4's double-parse fix, preserved across Fix loop 1's readLedgerBytes rework).
+      // Serialization is still total: every parsed record passed isWellFormedRecord's
       // depth cap (MAX_PARSE_DEPTH), which is far below JSON.stringify's overflow depth, so a deep row
       // is dropped at parse and never reaches serializedBytes/planCompaction — the depth cap (not a
       // wrap) is the load-bearing D6 protection for this path.
