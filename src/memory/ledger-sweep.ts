@@ -9,7 +9,7 @@ const HEX32 = '[0-9a-f]{32}';
  *  unrelated to the target). */
 export function orphanTmpPattern(base: string): RegExp {
   const esc = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`^${esc}\\.(c-${HEX32}|lk-${HEX32}|k-${HEX32}|\\d+)\\.tmp$`);
+  return new RegExp(`^${esc}\\.(c-${HEX32}|lk-${HEX32}|k-${HEX32}|w-${HEX32}|\\d+)\\.tmp$`);
 }
 
 /** Remove every orphaned tmp belonging to `artifactPath` (ledger or key). Callers hold the lock,
