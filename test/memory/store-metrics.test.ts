@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -24,12 +24,15 @@ describe('store metrics wiring (spec §5)', () => {
     const { sink, replays } = captureSink();
     const store = new MemoryStore(ledger, { home, sessionId: 't', metricsSink: sink });
     store.commit({ content: 'the deploy target is fly.io', source: 'user' });
+    // W-T5 note: the commit's OWN witnessed append now mints the master key too (advanceWitness MACs
+    // the witness entry via the same ensureMaster) — force genuine absence so this recall's
+    // verifying read still runs key-absent, matching what this test is actually about (see
+    // history-store.test.ts "integrityAvailable is false ... true once a signing verify mints it").
+    rmSync(join(home, 'ledger-mac-master.key'));
     replays.length = 0; // commit's own reads are not under test
     store.recall('deploy target');
     expect(replays.length).toBeGreaterThanOrEqual(1);
     const r = replays[0]!;
-    // A plain commit never mints the master, so the verifying read runs key-absent
-    // (see history-store.test.ts "integrityAvailable is false ... true once a signing verify mints it").
     expect(r).toMatchObject({ scope: 'global', caller: 'store', keyAvailable: false });
     expect(r.rows).toBe(1);
     expect(r.liveRows).toBe(1);

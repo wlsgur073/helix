@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, appendFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -96,10 +96,15 @@ describe('MemoryStore.historyView', () => {
   });
 
   it('integrityAvailable is false when no master key exists, true once a signing verify mints it', () => {
-    // A plain commit never mints the master, so the verifying replay ran key-absent (every grade
-    // clamped Fresh fail-safe). historyView reports that so the surface can flag it (mirrors recall).
-    const { store } = tmpStore();
+    // With no master key the verifying replay runs key-absent (every grade clamped Fresh fail-safe).
+    // historyView reports that so the surface can flag it (mirrors recall).
+    //
+    // W-T5 note: a plain commit now mints the master key too (its witnessed append MACs the witness
+    // entry via the same ensureMaster — plan Global Constraints: "write paths may mint via
+    // ensureMaster") — so genuine absence must be forced explicitly to exercise this path.
+    const { store, home } = tmpStore();
     const a = store.commit({ content: 'db is postgres', source: 'user' });
+    rmSync(join(home, 'ledger-mac-master.key'));
     expect(store.historyView().integrityAvailable).toBe(false);
     store.confirm(a.id); // mints the master key + signs a genuine verify
     expect(store.historyView().integrityAvailable).toBe(true);

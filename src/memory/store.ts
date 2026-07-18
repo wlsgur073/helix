@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerHealth, readLedgerBytes, readLedgerRaw, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
+import { parseLedger, parseLedgerHealth, readLedgerBytes, readLedgerRaw, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
+import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated } from './history.js';
@@ -216,7 +217,8 @@ export class MemoryStore {
       provenance: { source, sessionId: this.session() },
       supersedes: input.supersedes ?? null, blastRadius: input.blastRadius ?? null, reverifyTrigger: null, classification,
     };
-    appendRecord(this.targetLedger(input.scope), record);
+    const ledger = this.targetLedger(input.scope);
+    appendWitnessed(ledger, record, this.homeDir(), this.scopeRootOf(ledger));
     return record;
   }
 
@@ -502,7 +504,7 @@ export class MemoryStore {
         gen: maxGen + 1, targetDigest: digestContent(target.content),
       };
       const signed = signVerify(unsigned, subkey);
-      appendRecordUnlocked(ledger, signed);         // we already hold the ledger lock — non-locking append
+      appendWitnessedUnlocked(ledger, signed, this.homeDir(), this.scopeRootOf(ledger)); // we already hold the ledger lock — non-locking, witnessed append
       return signed;
     });
   }
@@ -713,12 +715,12 @@ export class MemoryStore {
     const alreadyDead = !this.verifiedOf(ledger).live.has(id);
     if (!isMarker && !alreadyDead) {                          // skip tombstone for markers (T1-g) + already-dead ids (D8)
       const ts = this.now();
-      appendRecord(ledger, {
+      appendWitnessed(ledger, {
         id: this.id(), tx: ts, validFrom: ts, validTo: null,
         type: 'erase', content: '', state: 'Suspect',
         provenance: { source: 'user', sessionId: this.session() },
         supersedes: id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
-      });
+      }, this.homeDir(), this.scopeRootOf(ledger));
     }
     if (opts.permanent) {
       // HMAC-aware compaction: preserve genuine signed verifies for this ledger, drop forgeries.

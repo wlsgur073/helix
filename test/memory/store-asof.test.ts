@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, appendFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -51,7 +51,10 @@ describe('store.asOfView (spec C §5)', () => {
   it('aggregate keyAvailable is false when a scope has no master key (M4)', () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-asof-'));
     const store = new MemoryStore(join(home, 'memory.jsonl'), { sessionId: 's', home });
-    const a = store.commit({ content: 'fact', source: 'user' }); // committed, NEVER confirmed -> no master key minted
+    const a = store.commit({ content: 'fact', source: 'user' }); // committed, never confirmed
+    // W-T5 note: the commit's OWN witnessed append now mints the master key too (advanceWitness MACs
+    // the witness entry via the same ensureMaster) — force genuine absence to exercise M4.
+    rmSync(join(home, 'ledger-mac-master.key'));
     const view = store.asOfView(new Date().toISOString());
     expect(view.keyAvailable).toBe(false);                                       // aggregate reflects the keyless scope
     expect(view.facts.find((x) => x.record.id === a.id)!.grade).toBe('Fresh');   // key-absent clamps every grade Fresh

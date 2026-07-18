@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, appendFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -14,7 +14,7 @@ function tmpStore() {
     now: () => `2026-06-09T00:00:00.${String(++t).padStart(3, '0')}Z`,
     genId: () => `m_${++n}`,
   });
-  return { store, ledger };
+  return { store, ledger, home };
 }
 
 // Forge a raw ledger record directly (bypassing store.commit, which forces a canonical tx). Mirrors
@@ -134,8 +134,13 @@ describe('handleInspect history mode', () => {
   it('key-absent history render appends the integrity-unavailable note; key-present does not', () => {
     // With no master key the verifying replay clamps every grade to Fresh fail-safe — the history
     // surface must say grades are unverified, exactly as recall does (handlers.ts integrityNote).
-    const { store } = tmpStore();
+    //
+    // W-T5 note: a plain commit now mints the master key too (its witnessed append MACs the witness
+    // entry via the same ensureMaster — plan Global Constraints: "write paths may mint via
+    // ensureMaster") — so genuine absence must be forced explicitly to exercise this render.
+    const { store, home } = tmpStore();
     const a = store.commit({ content: 'db is postgres', source: 'user' });
+    rmSync(join(home, 'ledger-mac-master.key'));
     expect(handleInspect(store, { history: true }).content[0]!.text).toContain('integrity verification unavailable');
     store.confirm(a.id); // mints the master key + signs a genuine verify -> integrity now available
     expect(handleInspect(store, { history: true }).content[0]!.text).not.toContain('integrity verification unavailable');

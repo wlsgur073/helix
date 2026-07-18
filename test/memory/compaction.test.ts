@@ -155,16 +155,25 @@ describe('compactLedger HMAC-aware (via store permanent-erase)', () => {
     // verify from a forgery — so we must DROP NOTHING rather than permanently destroy recoverable
     // elevations. With no key, the read path clamps everything to Fresh anyway, so kept records
     // confer no trust; the next key-present compaction purges any forgeries.
+    //
+    // W-T5 note: every witnessed append (including a plain commit, or an erase's own tombstone
+    // append) now mints the master key too if it is absent (advanceWitness MACs the witness entry
+    // via the same ensureMaster — plan Global Constraints: "write paths may mint via ensureMaster").
+    // So `c` must be committed AND soft-erased (already dead) BEFORE the key is deleted: a permanent
+    // erase of an ALREADY-dead id skips its tombstone append entirely (T1-g/D8) and goes straight to
+    // compactLedger, which is the only sequencing left that reaches compaction with a genuinely,
+    // still-absent key.
     const { store, ledger, home } = tmpStore();
     const a = store.commit({ content: 'alpha fact', source: 'user' });
     store.confirm(a.id); // mints the master + signs A's genuine verify
+    const c = store.commit({ content: 'gamma fact', source: 'user' });
+    store.erase(c.id); // soft erase (key still present) — c is already dead by the time we go permanent
 
     const masterPath = join(home, 'ledger-mac-master.key');
     expect(existsSync(masterPath)).toBe(true);
     rmSync(masterPath); // key now unavailable -> subkeyForLedger returns null at compact time
 
-    const c = store.commit({ content: 'gamma fact', source: 'user' });
-    store.erase(c.id, { permanent: true }); // triggers compaction with a null subkey
+    store.erase(c.id, { permanent: true }); // c already dead -> tombstone skipped -> compacts with a null subkey
 
     const after = parseLedger(ledger);
     // A's genuine signed verify MUST still be on disk — key-absent compaction must not destroy it.
