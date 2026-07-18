@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerText, parseLedgerHealth, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
+import { appendRecord, appendRecordUnlocked, parseLedger, parseLedgerHealth, readLedgerRaw, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated } from './history.js';
@@ -308,47 +308,38 @@ export class MemoryStore {
     if (p && disposition === 'owned') scopes.push({ ledger: p.ledger, scope: 'project', root: p.root });
 
     const key: ScopeKeyComponent[] = [];
-    const reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; text: string; bytes: number; subkey: Buffer | null; readMs: number }> = [];
+    const reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; records: MemoryRecord[]; bytes: number; subkey: Buffer | null; readMs: number }> = [];
     for (const s of scopes) {
-      let buf: Buffer;
       const rt0 = performance.now();
-      try {
-        buf = readFileSync(s.ledger);                 // I1: owned immutable buffer, read once
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'ENOENT') buf = Buffer.alloc(0);
-        else throw e;
-      }
-      const text = buf.toString('utf8');              // decode timed WITH the read (parseLedger's parseMs is read+decode-inclusive)
+      const { bytes: buf, records } = readLedgerRaw(s.ledger);  // I1: owned immutable buffer + parsed records — single raw-read seam (read+decode+parse timed together, replacing the old two-step buffer-then-lazy-parse)
       const readMs = performance.now() - rt0;
       const subkey = this.subkeyForLedger(s.ledger);  // I3: resolved fresh from disk, never memoized
       key.push({ scopeId: s.ledger, digest: ledgerDigest(buf), fingerprint: subkeyFingerprint(subkey) });
-      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, text, bytes: buf.length, subkey, readMs });
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, records, bytes: buf.length, subkey, readMs });
     }
 
     if (this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
       return { scoped: this.rankCache.scoped, available: this.rankCache.available, artifacts: this.rankCache.artifacts };
     }
 
-    // MISS: rebuild from the SAME bytes already read above. parseMs = per-scope read+decode (captured
-    // with the read) + line-split + JSON.parse, matching verifiedLiveStats' read-inclusive parseMs so
-    // the A3 replay curve stays comparable across the store/hook emitters; projectMs is the verifying
-    // replay, exactly as verifiedOf emits.
+    // MISS: project the records already read+parsed above (readLedgerRaw, in the per-scope loop) — no
+    // second parse. r.readMs is already read+decode+parse-inclusive, matching verifiedLiveStats'
+    // read-inclusive parseMs so the A3 replay curve stays comparable across the store/hook emitters;
+    // projectMs below is just the verifying replay, exactly as verifiedOf emits.
     const scoped: ScopedRecord[] = [];
     let available = true;
     for (const r of reads) {
       const t0 = performance.now();
-      const records = parseLedgerText(r.text);
+      const proj = verifiedProjectionWithSubkey(r.records, r.subkey);
       const t1 = performance.now();
-      const proj = verifiedProjectionWithSubkey(records, r.subkey);
-      const t2 = performance.now();
       if (!proj.keyAvailable) available = false;
       for (const rec of proj.live.values()) {
         scoped.push({ record: rec, scope: r.scope, integrity: proj.compromised.has(rec.id) ? 'compromised' : 'ok' });
       }
       this.opts.metricsSink?.emitReplay({
         scope: r.root ? 'project' : 'global', caller: 'store',
-        rows: records.length, liveRows: proj.live.size, bytes: r.bytes,
-        parseMs: r.readMs + (t1 - t0), projectMs: t2 - t1, keyAvailable: proj.keyAvailable,
+        rows: r.records.length, liveRows: proj.live.size, bytes: r.bytes,
+        parseMs: r.readMs, projectMs: t1 - t0, keyAvailable: proj.keyAvailable,
       });
     }
     const artifacts = buildRankArtifacts(scoped.map((s) => s.record));
@@ -377,19 +368,20 @@ export class MemoryStore {
    *  plan and that lock would otherwise be attributed to this compaction. Both fields are ZERO on
    *  failure: compactLedger writes a tmp and renames, so a throw leaves the ledger byte-identical and
    *  nothing was dropped or reclaimed. */
-  private maybeAutoCompact(reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; text: string; subkey: Buffer | null }>): void {
+  private maybeAutoCompact(reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; records: MemoryRecord[]; subkey: Buffer | null }>): void {
     const cfg = this.opts.compaction;
     if (!cfg || this.compactedThisSession) return;
     const nowMs = Date.parse(this.now());
     for (const r of reads) {
       let mtimeMs = 0; let totalBytes = 0;
       try { const st = statSync(r.ledger); mtimeMs = st.mtimeMs; totalBytes = st.size; } catch { continue; }
-      // Serialization is total here: every parsed record passed isWellFormedRecord's depth cap
-      // (MAX_PARSE_DEPTH), which is far below JSON.stringify's overflow depth, so a deep row is dropped
-      // at parse and never reaches serializedBytes/planCompaction — the depth cap (not a wrap) is the
-      // load-bearing D6 protection for this path. (A prior outer try/catch here was dead code: nothing
-      // in the eligibility body can throw on a cap-passed record.)
-      const records = parseLedgerText(r.text);
+      // records already read+parsed once by recallInput's per-scope loop (readLedgerRaw) — reused
+      // here instead of re-parsed, so a MISS with auto-compaction enabled no longer parses the same
+      // bytes twice. Serialization is still total: every parsed record passed isWellFormedRecord's
+      // depth cap (MAX_PARSE_DEPTH), which is far below JSON.stringify's overflow depth, so a deep row
+      // is dropped at parse and never reaches serializedBytes/planCompaction — the depth cap (not a
+      // wrap) is the load-bearing D6 protection for this path.
+      const records = r.records;
       // `rows` is the TOTAL PHYSICAL row count for BOTH gates (never liveRows), and `reclaimable` /
       // `reclaimableBytes` come from ONE planCompaction pass over that SAME array — dirtyGate's
       // `0 <= reclaimable <= rows` precondition is the caller's to keep.
@@ -570,7 +562,7 @@ export class MemoryStore {
     let integrityAvailable = true; // false if ANY read scope lacked a master key (mirrors scopedVerified)
 
     const addScope = (ledger: LedgerPath, scope: MemoryScope) => {
-      const records = parseLedger(ledger); // ONE read per scope — shared by both projections below
+      const { records } = readLedgerRaw(ledger); // ONE read per scope — shared by both projections below (single raw-read seam)
       // Live rows (graded) — membership authority + LEFT-join enrichment, identical to verifiedOf.
       const v = verifiedLiveOf(records, this.homeDir(), this.scopeRootOf(ledger));
       if (!v.keyAvailable) integrityAvailable = false; // key-absent => every grade clamped Fresh (fail-safe)
@@ -605,7 +597,7 @@ export class MemoryStore {
     let truncated = false;
 
     const addScope = (ledger: LedgerPath, scope: MemoryScope) => {
-      const records = parseLedger(ledger);                 // ONE read per scope
+      const { records } = readLedgerRaw(ledger);            // ONE read per scope (single raw-read seam)
       const subkey = this.subkeyForLedger(ledger);
       const out = buildAsOfEvidence(records, t, {
         verify: (r) => (subkey ? verifyVerify(r, subkey) : false),

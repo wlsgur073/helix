@@ -2,9 +2,8 @@
 // verified live projection. Both the MemoryStore (recall/inspect) and the SessionStart hook route
 // through these two functions so the trust grades they show can never drift — a forged or edited
 // ledger record replays as Fresh on EVERY read surface, not just the tool surface.
-import { statSync } from 'node:fs';
 import type { LedgerPath } from './ledger.js';
-import { parseLedger } from './ledger.js';
+import { readLedgerRaw } from './ledger.js';
 import type { MemoryRecord } from '../types.js';
 import { tryReadMaster, deriveSubkey, verifyVerify } from './ledger-mac.js';
 import { scopeNonce, globalScopeNonce } from './ownership.js';
@@ -47,17 +46,16 @@ export function verifiedLiveOf(records: MemoryRecord[], home: string, projectRoo
 export interface ReplayStats {
   rows: number;       // parsed record count (tolerant parse — the projection's actual input)
   liveRows: number;   // projection.live.size (future compaction dirty-ratio numerator)
-  bytes: number;      // statSync size just before the read; 0 when the file is missing.
-                      // A concurrent append between stat and read can skew this by one record —
-                      // benign under the lock-free read model (rows is the primary axis).
-  parseMs: number;    // parseLedger body: file read + decode + line split + JSON.parse
+  bytes: number;      // exact length of the raw bytes read (readLedgerRaw) — no separate stat call,
+                      // so no stat-vs-read race against a concurrent append; 0 when the file is missing.
+  parseMs: number;    // readLedgerRaw body: file read + decode + line split + JSON.parse
   projectMs: number;  // verifiedLiveOf body: subkey resolution + HMAC verifies + projection build
   keyAvailable: boolean;
 }
 
 /**
  * verifiedLive plus the replay decomposition. This wrapper is the ONLY place parse and project are
- * timed — callers must never re-compose parseLedger + verifiedLiveOf to measure (the same
+ * timed — callers must never re-compose readLedgerRaw + verifiedLiveOf to measure (the same
  * single-source-of-truth rule verifiedLive exists for). historyView/asOfView compose over one
  * parsed array by design (atomic read) and are deliberately NOT covered (spec §4 documented gaps).
  */
@@ -66,10 +64,8 @@ export function verifiedLiveStats(
   home: string,
   projectRoot?: string,
 ): { projection: VerifiedProjection; stats: ReplayStats } {
-  let bytes = 0;
-  try { bytes = statSync(ledger).size; } catch { /* ENOENT -> 0, matches parseLedger tolerance */ }
   const t0 = performance.now();
-  const records = parseLedger(ledger);
+  const { bytes, records } = readLedgerRaw(ledger);   // single raw-read seam (witness feature, W-T4): ENOENT -> bytes.length 0, matching the prior statSync tolerance
   const t1 = performance.now();
   const projection = verifiedLiveOf(records, home, projectRoot);
   const t2 = performance.now();
@@ -78,7 +74,7 @@ export function verifiedLiveStats(
     stats: {
       rows: records.length,
       liveRows: projection.live.size,
-      bytes,
+      bytes: bytes.length,
       parseMs: t1 - t0,
       projectMs: t2 - t1,
       keyAvailable: projection.keyAvailable,

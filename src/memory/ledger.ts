@@ -190,6 +190,26 @@ export function parseLedger(path: LedgerPath): MemoryRecord[] {
   return parseLedgerText(text);
 }
 
+/** Read the ledger's raw bytes ONCE and parse them (parseLedgerHealth) — the single seam every
+ *  grade-assigning reader converges on (witness feature, spec §4). Byte-hashing (the witness's
+ *  prefix-hash) is only sound over the EXACT raw bytes, never a re-encoded string, so a caller that
+ *  needs both records and a byte-faithful hash must get them from ONE read: calling parseLedger
+ *  (which decodes internally and never exposes the bytes) or hand-rolling a second readFileSync risks
+ *  hashing bytes that differ from the ones that were actually parsed. Missing file -> the same empty
+ *  convention parseLedger uses, spelled out over both return channels. Deliberately NOT rewritten in
+ *  terms of parseLedger (or vice versa): parseLedger stays untouched for its existing callers. */
+export function readLedgerRaw(path: LedgerPath): { bytes: Buffer; records: MemoryRecord[]; skippedNonBlank: number } {
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
+    throw err;
+  }
+  const { records, skippedNonBlank } = parseLedgerHealth(bytes.toString('utf8'));
+  return { bytes, records, skippedNonBlank };
+}
+
 export interface CompactOptions {
   /** Ids whose CONTENT must be physically erased (right-to-erasure / secrets). Doubles as the
    *  escape hatch for a planted/durable marker (F5): include its canonical id (`integrity_marker` /

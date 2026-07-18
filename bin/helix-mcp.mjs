@@ -13013,7 +13013,7 @@ var StdioServerTransport = class {
 
 // src/memory/store.ts
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync3, readFileSync as readFileSync8, statSync as statSync5 } from "node:fs";
+import { existsSync as existsSync3, readFileSync as readFileSync8, statSync as statSync4 } from "node:fs";
 import { dirname as dirname5 } from "node:path";
 
 // src/memory/ledger.ts
@@ -13720,6 +13720,17 @@ function parseLedger(path) {
     throw err;
   }
   return parseLedgerText(text);
+}
+function readLedgerRaw(path) {
+  let bytes;
+  try {
+    bytes = readFileSync3(path);
+  } catch (err) {
+    if (err.code === "ENOENT") return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
+    throw err;
+  }
+  const { records, skippedNonBlank } = parseLedgerHealth(bytes.toString("utf8"));
+  return { bytes, records, skippedNonBlank };
 }
 function planCompaction(records, opts) {
   const live = buildProjection(records);
@@ -14432,7 +14443,6 @@ function globalScopeNonce(home2) {
 }
 
 // src/memory/verified-read.ts
-import { statSync as statSync4 } from "node:fs";
 function subkeyForScope(home2, projectRoot2) {
   const master = tryReadMaster(home2);
   if (!master) return null;
@@ -14449,13 +14459,8 @@ function verifiedLiveOf(records, home2, projectRoot2) {
   return verifiedProjectionWithSubkey(records, subkeyForScope(home2, projectRoot2));
 }
 function verifiedLiveStats(ledger, home2, projectRoot2) {
-  let bytes = 0;
-  try {
-    bytes = statSync4(ledger).size;
-  } catch {
-  }
   const t0 = performance.now();
-  const records = parseLedger(ledger);
+  const { bytes, records } = readLedgerRaw(ledger);
   const t1 = performance.now();
   const projection = verifiedLiveOf(records, home2, projectRoot2);
   const t2 = performance.now();
@@ -14464,7 +14469,7 @@ function verifiedLiveStats(ledger, home2, projectRoot2) {
     stats: {
       rows: records.length,
       liveRows: projection.live.size,
-      bytes,
+      bytes: bytes.length,
       parseMs: t1 - t0,
       projectMs: t2 - t1,
       keyAvailable: projection.keyAvailable
@@ -14718,19 +14723,12 @@ var MemoryStore = class {
     const key = [];
     const reads = [];
     for (const s of scopes) {
-      let buf;
       const rt0 = performance.now();
-      try {
-        buf = readFileSync8(s.ledger);
-      } catch (e) {
-        if (e.code === "ENOENT") buf = Buffer.alloc(0);
-        else throw e;
-      }
-      const text = buf.toString("utf8");
+      const { bytes: buf, records } = readLedgerRaw(s.ledger);
       const readMs = performance.now() - rt0;
       const subkey = this.subkeyForLedger(s.ledger);
       key.push({ scopeId: s.ledger, digest: ledgerDigest(buf), fingerprint: subkeyFingerprint(subkey) });
-      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, text, bytes: buf.length, subkey, readMs });
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, records, bytes: buf.length, subkey, readMs });
     }
     if (this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
       return { scoped: this.rankCache.scoped, available: this.rankCache.available, artifacts: this.rankCache.artifacts };
@@ -14739,10 +14737,8 @@ var MemoryStore = class {
     let available = true;
     for (const r of reads) {
       const t0 = performance.now();
-      const records = parseLedgerText(r.text);
+      const proj = verifiedProjectionWithSubkey(r.records, r.subkey);
       const t1 = performance.now();
-      const proj = verifiedProjectionWithSubkey(records, r.subkey);
-      const t2 = performance.now();
       if (!proj.keyAvailable) available = false;
       for (const rec of proj.live.values()) {
         scoped.push({ record: rec, scope: r.scope, integrity: proj.compromised.has(rec.id) ? "compromised" : "ok" });
@@ -14750,11 +14746,11 @@ var MemoryStore = class {
       this.opts.metricsSink?.emitReplay({
         scope: r.root ? "project" : "global",
         caller: "store",
-        rows: records.length,
+        rows: r.records.length,
         liveRows: proj.live.size,
         bytes: r.bytes,
-        parseMs: r.readMs + (t1 - t0),
-        projectMs: t2 - t1,
+        parseMs: r.readMs,
+        projectMs: t1 - t0,
         keyAvailable: proj.keyAvailable
       });
     }
@@ -14788,13 +14784,13 @@ var MemoryStore = class {
       let mtimeMs = 0;
       let totalBytes = 0;
       try {
-        const st = statSync5(r.ledger);
+        const st = statSync4(r.ledger);
         mtimeMs = st.mtimeMs;
         totalBytes = st.size;
       } catch {
         continue;
       }
-      const records = parseLedgerText(r.text);
+      const records = r.records;
       const gate = cheapGate({ rows: records.length, totalBytes, mtimeMs, nowMs, cfg });
       if (!gate.proceed) continue;
       const keepValidVerify = this.keepValidVerifyFor(r.subkey);
@@ -14966,7 +14962,7 @@ var MemoryStore = class {
     let truncated = false;
     let integrityAvailable = true;
     const addScope = (ledger, scope) => {
-      const records = parseLedger(ledger);
+      const { records } = readLedgerRaw(ledger);
       const v = verifiedLiveOf(records, this.homeDir(), this.scopeRootOf(ledger));
       if (!v.keyAvailable) integrityAvailable = false;
       for (const r of v.live.values()) {
@@ -14995,7 +14991,7 @@ var MemoryStore = class {
     let keyAvailable = true;
     let truncated = false;
     const addScope = (ledger, scope) => {
-      const records = parseLedger(ledger);
+      const { records } = readLedgerRaw(ledger);
       const subkey = this.subkeyForLedger(ledger);
       const out = buildAsOfEvidence(records, t, {
         verify: (r) => subkey ? verifyVerify(r, subkey) : false,
@@ -23986,7 +23982,7 @@ import { join as join7, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync5, readdirSync as readdirSync3, lstatSync as lstatSync2, statSync as statSync6, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync5, readdirSync as readdirSync3, lstatSync as lstatSync2, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join6 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
@@ -24006,7 +24002,7 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     const stampPath = join6(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
-      stampMtimeMs = statSync6(stampPath).mtimeMs;
+      stampMtimeMs = statSync5(stampPath).mtimeMs;
     } catch {
       stampMtimeMs = null;
     }

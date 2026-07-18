@@ -179,9 +179,6 @@ function globalScopeNonce(home) {
   return macNonce;
 }
 
-// src/memory/verified-read.ts
-import { statSync as statSync3 } from "node:fs";
-
 // src/memory/ledger.ts
 import { readFileSync as readFileSync2, mkdirSync as mkdirSync2, statSync } from "node:fs";
 
@@ -245,18 +242,16 @@ function parseLedgerHealth(text) {
   }
   return { records, skippedNonBlank };
 }
-function parseLedgerText(text) {
-  return parseLedgerHealth(text).records;
-}
-function parseLedger(path) {
-  let text;
+function readLedgerRaw(path) {
+  let bytes;
   try {
-    text = readFileSync2(path, "utf8");
+    bytes = readFileSync2(path);
   } catch (err) {
-    if (err.code === "ENOENT") return [];
+    if (err.code === "ENOENT") return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
     throw err;
   }
-  return parseLedgerText(text);
+  const { records, skippedNonBlank } = parseLedgerHealth(bytes.toString("utf8"));
+  return { bytes, records, skippedNonBlank };
 }
 
 // src/memory/ledger-mac.ts
@@ -456,13 +451,8 @@ function verifiedLiveOf(records, home, projectRoot) {
   return verifiedProjectionWithSubkey(records, subkeyForScope(home, projectRoot));
 }
 function verifiedLiveStats(ledger, home, projectRoot) {
-  let bytes = 0;
-  try {
-    bytes = statSync3(ledger).size;
-  } catch {
-  }
   const t0 = performance.now();
-  const records = parseLedger(ledger);
+  const { bytes, records } = readLedgerRaw(ledger);
   const t1 = performance.now();
   const projection = verifiedLiveOf(records, home, projectRoot);
   const t2 = performance.now();
@@ -471,7 +461,7 @@ function verifiedLiveStats(ledger, home, projectRoot) {
     stats: {
       rows: records.length,
       liveRows: projection.live.size,
-      bytes,
+      bytes: bytes.length,
       parseMs: t1 - t0,
       projectMs: t2 - t1,
       keyAvailable: projection.keyAvailable
