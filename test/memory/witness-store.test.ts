@@ -356,9 +356,9 @@ describe('M1: transition-log durability wiring (three locks)', () => {
       const window = events.slice(openIdx + 1, openIdx + 1 + closeRel); // fd-recycling-safe window
       const writes = window.filter((e) => e.kind === 'write' && e.fd === fd);
       const expectedLine = JSON.stringify({ v: 1, scope: key, epoch: plan.epoch, kind: 'compaction', tx: '2026-07-19T00:00:00.000Z', nonce: plan.nonce }) + '\n';
+      expect(readFileSync(logPath, 'utf8')).toBe(expectedLine);     // LOCK 2: complete on disk under short writes
       expect(writes.length).toBeGreaterThan(1);                     // short counts forced the loop
       expect(Buffer.concat(writes.map((w) => w.bytes!)).toString('utf8')).toBe(expectedLine); // LOCK 1b: content-associated
-      expect(readFileSync(logPath, 'utf8')).toBe(expectedLine);     // LOCK 2: complete on disk under short writes
       const lastWriteIdx = window.reduce((acc, e, i) => (e.kind === 'write' && e.fd === fd ? i : acc), -1);
       const fsyncAfter = window.slice(lastWriteIdx + 1).some((e) => e.kind === 'fsync' && e.fd === fd);
       expect(fsyncAfter).toBe(true);                                // LOCK 3: fsync on the log fd, after the content
