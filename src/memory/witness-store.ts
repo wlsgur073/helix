@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, openSync, writeSync, fsyncSync, closeSync } fr
 import { dirname, join, resolve } from 'node:path';
 import { withFileLock, canonical } from './lock.js';
 import { ensureMaster, tryReadMaster } from './ledger-mac.js';
-import { realFsOps, writeAll } from './fs-ops.js';
+import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import {
   classifyWitness, advanceAllowed, cleanupClearAllowed, sha256Hex,
@@ -71,24 +71,27 @@ function readStoreFileAt(path: string): WitnessStoreFile {
 }
 
 /** Atomic replace: sweep orphans, write `.w-<hex32>.tmp` ('wx' + fchmod 0600), writeAll, fsync,
- *  close, rename over witness.json, fsync the parent dir. */
-function writeStoreFileAt(path: string, store: WitnessStoreFile): void {
+ *  close, rename over witness.json, fsync the parent dir. `fsOps` is the SAME injectable
+ *  fs-ops.ts:DurableFsOps seam compactLedger/appendRecordUnlocked already use — defaults to
+ *  realFsOps, so production behavior is unchanged; tests can inject a faulty fsOps to exercise the
+ *  disk-full/short-write/fsync failpoints on this specific file (Task 8). */
+function writeStoreFileAt(path: string, store: WitnessStoreFile, fsOps: DurableFsOps = realFsOps): void {
   const dir = dirname(path);
   const tmp = `${path}.w-${randomBytes(16).toString('hex')}.tmp`;
-  sweepOrphanTmps(path, { keep: tmp });
-  const fd = realFsOps.openSync(tmp, 'wx');
+  sweepOrphanTmps(path, { fsOps, keep: tmp });
+  const fd = fsOps.openSync(tmp, 'wx');
   try {
-    realFsOps.fchmodSync(fd, 0o600);
-    writeAll(realFsOps, fd, JSON.stringify(store));
-    realFsOps.fsyncSync(fd);
-    realFsOps.closeSync(fd);
+    fsOps.fchmodSync(fd, 0o600);
+    writeAll(fsOps, fd, JSON.stringify(store));
+    fsOps.fsyncSync(fd);
+    fsOps.closeSync(fd);
   } catch (e) {
-    try { realFsOps.closeSync(fd); } catch { /* already closed by a throwing close */ }
-    try { realFsOps.unlinkSync(tmp); } catch { /* best-effort cleanup */ }
+    try { fsOps.closeSync(fd); } catch { /* already closed by a throwing close */ }
+    try { fsOps.unlinkSync(tmp); } catch { /* best-effort cleanup */ }
     throw e;
   }
-  realFsOps.renameSync(tmp, path);
-  realFsOps.fsyncDir(dir);
+  fsOps.renameSync(tmp, path);
+  fsOps.fsyncDir(dir);
 }
 
 /** Verify entry/journal independently against `raw`; `macInvalid` is set if EITHER fails —
@@ -146,8 +149,9 @@ function appendWitnessLogLine(home: string, line: { v: 1; scope: string; epoch: 
 /** Under the witness lock, RE-classifies from current disk state (never a pre-lock snapshot) and
  *  throws WitnessAdvanceError unless advanceAllowed — the anti-laundering invariant enforced a
  *  second time at the store layer (spec §4.2). A macInvalid scope degrades wholesale to a fresh
- *  TOFU adoption: the new entry's epoch resets to 1, matching a genuine first-contact. */
-export function advanceWitness(home: string, scopeKey: string, bytes: Buffer, headTx: string | null): void {
+ *  TOFU adoption: the new entry's epoch resets to 1, matching a genuine first-contact. `fsOps`
+ *  (Task 8): injectable seam for the witness.json replace itself — defaults to realFsOps. */
+export function advanceWitness(home: string, scopeKey: string, bytes: Buffer, headTx: string | null, fsOps: DurableFsOps = realFsOps): void {
   mkdirSync(home, { recursive: true });
   const master = ensureMaster(home);
   const rawPath = witnessPath(home);
@@ -167,7 +171,7 @@ export function advanceWitness(home: string, scopeKey: string, bytes: Buffer, he
     const unsigned = { epoch: effectiveEntry?.epoch ?? 1, byteLength: bytes.length, prefixHash: sha256Hex(bytes), headTx };
     const entry = signedEntry(scopeKey, master, unsigned);
     const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry, journal: effectiveJournal } } };
-    writeStoreFileAt(path, nextStore);
+    writeStoreFileAt(path, nextStore, fsOps);
   });
 }
 
@@ -204,7 +208,8 @@ export function planTransition(
  *  plan's, AND the pending journal's nonce is exactly what the plan expects to supersede — else the
  *  witness moved after the plan was taken and this throws WitnessAdvanceError (the caller must
  *  re-plan). Appends the witness-log line BEFORE the journal write lands, so incident response sees
- *  the intent even if the journal write itself never completes. */
+ *  the intent even if the journal write itself never completes. `fsOps` (Task 8): injectable seam
+ *  for the witness.json replace itself — defaults to realFsOps. */
 export function openTransition(
   home: string, scopeKey: string,
   plan: {
@@ -216,6 +221,7 @@ export function openTransition(
     expected: { byteLength: number; prefixHash: string };
     tx: string;
   },
+  fsOps: DurableFsOps = realFsOps,
 ): JournalEntry {
   mkdirSync(home, { recursive: true });
   const master = ensureMaster(home);
@@ -242,7 +248,7 @@ export function openTransition(
     const journal = signedJournal(scopeKey, master, unsigned);
     appendWitnessLogLine(home, { v: 1, scope: scopeKey, epoch: plan.epoch, kind: plan.kind, tx: plan.tx, nonce: plan.nonce });
     const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry, journal } } };
-    writeStoreFileAt(path, nextStore);
+    writeStoreFileAt(path, nextStore, fsOps);
     return journal;
   });
 }
@@ -253,8 +259,9 @@ export function openTransition(
  *  can never lower the witness" (spec §4.3, R1-F2): a journal whose epoch the witness has already
  *  reached or passed is stale and MUST NOT be applied — only maybeCleanupClear may retire it. On
  *  success this is the ONLY path that moves the witness across a rewrite: entry becomes the
- *  expected head at the journal's epoch, and the slot clears. */
-export function completeTransition(home: string, scopeKey: string, bytes: Buffer, headTx: string | null): void {
+ *  expected head at the journal's epoch, and the slot clears. `fsOps` (Task 8): injectable seam for
+ *  the witness.json replace itself — defaults to realFsOps. */
+export function completeTransition(home: string, scopeKey: string, bytes: Buffer, headTx: string | null, fsOps: DurableFsOps = realFsOps): void {
   mkdirSync(home, { recursive: true });
   const master = ensureMaster(home);
   const rawPath = witnessPath(home);
@@ -275,15 +282,16 @@ export function completeTransition(home: string, scopeKey: string, bytes: Buffer
     const unsigned = { epoch: journal.epoch, byteLength: journal.expected.byteLength, prefixHash: journal.expected.prefixHash, headTx };
     const nextEntry = signedEntry(scopeKey, master, unsigned);
     const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry: nextEntry, journal: null } } };
-    writeStoreFileAt(path, nextStore);
+    writeStoreFileAt(path, nextStore, fsOps);
   });
 }
 
 /** Under the witness lock; applies cleanupClearAllowed's two-part predicate (witness at/beyond
  *  the journal's target epoch AND the current file validates against the CURRENT witness entry —
  *  monotonicity alone is not read containment, spec §4.3 R4-F1). Clears the slot and returns true
- *  only when it holds; otherwise the journal REMAINS pending (never a plain no-journal decay). */
-export function maybeCleanupClear(home: string, scopeKey: string, bytes: Buffer): boolean {
+ *  only when it holds; otherwise the journal REMAINS pending (never a plain no-journal decay).
+ *  `fsOps` (Task 8): injectable seam for the witness.json replace itself — defaults to realFsOps. */
+export function maybeCleanupClear(home: string, scopeKey: string, bytes: Buffer, fsOps: DurableFsOps = realFsOps): boolean {
   mkdirSync(home, { recursive: true });
   const rawPath = witnessPath(home);
   return withFileLock(rawPath, () => {
@@ -296,7 +304,7 @@ export function maybeCleanupClear(home: string, scopeKey: string, bytes: Buffer)
     const entry = state.macInvalid ? null : state.entry;
     if (!cleanupClearAllowed(bytes, entry, journal)) return false;
     const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry, journal: null } } };
-    writeStoreFileAt(path, nextStore);
+    writeStoreFileAt(path, nextStore, fsOps);
     return true;
   });
 }

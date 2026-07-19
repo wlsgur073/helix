@@ -13839,29 +13839,29 @@ function readStoreFileAt(path) {
     return { v: 1, scopes: {} };
   }
 }
-function writeStoreFileAt(path, store2) {
+function writeStoreFileAt(path, store2, fsOps = realFsOps) {
   const dir = dirname4(path);
   const tmp = `${path}.w-${randomBytes3(16).toString("hex")}.tmp`;
-  sweepOrphanTmps(path, { keep: tmp });
-  const fd = realFsOps.openSync(tmp, "wx");
+  sweepOrphanTmps(path, { fsOps, keep: tmp });
+  const fd = fsOps.openSync(tmp, "wx");
   try {
-    realFsOps.fchmodSync(fd, 384);
-    writeAll(realFsOps, fd, JSON.stringify(store2));
-    realFsOps.fsyncSync(fd);
-    realFsOps.closeSync(fd);
+    fsOps.fchmodSync(fd, 384);
+    writeAll(fsOps, fd, JSON.stringify(store2));
+    fsOps.fsyncSync(fd);
+    fsOps.closeSync(fd);
   } catch (e) {
     try {
-      realFsOps.closeSync(fd);
+      fsOps.closeSync(fd);
     } catch {
     }
     try {
-      realFsOps.unlinkSync(tmp);
+      fsOps.unlinkSync(tmp);
     } catch {
     }
     throw e;
   }
-  realFsOps.renameSync(tmp, path);
-  realFsOps.fsyncDir(dir);
+  fsOps.renameSync(tmp, path);
+  fsOps.fsyncDir(dir);
 }
 function deriveState(scopeKey, master, raw) {
   if (!raw) return { entry: null, journal: null, macInvalid: false };
@@ -13896,7 +13896,7 @@ function appendWitnessLogLine(home2, line) {
     closeSync3(fd);
   }
 }
-function advanceWitness(home2, scopeKey, bytes, headTx) {
+function advanceWitness(home2, scopeKey, bytes, headTx, fsOps = realFsOps) {
   mkdirSync2(home2, { recursive: true });
   const master = ensureMaster(home2);
   const rawPath = witnessPath(home2);
@@ -13913,7 +13913,7 @@ function advanceWitness(home2, scopeKey, bytes, headTx) {
     const unsigned = { epoch: effectiveEntry?.epoch ?? 1, byteLength: bytes.length, prefixHash: sha256Hex(bytes), headTx };
     const entry = signedEntry(scopeKey, master, unsigned);
     const nextStore = { v: 1, scopes: { ...store2.scopes, [scopeKey]: { entry, journal: effectiveJournal } } };
-    writeStoreFileAt(path, nextStore);
+    writeStoreFileAt(path, nextStore, fsOps);
   });
 }
 function planTransition(home2, scopeKey, kind) {
@@ -13927,7 +13927,7 @@ function planTransition(home2, scopeKey, kind) {
   const supersedes = pending?.nonce ?? null;
   return { epoch, nonce, predecessor, supersedes };
 }
-function openTransition(home2, scopeKey, plan) {
+function openTransition(home2, scopeKey, plan, fsOps = realFsOps) {
   mkdirSync2(home2, { recursive: true });
   const master = ensureMaster(home2);
   const rawPath = witnessPath(home2);
@@ -13955,11 +13955,11 @@ function openTransition(home2, scopeKey, plan) {
     const journal = signedJournal(scopeKey, master, unsigned);
     appendWitnessLogLine(home2, { v: 1, scope: scopeKey, epoch: plan.epoch, kind: plan.kind, tx: plan.tx, nonce: plan.nonce });
     const nextStore = { v: 1, scopes: { ...store2.scopes, [scopeKey]: { entry, journal } } };
-    writeStoreFileAt(path, nextStore);
+    writeStoreFileAt(path, nextStore, fsOps);
     return journal;
   });
 }
-function completeTransition(home2, scopeKey, bytes, headTx) {
+function completeTransition(home2, scopeKey, bytes, headTx, fsOps = realFsOps) {
   mkdirSync2(home2, { recursive: true });
   const master = ensureMaster(home2);
   const rawPath = witnessPath(home2);
@@ -13980,7 +13980,7 @@ function completeTransition(home2, scopeKey, bytes, headTx) {
     const unsigned = { epoch: journal.epoch, byteLength: journal.expected.byteLength, prefixHash: journal.expected.prefixHash, headTx };
     const nextEntry = signedEntry(scopeKey, master, unsigned);
     const nextStore = { v: 1, scopes: { ...store2.scopes, [scopeKey]: { entry: nextEntry, journal: null } } };
-    writeStoreFileAt(path, nextStore);
+    writeStoreFileAt(path, nextStore, fsOps);
   });
 }
 
