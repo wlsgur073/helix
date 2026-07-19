@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { parseLedger, parseLedgerHealth, readLedgerBytes, readLedgerRaw, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
+import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
 import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
 import { scopeKeyOf, readScopeWitness, classifyState, completeTransition } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
@@ -21,6 +21,7 @@ import { isOwned, stampOwnership, projectDispositionOf, type ProjectDisposition 
 import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedLiveWitnessed, verifiedProjectionWithSubkey } from './verified-read.js';
+import { readLedgerWitnessed, readLedgerBytesWitnessed } from './witness-read.js';
 import type { WitnessVerdict } from './witness-core.js';
 import { ledgerDigest, subkeyFingerprint, keyVectorEqual, type ScopeKeyComponent, type RecallCacheEntry } from './recall-cache.js';
 import type { MetricsSink } from '../metrics.js';
@@ -317,26 +318,25 @@ export class MemoryStore {
 
     // Bytes-only pass (Fix loop 1): digest + subkey fingerprint need nothing but the raw bytes, so the
     // cache-key check below runs BEFORE any parse — a HIT pays a read cost but ZERO parse cost, the A4
-    // cache's original invariant. readLedgerRaw (which parses eagerly) is deliberately NOT used here;
+    // cache's original invariant. readLedgerBytesWitnessed reads witness-FIRST then the ledger bytes
+    // with NO parse (readLedgerBytes), classifies, and retries once on an alarm (spec §7) — so a HIT
+    // still never reaches a parse. readLedgerRaw (which parses eagerly) is deliberately NOT used here;
     // it stays reserved for non-cache-gated sites (historyView/asOfView/verifiedLiveStats).
     const home = this.homeDir();
     const key: ScopeKeyComponent[] = [];
     const verdicts: Array<{ scope: MemoryScope; verdict: WitnessVerdict }> = [];
     const reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; bytes: Buffer; subkey: Buffer | null; readMs: number; journalPending: boolean }> = [];
     for (const s of scopes) {
-      const rt0 = performance.now();
-      const bytes = readLedgerBytes(s.ledger);        // I1: owned immutable buffer, read once — NO parse yet
-      const readMs = performance.now() - rt0;
+      // W-T7 + §7: witness verdict + identity + journalPending, all off the SAME (final) witness snapshot
+      // classified against the SAME (final) bytes — witness-first with a single alarm retry (no self-race,
+      // no spurious mismatch from a concurrent append). The identity is a cache-key component; the verdict
+      // is applied FRESH by recall() after cache resolution; journalPending forces a bypass.
+      const w = readLedgerBytesWitnessed(s.ledger, home, s.root);
+      const bytes = w.bytes;                          // I1: owned immutable buffer, read once — NO parse yet
       const subkey = this.subkeyForLedger(s.ledger);  // I3: resolved fresh from disk, never memoized
-      // W-T7: witness verdict + identity + journalPending, all off ONE witness.json snapshot classified
-      // against the SAME bytes just read (no self-race). The identity is a cache-key component; the
-      // verdict is applied FRESH by recall() after cache resolution; journalPending forces a bypass.
-      const witnessState = readScopeWitness(home, scopeKeyOf(home, s.root));
-      const verdict = classifyState(witnessState, bytes);
-      const witness = witnessState.entry?.mac ?? 'witness-absent';
-      key.push({ scopeId: s.ledger, digest: ledgerDigest(bytes), fingerprint: subkeyFingerprint(subkey), witness });
-      verdicts.push({ scope: s.scope, verdict });
-      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs, journalPending: witnessState.journal !== null });
+      key.push({ scopeId: s.ledger, digest: ledgerDigest(bytes), fingerprint: subkeyFingerprint(subkey), witness: w.witnessIdentity });
+      verdicts.push({ scope: s.scope, verdict: w.verdict });
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs: w.readMs, journalPending: w.journalPending });
     }
 
     // A pending journal means an in-flight rewrite: the cache is bypassed BOTH directions (no read,
@@ -666,21 +666,23 @@ export class MemoryStore {
 
     const addScope = (ledger: LedgerPath, scope: MemoryScope) => {
       const root = this.scopeRootOf(ledger);
-      const { bytes, records } = readLedgerRaw(ledger); // ONE read per scope — bytes feed the witness verdict, records feed both projections (single raw-read seam)
-      const verdict = classifyState(readScopeWitness(home, scopeKeyOf(home, root)), bytes);
-      verdicts.push(verdict);
-      if (verdict.kind === 'transition-interrupted') return; // exclude the whole scope (live AND closed rows)
+      // ONE witnessed read per scope (spec §7): witness-first + retry-once. bytes feed the verdict,
+      // records feed both projections — all from the SAME final read pair, so the verdict can never
+      // race the projection and an ordinary concurrent append never yields a spurious mismatch.
+      const w = readLedgerWitnessed(ledger, home, root);
+      verdicts.push(w.verdict);
+      if (w.verdict.kind === 'transition-interrupted') return; // exclude the whole scope (live AND closed rows)
       // Live rows (graded) — membership authority + LEFT-join enrichment, identical to verifiedOf —
       // then the witness clamp (mismatch => elevated LIVE grades drop to Fresh; closed rows below keep
       // their historical state, like asOf).
-      const rawV = verifiedLiveOf(records, home, root);
+      const rawV = verifiedLiveOf(w.records, home, root);
       if (!rawV.keyAvailable) integrityAvailable = false; // key-absent => every grade clamped Fresh (fail-safe)
-      const v = enforceWitnessProjection(rawV, verdict);
+      const v = enforceWitnessProjection(rawV, w.verdict);
       for (const r of v.live.values()) {
         rows.push({ record: r, scope, txTo: null, closedBy: null, integrity: v.compromised.has(r.id) ? 'compromised' : 'ok' });
       }
       // Closed rows from the SAME record array.
-      const h = buildHistory(records);
+      const h = buildHistory(w.records);
       for (const id of h.anomalies) anomalies.add(id);
       if (h.truncated) truncated = true;
       for (const row of h.rows) {
@@ -710,17 +712,18 @@ export class MemoryStore {
 
     const addScope = (ledger: LedgerPath, scope: MemoryScope) => {
       const root = this.scopeRootOf(ledger);
-      const { bytes, records } = readLedgerRaw(ledger);    // ONE read per scope — bytes feed the witness verdict (single raw-read seam)
-      const verdict = classifyState(readScopeWitness(home, scopeKeyOf(home, root)), bytes);
-      verdicts.push(verdict);
-      if (verdict.kind === 'transition-interrupted') return; // exclude the scope entirely; the note still renders below
+      // ONE witnessed read per scope (spec §7): witness-first + retry-once, so the verdict and the
+      // records come from the SAME final read pair (no spurious mismatch from a concurrent append).
+      const w = readLedgerWitnessed(ledger, home, root);
+      verdicts.push(w.verdict);
+      if (w.verdict.kind === 'transition-interrupted') return; // exclude the scope entirely; the note still renders below
       const subkey = this.subkeyForLedger(ledger);
-      const out = buildAsOfEvidence(records, t, {
+      const out = buildAsOfEvidence(w.records, t, {
         verify: (r) => (subkey ? verifyVerify(r, subkey) : false),
         keyAvailable: subkey !== null,
       });
       if (!out.keyAvailable) keyAvailable = false;
-      if (ledgerTruncated(records)) truncated = true;      // over the FULL records, not the t-window
+      if (ledgerTruncated(w.records)) truncated = true;      // over the FULL records, not the t-window
       // asOf facts are HISTORICAL — a mismatch renders the note (below) but does NOT clamp the grades
       // (a point-in-time reconstruction keeps what the ledger attested then).
       for (const f of out.facts) facts.push({ ...f, scope });

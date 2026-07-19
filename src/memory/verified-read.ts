@@ -8,7 +8,7 @@ import type { MemoryRecord } from '../types.js';
 import { tryReadMaster, deriveSubkey, verifyVerify } from './ledger-mac.js';
 import { scopeNonce, globalScopeNonce } from './ownership.js';
 import { buildVerifiedProjection, type VerifiedProjection } from './verified-projection.js';
-import { classifyState, readScopeWitness, scopeKeyOf } from './witness-store.js';
+import { readLedgerWitnessed } from './witness-read.js';
 import type { WitnessVerdict } from './witness-core.js';
 
 /**
@@ -94,12 +94,14 @@ export function verifiedLive(ledger: LedgerPath, home: string, projectRoot?: str
   return verifiedLiveStats(ledger, home, projectRoot).projection;
 }
 
-/** verifiedLiveStats PLUS the rollback-witness verdict + identity for this scope, all derived from a
- *  SINGLE raw byte read (readLedgerRaw), so the projection and the verdict can never race each other
- *  against disk — the same single-snapshot discipline readLedgerWitnessed uses (spec §4). The
- *  projection is RAW/unenforced: the caller overlays enforceWitnessProjection with `verdict`. parseMs/
- *  projectMs match verifiedLiveStats exactly (the witness classification below is timed into NEITHER),
- *  so the A3 replay curve stays comparable across the store (currentView) and hook emitters. */
+/** verifiedLiveStats PLUS the rollback-witness verdict + identity for this scope, routed through
+ *  readLedgerWitnessed so the projection and the verdict come from the SAME witness-first, retry-once
+ *  read pair (spec §7) — they can never race each other against disk, and an ordinary concurrent
+ *  append never yields a spurious mismatch. The projection is RAW/unenforced: the caller overlays
+ *  enforceWitnessProjection with `verdict`. parseMs is the FINAL ledger read+parse only (readLedgerRaw,
+ *  timed inside readLedgerWitnessed) and projectMs the verifying replay — the witness read/classify/
+ *  retry is timed into NEITHER, so the A3 replay curve stays comparable across the store (currentView)
+ *  and hook emitters, exactly as before. */
 export interface WitnessedLive {
   projection: VerifiedProjection;
   stats: ReplayStats;
@@ -109,23 +111,20 @@ export interface WitnessedLive {
 }
 
 export function verifiedLiveWitnessed(ledger: LedgerPath, home: string, projectRoot?: string): WitnessedLive {
-  const t0 = performance.now();
-  const { bytes, records } = readLedgerRaw(ledger);   // single raw-read seam: bytes feed BOTH sides
+  const w = readLedgerWitnessed(ledger, home, projectRoot); // witness-first + retry-once; bytes+records+verdict
   const t1 = performance.now();
-  const projection = verifiedLiveOf(records, home, projectRoot);
+  const projection = verifiedLiveOf(w.records, home, projectRoot);
   const t2 = performance.now();
-  const state = readScopeWitness(home, scopeKeyOf(home, projectRoot));
-  const verdict = classifyState(state, bytes);
   return {
     projection,
-    verdict,
-    witnessIdentity: state.entry?.mac ?? 'witness-absent',
-    journalPending: state.journal !== null,
+    verdict: w.verdict,
+    witnessIdentity: w.witnessIdentity,
+    journalPending: w.journalPending,
     stats: {
-      rows: records.length,
+      rows: w.records.length,
       liveRows: projection.live.size,
-      bytes: bytes.length,
-      parseMs: t1 - t0,
+      bytes: w.bytes.length,
+      parseMs: w.parseMs,   // final ledger read+parse only — witness read/classify/retry excluded
       projectMs: t2 - t1,
       keyAvailable: projection.keyAvailable,
     },

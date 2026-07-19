@@ -570,6 +570,41 @@ function buildVerifiedProjection(records, opts) {
   return { live, compromised, keyAvailable: true };
 }
 
+// src/memory/witness-read.ts
+function isWitnessAlarm(v) {
+  return v.kind === "mismatch" || v.kind === "transition-interrupted";
+}
+function witnessedRead(readWitness, readLedger) {
+  let state = readWitness();
+  let ledger = readLedger();
+  let verdict = classifyState(state, ledger.bytes);
+  if (isWitnessAlarm(verdict)) {
+    state = readWitness();
+    ledger = readLedger();
+    verdict = classifyState(state, ledger.bytes);
+  }
+  return { ledger, state, verdict };
+}
+function readLedgerWitnessed(path, home, projectRoot) {
+  const scopeKey = scopeKeyOf(home, projectRoot);
+  const { ledger, state, verdict } = witnessedRead(
+    () => readScopeWitness(home, scopeKey),
+    () => {
+      const t0 = performance.now();
+      const r = readLedgerRaw(path);
+      return { ...r, parseMs: performance.now() - t0 };
+    }
+  );
+  return {
+    bytes: ledger.bytes,
+    records: ledger.records,
+    verdict,
+    witnessIdentity: state.entry?.mac ?? "witness-absent",
+    journalPending: state.journal !== null,
+    parseMs: ledger.parseMs
+  };
+}
+
 // src/memory/verified-read.ts
 function subkeyForScope(home, projectRoot) {
   const master = tryReadMaster(home);
@@ -587,23 +622,21 @@ function verifiedLiveOf(records, home, projectRoot) {
   return verifiedProjectionWithSubkey(records, subkeyForScope(home, projectRoot));
 }
 function verifiedLiveWitnessed(ledger, home, projectRoot) {
-  const t0 = performance.now();
-  const { bytes, records } = readLedgerRaw(ledger);
+  const w = readLedgerWitnessed(ledger, home, projectRoot);
   const t1 = performance.now();
-  const projection = verifiedLiveOf(records, home, projectRoot);
+  const projection = verifiedLiveOf(w.records, home, projectRoot);
   const t2 = performance.now();
-  const state = readScopeWitness(home, scopeKeyOf(home, projectRoot));
-  const verdict = classifyState(state, bytes);
   return {
     projection,
-    verdict,
-    witnessIdentity: state.entry?.mac ?? "witness-absent",
-    journalPending: state.journal !== null,
+    verdict: w.verdict,
+    witnessIdentity: w.witnessIdentity,
+    journalPending: w.journalPending,
     stats: {
-      rows: records.length,
+      rows: w.records.length,
       liveRows: projection.live.size,
-      bytes: bytes.length,
-      parseMs: t1 - t0,
+      bytes: w.bytes.length,
+      parseMs: w.parseMs,
+      // final ledger read+parse only — witness read/classify/retry excluded
       projectMs: t2 - t1,
       keyAvailable: projection.keyAvailable
     }

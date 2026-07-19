@@ -14780,6 +14780,59 @@ function globalScopeNonce(home2) {
   return macNonce;
 }
 
+// src/memory/witness-read.ts
+function isWitnessAlarm(v) {
+  return v.kind === "mismatch" || v.kind === "transition-interrupted";
+}
+function witnessedRead(readWitness, readLedger) {
+  let state = readWitness();
+  let ledger = readLedger();
+  let verdict = classifyState(state, ledger.bytes);
+  if (isWitnessAlarm(verdict)) {
+    state = readWitness();
+    ledger = readLedger();
+    verdict = classifyState(state, ledger.bytes);
+  }
+  return { ledger, state, verdict };
+}
+function readLedgerWitnessed(path, home2, projectRoot2) {
+  const scopeKey = scopeKeyOf(home2, projectRoot2);
+  const { ledger, state, verdict } = witnessedRead(
+    () => readScopeWitness(home2, scopeKey),
+    () => {
+      const t0 = performance.now();
+      const r = readLedgerRaw(path);
+      return { ...r, parseMs: performance.now() - t0 };
+    }
+  );
+  return {
+    bytes: ledger.bytes,
+    records: ledger.records,
+    verdict,
+    witnessIdentity: state.entry?.mac ?? "witness-absent",
+    journalPending: state.journal !== null,
+    parseMs: ledger.parseMs
+  };
+}
+function readLedgerBytesWitnessed(path, home2, projectRoot2) {
+  const scopeKey = scopeKeyOf(home2, projectRoot2);
+  const { ledger, state, verdict } = witnessedRead(
+    () => readScopeWitness(home2, scopeKey),
+    () => {
+      const t0 = performance.now();
+      const bytes = readLedgerBytes(path);
+      return { bytes, readMs: performance.now() - t0 };
+    }
+  );
+  return {
+    bytes: ledger.bytes,
+    verdict,
+    witnessIdentity: state.entry?.mac ?? "witness-absent",
+    journalPending: state.journal !== null,
+    readMs: ledger.readMs
+  };
+}
+
 // src/memory/verified-read.ts
 function subkeyForScope(home2, projectRoot2) {
   const master = tryReadMaster(home2);
@@ -14815,23 +14868,21 @@ function verifiedLiveStats(ledger, home2, projectRoot2) {
   };
 }
 function verifiedLiveWitnessed(ledger, home2, projectRoot2) {
-  const t0 = performance.now();
-  const { bytes, records } = readLedgerRaw(ledger);
+  const w = readLedgerWitnessed(ledger, home2, projectRoot2);
   const t1 = performance.now();
-  const projection = verifiedLiveOf(records, home2, projectRoot2);
+  const projection = verifiedLiveOf(w.records, home2, projectRoot2);
   const t2 = performance.now();
-  const state = readScopeWitness(home2, scopeKeyOf(home2, projectRoot2));
-  const verdict = classifyState(state, bytes);
   return {
     projection,
-    verdict,
-    witnessIdentity: state.entry?.mac ?? "witness-absent",
-    journalPending: state.journal !== null,
+    verdict: w.verdict,
+    witnessIdentity: w.witnessIdentity,
+    journalPending: w.journalPending,
     stats: {
-      rows: records.length,
+      rows: w.records.length,
       liveRows: projection.live.size,
-      bytes: bytes.length,
-      parseMs: t1 - t0,
+      bytes: w.bytes.length,
+      parseMs: w.parseMs,
+      // final ledger read+parse only — witness read/classify/retry excluded
       projectMs: t2 - t1,
       keyAvailable: projection.keyAvailable
     }
@@ -15087,16 +15138,12 @@ var MemoryStore = class {
     const verdicts = [];
     const reads = [];
     for (const s of scopes) {
-      const rt0 = performance.now();
-      const bytes = readLedgerBytes(s.ledger);
-      const readMs = performance.now() - rt0;
+      const w = readLedgerBytesWitnessed(s.ledger, home2, s.root);
+      const bytes = w.bytes;
       const subkey = this.subkeyForLedger(s.ledger);
-      const witnessState = readScopeWitness(home2, scopeKeyOf(home2, s.root));
-      const verdict = classifyState(witnessState, bytes);
-      const witness = witnessState.entry?.mac ?? "witness-absent";
-      key.push({ scopeId: s.ledger, digest: ledgerDigest(bytes), fingerprint: subkeyFingerprint(subkey), witness });
-      verdicts.push({ scope: s.scope, verdict });
-      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs, journalPending: witnessState.journal !== null });
+      key.push({ scopeId: s.ledger, digest: ledgerDigest(bytes), fingerprint: subkeyFingerprint(subkey), witness: w.witnessIdentity });
+      verdicts.push({ scope: s.scope, verdict: w.verdict });
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs: w.readMs, journalPending: w.journalPending });
     }
     const anyPending = reads.some((r) => r.journalPending);
     if (!anyPending && this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
@@ -15395,17 +15442,16 @@ var MemoryStore = class {
     const verdicts = [];
     const addScope = (ledger, scope) => {
       const root = this.scopeRootOf(ledger);
-      const { bytes, records } = readLedgerRaw(ledger);
-      const verdict = classifyState(readScopeWitness(home2, scopeKeyOf(home2, root)), bytes);
-      verdicts.push(verdict);
-      if (verdict.kind === "transition-interrupted") return;
-      const rawV = verifiedLiveOf(records, home2, root);
+      const w = readLedgerWitnessed(ledger, home2, root);
+      verdicts.push(w.verdict);
+      if (w.verdict.kind === "transition-interrupted") return;
+      const rawV = verifiedLiveOf(w.records, home2, root);
       if (!rawV.keyAvailable) integrityAvailable = false;
-      const v = enforceWitnessProjection(rawV, verdict);
+      const v = enforceWitnessProjection(rawV, w.verdict);
       for (const r of v.live.values()) {
         rows.push({ record: r, scope, txTo: null, closedBy: null, integrity: v.compromised.has(r.id) ? "compromised" : "ok" });
       }
-      const h = buildHistory(records);
+      const h = buildHistory(w.records);
       for (const id of h.anomalies) anomalies.add(id);
       if (h.truncated) truncated = true;
       for (const row of h.rows) {
@@ -15431,17 +15477,16 @@ var MemoryStore = class {
     const verdicts = [];
     const addScope = (ledger, scope) => {
       const root = this.scopeRootOf(ledger);
-      const { bytes, records } = readLedgerRaw(ledger);
-      const verdict = classifyState(readScopeWitness(home2, scopeKeyOf(home2, root)), bytes);
-      verdicts.push(verdict);
-      if (verdict.kind === "transition-interrupted") return;
+      const w = readLedgerWitnessed(ledger, home2, root);
+      verdicts.push(w.verdict);
+      if (w.verdict.kind === "transition-interrupted") return;
       const subkey = this.subkeyForLedger(ledger);
-      const out = buildAsOfEvidence(records, t, {
+      const out = buildAsOfEvidence(w.records, t, {
         verify: (r) => subkey ? verifyVerify(r, subkey) : false,
         keyAvailable: subkey !== null
       });
       if (!out.keyAvailable) keyAvailable = false;
-      if (ledgerTruncated(records)) truncated = true;
+      if (ledgerTruncated(w.records)) truncated = true;
       for (const f of out.facts) facts.push({ ...f, scope });
     };
     addScope(this.global, "global");
