@@ -8,6 +8,7 @@ import {
   WitnessAdvanceError, WitnessBlockedError,
 } from '../../src/memory/witness-store.js';
 import { sha256Hex } from '../../src/memory/witness-core.js';
+import { realFsOps, type DurableFsOps } from '../../src/memory/fs-ops.js';
 
 function tmpHome(): string { return mkdtempSync(join(tmpdir(), 'helix-witness-')); }
 
@@ -318,5 +319,49 @@ describe('error classes', () => {
   it('WitnessAdvanceError and WitnessBlockedError are Error subclasses (Task 5 imports them)', () => {
     expect(new WitnessAdvanceError('x')).toBeInstanceOf(Error);
     expect(new WitnessBlockedError('x')).toBeInstanceOf(Error);
+  });
+});
+
+function recordingShortFs(): { fs: DurableFsOps; events: Array<{ kind: 'open' | 'write' | 'fsync' | 'close'; fd: number; path?: string; bytes?: Buffer }> } {
+  const events: Array<{ kind: 'open' | 'write' | 'fsync' | 'close'; fd: number; path?: string; bytes?: Buffer }> = [];
+  const fs: DurableFsOps = {
+    ...realFsOps,
+    openSync: (path, flags, mode) => { const fd = realFsOps.openSync(path, flags, mode); events.push({ kind: 'open', fd, path }); return fd; },
+    writeSync: (fd, buf, off, len) => { const n = realFsOps.writeSync(fd, buf, off, Math.min(3, len)); events.push({ kind: 'write', fd, bytes: Buffer.from(buf.subarray(off, off + n)) }); return n; },
+    fsyncSync: (fd) => { realFsOps.fsyncSync(fd); events.push({ kind: 'fsync', fd }); },
+    closeSync: (fd) => { realFsOps.closeSync(fd); events.push({ kind: 'close', fd }); },
+  };
+  return { fs, events };
+}
+
+describe('M1: transition-log durability wiring (three locks)', () => {
+  it('the log append goes through the injected seam, completes under short writes, and fsyncs the log fd before close', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-wlog-'));
+    try {
+      const { fs, events } = recordingShortFs();
+      const key = '@global';
+      const plan = planTransition(home, key, 'compaction');
+      openTransition(home, key, {
+        kind: 'compaction', epoch: plan.epoch, nonce: plan.nonce, predecessor: plan.predecessor,
+        supersedes: plan.supersedes, expected: { byteLength: 4, prefixHash: sha256Hex(Buffer.from('abcd')) },
+        tx: '2026-07-19T00:00:00.000Z',
+      }, fs);
+
+      const logPath = join(home, 'witness-log.jsonl');
+      const openIdx = events.findIndex((e) => e.kind === 'open' && e.path === logPath);
+      expect(openIdx).toBeGreaterThanOrEqual(0);                    // LOCK 1a: the seam saw the log open
+      const fd = events[openIdx]!.fd;
+      const closeRel = events.slice(openIdx + 1).findIndex((e) => e.kind === 'close' && e.fd === fd);
+      expect(closeRel).toBeGreaterThan(0);
+      const window = events.slice(openIdx + 1, openIdx + 1 + closeRel); // fd-recycling-safe window
+      const writes = window.filter((e) => e.kind === 'write' && e.fd === fd);
+      const expectedLine = JSON.stringify({ v: 1, scope: key, epoch: plan.epoch, kind: 'compaction', tx: '2026-07-19T00:00:00.000Z', nonce: plan.nonce }) + '\n';
+      expect(writes.length).toBeGreaterThan(1);                     // short counts forced the loop
+      expect(Buffer.concat(writes.map((w) => w.bytes!)).toString('utf8')).toBe(expectedLine); // LOCK 1b: content-associated
+      expect(readFileSync(logPath, 'utf8')).toBe(expectedLine);     // LOCK 2: complete on disk under short writes
+      const lastWriteIdx = window.reduce((acc, e, i) => (e.kind === 'write' && e.fd === fd ? i : acc), -1);
+      const fsyncAfter = window.slice(lastWriteIdx + 1).some((e) => e.kind === 'fsync' && e.fd === fd);
+      expect(fsyncAfter).toBe(true);                                // LOCK 3: fsync on the log fd, after the content
+    } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });

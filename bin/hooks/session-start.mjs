@@ -1,5 +1,5 @@
 // src/hooks/session-start.ts
-import { writeSync as writeSync3 } from "node:fs";
+import { writeSync as writeSync2 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join6, resolve as resolve3 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -266,7 +266,7 @@ function classifyWitness(bytes, entry, journal) {
 
 // src/memory/witness-store.ts
 import { randomBytes as randomBytes4, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { mkdirSync as mkdirSync3, readFileSync as readFileSync4, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync4 } from "node:fs";
 import { dirname as dirname3, join as join4, resolve as resolve2 } from "node:path";
 
 // src/memory/ledger-mac.ts
@@ -820,7 +820,7 @@ async function main() {
       unadoptedPresent: projectDisposition === "unadopted-present",
       witnessNotes
     });
-    if (text !== "") writeSync3(1, text + "\n");
+    if (text !== "") writeSync2(1, text + "\n");
     const sink = createMetricsSink(join6(home, "metrics.jsonl"), metricsEnabledFromGlobalConfig(home));
     for (const rp of replays) {
       sink.emitReplay({

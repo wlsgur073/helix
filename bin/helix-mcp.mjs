@@ -13661,7 +13661,7 @@ function fenceId(epoch, nonce) {
 
 // src/memory/witness-store.ts
 import { randomBytes as randomBytes3, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { mkdirSync as mkdirSync2, readFileSync as readFileSync4, openSync as openSync3, writeSync as writeSync3, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync4 } from "node:fs";
 import { dirname as dirname4, join as join4, resolve } from "node:path";
 
 // src/memory/ledger-mac.ts
@@ -13894,13 +13894,13 @@ function classifyState(state, bytes) {
   if (state.macInvalid) return { kind: "first-contact", reason: "mac-invalid" };
   return classifyWitness(bytes, state.entry, state.journal);
 }
-function appendWitnessLogLine(home2, line) {
-  const fd = openSync3(witnessLogPath(home2), "a", 384);
+function appendWitnessLogLine(home2, line, fsOps) {
+  const fd = fsOps.openSync(witnessLogPath(home2), "a", 384);
   try {
-    writeSync3(fd, Buffer.from(JSON.stringify(line) + "\n", "utf8"));
-    fsyncSync3(fd);
+    writeAll(fsOps, fd, JSON.stringify(line) + "\n");
+    fsOps.fsyncSync(fd);
   } finally {
-    closeSync3(fd);
+    fsOps.closeSync(fd);
   }
 }
 function advanceWitness(home2, scopeKey, bytes, headTx, fsOps = realFsOps) {
@@ -13960,7 +13960,7 @@ function openTransition(home2, scopeKey, plan, fsOps = realFsOps) {
       supersedes: plan.supersedes
     };
     const journal = signedJournal(scopeKey, master, unsigned);
-    appendWitnessLogLine(home2, { v: 1, scope: scopeKey, epoch: plan.epoch, kind: plan.kind, tx: plan.tx, nonce: plan.nonce });
+    appendWitnessLogLine(home2, { v: 1, scope: scopeKey, epoch: plan.epoch, kind: plan.kind, tx: plan.tx, nonce: plan.nonce }, fsOps);
     const nextStore = { v: 1, scopes: { ...store2.scopes, [scopeKey]: { entry, journal } } };
     writeStoreFileAt(path, nextStore, fsOps);
     return journal;

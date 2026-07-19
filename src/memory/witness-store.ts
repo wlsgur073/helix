@@ -4,7 +4,7 @@
  *  is not re-entrant per path, lock.ts:107), so the functions below never call each other; each
  *  re-derives its own view of the current disk state under its own lock acquisition. */
 import { randomBytes, createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
-import { mkdirSync, readFileSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { withFileLock, canonical } from './lock.js';
 import { ensureMaster, tryReadMaster } from './ledger-mac.js';
@@ -136,13 +136,13 @@ export function classifyScope(home: string, scopeKey: string, bytes: Buffer): Wi
   return classifyState(readScopeWitness(home, scopeKey), bytes);
 }
 
-function appendWitnessLogLine(home: string, line: { v: 1; scope: string; epoch: number; kind: JournalEntry['kind']; tx: string; nonce: string }): void {
-  const fd = openSync(witnessLogPath(home), 'a', 0o600);
+function appendWitnessLogLine(home: string, line: { v: 1; scope: string; epoch: number; kind: JournalEntry['kind']; tx: string; nonce: string }, fsOps: DurableFsOps): void {
+  const fd = fsOps.openSync(witnessLogPath(home), 'a', 0o600);
   try {
-    writeSync(fd, Buffer.from(JSON.stringify(line) + '\n', 'utf8'));
-    fsyncSync(fd);
+    writeAll(fsOps, fd, JSON.stringify(line) + '\n');
+    fsOps.fsyncSync(fd);
   } finally {
-    closeSync(fd);
+    fsOps.closeSync(fd);
   }
 }
 
@@ -246,7 +246,7 @@ export function openTransition(
       nonce: plan.nonce, tx: plan.tx, supersedes: plan.supersedes,
     };
     const journal = signedJournal(scopeKey, master, unsigned);
-    appendWitnessLogLine(home, { v: 1, scope: scopeKey, epoch: plan.epoch, kind: plan.kind, tx: plan.tx, nonce: plan.nonce });
+    appendWitnessLogLine(home, { v: 1, scope: scopeKey, epoch: plan.epoch, kind: plan.kind, tx: plan.tx, nonce: plan.nonce }, fsOps);
     const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry, journal } } };
     writeStoreFileAt(path, nextStore, fsOps);
     return journal;
