@@ -49,12 +49,15 @@ export function advanceAllowed(v: WitnessVerdict): boolean {
   return v.kind === 'first-contact' || v.kind === 'in-sync' || v.kind === 'unwitnessed-suffix';
 }
 
-/** Two-part cleanup predicate: witness monotonicity alone is NOT read containment. */
+/** Two-part cleanup predicate: witness monotonicity alone is NOT read containment.
+ *  matchesAt() alone suffices for the byte check: its short-input guard (first line) implies
+ *  bytes.length >= entry.byteLength on any true return — locked by the "forged over-length
+ *  entry" contract test in witness-core.test.ts, which goes RED if that guard is removed. */
 export function cleanupClearAllowed(
   bytes: Buffer, entry: WitnessEntry | null, journal: JournalEntry,
 ): boolean {
   if (!entry || entry.epoch < journal.epoch) return false;
-  return matchesAt(bytes, entry.byteLength, entry.prefixHash) && bytes.length >= entry.byteLength;
+  return matchesAt(bytes, entry.byteLength, entry.prefixHash);
 }
 
 export function fenceId(epoch: number, nonce: string): string {

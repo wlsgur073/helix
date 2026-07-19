@@ -31,6 +31,11 @@ describe('classifyWitness — journal-first (§4.4)', () => {
     expect(classifyWitness(B('r1\n'), w, null).kind).toBe('mismatch');
     expect(classifyWitness(B('r1\nrX\n'), w, null).kind).toBe('mismatch');
   });
+  it("forged over-length entry (byteLength beyond the bytes, prefixHash OF the short bytes) → mismatch — locks matchesAt's short-input guard, which the plain shorter-file case does NOT (its hash never matches regardless)", () => {
+    const short = B('r1\n');
+    const w = entryFor(short, { byteLength: short.length + 3 });
+    expect(classifyWitness(short, w, null).kind).toBe('mismatch');
+  });
   it('pending journal + file == expected → transition-heal (even when entry also mismatches)', () => {
     const target = B('kept\nfence\n');
     const v = classifyWitness(target, entryFor(B('old-longer-bytes\n')), journalFor(target));
