@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
 import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
 import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
-import { scopeKeyOf, readScopeWitness, classifyState, completeTransition } from './witness-store.js';
+import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, WitnessBlockedError } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated } from './history.js';
@@ -325,7 +325,7 @@ export class MemoryStore {
     const home = this.homeDir();
     const key: ScopeKeyComponent[] = [];
     const verdicts: Array<{ scope: MemoryScope; verdict: WitnessVerdict }> = [];
-    const reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; bytes: Buffer; subkey: Buffer | null; readMs: number; journalPending: boolean }> = [];
+    const reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; bytes: Buffer; subkey: Buffer | null; readMs: number; journalPending: boolean; mismatch: boolean }> = [];
     for (const s of scopes) {
       // W-T7 + §7: witness verdict + identity + journalPending, all off the SAME (final) witness snapshot
       // classified against the SAME (final) bytes — witness-first with a single alarm retry (no self-race,
@@ -336,7 +336,10 @@ export class MemoryStore {
       const subkey = this.subkeyForLedger(s.ledger);  // I3: resolved fresh from disk, never memoized
       key.push({ scopeId: s.ledger, digest: ledgerDigest(bytes), fingerprint: subkeyFingerprint(subkey), witness: w.witnessIdentity });
       verdicts.push({ scope: s.scope, verdict: w.verdict });
-      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs: w.readMs, journalPending: w.journalPending });
+      // `mismatch` is the STABLE (witness-first + retry-once) rollback verdict — threaded into
+      // maybeAutoCompact below so it never advances the witness onto a rolled-back scope (spec §4.2
+      // PR-1, belt-and-braces above compactLedger's own authoritative gate).
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs: w.readMs, journalPending: w.journalPending, mismatch: w.verdict.kind === 'mismatch' });
     }
 
     // A pending journal means an in-flight rewrite: the cache is bypassed BOTH directions (no read,
@@ -354,7 +357,7 @@ export class MemoryStore {
     // comparable across the store/hook emitters; projectMs is just the verifying replay. `parsed`
     // carries the records this loop just parsed, threaded into maybeAutoCompact below so IT never
     // re-parses either (the Task-4 double-parse-on-MISS-with-compaction-enabled fix, preserved).
-    const parsed: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; records: MemoryRecord[]; subkey: Buffer | null }> = [];
+    const parsed: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; records: MemoryRecord[]; subkey: Buffer | null; mismatch: boolean }> = [];
     const scoped: ScopedRecord[] = [];
     let available = true;
     for (const r of reads) {
@@ -372,7 +375,7 @@ export class MemoryStore {
         rows: records.length, liveRows: proj.live.size, bytes: r.bytes.length,
         parseMs: r.readMs + (t1 - t0), projectMs: t2 - t1, keyAvailable: proj.keyAvailable,
       });
-      parsed.push({ ledger: r.ledger, scope: r.scope, root: r.root, records, subkey: r.subkey });
+      parsed.push({ ledger: r.ledger, scope: r.scope, root: r.root, records, subkey: r.subkey, mismatch: r.mismatch });
     }
     const artifacts = buildRankArtifacts(scoped.map((s) => s.record));
     // Store + auto-compact ONLY when no scope has a pending journal. A pending journal is bypassed both
@@ -413,11 +416,17 @@ export class MemoryStore {
    *  plan and that lock would otherwise be attributed to this compaction. Both fields are ZERO on
    *  failure: compactLedger writes a tmp and renames, so a throw leaves the ledger byte-identical and
    *  nothing was dropped or reclaimed. */
-  private maybeAutoCompact(reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; records: MemoryRecord[]; subkey: Buffer | null }>): void {
+  private maybeAutoCompact(reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; records: MemoryRecord[]; subkey: Buffer | null; mismatch: boolean }>): void {
     const cfg = this.opts.compaction;
     if (!cfg || this.compactedThisSession) return;
     const nowMs = Date.parse(this.now());
     for (const r of reads) {
+      // Anti-laundering (spec §4.2 PR-1): NEVER auto-compact a scope whose pre-recall witness verdict
+      // is a stable MISMATCH. compactLedger's own gate would throw here anyway, and the catch below
+      // swallows it (functionally safe — a rolled-back scope is never silently re-blessed), but skipping
+      // explicitly keeps the common path off a swallowed-exception crutch and does not consume the
+      // once-per-session guard on a doomed attempt (the guard is only set when a scope actually fires).
+      if (r.mismatch) continue;
       let mtimeMs = 0; let totalBytes = 0;
       try { const st = statSync(r.ledger); mtimeMs = st.mtimeMs; totalBytes = st.size; } catch { continue; }
       // records already read+parsed once by recallInput's own MISS-branch parse loop — reused here
@@ -819,6 +828,19 @@ export class MemoryStore {
   erase(id: string, opts: { permanent?: boolean; scope?: MemoryScope } = {}): void {
     const ledger = this.resolveEraseTarget(id, opts.scope, opts.permanent ?? false);
     if (ledger === null) { this.rankCache = null; return; }   // clean + absent → idempotent no-op success
+    // Anti-laundering (spec §4.2 PR-1): a PERMANENT erase ends in a witnessed compactLedger rewrite,
+    // which refuses to advance the witness over a MISMATCH. Gate the WHOLE permanent erase up front on
+    // the scope's stable (witness-first + retry-once) verdict, so a rolled-back scope is refused BEFORE
+    // the tombstone append — never left tombstone-without-compaction (the plaintext stays on disk while
+    // the row already reads as erased). Recovery is the user-only re-baseline ceremony (helix-rebaseline),
+    // then re-erase. A SOFT erase is unaffected: its tombstone append is availability-correct (it lands
+    // without advancing the witness on a mismatch, witness-write.ts). This up-front read is advisory; the
+    // authoritative refusal is compactLedger's own under-lock gate, so a race here can never launder.
+    if (opts.permanent && readLedgerBytesWitnessed(ledger, this.homeDir(), this.scopeRootOf(ledger)).verdict.kind === 'mismatch') {
+      throw new WitnessBlockedError(
+        `erase: scope for id '${id}' is in a MISMATCH (rollback-alarm) state — refusing a permanent erase that would launder the alarm; re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry (spec §4.2)`,
+      );
+    }
     const isMarker = this.markerFamilyOf(id) !== null;
     const alreadyDead = !this.verifiedOf(ledger).live.has(id);
     if (!isMarker && !alreadyDead) {                          // skip tombstone for markers (T1-g) + already-dead ids (D8)

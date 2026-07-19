@@ -7,7 +7,7 @@ import { withFileLock, canonical } from './lock.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import { fenceId, sha256Hex } from './witness-core.js';
-import { planTransition, openTransition, completeTransition } from './witness-store.js';
+import { planTransition, openTransition, completeTransition, classifyState, readScopeWitness, WitnessBlockedError } from './witness-store.js';
 
 export type LedgerPath = string;
 
@@ -429,6 +429,25 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       let fenceTx: string | null = null;
       if (w) {
         const kind = w.kind ?? 'compaction';
+        // Anti-laundering gate (spec §4.2 PR-1, SECURITY.md "the very next ordinary append after a
+        // rollback can never silently launder the alarm away"): a witnessed REWRITE must never advance
+        // the witness over a MISMATCH. Advancing onto forked / rolled-back content would bless it into a
+        // fresh epoch and silently retire the rollback alarm, permanently re-serving forged Verified
+        // grades. Classify the CURRENT on-disk bytes — re-read here under THIS ledger lock, which
+        // serializes every witness advance for the scope, so the witness snapshot is stable and the
+        // concurrent-reader retry (witness-read.ts §7) does not apply — against the scope witness BEFORE
+        // minting the transition. Refuse 'mismatch' ONLY: 'transition-interrupted' stays ALLOWED — it is
+        // the legitimate re-drive / journal-supersession path (crash window A) — as do in-sync /
+        // unwitnessed-suffix / first-contact / transition-heal (advanceAllowed + the transition
+        // verdicts). A naive `!advanceAllowed(v)` would wrongly refuse the interrupted re-drive. The
+        // throw lands inside the try below, whose catch closes+unlinks the tmp and rethrows, so the
+        // ledger is left byte-identical and no journal is opened — the witness is wholly untouched.
+        const verdict = classifyState(readScopeWitness(w.home, w.scopeKey), readLedgerBytes(path));
+        if (verdict.kind === 'mismatch') {
+          throw new WitnessBlockedError(
+            `compactLedger: scope '${w.scopeKey}' is in a MISMATCH (rollback-alarm) state — refusing the rewrite; advancing the witness over forked/rolled-back content would launder the alarm (spec §4.2). Re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry.`,
+          );
+        }
         const plan = planTransition(w.home, w.scopeKey, kind);
         const fence = witnessFenceRecord(plan.epoch, plan.nonce, w.now());   // the fence's own real tx
         rows = kept.concat(fence);                                           // fence is the LAST row

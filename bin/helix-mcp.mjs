@@ -14177,6 +14177,12 @@ function compactLedger(rawPath, opts) {
       let fenceTx = null;
       if (w) {
         const kind = w.kind ?? "compaction";
+        const verdict = classifyState(readScopeWitness(w.home, w.scopeKey), readLedgerBytes(path));
+        if (verdict.kind === "mismatch") {
+          throw new WitnessBlockedError(
+            `compactLedger: scope '${w.scopeKey}' is in a MISMATCH (rollback-alarm) state \u2014 refusing the rewrite; advancing the witness over forked/rolled-back content would launder the alarm (spec \xA74.2). Re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry.`
+          );
+        }
         const plan = planTransition(w.home, w.scopeKey, kind);
         const fence = witnessFenceRecord(plan.epoch, plan.nonce, w.now());
         rows = kept.concat(fence);
@@ -15150,7 +15156,7 @@ var MemoryStore = class {
       const subkey = this.subkeyForLedger(s.ledger);
       key.push({ scopeId: s.ledger, digest: ledgerDigest(bytes), fingerprint: subkeyFingerprint(subkey), witness: w.witnessIdentity });
       verdicts.push({ scope: s.scope, verdict: w.verdict });
-      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs: w.readMs, journalPending: w.journalPending });
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs: w.readMs, journalPending: w.journalPending, mismatch: w.verdict.kind === "mismatch" });
     }
     const anyPending = reads.some((r) => r.journalPending);
     if (!anyPending && this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
@@ -15179,7 +15185,7 @@ var MemoryStore = class {
         projectMs: t2 - t1,
         keyAvailable: proj.keyAvailable
       });
-      parsed.push({ ledger: r.ledger, scope: r.scope, root: r.root, records, subkey: r.subkey });
+      parsed.push({ ledger: r.ledger, scope: r.scope, root: r.root, records, subkey: r.subkey, mismatch: r.mismatch });
     }
     const artifacts = buildRankArtifacts(scoped.map((s) => s.record));
     if (!anyPending) {
@@ -15217,6 +15223,7 @@ var MemoryStore = class {
     if (!cfg || this.compactedThisSession) return;
     const nowMs = Date.parse(this.now());
     for (const r of reads) {
+      if (r.mismatch) continue;
       let mtimeMs = 0;
       let totalBytes = 0;
       try {
@@ -15574,6 +15581,11 @@ var MemoryStore = class {
     if (ledger === null) {
       this.rankCache = null;
       return;
+    }
+    if (opts.permanent && readLedgerBytesWitnessed(ledger, this.homeDir(), this.scopeRootOf(ledger)).verdict.kind === "mismatch") {
+      throw new WitnessBlockedError(
+        `erase: scope for id '${id}' is in a MISMATCH (rollback-alarm) state \u2014 refusing a permanent erase that would launder the alarm; re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry (spec \xA74.2)`
+      );
     }
     const isMarker = this.markerFamilyOf(id) !== null;
     const alreadyDead = !this.verifiedOf(ledger).live.has(id);
