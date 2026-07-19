@@ -10,7 +10,7 @@
 // the interleave/retry deterministically; the production helpers (readLedgerWitnessed /
 // readLedgerBytesWitnessed) pass the real disk reads. Integration tests then prove store.recall wires
 // the fixed read path end to end.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, readFileSync, appendFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,6 +24,7 @@ import {
 } from '../../src/memory/witness-store.js';
 import { sha256Hex, type WitnessEntry, type JournalEntry } from '../../src/memory/witness-core.js';
 import { appendRecord, readLedgerBytes } from '../../src/memory/ledger.js';
+import * as ledgerMod from '../../src/memory/ledger.js';
 import { WITNESS_MISMATCH_NOTE } from '../../src/memory/content-frame.js';
 import type { MemoryRecord } from '../../src/types.js';
 
@@ -58,6 +59,29 @@ function pendingState(expected: Buffer): ScopeWitnessState {
 function seam<T>(first: T, second: T): { read: () => T; calls: () => number } {
   let n = 0;
   return { read: () => (++n === 1 ? first : second), calls: () => n };
+}
+
+// SUSTAINED concurrent-append seam (Fix loop 2 — the ORDER discriminator). One shared tick advances on
+// EVERY read; a fresh append lands between the two reads of each pair, so whichever read fires SECOND
+// always observes exactly one append MORE than the read that fired FIRST — and this holds on the
+// retry's pair too, so a ledger-first reader cannot self-heal. States are append-preserving
+// (bytesAt(i+1) extends bytesAt(i)), so:
+//   - WITNESS-FIRST (correct): witness snapshot @ M paired with the LONGER ledger read afterward ->
+//     unwitnessed-suffix (benign), no retry.
+//   - LEDGER-FIRST (the release-blocking bug): the shorter ledger read first, then the ADVANCED witness
+//     -> ledger shorter than the witnessed byteLength -> mismatch, on both the attempt and the retry.
+// The read that fires first in each pair sees the pre-append state; the second sees post-append. Pair k
+// reads at ticks 2k, 2k+1 -> stateIndex ceil(t/2) = M_k, M_{k+1}.
+function sustainedAppendSeam(): { readWitness: () => ScopeWitnessState; readLedger: () => { bytes: Buffer }; ticks: () => number } {
+  let tick = 0;
+  const stateIndex = (t: number): number => Math.floor((t + 1) / 2);
+  const bytesAt = (i: number): Buffer =>
+    Buffer.from(Array.from({ length: i + 1 }, (_, n) => `row-${n}\n`).join(''), 'utf8');
+  return {
+    readWitness: () => stateAt(bytesAt(stateIndex(tick++))),
+    readLedger: () => ({ bytes: bytesAt(stateIndex(tick++)) }),
+    ticks: () => tick,
+  };
 }
 
 describe('witnessedRead — witness-first ordering + retry-once (spec §7)', () => {
@@ -214,6 +238,51 @@ describe('witnessedRead — witness-first ordering + retry-once (spec §7)', () 
         expect(b.bytes.equals(readLedgerBytes(ledger))).toBe(true);
         expect(typeof b.readMs).toBe('number');
       } finally { rmSync(home, { recursive: true, force: true }); }
+    });
+  });
+
+  // Fix loop 2 (efficacy). The tests above lock the retry + classify PROPERTIES but none of them
+  // discriminates witness-first from ledger-first, nor catches a parse-and-discard on a cache HIT — so
+  // the release-blocking regression (reversing the read order) or the Task-4 regression (parsing on a
+  // HIT) could be reintroduced and leave the suite GREEN. These two locks close that: each is
+  // mutation-verified to go RED under exactly the reversal/parse it exists to catch (see
+  // task-8-fix-report.md "Fix loop 2").
+  describe('efficacy locks — the regression this file exists to catch actually goes RED', () => {
+    it('ORDER LOCK: a SUSTAINED concurrent append is benign witness-first, but a ledger-first reversal makes it mismatch (RED under the reversal)', () => {
+      // Under witness-first (correct): witness@M paired with the LONGER ledger read afterward ->
+      // unwitnessed-suffix, no retry (exactly one read pair). Under ledger-first (the bug): the shorter
+      // ledger read first, then the advanced witness -> mismatch on the attempt AND the sustained retry.
+      const s = sustainedAppendSeam();
+      const out = witnessedRead(s.readWitness, s.readLedger);
+      expect(out.verdict.kind).toBe('unwitnessed-suffix'); // <- flips to 'mismatch' iff reads are ledger-first
+      expect(s.ticks()).toBe(2);                            // benign => one read pair (no retry). Ledger-first => 4.
+    });
+
+    it('ZERO-PARSE-ON-HIT LOCK: a recall cache HIT triggers ZERO ledger parses through the witnessed path (RED if readLedgerBytesWitnessed parses)', () => {
+      const home = newHome();
+      const ledger = join(home, 'memory.jsonl');
+      let n = 0;
+      const box = { replays: 0 };
+      const store = new MemoryStore(ledger, {
+        home, sessionId: 't', now: () => FIXED, genId: () => `m_${++n}`,
+        metricsSink: { emitReplay: () => { box.replays += 1; }, emitCompaction: () => {}, runOp: async (_t, fn) => await fn() },
+      });
+      // readLedgerRaw is the ONLY read+parse entry the witnessed read path could route through; the
+      // correct bytes-only path (readLedgerBytes) never calls it. Spy it AFTER the cold recall warms the
+      // cache, so we count only what the HIT does.
+      const parseSpy = vi.spyOn(ledgerMod, 'readLedgerRaw');
+      try {
+        store.commit({ content: 'cacheable deploy fact', source: 'user' });
+        store.recall('deploy');                 // MISS -> warms the single-slot cache
+        box.replays = 0;
+        parseSpy.mockClear();
+        const before = store.recall('deploy');   // HIT
+        // It is a genuine HIT (no verifying replay emitted) AND it parsed the ledger ZERO times.
+        expect(box.replays).toBe(0);
+        expect(parseSpy).toHaveBeenCalledTimes(0); // <- becomes >=1 iff the witnessed read parses on the HIT
+        // sanity: the HIT still answered (cache is not simply broken to zero rows)
+        expect(before.items.length).toBeGreaterThan(0);
+      } finally { parseSpy.mockRestore(); rmSync(home, { recursive: true, force: true }); }
     });
   });
 });
