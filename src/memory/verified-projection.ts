@@ -1,12 +1,43 @@
-import type { MemoryRecord, AsOfVerify } from '../types.js';
+import type { MemoryRecord, AsOfVerify, MemoryState } from '../types.js';
 import { buildProjection } from './projection.js';
 import { digestContent } from './ledger-mac.js';
 import { isIsoInstant } from './history.js';
+import type { WitnessVerdict } from './witness-core.js';
 
 export interface VerifiedProjection {
   live: Map<string, MemoryRecord>;
   compromised: Set<string>;
   keyAvailable: boolean;
+}
+
+/** D1 authority rule: an elevated live grade (Verified/Corroborated) drops to Fresh; Fresh/Suspect
+ *  are untouched. The single "the witness cannot vouch for this elevation" state map — shared by the
+ *  projection-level clampElevated (P1) and the recall path's scoped-record clamp (P2). */
+export function clampElevatedState(s: MemoryState): MemoryState {
+  return s === 'Verified' || s === 'Corroborated' ? 'Fresh' : s;
+}
+
+/** New projection with every elevated live grade clamped to Fresh (D1). Suspect untouched;
+ *  compromised/keyAvailable carried through unchanged. A POST-projection transform — the verifying
+ *  replay already ran; this is the rollback-witness authority overlaid on a `mismatch`. */
+export function clampElevated(p: VerifiedProjection): VerifiedProjection {
+  const live = new Map<string, MemoryRecord>();
+  for (const [id, rec] of p.live) {
+    const state = clampElevatedState(rec.state);
+    live.set(id, state === rec.state ? rec : { ...rec, state });
+  }
+  return { live, compromised: p.compromised, keyAvailable: p.keyAvailable };
+}
+
+/** Read-side witness enforcement over a verified projection (spec §4). `mismatch` clamps elevated
+ *  grades to Fresh (D1; D1b — rows are still served); `transition-interrupted` excludes the whole
+ *  scope (empty live map + no compromised flags); every other verdict passes through untouched.
+ *  keyAvailable (the master-key signal) is orthogonal to the witness and always carried. asOf uses a
+ *  facts-level rule (exclude only, never clamp), so this projection helper is P1/P2-live only. */
+export function enforceWitnessProjection(p: VerifiedProjection, verdict: WitnessVerdict): VerifiedProjection {
+  if (verdict.kind === 'transition-interrupted') return { live: new Map(), compromised: new Set(), keyAvailable: p.keyAvailable };
+  if (verdict.kind === 'mismatch') return clampElevated(p);
+  return p;
 }
 
 const isPromotion = (s: MemoryRecord['state']): boolean => s === 'Verified' || s === 'Corroborated';

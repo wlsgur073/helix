@@ -8,6 +8,8 @@ import type { MemoryRecord } from '../types.js';
 import { tryReadMaster, deriveSubkey, verifyVerify } from './ledger-mac.js';
 import { scopeNonce, globalScopeNonce } from './ownership.js';
 import { buildVerifiedProjection, type VerifiedProjection } from './verified-projection.js';
+import { classifyState, readScopeWitness, scopeKeyOf } from './witness-store.js';
+import type { WitnessVerdict } from './witness-core.js';
 
 /**
  * Resolve the per-scope HMAC subkey that verifies a ledger's signed `verify` records. Mirrors
@@ -90,4 +92,42 @@ export function verifiedLiveStats(
  */
 export function verifiedLive(ledger: LedgerPath, home: string, projectRoot?: string): VerifiedProjection {
   return verifiedLiveStats(ledger, home, projectRoot).projection;
+}
+
+/** verifiedLiveStats PLUS the rollback-witness verdict + identity for this scope, all derived from a
+ *  SINGLE raw byte read (readLedgerRaw), so the projection and the verdict can never race each other
+ *  against disk — the same single-snapshot discipline readLedgerWitnessed uses (spec §4). The
+ *  projection is RAW/unenforced: the caller overlays enforceWitnessProjection with `verdict`. parseMs/
+ *  projectMs match verifiedLiveStats exactly (the witness classification below is timed into NEITHER),
+ *  so the A3 replay curve stays comparable across the store (currentView) and hook emitters. */
+export interface WitnessedLive {
+  projection: VerifiedProjection;
+  stats: ReplayStats;
+  verdict: WitnessVerdict;
+  witnessIdentity: string;   // the witness entry's own MAC, or 'witness-absent' (cache-key component)
+  journalPending: boolean;   // an in-flight rewrite transition is open (bypass caches, exclude reads)
+}
+
+export function verifiedLiveWitnessed(ledger: LedgerPath, home: string, projectRoot?: string): WitnessedLive {
+  const t0 = performance.now();
+  const { bytes, records } = readLedgerRaw(ledger);   // single raw-read seam: bytes feed BOTH sides
+  const t1 = performance.now();
+  const projection = verifiedLiveOf(records, home, projectRoot);
+  const t2 = performance.now();
+  const state = readScopeWitness(home, scopeKeyOf(home, projectRoot));
+  const verdict = classifyState(state, bytes);
+  return {
+    projection,
+    verdict,
+    witnessIdentity: state.entry?.mac ?? 'witness-absent',
+    journalPending: state.journal !== null,
+    stats: {
+      rows: records.length,
+      liveRows: projection.live.size,
+      bytes: bytes.length,
+      parseMs: t1 - t0,
+      projectMs: t2 - t1,
+      keyAvailable: projection.keyAvailable,
+    },
+  };
 }

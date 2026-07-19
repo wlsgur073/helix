@@ -12,9 +12,11 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatSessionStartContext } from './format-context.js';
-import { newNonce } from '../memory/content-frame.js';
+import { newNonce, collectWitnessNotes } from '../memory/content-frame.js';
 import { projectDispositionOf, projectLedgerPath, type ProjectDisposition } from '../memory/ownership.js';
-import { verifiedLiveStats, type ReplayStats } from '../memory/verified-read.js';
+import { verifiedLiveWitnessed, type ReplayStats } from '../memory/verified-read.js';
+import { enforceWitnessProjection } from '../memory/verified-projection.js';
+import type { WitnessVerdict } from '../memory/witness-core.js';
 import { createMetricsSink } from '../metrics.js';
 import { metricsEnabledFromGlobalConfig } from '../config.js';
 import type { MemoryScope, ScopedRecord } from '../types.js';
@@ -43,6 +45,10 @@ export interface GatherResult {
    *  MemoryStore's read paths use — see ownership.ts's projectDispositionOf), for the caller's
    *  unadopted-ledger disclosure note. 'inactive' when no cwd was given. */
   projectDisposition: ProjectDisposition;
+  /** W-T7: ordered, deduped rollback-witness disclosure notes for the read scopes (mismatch/
+   *  interrupted/first-contact). Threaded into formatSessionStartContext, rendered OUTSIDE the frame
+   *  like the unadopted note — including when the enforced record set is empty. */
+  witnessNotes: string[];
 }
 
 /**
@@ -58,11 +64,17 @@ export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): G
   const records: ScopedRecord[] = [];
   let integrityAvailable = true;
   const replays: Array<{ scope: MemoryScope } & ReplayStats> = [];
+  const verdicts: WitnessVerdict[] = [];
 
-  const g = verifiedLiveStats(globalLedger, home);
+  // W-T7: verifiedLiveWitnessed reads bytes ONCE per scope and returns projection + witness verdict
+  // (no self-race); enforceWitnessProjection then clamps a mismatch / excludes an interrupted scope,
+  // exactly as recall/inspect do — the auto-load shows the SAME grades the tools do.
+  const g = verifiedLiveWitnessed(globalLedger, home);
   replays.push({ scope: 'global', ...g.stats });
   if (!g.projection.keyAvailable) integrityAvailable = false;
-  for (const r of g.projection.live.values()) records.push({ record: r, scope: 'global' });
+  const gProj = enforceWitnessProjection(g.projection, g.verdict);
+  for (const r of gProj.live.values()) records.push({ record: r, scope: 'global' });
+  verdicts.push(g.verdict);
 
   // Project root comes ONLY from the hook's stdin cwd (canonical). No process.cwd() fallback —
   // a hook's own cwd is unreliable. No cwd -> global only (disposition stays 'inactive').
@@ -80,15 +92,17 @@ export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): G
         // already safe), so an exception here can only come from the read that follows.
         projectDisposition = projectDispositionOf({ root: cwd, home, ledger: projLedger });
         if (projectDisposition === 'owned') {
-          const project = verifiedLiveStats(projLedger, home, cwd);
+          const project = verifiedLiveWitnessed(projLedger, home, cwd);
           replays.push({ scope: 'project', ...project.stats });
           if (!project.projection.keyAvailable) integrityAvailable = false;
-          for (const r of project.projection.live.values()) records.push({ record: r, scope: 'project' });
+          const pProj = enforceWitnessProjection(project.projection, project.verdict);
+          for (const r of pProj.live.values()) records.push({ record: r, scope: 'project' });
+          verdicts.push(project.verdict);
         }
       } catch { /* unreadable/foreign project ledger → global only */ }
     }
   }
-  return { records, integrityAvailable, replays, projectDisposition };
+  return { records, integrityAvailable, replays, projectDisposition, witnessNotes: collectWitnessNotes(verdicts) };
 }
 
 async function main(): Promise<void> {
@@ -102,9 +116,9 @@ async function main(): Promise<void> {
       if (typeof j.cwd === 'string') cwd = j.cwd;
     } catch { /* no/garbage stdin -> global only */ }
 
-    const { records, integrityAvailable, replays, projectDisposition } = gatherScopedRecords({ home, globalLedger, cwd });
+    const { records, integrityAvailable, replays, projectDisposition, witnessNotes } = gatherScopedRecords({ home, globalLedger, cwd });
     const text = formatSessionStartContext(records, newNonce(), {
-      integrityAvailable, unadoptedPresent: projectDisposition === 'unadopted-present',
+      integrityAvailable, unadoptedPresent: projectDisposition === 'unadopted-present', witnessNotes,
     });
     // Synchronous write to fd 1: process exit must not drop a buffered async pipe write on
     // Windows (which would inject an unterminated DATA block). No explicit exit() needed —

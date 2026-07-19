@@ -5,11 +5,15 @@ import { createHash, createHmac } from 'node:crypto';
 import type { ScopedRecord } from '../types.js';
 import type { RankArtifacts } from './retrieval.js';
 
-/** One participating scope's cache-key component: ledger content identity + key material. */
+/** One participating scope's cache-key component: ledger content identity + key material + witness
+ *  identity. */
 export interface ScopeKeyComponent {
   scopeId: string;     // canonical ledger path (I2/I8)
   digest: string;      // SHA256 hex over the exact ledger bytes (I1/I2)
   fingerprint: string; // HMAC over the current subkey, or KEY_ABSENT (I3)
+  witness: string;     // the witness entry's own MAC, or 'witness-absent' (W-T7). A re-baseline that
+                       // moves the witness WITHOUT changing ledger bytes still forces a rebuild — the
+                       // rank cache stays a pure function of (bytes, subkey, witness identity).
 }
 
 /** Fingerprint sentinel for "no subkey resolved this call" (no master, or unowned scope). Distinct
@@ -37,7 +41,7 @@ export function keyVectorEqual(a: ScopeKeyComponent[], b: ScopeKeyComponent[]): 
   for (let i = 0; i < a.length; i++) {
     const x = a[i]!;
     const y = b[i]!;
-    if (x.scopeId !== y.scopeId || x.digest !== y.digest || x.fingerprint !== y.fingerprint) return false;
+    if (x.scopeId !== y.scopeId || x.digest !== y.digest || x.fingerprint !== y.fingerprint || x.witness !== y.witness) return false;
   }
   return true;
 }

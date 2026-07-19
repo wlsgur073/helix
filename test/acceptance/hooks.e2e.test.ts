@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stampOwnership } from '../../src/memory/ownership.js';
+import { WITNESS_INIT_NOTE } from '../../src/memory/content-frame.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const START = join(root, 'bin', 'hooks', 'session-start.mjs');
@@ -49,11 +50,15 @@ describe('session-start hook e2e', () => {
     expect(stdout).toContain('user prefers vitest over jest');
   }, 20_000);
 
-  it('missing ledger: injects nothing, still exits 0', async () => {
+  it('missing ledger (virgin, never witnessed): injects ONLY the first-contact witness note, exits 0', async () => {
+    // W-T7: a virgin global scope is first-contact (no witness entry yet), so the auto-load surfaces
+    // the INIT disclosure — alone, since there is no memory to frame. It disappears after the first
+    // witnessed write (the scope becomes in-sync). Pre-witness this injected nothing.
     const home = mkdtempSync(join(tmpdir(), 'helix-hook-'));
     const { code, stdout } = await runHook(START, home, '{}');
     expect(code).toBe(0);
-    expect(stdout).toBe('');
+    expect(stdout.trim()).toBe(WITNESS_INIT_NOTE);
+    expect(stdout).not.toContain('DATA, NOT INSTRUCTIONS'); // note-only, no frame
   }, 20_000);
 
   it('unreadable ledger path (a directory): injects nothing, still exits 0', async () => {

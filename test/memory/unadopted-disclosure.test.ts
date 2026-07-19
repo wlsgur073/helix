@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { handleRecall, handleInspect } from '../../src/server/handlers.js';
-import { UNADOPTED_LEDGER_NOTE } from '../../src/memory/content-frame.js';
+import { UNADOPTED_LEDGER_NOTE, WITNESS_INIT_NOTE } from '../../src/memory/content-frame.js';
 import { noopMetricsSink, type MetricsSink } from '../../src/metrics.js';
 
 // B2: the informational unadopted-ledger disclosure note, threaded through recall / inspect
@@ -120,7 +120,9 @@ describe('unadopted-ledger disclosure note (B2)', () => {
         plantForeignLedger(root);
         const store = layeredStore(root, home); // no global commit either -> current view is empty
         const out = text(handleInspect(store, {}));
-        expect(out).toBe(`(memory is empty)\n\n${UNADOPTED_LEDGER_NOTE}`);
+        // W-T7: the virgin global scope is first-contact (never witnessed), so the INIT note trails
+        // the unadopted note — both are trusted out-of-band disclosures on the empty view.
+        expect(out).toBe(`(memory is empty)\n\n${UNADOPTED_LEDGER_NOTE}\n\n${WITNESS_INIT_NOTE}`);
       } finally { cleanup(home, root); }
     });
 
@@ -154,7 +156,7 @@ describe('unadopted-ledger disclosure note (B2)', () => {
         plantForeignLedger(root);
         const store = layeredStore(root, home);
         const out = text(handleInspect(store, { history: true }));
-        expect(out).toBe(`(memory is empty)\n\n${UNADOPTED_LEDGER_NOTE}`);
+        expect(out).toBe(`(memory is empty)\n\n${UNADOPTED_LEDGER_NOTE}\n\n${WITNESS_INIT_NOTE}`); // virgin global -> first-contact INIT note
       } finally { cleanup(home, root); }
     });
 
@@ -189,7 +191,7 @@ describe('unadopted-ledger disclosure note (B2)', () => {
         const store = layeredStore(root, home);
         const t = new Date().toISOString();
         const out = text(handleInspect(store, { asOf: t }));
-        expect(out).toBe(`(memory is empty as of ${t})\n\n${UNADOPTED_LEDGER_NOTE}`);
+        expect(out).toBe(`(memory is empty as of ${t})\n\n${UNADOPTED_LEDGER_NOTE}\n\n${WITNESS_INIT_NOTE}`); // virgin global -> first-contact INIT note
       } finally { cleanup(home, root); }
     });
 

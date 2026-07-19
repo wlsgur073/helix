@@ -19,6 +19,11 @@ export interface FormatOptions {
    *  exists" and "one exists but isn't trusted") — and is reserved outside the maxChars truncation
    *  accounting so the budget can never drop it. Default false (no note, backward-compatible). */
   unadoptedPresent?: boolean;
+  /** W-T7: ordered, deduped rollback-witness notes (mismatch/interrupted/first-contact). Appended
+   *  AFTER the unadopted note, OUTSIDE the maxChars budget (same reservation as unadoptedPresent), and
+   *  STILL printed on the empty-records early return — a transition-interrupted scope that excludes
+   *  every record must not fall silently to ''. Default none (backward-compatible). */
+  witnessNotes?: string[];
 }
 
 const INTEGRITY_UNAVAILABLE_NOTE = '(integrity verification unavailable — trust grades shown are unverified)';
@@ -43,11 +48,14 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
   const maxItemChars = opts.maxItemChars ?? 240;
   const integrityAvailable = opts.integrityAvailable ?? true;
   const unadoptedNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : null;
+  // Trusted out-of-band trailer: unadopted note FIRST, then the witness notes (ordered, deduped by
+  // the caller). Reserved outside the maxChars budget below, like the unadopted note.
+  const trailer = [unadoptedNote, ...(opts.witnessNotes ?? [])].filter((n): n is string => n !== null && n !== '');
 
   const usable = records
     .filter(({ record }) => record.content.trim() !== '')
     .sort((a, b) => STATE_ORDER[a.record.state] - STATE_ORDER[b.record.state] || b.record.tx.localeCompare(a.record.tx));
-  if (usable.length === 0) return unadoptedNote ?? '';
+  if (usable.length === 0) return trailer.length > 0 ? trailer.join('\n') : '';
 
   // Crowd-out protection: guarantee up to RESERVE current-authoritative (verifying source, not
   // Suspect) records survive the item cap, even if newer non-authoritative records would fill every
@@ -112,9 +120,9 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
     dropped += 1;
     out = assemble();
   }
-  // B2: appended AFTER the budget loop has already settled `out` against maxChars — reserved, i.e.
-  // EXCLUDED from truncation accounting (the loop above never sees it, so it is never a line-drop
-  // candidate and the budget can never suppress it; a saturated context may end up a little over
-  // maxChars rather than lose the note).
-  return unadoptedNote ? out + '\n' + unadoptedNote : out;
+  // B2 + W-T7: appended AFTER the budget loop has already settled `out` against maxChars — reserved,
+  // i.e. EXCLUDED from truncation accounting (the loop above never sees the trailer, so it is never a
+  // line-drop candidate and the budget can never suppress it; a saturated context may end up a little
+  // over maxChars rather than lose a disclosure note).
+  return trailer.length > 0 ? out + '\n' + trailer.join('\n') : out;
 }

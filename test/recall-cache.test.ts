@@ -23,11 +23,12 @@ describe('recall-cache key primitives', () => {
   });
 
   it('keyVectorEqual is true only for identical ordered vectors', () => {
-    const base: ScopeKeyComponent[] = [{ scopeId: '/g', digest: 'd', fingerprint: 'f' }];
-    expect(keyVectorEqual(base, [{ scopeId: '/g', digest: 'd', fingerprint: 'f' }])).toBe(true);
-    expect(keyVectorEqual(base, [{ scopeId: '/g', digest: 'D', fingerprint: 'f' }])).toBe(false);
-    expect(keyVectorEqual(base, [{ scopeId: '/g', digest: 'd', fingerprint: 'F' }])).toBe(false);
-    expect(keyVectorEqual(base, [{ scopeId: '/p', digest: 'd', fingerprint: 'f' }])).toBe(false);
-    expect(keyVectorEqual(base, [...base, { scopeId: '/p', digest: 'd', fingerprint: 'f' }])).toBe(false);
+    const base: ScopeKeyComponent[] = [{ scopeId: '/g', digest: 'd', fingerprint: 'f', witness: 'w' }];
+    expect(keyVectorEqual(base, [{ scopeId: '/g', digest: 'd', fingerprint: 'f', witness: 'w' }])).toBe(true);
+    expect(keyVectorEqual(base, [{ scopeId: '/g', digest: 'D', fingerprint: 'f', witness: 'w' }])).toBe(false);
+    expect(keyVectorEqual(base, [{ scopeId: '/g', digest: 'd', fingerprint: 'F', witness: 'w' }])).toBe(false);
+    expect(keyVectorEqual(base, [{ scopeId: '/g', digest: 'd', fingerprint: 'f', witness: 'W' }])).toBe(false); // W-T7: witness identity differs
+    expect(keyVectorEqual(base, [{ scopeId: '/p', digest: 'd', fingerprint: 'f', witness: 'w' }])).toBe(false);
+    expect(keyVectorEqual(base, [...base, { scopeId: '/p', digest: 'd', fingerprint: 'f', witness: 'w' }])).toBe(false);
   });
 });
