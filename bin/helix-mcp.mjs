@@ -13410,7 +13410,7 @@ function timeoutMessage(lockPath, holder, waitedMs) {
   const who = holder ? `held by pid ${holder.pid} (started ticks ${holder.startTicks ?? "unknown"})` : "holder unreadable (never auto-reclaimed)";
   return `withFileLock: timed out after ${waitedMs}ms acquiring ${lockPath} \u2014 ${who}. Verify liveness with: kill -0 <pid>. If (and only if) the holder is truly gone, remove the lock file manually.`;
 }
-function withFileLock(target, fn, opts = {}) {
+function acquireFileLock(target, opts = {}) {
   const probe = opts.probe ?? realProbe;
   const canon = canonical(target);
   const lockPath = canon + ".lock";
@@ -13482,13 +13482,20 @@ function withFileLock(target, fn, opts = {}) {
       }
     }
   };
-  try {
-    return fn(ctx);
-  } finally {
+  const release = () => {
     try {
       if (!lstatSync(lockPath).isDirectory() && tryParsePayload(readFileSync2(lockPath, "utf8"))?.token === token) unlinkSync(lockPath);
     } catch {
     }
+  };
+  return { ctx, release };
+}
+function withFileLock(target, fn, opts = {}) {
+  const { ctx, release } = acquireFileLock(target, opts);
+  try {
+    return fn(ctx);
+  } finally {
+    release();
   }
 }
 function classifyLegacyDir(lockPath, probe) {

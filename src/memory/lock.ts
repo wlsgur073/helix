@@ -53,7 +53,13 @@ function timeoutMessage(lockPath: string, holder: LockPayload | null, waitedMs: 
     `Verify liveness with: kill -0 <pid>. If (and only if) the holder is truly gone, remove the lock file manually.`;
 }
 
-export function withFileLock<T>(target: string, fn: (ctx: LockContext) => T, opts: LockOptions = {}): T {
+interface AcquiredLock { ctx: LockContext; release: () => void }
+
+/** Shared acquire path for withFileLock/withFileLockAsync (extracted; zero behavior change for
+ *  existing synchronous callers — same publish/contend/classify/reclaim loop, same error
+ *  messages). Returns the acquired LockContext plus a release() thunk; deciding how the held
+ *  section runs (sync return vs awaited) is the caller's job. */
+function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
   const probe = opts.probe ?? realProbe;
   const canon = canonical(target);
   const lockPath = canon + '.lock';
@@ -123,14 +129,44 @@ export function withFileLock<T>(target: string, fn: (ctx: LockContext) => T, opt
       try { return tryParsePayload(readFileSync(lockPath, 'utf8'))?.token === token; } catch { return false; }
     },
   };
-  try {
-    return fn(ctx);
-  } finally {
+  const release = (): void => {
     // Release ONLY a lock we can prove is ours. Anything else (foreign payload, legacy dir,
     // unreadable) is left in place — deleting it would free a lock someone else may hold.
     try {
       if (!lstatSync(lockPath).isDirectory() && tryParsePayload(readFileSync(lockPath, 'utf8'))?.token === token) unlinkSync(lockPath);
     } catch { /* gone/unreadable — cannot prove ownership — leave it */ }
+  };
+  return { ctx, release };
+}
+
+export function withFileLock<T>(target: string, fn: (ctx: LockContext) => T, opts: LockOptions = {}): T {
+  const { ctx, release } = acquireFileLock(target, opts);
+  try {
+    return fn(ctx);
+  } finally {
+    release();
+  }
+}
+
+/** Async-aware sibling of withFileLock, for a critical section that must `await` something WHILE
+ *  still holding the lock (e.g. an interactive confirmation — scripts/rebaseline-cli.ts, spec §6,
+ *  is the first caller). This CANNOT be expressed as `withFileLock(target, async (ctx) => {...})`:
+ *  withFileLock's body is `try { return fn(ctx); } finally { release(); }`. When `fn` is an async
+ *  function, `fn(ctx)` runs synchronously only up to its first `await`, then synchronously returns
+ *  a PENDING promise — `return fn(ctx)` hands that pending promise straight to `finally`, which
+ *  runs IMMEDIATELY (a `finally` after a bare `return <promise>` does not wait for the promise to
+ *  settle). The lock would be released the instant `fn` hit its first `await`, not once `fn`
+ *  logically finished — silently defeating "held across the await" (verified empirically: a
+ *  probe script confirmed the release log line fires before the awaited callback resumes).
+ *  This sibling instead `await`s `fn(ctx)` INSIDE the try, so `finally`/`release()` only runs
+ *  once the async work has actually settled. Acquisition reuses the IDENTICAL synchronous loop
+ *  (acquireFileLock) — only the held-scope call and release are sequenced differently. */
+export async function withFileLockAsync<T>(target: string, fn: (ctx: LockContext) => Promise<T>, opts: LockOptions = {}): Promise<T> {
+  const { ctx, release } = acquireFileLock(target, opts);
+  try {
+    return await fn(ctx);
+  } finally {
+    release();
   }
 }
 
