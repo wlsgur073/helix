@@ -670,7 +670,11 @@ export class MemoryStore {
     const rows: ScopedHistoricalRecord[] = [];
     const anomalies = new Set<string>();
     let truncated = false;
-    let integrityAvailable = true; // false if ANY read scope lacked a master key (mirrors scopedVerified)
+    // false if ANY read scope lacked a master key (mirrors scopedVerified). Intended semantic:
+    // availability over the scopes whose rows are actually SERVED; today it also spans
+    // witness-EXCLUDED scopes' key availability — indistinguishable while every scope shares the
+    // one master key. If per-scope keys ever ship, compute over included scopes only.
+    let integrityAvailable = true;
     const verdicts: WitnessVerdict[] = [];
 
     const addScope = (ledger: LedgerPath, scope: MemoryScope) => {

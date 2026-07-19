@@ -209,7 +209,11 @@ same one-time path as before; nothing about the key's secrecy changes, only when
   counted by parse health, and a complete-but-unacknowledged record commits (at-least-once).
 - **Rollout launch barrier (normative):** old bundles age-steal locks and do not sweep — while any
   old helix-mcp process runs, the new guarantees do not hold. Upgrade procedure: close every Claude
-  session, verify no helix-mcp processes remain, reinstall the plugin, then reopen sessions.
+  session, verify no helix-mcp processes remain, reinstall the plugin, then reopen sessions. The
+  barrier's unit is a fresh CLI process, not a new conversation: a conversation reset (`/clear`)
+  does NOT restart a session's MCP server, which keeps the code image it loaded at startup
+  (observed live 2026-07-19: a server outlived a reinstall by hours across `/clear`, while
+  per-event hooks — fresh processes — ran the newly installed code immediately).
 
 ## Scope / non-goals
 
