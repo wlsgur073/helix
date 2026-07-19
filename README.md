@@ -173,6 +173,7 @@ Helix keeps two ledgers that it always reads together:
 Helix is local-first. Installing it lets Claude Code run code on your machine — here is exactly what that code does:
 
 - **MCP server** (`node bin/helix-mcp.mjs`, launched by Claude Code): reads and writes memory under `~/.helix/` (and an owned `<project>/.helix/` ledger when present). It makes **no network calls** except the optional dual-verify path below.
+- **Re-baseline ceremony** (`node bin/helix-rebaseline.mjs --scope global`, or `--scope <absoluteProjectRoot>` for a project; run by you): an interactive, TTY-only maintenance command that re-blesses a ledger scope after the rollback witness flags it as regressed (see [SECURITY.md](./SECURITY.md)). It is never launched automatically and is not exposed as an MCP tool.
 - **Session hooks:** SessionStart reads your trusted memory and injects it into the session as quarantined DATA (never as instructions); SessionEnd appends a session record. Neither sends anything off-machine.
 - **No telemetry.** Helix never phones home.
 - **Metrics (local only):** Helix appends content-free latency/size records (tool op durations,

@@ -105,9 +105,11 @@ still confirm which ledger it physically lives in (read the ledger JSONL directl
   and can mint valid MACs; no locally-held key is safe from it. A readable home key (broad
   permissions, a shared host) is a **security downgrade equivalent to that out-of-model adversary**:
   the file-surface guarantee is then void and all grades become forgeable.
-- **Rollback-by-suppression is not detected.** Deleting or truncating a later legitimate `verify`
-  to preserve a stale elevated grade is invisible to a per-record MAC. A home-side per-target
-  high-water counter that would close this is a registered follow-on.
+- **Rollback-by-suppression is not detected by the per-record MAC alone.** Deleting or truncating
+  a later legitimate `verify` to preserve a stale elevated grade is invisible to a per-record MAC
+  in isolation. A home-side per-target high-water counter that closes this for a boundary-writable,
+  git-tracked ledger has shipped — see *Rollback witness* below for what it catches and its own
+  residual bounds (a whole-home coordinated rollback is still undetectable locally).
 - **Trust is machine-local.** The signing key never leaves `~/.helix`, so a `Verified` grade does
   not transfer to another machine (e.g. a Windows vs. WSL clone) — elevations signed elsewhere
   replay as `Fresh` until you re-`confirm` on that machine.
@@ -121,6 +123,66 @@ still confirm which ledger it physically lives in (read the ledger JSONL directl
   can still be superseded or evicted by a later Fresh non-authoritative commit; the replacement is
   honestly `Fresh` — no grade is forged — so this is a within-model crowd-out property, not a
   trust-forgery.
+
+## Rollback witness (cross-boundary ledger rollback)
+
+Ledger integrity (above) authenticates individual records; it does not by itself detect a ledger
+*regressing*. A project ledger that lives in a boundary-writable, git-tracked tree (for example, a
+repo that tracks `.helix/memory.jsonl`) can be checked out, restored, or reset to an earlier state
+while every other copy of the world still remembers the newer one — silently, with no MAC
+violation, because the restored file is itself a completely legitimate, correctly-signed past
+state. A home-side **rollback witness** (`~/.helix/witness.json`, one MAC'd entry per ledger scope,
+signed with the same master key as `verify` records under its own domain) closes this gap: it
+lives on the trusted side of the boundary the ledger-HMAC threat model already assumes an
+adversary cannot read or write, so a ledger's current bytes are checked against it on every read.
+
+- **Authority.** A detected mismatch — a current ledger that has forked from or fallen behind its
+  witnessed head, with no rewrite already in flight for that scope — clamps that scope's
+  `Verified`/`Corroborated` grades to `Fresh` on every live projection (recall, inspect, the
+  SessionStart hook) and renders a constant, trusted disclosure note outside the DATA frame. This
+  is armed from the first release, not opt-in.
+- **Serve-with-note.** A mismatched scope is not blacked out: its rows keep being served (with the
+  note, and with elevated grades clamped) and new appends keep landing, but the witness itself
+  never advances over a mismatch. Only an explicit re-baseline (below) clears the signal, so the
+  very next ordinary append after a rollback can never silently launder the alarm away. (A
+  separate, narrower state — a ledger rewrite caught mid-transition — always excludes reads and
+  blocks writes for that scope until resolved, independent of this policy.)
+- **Fenced current-head-only witness, user-only ceremony.** The witness keeps only each scope's
+  live head, never a history of erased-era bytes, kept honest by a content-free marker row planted
+  at the end of every legitimate rewrite (compaction, erase, an authorized re-baseline) — so a
+  restored old-era file can never pass as a benign extension of the current one. The only
+  sanctioned way to re-bless a mismatched scope is `bin/helix-rebaseline.mjs`, an interactive,
+  TTY-only CLI that displays the scope, byte hash, and target epoch, requires a typed
+  confirmation, and holds the ledger lock from that display through the commit. It is deliberately
+  **not** an MCP tool: no agent-suppliable parameter can invoke it, and nothing invokes it
+  automatically.
+
+### Named limitations (documented, not defended)
+
+- A whole-home coordinated rollback — the ledger, the witness, and any cache all restored together
+  to one consistent earlier snapshot — is not detectable locally; it is the same class of exposure
+  as any other adversary capable of reading and writing your home directory.
+- Rows appended in the narrow window between a durable append and the witness's own next advance
+  stay regression-unprotected until that advance happens (the unwitnessed-suffix crash window).
+- First run, first contact with a new scope, a witness key rotation, and a deleted witness file are
+  all trust-on-first-use: each is an honest, fail-open re-initialization rather than a silent one,
+  and every case is surfaced by its own disclosure note.
+- The re-baseline ceremony proves interface shape, not human presence: any agent capable of driving
+  a shell can allocate a pty, read the displayed hash, and type the confirmation. This is a
+  residual in every deployment that grants an agent shell access — it is not a guarantee that a
+  human approved the re-baseline.
+- Era information recovered from marker rows inside a mismatched file is an advisory diagnostic,
+  not an authenticated fact: a boundary adversary can strip or replant a marker it has already seen
+  (though it can never forge one bearing a future, still-unpredictable nonce).
+- The witness does not stop a boundary writer from re-appending copies of previously-read rows as
+  new suffix content — that is the ordinary append capability this threat model always grants.
+  Keeping replayed content from being trusted again is row-level validation and provenance's job,
+  not the witness's.
+- Availability under attack is contained per scope: forcing a mismatch and forcing a caught-mid-
+  rewrite state both require boundary write access, though they are not the identical capability.
+  Recovery is normally a short, idempotent re-drive of the interrupted rewrite; when the rewrite
+  cannot be re-driven, recovery is ceremony-bound instead, and the affected scope stays dark until
+  a human runs it.
 
 ## Ledger locking, erasure, and durability boundaries
 
