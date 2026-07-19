@@ -66,6 +66,35 @@ describe('round-trip / tamper / anti-laundering / key-absent', () => {
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
+  it('structurally-malformed witness.json fail-safes to first-contact — never throws (partial write / corruption)', () => {
+    // The hex-flip case above is a WELL-FORMED shape with a wrong MAC. This covers the other class:
+    // a witness.json that is structurally broken (unparseable, wrong-typed, missing fields). Each
+    // must degrade to first-contact (TOFU + note) rather than crash a read, so a corrupted/half-
+    // written witness file can never brick recall. (Mutation-checked in authoring: making
+    // readStoreFileAt rethrow instead of degrading to {} turns the garbage-JSON case RED.)
+    const bytes = Buffer.from('a\n', 'utf8');
+    const malformed: Array<[string, string]> = [
+      ['unparseable garbage', 'this is not json at all {{{'],
+      ['truncated json', '{"v":1,"scopes":{"@global":{"entry":{"epoch":1,'],
+      ['scopes not an object', JSON.stringify({ v: 1, scopes: 'nope' })],
+      ['scopes missing', JSON.stringify({ v: 1 })],
+      ['entry missing mac', JSON.stringify({ v: 1, scopes: { '@global': { entry: { epoch: 1, byteLength: 2, prefixHash: sha256Hex(bytes), headTx: null }, journal: null } } })],
+      ['entry wrong-typed epoch', JSON.stringify({ v: 1, scopes: { '@global': { entry: { epoch: 'one', byteLength: 2, prefixHash: sha256Hex(bytes), headTx: null, mac: 'x'.repeat(64) }, journal: null } } })],
+      ['entry is a scalar', JSON.stringify({ v: 1, scopes: { '@global': { entry: 42, journal: null } } })],
+    ];
+    for (const [label, content] of malformed) {
+      const home = tmpHome();
+      try {
+        writeFileSync(witnessPath(home), content);
+        // Neither the raw read nor the classify may throw on a broken file.
+        let state!: ReturnType<typeof readScopeWitness>;
+        expect(() => { state = readScopeWitness(home, '@global'); }, label).not.toThrow();
+        expect(state.entry, label).toBeNull();
+        expect(classifyScope(home, '@global', bytes).kind, label).toBe('first-contact');
+      } finally { rmSync(home, { recursive: true, force: true }); }
+    }
+  });
+
   it('advance re-classifies under lock: rolled-back (shorter) bytes throw WitnessAdvanceError — anti-laundering at the store layer', () => {
     const home = tmpHome();
     try {

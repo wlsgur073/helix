@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, existsSync, writeFileSync, readFileSync, symlin
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { withFileLock, lockPathOf, writeLockFileForTest } from '../../src/memory/lock.js';
+import { withFileLock, withFileLockAsync, lockPathOf, writeLockFileForTest } from '../../src/memory/lock.js';
 import { selfIdentity } from '../../src/memory/lock-liveness.js';
 
 const target = (): string => { const d = mkdtempSync(join(tmpdir(), 'helix-lock-')); writeFileSync(join(d, 'ledger.jsonl'), ''); return join(d, 'ledger.jsonl'); };
@@ -92,5 +92,45 @@ describe('withFileLock (link-published)', () => {
       expect(ctx.stillOwned()).toBe(false);
     });
     rmSync(lockPathOf(t), { force: true });
+  });
+});
+
+describe('withFileLockAsync (holds across the await)', () => {
+  // The property that distinguishes this from `withFileLock(t, async fn)`: the lock stays held
+  // until the async callback SETTLES, not until it hits its first `await`. Verified by a competing
+  // same-process acquire while the holder is parked mid-await — because THIS process still holds
+  // the lock across the await, the nested acquire is rejected as re-entrant; once the holder
+  // releases, the path is free again. (Mutation-checked during authoring: reverting the impl to
+  // `return fn(ctx)` — the early-release bug this sibling exists to avoid — turns the re-entrant
+  // assertion RED, because the freed lock lets the competitor acquire cleanly and NOT throw.)
+  it('holds the lock across the await — a nested acquire is rejected while parked mid-await, then the path frees after it settles', async () => {
+    const t = target();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let settled = false;
+    // acquireFileLock runs synchronously before the first `await`, so the lock is held the moment
+    // withFileLockAsync is called; the holder then parks on `gate`.
+    const held = withFileLockAsync(t, async () => { await gate; return 'inner'; })
+      .then((v) => { settled = true; return v; });
+
+    // Held across the await: a competing acquire on the same path fails (re-entrant fast-path,
+    // because this process is the holder). Under the early-release bug it would instead succeed.
+    expect(() => withFileLock(t, () => 'never', { maxWaitMs: 100 })).toThrow(/re-entrant/i);
+    expect(settled).toBe(false);                 // the async holder has NOT released yet
+    expect(existsSync(lockPathOf(t))).toBe(true); // lock file still present (held across the await)
+
+    release();                                    // let the async fn settle
+    await expect(held).resolves.toBe('inner');
+    expect(existsSync(lockPathOf(t))).toBe(false); // released in finally, only AFTER the await settled
+    expect(withFileLock(t, () => 'ok')).toBe('ok'); // path is free again
+  });
+
+  it('releases the lock even when the async fn rejects (finally runs after the promise settles)', async () => {
+    const t = target();
+    await expect(withFileLockAsync(t, async () => { await Promise.resolve(); throw new Error('boom'); }))
+      .rejects.toThrow('boom');
+    expect(existsSync(lockPathOf(t))).toBe(false);                       // not left held
+    const dir = join(t, '..');
+    expect(readdirSync(dir).filter((n: string) => n.includes('.lk-'))).toHaveLength(0); // no orphan src tmp
   });
 });
