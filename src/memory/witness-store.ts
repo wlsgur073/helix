@@ -290,7 +290,13 @@ export function completeTransition(home: string, scopeKey: string, bytes: Buffer
  *  the journal's target epoch AND the current file validates against the CURRENT witness entry —
  *  monotonicity alone is not read containment, spec §4.3 R4-F1). Clears the slot and returns true
  *  only when it holds; otherwise the journal REMAINS pending (never a plain no-journal decay).
- *  `fsOps` (Task 8): injectable seam for the witness.json replace itself — defaults to realFsOps. */
+ *  `fsOps` (Task 8): injectable seam for the witness.json replace itself — defaults to realFsOps.
+ *
+ *  DEFENSIVE / not on a live path (final whole-branch review, 2026-07-18): `completeTransition`
+ *  advances the entry AND clears the journal in ONE atomic write, so the "witness at/beyond target
+ *  with the journal still pending" state this cleans up cannot arise from our own write paths. It
+ *  is retained, tested, as defense-in-depth against a partial-write adversary the model otherwise
+ *  excludes; no production caller invokes it today. */
 export function maybeCleanupClear(home: string, scopeKey: string, bytes: Buffer, fsOps: DurableFsOps = realFsOps): boolean {
   mkdirSync(home, { recursive: true });
   const rawPath = witnessPath(home);

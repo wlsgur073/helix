@@ -157,6 +157,11 @@ adversary cannot read or write, so a ledger's current bytes are checked against 
   **not** an MCP tool: no agent-suppliable parameter can invoke it, and nothing invokes it
   automatically.
 
+Note: because the witness is signed, a witnessed append now materializes the master signing key
+(`~/.helix/ledger-mac-master.key`) on the *first* memory write rather than the first `verify` —
+the key simply comes into existence earlier in a fresh install's life. It is created 0600 by the
+same one-time path as before; nothing about the key's secrecy changes, only when it first appears.
+
 ### Named limitations (documented, not defended)
 
 - A whole-home coordinated rollback — the ledger, the witness, and any cache all restored together
