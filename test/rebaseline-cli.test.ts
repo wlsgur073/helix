@@ -10,9 +10,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../scripts/rebaseline-cli.js';
 import { MemoryStore } from '../src/memory/store.js';
-import { readLedgerBytes } from '../src/memory/ledger.js';
+import { readLedgerBytes, witnessFenceRecord } from '../src/memory/ledger.js';
 import { withFileLock } from '../src/memory/lock.js';
-import { readScopeWitness, classifyState, scopeKeyOf, witnessLogPath } from '../src/memory/witness-store.js';
+import {
+  readScopeWitness, classifyState, scopeKeyOf, witnessLogPath, planTransition, openTransition,
+} from '../src/memory/witness-store.js';
+import { sha256Hex } from '../src/memory/witness-core.js';
 
 function tmpHome(): string { return mkdtempSync(join(tmpdir(), 'helix-rebaseline-home-')); }
 
@@ -35,6 +38,39 @@ function mismatchedGlobalHome(): { home: string; ledger: string } {
   const key = scopeKeyOf(home);
   expect(classifyState(readScopeWitness(home, key), readLedgerBytes(ledger)).kind).toBe('mismatch'); // sanity
   return { home, ledger };
+}
+
+/** Global-scope TRANSITION-INTERRUPTED fixture (spec §4.3/§7 crash-window-A): witness a scope, then
+ *  plant a pending journal whose `expected` target was NEVER actually written to the ledger — the
+ *  ledger's real bytes stay at their pre-transition value while the journal describes a fenced
+ *  rewrite that never landed (mirrors witness-enforcement.test.ts's plantInterrupted recipe). This
+ *  is the state where re-driving the ORIGINAL operation is unavailable (nothing produced the target
+ *  bytes) and only the ceremony's supersession can un-stick the scope (spec §7 round-4
+ *  "non-re-runnable-transition recovery drill"). */
+function transitionInterruptedGlobalHome() {
+  const home = tmpHome();
+  const ledger = join(home, 'memory.jsonl');
+  let n = 0;
+  const store = new MemoryStore(ledger, { home, sessionId: 't', genId: () => `m_${++n}` });
+  store.commit({ content: 'alpha fact before interruption', source: 'user' });
+  const key = scopeKeyOf(home);
+
+  const preBytes = readLedgerBytes(ledger);
+  const plan0 = planTransition(home, key, 'compaction');
+  const neverAppliedTargetText = preBytes.toString('utf8')
+    + JSON.stringify(witnessFenceRecord(plan0.epoch, plan0.nonce, '2026-07-18T00:05:00.000Z')) + '\n';
+  const staleExpected = {
+    byteLength: Buffer.byteLength(neverAppliedTargetText),
+    prefixHash: sha256Hex(Buffer.from(neverAppliedTargetText)),
+  };
+  const staleJournal = openTransition(home, key, {
+    kind: 'compaction', epoch: plan0.epoch, nonce: plan0.nonce, predecessor: plan0.predecessor,
+    supersedes: plan0.supersedes, expected: staleExpected, tx: '2026-07-18T00:05:00.000Z',
+  });
+  // Sanity: the ledger's REAL bytes are still preBytes (the journaled target was never written), so
+  // this IS transition-interrupted, not transition-heal.
+  expect(classifyState(readScopeWitness(home, key), readLedgerBytes(ledger)).kind).toBe('transition-interrupted');
+  return { home, ledger, key, staleJournal };
 }
 
 function envFor(home: string): NodeJS.ProcessEnv {
@@ -153,6 +189,50 @@ describe('rebaseline-cli main() — happy path (mismatched scope)', () => {
     const state = readScopeWitness(home, key);
     expect(state.entry!.epoch).toBe(1);
     expect(classifyState(state, readLedgerBytes(projLedger)).kind).toBe('in-sync');
+  });
+});
+
+describe('rebaseline-cli main() — recovers a transition-interrupted scope (spec §4.3/§7 recovery drill)', () => {
+  it('bless supersedes the stale pending journal and un-sticks the scope to in-sync, exit 0', async () => {
+    const { home, ledger, key, staleJournal } = transitionInterruptedGlobalHome();
+    homes.push(home);
+
+    // Independent, pure-read probe of what the ceremony's OWN internal planTransition call will
+    // compute — taken BEFORE main() runs, over the identical (still-untouched) witness state main()
+    // will see. planTransition never mutates (witness-store.ts), so this extra call is side-effect-
+    // free and does not perturb the scenario; epoch/supersedes are derived deterministically from the
+    // current entry/pending state (only `nonce` is randomized per call), so this is a faithful,
+    // non-invasive stand-in for what main()'s internal call computes — no need to mock/intercept the
+    // real one to observe the supersession.
+    const expectedSupersession = planTransition(home, key, 'rebaseline');
+    expect(expectedSupersession.supersedes).toBe(staleJournal.nonce);
+    expect(expectedSupersession.epoch).toBeGreaterThan(staleJournal.epoch);
+
+    const cap = captureStd();
+    let code: number;
+    try {
+      code = await main(['--scope', 'global'], { env: envFor(home), isTTY: true, promptLine: async () => 'bless' });
+    } finally { cap.restore(); }
+
+    expect(code).toBe(0);
+
+    const finalBytes = readLedgerBytes(ledger);
+    const postState = readScopeWitness(home, key);
+    expect(postState.journal).toBeNull(); // the ceremony's own transition completed and cleared
+    expect(postState.entry!.epoch).toBe(expectedSupersession.epoch); // landed exactly at the superseding plan's epoch
+    expect(classifyState(postState, finalBytes).kind).toBe('in-sync'); // the scope is un-stuck
+
+    const lines = finalBytes.toString('utf8').split('\n').filter((l) => l.length > 0);
+    const lastRow = JSON.parse(lines[lines.length - 1]!) as { id: string };
+    expect(lastRow.id.startsWith('witness_fence_')).toBe(true); // fence is the last ledger row
+
+    const logLines = readFileSync(witnessLogPath(home), 'utf8').trim().split('\n')
+      .map((l) => JSON.parse(l) as { kind: string; scope: string; epoch: number; nonce: string });
+    expect(logLines.some((l) => l.kind === 'compaction' && l.nonce === staleJournal.nonce)).toBe(true); // the stale journal's own creation line survives
+    const lastLog = logLines[logLines.length - 1]!;
+    expect(lastLog.kind).toBe('rebaseline'); // the ceremony's superseding transition is the newest log line
+    expect(lastLog.scope).toBe(key);
+    expect(lastLog.epoch).toBe(expectedSupersession.epoch);
   });
 });
 
