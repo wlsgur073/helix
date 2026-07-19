@@ -250,21 +250,28 @@ describe('Task 6 — witnessed rewrites', () => {
       // Two real kept rows, serialized exactly as the ledger writes them.
       const kept = [mkRec('m_1', 'alpha kept row'), mkRec('m_2', 'bravo kept row')];
       const K = kept.map((r) => JSON.stringify(r) + '\n').join('');
-      // A restored OLD file = the same two rows PLUS one extra (dead/resurrected) row. This is a benign
-      // append-shaped restore: without a fence in the witnessed head it classifies as unwitnessed-suffix
-      // (advance-allowed — laundered). extraRow is a real row, never equal to the fence.
-      const extraRow = mkRec('m_extra', 'resurrected dead tail row');
-      const oldFile = Buffer.from(K + JSON.stringify(extraRow) + '\n');
-
-      // --- WITH the fence: witness a head that ENDS in an unpredictable fence, then restore oldFile. ---
+      // The witnessed head ENDS in an unpredictable fence row.
       const ledger = join(home, 'memory.jsonl');
       const nonce = randomBytes(16).toString('hex');               // a real 32-hex per-rewrite nonce
       const fence = witnessFenceRecord(1, nonce, FIXED);
       const headBytes = Buffer.from(K + JSON.stringify(fence) + '\n');
+
+      // A restored OLD file = the same two kept rows PLUS one extra (dead/resurrected) row. It is a
+      // benign append-shaped restore: without a fence in the witnessed head it classifies as
+      // unwitnessed-suffix (advance-allowed — laundered). The extra row is deliberately LONGER than the
+      // fence row so `oldFile.length >= headBytes.length` — that makes matchesAt PASS its length check
+      // and REACH the hash compare, so the WITH-fence mismatch below is caused by CONTENT divergence at
+      // the fence offset (K is byte-identical, then oldFile carries extraRow's bytes where the head
+      // carries the fence's — they differ at the very first field, the id), NOT a length artifact.
+      const extraRow = mkRec('m_extra', 'resurrected dead tail row, padded long enough that this record serializes strictly larger than the fence row does');
+      const oldFile = Buffer.from(K + JSON.stringify(extraRow) + '\n');
+      expect(oldFile.length).toBeGreaterThanOrEqual(headBytes.length); // provably exclude the length-artifact path
+
+      // --- WITH the fence: witness K+fence, then restore oldFile -> mismatch by CONTENT divergence. ---
       writeFileSync(ledger, headBytes);
       advanceWitness(home, scopeKeyOf(home), headBytes, FIXED);    // fresh scope -> first-contact -> witnesses K+fence
       writeFileSync(ledger, oldFile);
-      expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('mismatch'); // the fence makes oldFile non-prefix -> CAUGHT
+      expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('mismatch'); // oldFile diverges from head at the fence offset -> CAUGHT
 
       // --- COUNTERFACTUAL: the SAME oldFile, but the witnessed head is K WITHOUT the fence. ---
       const projectRoot2 = join(home, 'proj2');                    // a distinct scope in the same home
@@ -273,7 +280,7 @@ describe('Task 6 — witnessed rewrites', () => {
       writeFileSync(ledger2, K);
       advanceWitness(home, scopeKey2, Buffer.from(K), FIXED);      // witnesses K only (no fence)
       writeFileSync(ledger2, oldFile);
-      expect(readLedgerWitnessed(ledger2, home, projectRoot2).verdict.kind).toBe('unwitnessed-suffix'); // LAUNDERED
+      expect(readLedgerWitnessed(ledger2, home, projectRoot2).verdict.kind).toBe('unwitnessed-suffix'); // K is a prefix of the longer oldFile -> LAUNDERED
       // The ONLY difference between the two branches is whether the witnessed head ended in the fence —
       // so the fence bytes are provably the sole converter from 'unwitnessed-suffix' (benign) to 'mismatch'.
     } finally { rmSync(home, { recursive: true, force: true }); }
