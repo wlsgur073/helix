@@ -5,16 +5,18 @@
 // skipped witness transition is observable end to end.
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { MemoryRecord } from '../../src/types.js';
 import { MemoryStore } from '../../src/memory/store.js';
 import {
   compactLedger, planCompaction, witnessFenceRecord, readLedgerBytes, parseLedger,
 } from '../../src/memory/ledger.js';
 import { realFsOps, type DurableFsOps } from '../../src/memory/fs-ops.js';
 import {
-  planTransition, openTransition, completeTransition, readScopeWitness, witnessPath, witnessLogPath,
-  WitnessAdvanceError,
+  planTransition, openTransition, completeTransition, advanceWitness, readScopeWitness, scopeKeyOf,
+  witnessPath, witnessLogPath, WitnessAdvanceError,
 } from '../../src/memory/witness-store.js';
 import { readLedgerWitnessed } from '../../src/memory/witness-read.js';
 import { sha256Hex } from '../../src/memory/witness-core.js';
@@ -229,6 +231,76 @@ describe('Task 6 — witnessed rewrites', () => {
       store.healWitness();
       expect(readScopeWitness(home, '@global')).toEqual(before);
       expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('mismatch');
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  // Fix loop 1 (reviewer): the R1-F1 erase-path test above asserts mismatch, but that mismatch is
+  // OVER-DETERMINED (the erase rewrite also adds a tombstone + horizon marker and shortens the head vs
+  // the restored superset), so it stays green even with the fence removed. These two tests isolate the
+  // fence's ACTUAL security property (spec §4.9): the unpredictable per-rewrite nonce is what makes the
+  // post-rewrite head un-prefixable by any pre-existing file.
+
+  it('R1-F1 fence ISOLATION: the fence row is the SOLE thing that converts a laundered-benign restore into a caught rollback', () => {
+    const home = newHome();
+    try {
+      const mkRec = (id: string, content: string): MemoryRecord => ({
+        id, tx: FIXED, validFrom: FIXED, validTo: null, type: 'assert', state: 'Fresh', content,
+        provenance: { source: 'user', sessionId: 't' }, supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+      });
+      // Two real kept rows, serialized exactly as the ledger writes them.
+      const kept = [mkRec('m_1', 'alpha kept row'), mkRec('m_2', 'bravo kept row')];
+      const K = kept.map((r) => JSON.stringify(r) + '\n').join('');
+      // A restored OLD file = the same two rows PLUS one extra (dead/resurrected) row. This is a benign
+      // append-shaped restore: without a fence in the witnessed head it classifies as unwitnessed-suffix
+      // (advance-allowed — laundered). extraRow is a real row, never equal to the fence.
+      const extraRow = mkRec('m_extra', 'resurrected dead tail row');
+      const oldFile = Buffer.from(K + JSON.stringify(extraRow) + '\n');
+
+      // --- WITH the fence: witness a head that ENDS in an unpredictable fence, then restore oldFile. ---
+      const ledger = join(home, 'memory.jsonl');
+      const nonce = randomBytes(16).toString('hex');               // a real 32-hex per-rewrite nonce
+      const fence = witnessFenceRecord(1, nonce, FIXED);
+      const headBytes = Buffer.from(K + JSON.stringify(fence) + '\n');
+      writeFileSync(ledger, headBytes);
+      advanceWitness(home, scopeKeyOf(home), headBytes, FIXED);    // fresh scope -> first-contact -> witnesses K+fence
+      writeFileSync(ledger, oldFile);
+      expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('mismatch'); // the fence makes oldFile non-prefix -> CAUGHT
+
+      // --- COUNTERFACTUAL: the SAME oldFile, but the witnessed head is K WITHOUT the fence. ---
+      const projectRoot2 = join(home, 'proj2');                    // a distinct scope in the same home
+      const scopeKey2 = scopeKeyOf(home, projectRoot2);
+      const ledger2 = join(home, 'ledger2.jsonl');
+      writeFileSync(ledger2, K);
+      advanceWitness(home, scopeKey2, Buffer.from(K), FIXED);      // witnesses K only (no fence)
+      writeFileSync(ledger2, oldFile);
+      expect(readLedgerWitnessed(ledger2, home, projectRoot2).verdict.kind).toBe('unwitnessed-suffix'); // LAUNDERED
+      // The ONLY difference between the two branches is whether the witnessed head ended in the fence —
+      // so the fence bytes are provably the sole converter from 'unwitnessed-suffix' (benign) to 'mismatch'.
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('R1-F1 fence FRESHNESS: two successive production rewrites plant fences with DIFFERENT nonces and a strictly higher epoch (catches a constant nonce)', () => {
+    const home = newHome();
+    try {
+      const ledger = join(home, 'memory.jsonl');
+      const store = makeStore(home);
+      const a = store.commit({ content: 'alpha fact', source: 'user' });
+      void a;
+      const b = store.commit({ content: 'bravo fact', source: 'user' });
+      const c = store.commit({ content: 'charlie fact', source: 'user' });
+
+      store.erase(c.id, { permanent: true, scope: 'global' });          // rewrite 1 (production path)
+      const fence1 = parseLedger(ledger).find((r) => r.id.startsWith('witness_fence_'))!;
+      store.erase(b.id, { permanent: true, scope: 'global' });          // rewrite 2 (production path)
+      const fence2 = parseLedger(ledger).find((r) => r.id.startsWith('witness_fence_'))!;
+
+      // id === witness_fence_<epoch>_<nonce>
+      const epoch1 = Number(fence1.id.split('_')[2]!); const nonce1 = fence1.id.split('_')[3]!;
+      const epoch2 = Number(fence2.id.split('_')[2]!); const nonce2 = fence2.id.split('_')[3]!;
+      expect(fence1.id).not.toBe(fence2.id);
+      expect(nonce1).not.toBe(nonce2);                 // the per-rewrite nonce is FRESH (RED under a constant nonce)
+      expect(nonce1.length).toBe(32);                  // a real 16-byte hex nonce, not a fixed sentinel
+      expect(epoch2).toBeGreaterThan(epoch1);          // epoch is strictly monotonic across rewrites
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });
