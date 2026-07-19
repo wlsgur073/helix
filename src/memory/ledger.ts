@@ -444,8 +444,10 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
         // ledger is left byte-identical and no journal is opened — the witness is wholly untouched.
         const verdict = classifyState(readScopeWitness(w.home, w.scopeKey), readLedgerBytes(path));
         if (verdict.kind === 'mismatch') {
+          const op = kind === 'erase' ? ('permanent-erase' as const) : ('compaction' as const);
           throw new WitnessBlockedError(
-            `compactLedger: scope '${w.scopeKey}' is in a MISMATCH (rollback-alarm) state — refusing the rewrite; advancing the witness over forked/rolled-back content would launder the alarm (spec §4.2). Re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry.`,
+            op,
+            `${op}: scope '${w.scopeKey}' is in a MISMATCH (rollback-alarm) state — refusing the rewrite; advancing the witness over forked/rolled-back content would launder the alarm (spec §4.2). Re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry.`,
           );
         }
         const plan = planTransition(w.home, w.scopeKey, kind);

@@ -138,7 +138,11 @@ describe('appendWitnessed via MemoryStore.commit', () => {
       });
       const before = readFileSync(ledger, 'utf8');
 
-      expect(() => store.commit({ content: 'fact two', source: 'user' })).toThrow(WitnessBlockedError);
+      let caught: unknown;
+      try { store.commit({ content: 'fact two', source: 'user' }); } catch (e) { caught = e; }
+      expect(caught).toBeInstanceOf(WitnessBlockedError);
+      expect((caught as WitnessBlockedError).op).toBe('commit');
+      expect((caught as Error).message).toMatch(/^commit: /);
 
       expect(readFileSync(ledger, 'utf8')).toBe(before); // ledger untouched
       expect(readScopeWitness(home, key).journal).not.toBeNull(); // still pending, unresolved
@@ -164,6 +168,27 @@ describe('appendWitnessedUnlocked via MemoryStore.confirm (writeVerify path)', (
       expect(after.epoch).toBe(before.epoch); // plain (unwitnessed-suffix) advance, no transition involved
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
+
+  it('a pending non-matching journal blocks store.confirm (the signing writeVerify path) with op verify', () => {
+    const { store, ledger, home } = tmpStore();
+    try {
+      const a = store.commit({ content: 'fact one', source: 'user' });
+      const key = scopeKeyOf(home);
+      const p = planTransition(home, key, 'erase');
+      openTransition(home, key, {
+        kind: 'erase', epoch: p.epoch, nonce: p.nonce, predecessor: p.predecessor, supersedes: p.supersedes,
+        expected: { byteLength: 999, prefixHash: sha256Hex(Buffer.from('nonsense-not-on-disk')) },
+        tx: '2026-07-18T00:00:30.000Z',
+      });
+      const before = readFileSync(ledger, 'utf8');
+      let caught: unknown;
+      try { store.confirm(a.id); } catch (e) { caught = e; }
+      expect(caught).toBeInstanceOf(WitnessBlockedError);
+      expect((caught as WitnessBlockedError).op).toBe('verify');
+      expect((caught as Error).message).toMatch(/^verify: /);
+      expect(readFileSync(ledger, 'utf8')).toBe(before); // ledger byte-identical
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
 });
 
 describe('WitnessBlockedError propagation out of store.erase (context point 6)', () => {
@@ -180,7 +205,11 @@ describe('WitnessBlockedError propagation out of store.erase (context point 6)',
       });
       const before = readFileSync(ledger, 'utf8');
 
-      expect(() => store.erase(a.id, { scope: 'global' })).toThrow(WitnessBlockedError);
+      let caught: unknown;
+      try { store.erase(a.id, { scope: 'global' }); } catch (e) { caught = e; }
+      expect(caught).toBeInstanceOf(WitnessBlockedError);
+      expect((caught as WitnessBlockedError).op).toBe('erase');
+      expect((caught as Error).message).toMatch(/^erase: /);
 
       expect(readFileSync(ledger, 'utf8')).toBe(before); // ledger untouched
     } finally { rmSync(home, { recursive: true, force: true }); }

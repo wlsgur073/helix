@@ -225,7 +225,7 @@ export class MemoryStore {
       supersedes: input.supersedes ?? null, blastRadius: input.blastRadius ?? null, reverifyTrigger: null, classification,
     };
     const ledger = this.targetLedger(input.scope);
-    appendWitnessed(ledger, record, this.homeDir(), this.scopeRootOf(ledger));
+    appendWitnessed(ledger, record, this.homeDir(), this.scopeRootOf(ledger), 'commit');
     return record;
   }
 
@@ -578,7 +578,7 @@ export class MemoryStore {
         gen: maxGen + 1, targetDigest: digestContent(target.content),
       };
       const signed = signVerify(unsigned, subkey);
-      appendWitnessedUnlocked(ledger, signed, this.homeDir(), this.scopeRootOf(ledger)); // we already hold the ledger lock — non-locking, witnessed append
+      appendWitnessedUnlocked(ledger, signed, this.homeDir(), this.scopeRootOf(ledger), 'verify'); // we already hold the ledger lock — non-locking, witnessed append
       return signed;
     });
   }
@@ -838,7 +838,8 @@ export class MemoryStore {
     // authoritative refusal is compactLedger's own under-lock gate, so a race here can never launder.
     if (opts.permanent && readLedgerBytesWitnessed(ledger, this.homeDir(), this.scopeRootOf(ledger)).verdict.kind === 'mismatch') {
       throw new WitnessBlockedError(
-        `erase: scope for id '${id}' is in a MISMATCH (rollback-alarm) state — refusing a permanent erase that would launder the alarm; re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry (spec §4.2)`,
+        'permanent-erase',
+        `permanent-erase: scope for id '${id}' is in a MISMATCH (rollback-alarm) state — refusing a permanent erase that would launder the alarm; re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry (spec §4.2)`,
       );
     }
     const isMarker = this.markerFamilyOf(id) !== null;
@@ -850,7 +851,7 @@ export class MemoryStore {
         type: 'erase', content: '', state: 'Suspect',
         provenance: { source: 'user', sessionId: this.session() },
         supersedes: id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
-      }, this.homeDir(), this.scopeRootOf(ledger));
+      }, this.homeDir(), this.scopeRootOf(ledger), 'erase');
     }
     if (opts.permanent) {
       // HMAC-aware compaction: preserve genuine signed verifies for this ledger, drop forgeries.

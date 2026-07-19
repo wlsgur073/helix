@@ -318,7 +318,8 @@ describe('orphan sweep', () => {
 describe('error classes', () => {
   it('WitnessAdvanceError and WitnessBlockedError are Error subclasses (Task 5 imports them)', () => {
     expect(new WitnessAdvanceError('x')).toBeInstanceOf(Error);
-    expect(new WitnessBlockedError('x')).toBeInstanceOf(Error);
+    expect(new WitnessBlockedError('commit', 'x')).toBeInstanceOf(Error);
+    expect(new WitnessBlockedError('commit', 'x').op).toBe('commit');
   });
 });
 

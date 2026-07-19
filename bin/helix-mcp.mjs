@@ -13812,6 +13812,11 @@ function scopeKeyOf(home2, projectRoot2) {
 var WitnessAdvanceError = class extends Error {
 };
 var WitnessBlockedError = class extends Error {
+  constructor(op, message) {
+    super(message);
+    this.op = op;
+  }
+  op;
 };
 function macKeyFor(scopeKey, master) {
   return Buffer.from(hkdfSync2("sha256", master, Buffer.from(scopeKey), "helix-witness-mac-v1", 32));
@@ -14179,8 +14184,10 @@ function compactLedger(rawPath, opts) {
         const kind = w.kind ?? "compaction";
         const verdict = classifyState(readScopeWitness(w.home, w.scopeKey), readLedgerBytes(path));
         if (verdict.kind === "mismatch") {
+          const op = kind === "erase" ? "permanent-erase" : "compaction";
           throw new WitnessBlockedError(
-            `compactLedger: scope '${w.scopeKey}' is in a MISMATCH (rollback-alarm) state \u2014 refusing the rewrite; advancing the witness over forked/rolled-back content would launder the alarm (spec \xA74.2). Re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry.`
+            op,
+            `${op}: scope '${w.scopeKey}' is in a MISMATCH (rollback-alarm) state \u2014 refusing the rewrite; advancing the witness over forked/rolled-back content would launder the alarm (spec \xA74.2). Re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry.`
           );
         }
         const plan = planTransition(w.home, w.scopeKey, kind);
@@ -14246,13 +14253,14 @@ function modeOf(path) {
 // src/memory/witness-write.ts
 import { dirname as dirname6 } from "node:path";
 import { mkdirSync as mkdirSync4 } from "node:fs";
-function appendWitnessedUnlocked(ledger, record2, home2, projectRoot2) {
+function appendWitnessedUnlocked(ledger, record2, home2, projectRoot2, op) {
   const key = scopeKeyOf(home2, projectRoot2);
   const bytes = readLedgerBytes(ledger);
   const preVerdict = classifyState(readScopeWitness(home2, key), bytes);
   if (preVerdict.kind === "transition-interrupted") {
     throw new WitnessBlockedError(
-      `appendWitnessed: scope '${key}' has an interrupted transition pending \u2014 writes are blocked until it resolves (re-drive the operation, or run a re-baseline)`
+      op,
+      `${op}: scope '${key}' has an interrupted transition pending \u2014 writes are blocked until it resolves (re-drive the operation, or run a re-baseline)`
     );
   }
   let gateVerdict = preVerdict;
@@ -14267,9 +14275,9 @@ function appendWitnessedUnlocked(ledger, record2, home2, projectRoot2) {
     advanceWitness(home2, key, after, record2.tx);
   }
 }
-function appendWitnessed(ledger, record2, home2, projectRoot2) {
+function appendWitnessed(ledger, record2, home2, projectRoot2, op) {
   mkdirSync4(dirname6(ledger), { recursive: true });
-  withFileLock(ledger, () => appendWitnessedUnlocked(ledger, record2, home2, projectRoot2));
+  withFileLock(ledger, () => appendWitnessedUnlocked(ledger, record2, home2, projectRoot2, op));
 }
 
 // src/memory/compaction-trigger.ts
@@ -15062,7 +15070,7 @@ var MemoryStore = class {
       classification
     };
     const ledger = this.targetLedger(input.scope);
-    appendWitnessed(ledger, record2, this.homeDir(), this.scopeRootOf(ledger));
+    appendWitnessed(ledger, record2, this.homeDir(), this.scopeRootOf(ledger), "commit");
     return record2;
   }
   /** Resolve the ledger to write to. Project scope claims ownership on first use and refuses a
@@ -15359,7 +15367,7 @@ var MemoryStore = class {
         targetDigest: digestContent(target.content)
       };
       const signed = signVerify(unsigned, subkey);
-      appendWitnessedUnlocked(ledger, signed, this.homeDir(), this.scopeRootOf(ledger));
+      appendWitnessedUnlocked(ledger, signed, this.homeDir(), this.scopeRootOf(ledger), "verify");
       return signed;
     });
   }
@@ -15584,7 +15592,8 @@ var MemoryStore = class {
     }
     if (opts.permanent && readLedgerBytesWitnessed(ledger, this.homeDir(), this.scopeRootOf(ledger)).verdict.kind === "mismatch") {
       throw new WitnessBlockedError(
-        `erase: scope for id '${id}' is in a MISMATCH (rollback-alarm) state \u2014 refusing a permanent erase that would launder the alarm; re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry (spec \xA74.2)`
+        "permanent-erase",
+        `permanent-erase: scope for id '${id}' is in a MISMATCH (rollback-alarm) state \u2014 refusing a permanent erase that would launder the alarm; re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry (spec \xA74.2)`
       );
     }
     const isMarker = this.markerFamilyOf(id) !== null;
@@ -15604,7 +15613,7 @@ var MemoryStore = class {
         blastRadius: null,
         reverifyTrigger: null,
         classification: "normal"
-      }, this.homeDir(), this.scopeRootOf(ledger));
+      }, this.homeDir(), this.scopeRootOf(ledger), "erase");
     }
     if (opts.permanent) {
       const sk = this.subkeyForLedger(ledger);

@@ -25,7 +25,15 @@ export function scopeKeyOf(home: string, projectRoot?: string): string {
 }
 
 export class WitnessAdvanceError extends Error {}
-export class WitnessBlockedError extends Error {}
+/** The operation a blocked witnessed write was performing. Append ops ('commit' | 'erase' |
+ *  'verify') come from the three witness-write callers; rewrite ops ('compaction' |
+ *  'permanent-erase') are DERIVED from the flowing witness kind at the authoritative gate, so
+ *  the label stays truthful even when a permanent erase loses the advisory-precheck race and
+ *  is refused inside compactLedger (Codex round 3). */
+export type WitnessBlockedOp = 'commit' | 'erase' | 'verify' | 'compaction' | 'permanent-erase';
+export class WitnessBlockedError extends Error {
+  constructor(readonly op: WitnessBlockedOp, message: string) { super(message); }
+}
 
 export interface ScopeWitnessState { entry: WitnessEntry | null; journal: JournalEntry | null; macInvalid: boolean }
 

@@ -42,14 +42,15 @@ import {
  *  signing `writeVerify`; withFileLock is not re-entrant per path). Never takes the ledger lock
  *  itself; the nested witness-lock calls inside (completeTransition/advanceWitness) are a different
  *  path and safe to acquire regardless of who holds the ledger lock. */
-export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined): void {
+export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined, op: 'commit' | 'erase' | 'verify'): void {
   const key = scopeKeyOf(home, projectRoot);
   const bytes = readLedgerBytes(ledger);
   const preVerdict = classifyState(readScopeWitness(home, key), bytes);
 
   if (preVerdict.kind === 'transition-interrupted') {
     throw new WitnessBlockedError(
-      `appendWitnessed: scope '${key}' has an interrupted transition pending — writes are blocked until it resolves (re-drive the operation, or run a re-baseline)`,
+      op,
+      `${op}: scope '${key}' has an interrupted transition pending — writes are blocked until it resolves (re-drive the operation, or run a re-baseline)`,
     );
   }
 
@@ -76,7 +77,7 @@ export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord
 /** Locked wrapper — for a caller that does NOT already hold the ledger lock (store.ts's `commit`
  *  and `erase` tombstone append). Mirrors `appendRecord`'s own mkdir-before-lock convention
  *  (ledger.ts): the parent directory must exist before `withFileLock` can resolve the lock path. */
-export function appendWitnessed(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined): void {
+export function appendWitnessed(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined, op: 'commit' | 'erase' | 'verify'): void {
   mkdirSync(dirname(ledger), { recursive: true });
-  withFileLock(ledger, () => appendWitnessedUnlocked(ledger, record, home, projectRoot));
+  withFileLock(ledger, () => appendWitnessedUnlocked(ledger, record, home, projectRoot, op));
 }

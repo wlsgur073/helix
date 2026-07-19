@@ -55,10 +55,16 @@ describe('anti-laundering — a witnessed rewrite never advances the witness ove
       expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('mismatch'); // the alarm is live
 
       // The witnessed rewrite MUST refuse to advance the witness onto the forked content.
-      expect(() => compactLedger(ledger, {
-        erasedIds: new Set(),
-        witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:05:00.000Z', kind: 'compaction' },
-      })).toThrow(WitnessBlockedError);
+      let caught: unknown;
+      try {
+        compactLedger(ledger, {
+          erasedIds: new Set(),
+          witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:05:00.000Z', kind: 'compaction' },
+        });
+      } catch (e) { caught = e; }
+      expect(caught).toBeInstanceOf(WitnessBlockedError);
+      expect((caught as WitnessBlockedError).op).toBe('compaction');
+      expect((caught as Error).message).toMatch(/^compaction: /);
 
       // The witness entry is UNCHANGED (never bumped to a fresh epoch over the fork), the scope STILL
       // verdicts MISMATCH (alarm not retired), and the ledger is byte-identical (tmp cleaned up, no
@@ -70,6 +76,32 @@ describe('anti-laundering — a witnessed rewrite never advances the witness ove
       expect(after.journal).toBeNull();
       expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('mismatch');
       expect(readLedgerBytes(ledger).toString('utf8')).toBe(forgedBytes);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it("permanent-erase that loses the advisory-precheck race is labeled 'permanent-erase' at the authoritative gate, never 'compaction'", () => {
+    const home = newHome();
+    try {
+      const ledger = join(home, 'memory.jsonl');
+      const store = makeStore(home);
+      store.commit({ content: 'alpha fact', source: 'user' });
+      // Emulate the race: the advisory precheck in store.erase has already passed when a concurrent
+      // writer forks the ledger; the under-lock gate inside compactLedger is what actually refuses.
+      // Invoke the rewrite directly with kind 'erase' over a mismatched scope.
+      const forged: MemoryRecord = {
+        id: 'forged_2', tx: FIXED, validFrom: FIXED, validTo: null, type: 'assert', state: 'Verified',
+        content: 'forked content', provenance: { source: 'user', sessionId: 't' },
+        supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+      };
+      writeFileSync(ledger, JSON.stringify(forged) + '\n');
+      expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('mismatch');
+      let caught: unknown;
+      try {
+        compactLedger(ledger, { erasedIds: new Set(), witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:05:00.000Z', kind: 'erase' } });
+      } catch (e) { caught = e; }
+      expect(caught).toBeInstanceOf(WitnessBlockedError);
+      expect((caught as WitnessBlockedError).op).toBe('permanent-erase');
+      expect((caught as Error).message).toMatch(/^permanent-erase: /);
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
@@ -94,7 +126,11 @@ describe('anti-laundering — a witnessed rewrite never advances the witness ove
       writeFileSync(ledger, forgedBytes);
       expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('mismatch');
 
-      expect(() => store.erase('forged_1', { permanent: true, scope: 'global' })).toThrow(WitnessBlockedError);
+      let caught: unknown;
+      try { store.erase('forged_1', { permanent: true, scope: 'global' }); } catch (e) { caught = e; }
+      expect(caught).toBeInstanceOf(WitnessBlockedError);
+      expect((caught as WitnessBlockedError).op).toBe('permanent-erase');
+      expect((caught as Error).message).toMatch(/^permanent-erase: /);
 
       // Refused BEFORE any side effect: no tombstone appended, witness untouched, still a mismatch.
       expect(readLedgerBytes(ledger).toString('utf8')).toBe(forgedBytes); // no tombstone row added
