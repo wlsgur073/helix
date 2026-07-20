@@ -8,7 +8,8 @@
 # guideline/ = project philosophy (authoritative); docs/ = research/specs/plans;
 # CLAUDE.md = operating shell. All local-only.
 guideline/
-docs/
+docs/*
+!docs/release/
 CLAUDE.md
 
 # ── Machine-local state (per-user, never shared) ──
