@@ -14,4 +14,8 @@ describe('frozen derivation rule', () => {
     const t = 'Saves are atomic now. Formerly: every save truncated the store in place.';
     expect(topicTerms(t)).not.toContain('truncated');
   });
+  it('caps at exactly 8 tokens, keeping first-8 order, when 9+ unique non-stopword candidates are present', () => {
+    const text = 'alpha bravo charlie delta echo foxtrot golf hotel india juliet';
+    expect(topicTerms(text)).toEqual(['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel']);
+  });
 });
