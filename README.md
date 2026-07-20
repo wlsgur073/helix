@@ -158,6 +158,16 @@ Helix keeps two ledgers that it always reads together:
 
 **Recall output.** Each recalled item is labeled with its scope: `DATA[Fresh:project]|` or `DATA[Fresh:global]|`. Items from both ledgers appear together in a single quarantined DATA block.
 
+## Backup, restore & recovery
+
+Helix's memory lives in plain files under your control. Back them up like any other data — here is what to expect on restore.
+
+- **What to back up.** `~/.helix/` holds the global ledger (`memory.jsonl`), the signing key (`ledger-mac-master.key`), the rollback-witness state (`witness.json`) and its diagnostic log (`witness-log.jsonl`), config (`config.json`), and the project-ownership registry (`projects.json`). Each project's own `<project-root>/.helix/` is a second, independent unit. Back up both while no Claude Code session is running against them — an external backup tool isn't covered by Helix's own file lock, so copying mid-rewrite can catch an inconsistent instant.
+- **Restoring.** Copy the directories back into place. **An intentionally restored older ledger will trip the rollback witness by design**: the witness lives in `~/.helix/` independently of whichever ledger bytes are on disk, so a restored file that no longer matches the head it last saw gets that scope's elevated grades clamped to `Fresh` plus a disclosure note. This is not a failure to route around — the legitimate way to adopt an old backup on purpose is the operator re-baseline ceremony: `node bin/helix-rebaseline.mjs --scope global` (or `--scope <absoluteProjectRoot>` for a project), an interactive, TTY-only command that is never run automatically. See [SECURITY.md's rollback witness section](./SECURITY.md#rollback-witness-cross-boundary-ledger-rollback) for the full mechanics.
+- **Key loss.** Without `ledger-mac-master.key`, no signed `verify` record can validate, so every elevated grade degrades to `Fresh` — fail-low, not fail-crash. A new key is minted automatically on the next write, and you can re-elevate facts you care about with `helix_memory_confirm`. Losing the key never loses content; only the `Corroborated`/`Verified` grade is affected.
+- **Corruption.** A torn tail line (e.g. power loss mid-append) is repaired by the next writer, which prefixes a separator so its own record lands cleanly while the torn fragment is isolated as its own skipped line. A more structurally damaged line elsewhere in the ledger is simply excluded from the live view rather than guessed at or fabricated. Restore from backup for anything worse than a torn tail, and never hand-edit a ledger file while a session is running — Helix's own file lock coordinates only its own processes, not an external editor.
+- **Migration & downgrade honesty.** The ledger is append-only JSONL with no schema migrations to date, and Helix does not yet guarantee forward or backward compatibility across versions before 1.0. Keep your backups across upgrades.
+
 ## How it works
 
 - **Trust states.** Every memory item is `Fresh`, `Corroborated`, `Verified`, or `Suspect`. A mechanical reality-check (`helix_memory_recheck`) can raise a fact to `Corroborated` (machine-checked at one moment in time); only you (`helix_memory_confirm`) can promote it to `Verified` — agreement from an external model never can (a provenance firewall, fail-closed).
