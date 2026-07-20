@@ -24910,7 +24910,7 @@ function createMetricsSink(path, enabled, deps = {}) {
 // src/server/helix-server.ts
 function buildServer(store2, dualDeps, metrics2) {
   const m = metrics2 ?? noopMetricsSink;
-  const server2 = new McpServer({ name: "helix", version: "0.1.0" });
+  const server2 = new McpServer({ name: "helix", version: "0.2.0" });
   const home2 = process.env.HELIX_HOME ?? join9(homedir2(), ".helix");
   const dv = dualDeps ?? {
     config: loadConfig({ globalPath: join9(home2, "config.json") }),

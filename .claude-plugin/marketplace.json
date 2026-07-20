@@ -6,7 +6,7 @@
     {
       "name": "helix",
       "source": "./",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Trust-indexed cross-session memory (provenance firewall, fail-closed) with optional Codex dual-verify — MCP tools + SessionStart/End hooks.",
       "author": { "name": "wlsgur073" },
       "keywords": ["memory", "mcp", "dual-verify", "claude-code"]

@@ -14,7 +14,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   // Single dispatch seam: every tool handler runs inside m.runOp so store.emitReplay calls made
   // synchronously inside self-stamp the current op id (spec §5). Default noop = zero behavior change.
   const m = metrics ?? noopMetricsSink;
-  const server = new McpServer({ name: 'helix', version: '0.1.0' });
+  const server = new McpServer({ name: 'helix', version: '0.2.0' });
   // The no-deps fallback must honor HELIX_HOME too, or it would silently read the real
   // ~/.helix/config.json and write the real audit log under test isolation (the index.ts
   // entry always passes explicit deps; this keeps a future caller from breaking isolation).

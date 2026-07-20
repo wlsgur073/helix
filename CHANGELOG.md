@@ -5,6 +5,8 @@ All notable changes to Helix are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-20
+
 ### Added
 - Codex 5.6 reasoning efforts. `dualVerify.effort` now accepts `max` and `ultra`. Per-model support
   varies and Helix does not arbitrate it — `codex debug models` is the authority.
@@ -120,8 +122,9 @@ All notable changes to Helix are documented here. This project follows
   Still **not** the tool surface: a `helix_memory_confirm` call carries no enforceable human-approval
   signal, so do **not** allow-list it. Documented residuals: an adversary that can read `~/.helix`
   can mint valid MACs (irreducible; a readable home key voids the guarantee); rollback-by-suppression
-  (deleting a later `verify`) is undetected (home high-water counter is a follow-on); and trust is
-  machine-local (a `Verified` grade does not transfer to another machine).
+  (deleting a later `verify`) is invisible to the per-record MAC alone — the rollback witness
+  (below) closes that gap; and trust is machine-local (a `Verified` grade does not transfer to
+  another machine).
 - Ledger MAC v2: `verify` records now bind their system-time `tx` into the MAC, so a genuine
   verification's *timing* cannot be edited in place (authenticity, not clock accuracy). Reads
   dual-accept existing v1 signatures, so no grades are lost; only new verifications become
@@ -135,6 +138,37 @@ All notable changes to Helix are documented here. This project follows
   facts were live at a system-time, the grade each held, and the full verify evidence for why.
   Grade reconstruction shares the live projection's rule (asOf(now) == live grade); membership and
   legacy v1 verify timing are surfaced as declared, only v2 verify timing is authenticated.
+- Bitemporal history: `helix_memory_inspect history` reconstructs every fact's system-time
+  `[tx, txTo)` interval across the whole ledger — when it became live and, if closed, when and by
+  what (`supersede` / `invalidate` / `erase`) — computed atomically alongside the live projection
+  in the same single read `asOf` uses. An unresolvable master key clamps every grade shown to
+  `Fresh` with an explicit note, the same policy `asOf` and recall already apply, rather than
+  silently trusting stale evidence.
+- Lock durability hardening: the cross-process ledger lock is now published atomically together
+  with its owner payload (`linkSync`), so a live creator can never present a malformed lock file,
+  and a liveness matrix — never age — decides whether a recorded holder is reclaimed: only a
+  provably-dead holder is ever stolen, and every reclaim is serialized through a per-boot reaper
+  gate so two reapers can never act on the same victim. Every append and compaction now fsyncs
+  both the data and the containing directory before reporting success, and a hard-linked ledger
+  (link count ≠ 1) is refused outright, since two alias names would carry two independent locks
+  with no mutual exclusion.
+- Rollback witness (high-water counter): a home-side, per-scope witness (`~/.helix/witness.json`,
+  MAC'd with the same master key as `verify` records) detects a ledger that has forked from or
+  fallen behind the head it last saw — a regression the per-record MAC alone cannot catch, because
+  a restored older ledger file is itself validly signed. A detected mismatch clamps that scope's
+  `Verified`/`Corroborated` grades to `Fresh` on every live projection (recall, inspect, the
+  SessionStart hook) and renders a constant disclosure note; the scope keeps serving reads and
+  accepting new appends, but the witness itself never advances past a mismatch until an explicit
+  re-baseline. Fenced to each scope's current head only — never a history of erased eras — and
+  kept honest by a content-free marker planted at the end of every legitimate rewrite. Armed from
+  the first release, not opt-in; first contact, a key rotation, and a deleted witness file are all
+  honest trust-on-first-use, each surfaced by its own note.
+- Operator re-baseline ceremony: `node bin/helix-rebaseline.mjs --scope global` (or
+  `--scope <projectRoot>`) is the only sanctioned way to clear a rollback-witness mismatch — an
+  interactive, TTY-only command that displays the mismatched scope's hash and target epoch,
+  requires a typed confirmation, and holds the ledger lock from that display through the commit.
+  It is deliberately not an MCP tool: no agent-suppliable parameter can invoke it, and nothing
+  invokes it automatically.
 
 ### Changed
 - `dualVerify.timeoutMs` is now clamped to a 1-hour maximum. A valid integer ≥ 1s is accepted
@@ -223,5 +257,6 @@ First public release.
 - Provenance firewall: agreement from an external model never promotes to `Verified`.
 - Content-free audit log; the Codex content log is opt-in, `0o600`, and capped.
 
-[Unreleased]: https://github.com/wlsgur073/helix/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/wlsgur073/helix/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/wlsgur073/helix/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/wlsgur073/helix/releases/tag/v0.1.0
