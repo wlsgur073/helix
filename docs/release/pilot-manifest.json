@@ -1,0 +1,456 @@
+{
+ "k": 20,
+ "probes": [
+  {
+   "id": "L_m_e15e4482-8f83-4d0d-8132-59be1ab792a7",
+   "query": "storage local json file tinytask tasks",
+   "relevant": [
+    "m_e15e4482-8f83-4d0d-8132-59be1ab792a7"
+   ],
+   "unambiguous": true,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_1f47dd11-3a5c-454d-a727-e49511287564",
+   "query": "timestamps iso",
+   "relevant": [
+    "m_1f47dd11-3a5c-454d-a727-e49511287564"
+   ],
+   "unambiguous": true,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_59de9c29-b142-43ad-9c3c-f709543f2533",
+   "query": "cli commands verb-first add list",
+   "relevant": [
+    "m_59de9c29-b142-43ad-9c3c-f709543f2533"
+   ],
+   "unambiguous": true,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_44415eb8-2f7d-4c33-a373-3933efd09c7b",
+   "query": "runtime dependencies tests use vitest",
+   "relevant": [
+    "m_44415eb8-2f7d-4c33-a373-3933efd09c7b"
+   ],
+   "unambiguous": true,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_b9ac6e35-1051-49c4-a4a8-fe954d954822",
+   "query": "exit code usage error",
+   "relevant": [
+    "m_b9ac6e35-1051-49c4-a4a8-fe954d954822"
+   ],
+   "unambiguous": true,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_ab8b1e1a-7894-431b-8533-94b6539e73f8",
+   "query": "tinytask store mutator functions reject unknown task id",
+   "relevant": [
+    "m_ab8b1e1a-7894-431b-8533-94b6539e73f8"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_10a10482-18dc-4ff4-add9-1e216d4f27cf",
+   "query": "tinytask command hard-deletes task implemented via store mutator",
+   "relevant": [
+    "m_10a10482-18dc-4ff4-add9-1e216d4f27cf"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_525ae868-8856-484e-b33f-40e81e54dc8b",
+   "query": "tinytask command finds tasks case-insensitive substring match title",
+   "relevant": [
+    "m_525ae868-8856-484e-b33f-40e81e54dc8b"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_ca402fcc-5b99-4f3e-bdca-0329dc069e31",
+   "query": "tinytask tags tasks task gains optional stores defaults",
+   "relevant": [
+    "m_ca402fcc-5b99-4f3e-bdca-0329dc069e31"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_5e03029d-c15e-4d5e-9b09-f8b7df8dbcab",
+   "query": "tinytask due dates task gains optional iso date",
+   "relevant": [
+    "m_5e03029d-c15e-4d5e-9b09-f8b7df8dbcab"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_e7787d10-4579-4466-963a-555baa40a486",
+   "query": "tinytask command re-opens completed task inverse implemented via",
+   "relevant": [
+    "m_e7787d10-4579-4466-963a-555baa40a486"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_066ad49b-49c4-45c0-8410-2bf000feee99",
+   "query": "tinytask shows completed tasks too implemented extending listtasks",
+   "relevant": [
+    "m_066ad49b-49c4-45c0-8410-2bf000feee99"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_ea99d928-125d-4d13-99e7-c40150569917",
+   "query": "tinytask flag parsing centralized pure store function does",
+   "relevant": [
+    "m_ea99d928-125d-4d13-99e7-c40150569917"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_02fd751a-adae-4b7e-9fbb-fa7bcfe9dd3b",
+   "query": "tinytask command renames task title place implemented via",
+   "relevant": [
+    "m_02fd751a-adae-4b7e-9fbb-fa7bcfe9dd3b"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_d35acbd0-bf4d-4b64-9d75-d58fb78078e3",
+   "query": "tinytask command prints read-only one-line summary task counts",
+   "relevant": [
+    "m_d35acbd0-bf4d-4b64-9d75-d58fb78078e3"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_54ad105e-e337-4348-8c0f-733230c7fa72",
+   "query": "tinytask orders list output new pure store fn",
+   "relevant": [
+    "m_54ad105e-e337-4348-8c0f-733230c7fa72"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_d3c3b321-5607-4890-a5ea-d4e960e8f675",
+   "query": "tinytask list verb gains opt-in machine readable output",
+   "relevant": [
+    "m_d3c3b321-5607-4890-a5ea-d4e960e8f675"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_c5f4b6c0-0411-4cdd-9b3f-86fdccac004b",
+   "query": "tinytask project gains second test layer first ever",
+   "relevant": [
+    "m_c5f4b6c0-0411-4cdd-9b3f-86fdccac004b"
+   ],
+   "unambiguous": true,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_8b466148-17c0-4e74-80ab-4ad1480fea97",
+   "query": "tinytask store file exists cannot read stops program",
+   "relevant": [
+    "m_8b466148-17c0-4e74-80ab-4ad1480fea97"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_8a714f89-5ee2-415a-a5aa-7a62f5f7b057",
+   "query": "tinytask save opens live store file all until",
+   "relevant": [
+    "m_8a714f89-5ee2-415a-a5aa-7a62f5f7b057"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_0f575efc-1204-4652-8dda-ba1529c445c4",
+   "query": "tinytask store loader validates record just container loadtasks",
+   "relevant": [
+    "m_0f575efc-1204-4652-8dda-ba1529c445c4"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_a38ac150-1bb3-4c0c-854d-3bfe52331eab",
+   "query": "tinytask store loader enforces first invariant belongs collection",
+   "relevant": [
+    "m_a38ac150-1bb3-4c0c-854d-3bfe52331eab"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_e39e2eae-6552-4751-8431-32c34a757d28",
+   "query": "tinytask identifier generator refuses allocate rather than hand",
+   "relevant": [
+    "m_e39e2eae-6552-4751-8431-32c34a757d28"
+   ],
+   "unambiguous": true,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_ec29a39f-2675-4c96-a5ce-f1a324c2dea7",
+   "query": "tinytask store rules enforced both directions save refuses",
+   "relevant": [
+    "m_ec29a39f-2675-4c96-a5ce-f1a324c2dea7"
+   ],
+   "unambiguous": false,
+   "side": "ledger"
+  },
+  {
+   "id": "L_m_282991a5-a1e7-47ea-b22a-01569a83baf6",
+   "query": "tinytask identifier typed command line spelled exactly way",
+   "relevant": [
+    "m_282991a5-a1e7-47ea-b22a-01569a83baf6"
+   ],
+   "unambiguous": true,
+   "side": "ledger"
+  },
+  {
+   "id": "O_0",
+   "query": "storage local json",
+   "relevant": [
+    "m_e15e4482-8f83-4d0d-8132-59be1ab792a7"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_1",
+   "query": "timestamps iso",
+   "relevant": [
+    "m_1f47dd11-3a5c-454d-a727-e49511287564"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_2",
+   "query": "cli commands verb-first",
+   "relevant": [
+    "m_59de9c29-b142-43ad-9c3c-f709543f2533"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_3",
+   "query": "runtime dependencies tests use vitest",
+   "relevant": [
+    "m_44415eb8-2f7d-4c33-a373-3933efd09c7b"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_4",
+   "query": "exit code usage error",
+   "relevant": [
+    "m_b9ac6e35-1051-49c4-a4a8-fe954d954822"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_5",
+   "query": "store mutators reject unknown ids throwing cli catches",
+   "relevant": [
+    "m_ab8b1e1a-7894-431b-8533-94b6539e73f8"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_6",
+   "query": "flag parsing centralized pure store fn value begins",
+   "relevant": [
+    "m_ea99d928-125d-4d13-99e7-c40150569917"
+   ],
+   "unambiguous": false,
+   "side": "oracle"
+  },
+  {
+   "id": "O_7",
+   "query": "renames title does re-parse tokens those become literal",
+   "relevant": [
+    "m_02fd751a-adae-4b7e-9fbb-fa7bcfe9dd3b"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_8",
+   "query": "applied last base set filters sorting reorders filtered",
+   "relevant": [
+    "m_54ad105e-e337-4348-8c0f-733230c7fa72"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_10",
+   "query": "tests two layers pure store fns unit-tested cli",
+   "relevant": [
+    "m_c5f4b6c0-0411-4cdd-9b3f-86fdccac004b"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_16",
+   "query": "id argument spelled way prints canonicality safety coercion",
+   "relevant": [
+    "m_282991a5-a1e7-47ea-b22a-01569a83baf6"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_17",
+   "query": "store rules enforced both directions save refuses invalid",
+   "relevant": [
+    "m_ec29a39f-2675-4c96-a5ce-f1a324c2dea7"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_18",
+   "query": "save opens live store stages whole new file",
+   "relevant": [
+    "m_8a714f89-5ee2-415a-a5aa-7a62f5f7b057"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_19",
+   "query": "prints read-only one-line summary via pure counts open",
+   "relevant": [
+    "m_d35acbd0-bf4d-4b64-9d75-d58fb78078e3"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_63",
+   "query": "add sorttasks opt-in ordering over filtered set new",
+   "relevant": [
+    "m_54ad105e-e337-4348-8c0f-733230c7fa72"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_64",
+   "query": "add computestats read-only one-line summary new pure store",
+   "relevant": [
+    "m_d35acbd0-bf4d-4b64-9d75-d58fb78078e3"
+   ],
+   "unambiguous": false,
+   "side": "oracle"
+  },
+  {
+   "id": "O_66",
+   "query": "seed add list conventions above established",
+   "relevant": [],
+   "unambiguous": false,
+   "side": "oracle"
+  },
+  {
+   "id": "O_67",
+   "query": "add completetask store mutators throw unknown id cli",
+   "relevant": [
+    "m_ab8b1e1a-7894-431b-8533-94b6539e73f8"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_68",
+   "query": "add removetask hard-deletes filtering id out same throw-on-unknown-id",
+   "relevant": [
+    "m_10a10482-18dc-4ff4-add9-1e216d4f27cf"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_69",
+   "query": "add searchtasks case-insensitive substring match title searches all",
+   "relevant": [
+    "m_525ae868-8856-484e-b33f-40e81e54dc8b"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_70",
+   "query": "add tags optional back-compat parses tokens lowercased stripped",
+   "relevant": [
+    "m_ca402fcc-5b99-4f3e-bdca-0329dc069e31"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_71",
+   "query": "add due dates optional iso date back-compat like",
+   "relevant": [
+    "m_5e03029d-c15e-4d5e-9b09-f8b7df8dbcab"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_73",
+   "query": "validate flags via new pure one left-to-right pass",
+   "relevant": [
+    "m_ea99d928-125d-4d13-99e7-c40150569917"
+   ],
+   "unambiguous": true,
+   "side": "oracle"
+  },
+  {
+   "id": "O_75",
+   "query": "scheduled dogfood agent runs daily kst nominal wsl",
+   "relevant": [],
+   "unambiguous": false,
+   "side": "oracle"
+  },
+  {
+   "id": "O_76",
+   "query": "silence watchdog called",
+   "relevant": [],
+   "unambiguous": false,
+   "side": "oracle"
+  },
+  {
+   "id": "O_77",
+   "query": "review weekly promote confirmed defects helix maintainer",
+   "relevant": [],
+   "unambiguous": false,
+   "side": "oracle"
+  }
+ ]
+}
