@@ -127,8 +127,13 @@ checked against this rubric; the manifest is not frozen until it passes:
 - **no record ids** — no query may contain a memory record identifier;
 - **no verbatim outcome phrases** — no query may quote a decision's verdict verbatim;
 - **no numerals** — every digit sequence is stripped;
-- **no code spans / unique literals** — backticked identifiers and one-of-a-kind tokens that
-  would make a match trivial are stripped.
+- **no code spans / numerals** — text in backticks and every digit sequence are stripped
+  (record ids, exit codes, dates, magnitudes). **[Amended pre-execution — see
+  pilot-amendment-1.md]** This is the rubric's *goal*; the frozen rule (§3a) enforces the
+  "unique literals" part **only for backticked spans and digits**. An identifier written
+  *without* backticks — a store-function name in unbackticked parentheses in a changelog line —
+  **survives** into the query. The earlier wording ("one-of-a-kind tokens ... are stripped")
+  overstated the rule and is corrected here.
 
 The manifest at this freeze was checked two ways. A mechanical sweep of all 51 queries
 confirmed that none contains a digit, a backtick, a record identifier, or an underscore, and
@@ -136,6 +141,21 @@ that no query contains its own target's identifier. Three probes were additional
 against the full rubric — one information-rich ledger probe, one oracle probe whose source is
 dense with dates, magnitudes, and code spans, and one coverage-gap probe — and all three
 carried only generic topic terms with no leaked id, outcome phrase, numeral, or literal.
+
+**[Amended pre-execution — see pilot-amendment-1.md]** Five oracle-side probes carry a surviving
+unbackticked store-function identifier — the changelog entries that name the function in
+parentheses: `O_63` (sorttasks), `O_64` (computestats), `O_67` (completetask), `O_68`
+(removetask), `O_69` (searchtasks). **Direction:** a surviving identifier makes recall *easier*
+for those probes (a leniency toward hits), never harder. This is a documentation correction
+only: the frozen manifest and every probe's mechanical flag were generated under the true rule
+(§3a) and are unchanged, so correcting the prose **cannot silently flip any recorded hit or
+miss**. The two integrity-critical legs are unaffected. An unambiguous (Hit@1) probe is, by
+definition, one where no other live record shares three or more of its query terms, so a
+surviving identifier **reinforces an already-unique match rather than manufacturing one** (four
+of the five affected probes are unambiguous). And **ledger-side probes are outside this concern
+entirely**: a ledger probe's query is derived from its own target record, so shared
+implementation tokens are inherent to the probe by construction, not leakage from an independent
+paraphrase.
 
 `deriveQuery` is exported from the same module for callers that want the query as a string; the
 generator uses `topicTerms` directly. Both share the single derivation above.
@@ -175,6 +195,13 @@ gate above is evaluated over the 47 targeted probes; the 4 coverage gaps are dis
 published result, never counted as retrieval successes and never quietly excluded from the
 denominator without note. A candidate is rejected on any genuine retrieval miss (ii > 0), and
 on any coverage gap not already preregistered in this document.
+
+**[Amended pre-execution — see pilot-amendment-1.md]** A pre-execution amendment (committed
+before any retrieval ran) additionally defines a labeled *conditional* gate over **48** targeted
+probes — the seed probe `O_66` remapped to its five underlying convention records — and locks the
+release waiver to exactly the three remaining coverage gaps (`O_75`/`O_76`/`O_77`); this
+registered 51-probe verdict is preserved and reported NOT MET regardless. See
+`pilot-amendment-1.md`.
 
 The full rank distribution is reported for **all** probes (§6). Ambiguous probes contribute to
 Recall@20 and to the rank distribution but are never aggregated into a rank-1 threshold.
@@ -279,6 +306,14 @@ All values are of the artifacts exactly as committed / pinned at the method free
 
 sha256 values are produced by `sha256sum`; generator-identity values are Git blob object ids
 (`git hash-object`), which equal the committed blob ids for those four files at this commit.
+
+**[Amended pre-execution — see pilot-amendment-1.md]** LOCAL, PATH-DEPENDENT audit value (not a
+reproducible artifact hash): the rewritten snapshot `projects.json` (§9b) has sha256
+`f74ba0bd97b354799cddecbe5dacaf90cfce405b04a2e11fe29a9204587fe582`. This value is specific to
+this machine's snapshot path and the single-key rewrite, so it is not reproducible across
+environments and is recorded for audit only. What a re-run must reproduce is the **procedure** in
+§9b (rewrite the registry key to the snapshot's project directory, stamp/nonce preserved), not
+this exact byte value.
 
 ### 9b. Snapshot layout and isolation
 
