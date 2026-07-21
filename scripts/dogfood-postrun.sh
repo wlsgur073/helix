@@ -53,6 +53,30 @@ timeout -k "${HELIX_POSTRUN_KILL_AFTER:-5}" "${HELIX_POSTRUN_TIMEOUT:-45}" \
   --service-result "${SERVICE_RESULT:-}" --exit-code "${EXIT_CODE:-}" --exit-status "${EXIT_STATUS:-}"
 status=$?
 
+# Dogfood issue auto-file (issue-tracking decision 2026-07-20): when the RUN ITSELF failed --
+# SERVICE_RESULT is anything but "success", covering the agent-dead / signal / nonzero cases the
+# agent can never self-report -- append one OPEN issue to the project's ISSUES.md so the NEXT
+# run's open-issue-first rule picks it up. Independent of the reporter artifact's own status
+# (checked BEFORE the exit-0 early return below: a healthy reporter can coexist with a failed
+# run). Fixed template; lifecycle enums pass the same control/quote/backslash strip as the sink
+# record plus shell-metacharacter strip (defensive -- systemd values are enum-like already); the
+# run id is machine-generated. Best-effort and fully guarded like everything in this script --
+# a missing/unwritable ISSUES.md (or an absent $1) silently skips, and nothing here can break
+# the trailing exit 0. Next id = HIGHEST existing "## ISSUE-NNNN" + 1 (the file's own convention;
+# a count would collide after gaps). 10# forces decimal -- zero-padded ids would otherwise parse
+# as octal and "0008"/"0009" would abort the arithmetic.
+if [ "${SERVICE_RESULT:-}" != "success" ] && [ -n "${1:-}" ] && [ -f "${1}/ISSUES.md" ]; then
+  {
+    last=$(grep -o '^## ISSUE-[0-9]\{1,\}' "${1}/ISSUES.md" 2>/dev/null | sed 's/.*ISSUE-//' | sort -n | tail -1)
+    issue_n=$(( 10#${last:-0} + 1 ))
+    sr=$(printf '%s' "${SERVICE_RESULT:-unknown}" | tr -d '\000-\037\177"\\`$')
+    es=$(printf '%s' "${EXIT_STATUS:-unknown}" | tr -d '\000-\037\177"\\`$')
+    today=$(date -u +%Y-%m-%d)
+    printf '\n## ISSUE-%04d — %s — OPEN — severity: high\n- symptom: run-level failure, auto-filed by postrun adapter (service_result=%s exit_status=%s)\n- evidence: journalctl --user -u helix-dogfood.service --since "%s"; run id %s\n- suspected cause: (next session: diagnose from the journal)\n- resolution: (filled at close)\n- closed: (date + commit id)\n' \
+      "$issue_n" "$today" "$sr" "$es" "$today" "$run_id" >> "${1}/ISSUES.md"
+  } 2>/dev/null || true
+fi
+
 # Artifact exit 0 -> it already validated and appended its own evaluation record. Nothing more to do.
 if [ "$status" -eq 0 ]; then
   exit 0

@@ -247,3 +247,53 @@ describe('scripts/dogfood-postrun.sh (ExecStopPost adapter spawn tests)', () => 
     expect(res.stdout).toBe('0'); // the expected stderr noise ("printf: write error: Broken pipe") is not asserted -- status only
   });
 });
+
+describe('ISSUES.md auto-file on run-level failure (issue-tracking decision 2026-07-20)', () => {
+  it('service failure + ISSUES.md present -> one OPEN high-severity auto-filed entry with the next sequential id', () => {
+    const { scriptPath } = buildTree(STUB_OK); // reporter succeeds — auto-file keys on SERVICE_RESULT, not artifact status
+    const home = mkdtempSync(join(tmpdir(), 'helix-home-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-root-'));
+    writeFileSync(join(root, 'ISSUES.md'), '# Issues\n\n## ISSUE-0003 — 2026-07-20 — CLOSED — severity: low\n- symptom: old\n');
+    const env = { ...baseEnv(home), INVOCATION_ID: 'inv-if1', SERVICE_RESULT: 'signal', EXIT_CODE: 'killed', EXIT_STATUS: 'TERM' };
+    const res = runAdapter(scriptPath, root, env);
+    expect(res.status).toBe(0);
+    const issues = readFileSync(join(root, 'ISSUES.md'), 'utf8');
+    expect(issues).toMatch(/## ISSUE-0004 — \d{4}-\d{2}-\d{2} — OPEN — severity: high/);
+    expect(issues).toContain('auto-filed by postrun adapter');
+    expect(issues).toContain('service_result=signal');
+    expect(issues).toContain('exit_status=TERM');
+    expect(issues).toContain('inv-if1');
+  });
+  it('service success -> ISSUES.md byte-untouched', () => {
+    const { scriptPath } = buildTree(STUB_OK);
+    const home = mkdtempSync(join(tmpdir(), 'helix-home-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-root-'));
+    const before = '# Issues\n\n(no issues yet)\n';
+    writeFileSync(join(root, 'ISSUES.md'), before);
+    const env = { ...baseEnv(home), INVOCATION_ID: 'inv-if2', SERVICE_RESULT: 'success', EXIT_CODE: '0', EXIT_STATUS: '0' };
+    runAdapter(scriptPath, root, env);
+    expect(readFileSync(join(root, 'ISSUES.md'), 'utf8')).toBe(before);
+  });
+  it('ISSUES.md absent -> nothing created, adapter still exit 0', () => {
+    const { scriptPath } = buildTree(STUB_OK);
+    const home = mkdtempSync(join(tmpdir(), 'helix-home-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-root-'));
+    const env = { ...baseEnv(home), INVOCATION_ID: 'inv-if3', SERVICE_RESULT: 'signal', EXIT_CODE: 'killed', EXIT_STATUS: 'KILL' };
+    const res = runAdapter(scriptPath, root, env);
+    expect(res.status).toBe(0);
+    expect(existsSync(join(root, 'ISSUES.md'))).toBe(false);
+  });
+  it('run failure + reporter crash together -> BOTH the issue entry and the reporter-failure sink record; exit 0', () => {
+    const { scriptPath } = buildTree(STUB_CRASH);
+    const home = mkdtempSync(join(tmpdir(), 'helix-home-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-root-'));
+    writeFileSync(join(root, 'ISSUES.md'), '# Issues\n');
+    const env = { ...baseEnv(home), INVOCATION_ID: 'inv-if4', SERVICE_RESULT: 'exit-code', EXIT_CODE: '1', EXIT_STATUS: '1' };
+    const res = runAdapter(scriptPath, root, env);
+    expect(res.status).toBe(0);
+    expect(readFileSync(join(root, 'ISSUES.md'), 'utf8')).toMatch(/## ISSUE-0001 .* OPEN .* high/);
+    const lines = sinkLines(home);
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toContain('reporter-failure');
+  });
+});
