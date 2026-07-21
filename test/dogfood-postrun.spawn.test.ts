@@ -283,6 +283,18 @@ describe('ISSUES.md auto-file on run-level failure (issue-tracking decision 2026
     expect(res.status).toBe(0);
     expect(existsSync(join(root, 'ISSUES.md'))).toBe(false);
   });
+  it('zero-padded high id (0008) increments decimally to 0009 — locks the 10# octal guard', () => {
+    const { scriptPath } = buildTree(STUB_OK);
+    const home = mkdtempSync(join(tmpdir(), 'helix-home-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-root-'));
+    writeFileSync(join(root, 'ISSUES.md'), '# Issues\n\n## ISSUE-0008 \u2014 2026-07-20 \u2014 CLOSED \u2014 severity: low\n- symptom: old\n');
+    const env = { ...baseEnv(home), INVOCATION_ID: 'inv-if5', SERVICE_RESULT: 'signal', EXIT_CODE: 'killed', EXIT_STATUS: 'TERM' };
+    const res = runAdapter(scriptPath, root, env);
+    expect(res.status).toBe(0);
+    const issues = readFileSync(join(root, 'ISSUES.md'), 'utf8');
+    expect(issues).toMatch(/## ISSUE-0009 \u2014/u); // without 10#, bash arithmetic rejects "0008" (octal) and the id silently renders 0000
+    expect(issues).not.toContain('ISSUE-0000');
+  });
   it('run failure + reporter crash together -> BOTH the issue entry and the reporter-failure sink record; exit 0', () => {
     const { scriptPath } = buildTree(STUB_CRASH);
     const home = mkdtempSync(join(tmpdir(), 'helix-home-'));
