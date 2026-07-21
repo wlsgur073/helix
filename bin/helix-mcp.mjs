@@ -13168,25 +13168,33 @@ function isStopword(w) {
 function meaningfulTokens(tokens) {
   return tokens.filter((t) => !isStopword(t));
 }
-function semanticCoverage(qTerms, docTokens, expansion, discount = 1) {
+function semanticCoverage(qTerms, docTokens, expansion, discount = 1, weights) {
   if (qTerms.length === 0) return { score: 0, lexicalMatched: 0, semanticWeight: 0 };
   const docSet = new Set(docTokens);
   const present = (tok) => docSet.has(tok) || tok.length >= 3 && docTokens.some((d) => d.startsWith(tok));
   let lexicalMatched = 0;
   let semanticWeight = 0;
+  let num = 0;
+  let den = 0;
   for (const t of qTerms) {
+    const w = weights ? weights(t) : 1;
+    den += w;
     if (present(t)) {
       lexicalMatched += 1;
+      num += w;
       continue;
     }
     const neigh = expansion?.get(t);
     if (neigh) {
       let best = 0;
       for (const n of neigh) if (n.w > best && present(n.token)) best = n.w;
-      if (best > 0) semanticWeight += best * discount;
+      if (best > 0) {
+        semanticWeight += best * discount;
+        num += w * best * discount;
+      }
     }
   }
-  return { score: (lexicalMatched + semanticWeight) / qTerms.length, lexicalMatched, semanticWeight };
+  return { score: den === 0 ? 0 : num / den, lexicalMatched, semanticWeight };
 }
 function phraseScoreNorm(query, d) {
   const words = normalizeText(query).split(/\s+/).filter(Boolean);
@@ -13260,7 +13268,7 @@ function rankWithArtifacts(records, artifacts, query, opts = {}) {
   const semGate = opts.semGate ?? 0;
   const scored = records.map((r, i) => {
     const d = docs[i];
-    const cov = semanticCoverage(qMeaning, d.tokens, opts.expansion, opts.semDiscount ?? 1);
+    const cov = semanticCoverage(qMeaning, d.tokens, opts.expansion, opts.semDiscount ?? 1, (t) => idf(t, idx));
     const phrase = phraseScoreNorm(query, d.normContent);
     const bm = bm25norm(r.id);
     const relevance = W_PHRASE * phrase + W_COVERAGE * cov.score + W_BM25 * bm;

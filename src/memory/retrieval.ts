@@ -99,9 +99,18 @@ export interface SemCoverage { score: number; lexicalMatched: number; semanticWe
  * `deletes`) — the build-time table stores canonical synonyms while records carry inflections.
  * Returns the breakdown so the ranker can gate semantic-only rescues. With no `expansion`,
  * semanticWeight is always 0 => score === coverageScore (exact back-compat).
+ *
+ * `weights` (2026-07 pilot fix): optional per-term weight — the ranker passes idf so a
+ * corpus-unique term carries the coverage mass a generic term cannot (equal-weight coverage let
+ * records matching MORE generic terms outrank the one record matching the query's naming token).
+ * A term's weight scales BOTH its numerator credit (lexical = w, semantic rescue = w·nw·discount)
+ * and its denominator share, so the score stays in [0,1] and CONSTANT weights reduce to the
+ * unweighted formula exactly. `lexicalMatched`/`semanticWeight` stay UNWEIGHTED — they feed the
+ * semantic-only gate, whose semantics this change must not move.
  */
 export function semanticCoverage(
   qTerms: string[], docTokens: string[], expansion?: Expansion, discount = 1,
+  weights?: (t: string) => number,
 ): SemCoverage {
   if (qTerms.length === 0) return { score: 0, lexicalMatched: 0, semanticWeight: 0 };
   const docSet = new Set(docTokens);
@@ -109,16 +118,20 @@ export function semanticCoverage(
     docSet.has(tok) || (tok.length >= 3 && docTokens.some((d) => d.startsWith(tok)));
   let lexicalMatched = 0;
   let semanticWeight = 0;
+  let num = 0;
+  let den = 0;
   for (const t of qTerms) {
-    if (present(t)) { lexicalMatched += 1; continue; }
+    const w = weights ? weights(t) : 1;
+    den += w;
+    if (present(t)) { lexicalMatched += 1; num += w; continue; }
     const neigh = expansion?.get(t);
     if (neigh) {
       let best = 0;
       for (const n of neigh) if (n.w > best && present(n.token)) best = n.w;
-      if (best > 0) semanticWeight += best * discount;
+      if (best > 0) { semanticWeight += best * discount; num += w * best * discount; }
     }
   }
-  return { score: (lexicalMatched + semanticWeight) / qTerms.length, lexicalMatched, semanticWeight };
+  return { score: den === 0 ? 0 : num / den, lexicalMatched, semanticWeight };
 }
 
 // Prefix-anchored (not full proximity): reordered/co-occurring terms are caught by coverageScore, not here.
@@ -250,7 +263,9 @@ export function rankWithArtifacts(records: MemoryRecord[], artifacts: RankArtifa
       // would collapse last-wins and score a record against another record's content. Positional
       // pairing is byte-identical to pre-A4 rankRecords, which scored each record against itself.
       const d = docs[i]!;
-      const cov = semanticCoverage(qMeaning, d.tokens, opts.expansion, opts.semDiscount ?? 1);
+      // idf-weighted coverage (2026-07 pilot fix): rarity lives in the coverage leg itself.
+      // Rarity is also visible to the small bm25 leg (0.1) — accepted, documented in the fix spec.
+      const cov = semanticCoverage(qMeaning, d.tokens, opts.expansion, opts.semDiscount ?? 1, (t) => idf(t, idx));
       const phrase = phraseScoreNorm(query, d.normContent);
       const bm = bm25norm(r.id);
       const relevance = W_PHRASE * phrase + W_COVERAGE * cov.score + W_BM25 * bm;
