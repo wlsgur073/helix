@@ -148,7 +148,10 @@ export interface SemCoverage { score: number; lexicalMatched: number; semanticWe
  * `discount`). The neighbor match ALSO prefix-expands (neighbor `delete` matches record token
  * `deletes`) — the build-time table stores canonical synonyms while records carry inflections.
  * Returns the breakdown so the ranker can gate semantic-only rescues. With no `expansion`,
- * semanticWeight is always 0 => score === coverageScore (exact back-compat).
+ * semanticWeight is always 0 and the score reduces to plain lexical coverage — the formula the
+ * standalone `coverageScore` computed BEFORE R-F6 made it a delegating wrapper over this
+ * function (equality now holds by construction; locked by the parity tests in
+ * matcher-rescue.test.ts).
  *
  * `weights` (2026-07 pilot fix): optional per-term weight — the ranker passes idf so a
  * corpus-unique term carries the coverage mass a generic term cannot (equal-weight coverage let

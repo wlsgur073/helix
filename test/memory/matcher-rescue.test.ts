@@ -156,7 +156,11 @@ describe('ranking-level locks (FULL production formula via rankRecords)', () => 
     // Codex round-3 counterexample, adjudicated ACCEPTED: without the support gate,
     // stated<-stat full-idf credit lifts 'wrong' to 0.422 past the target's 0.212 (spec §2).
     const rs = [rec('target', 'rollback procedure'), rec('wrong', 'stat counter')];
-    expect(rankRecords(rs, 'stated rollback').map((r) => r.id)[0]).toBe('target');
+    // Full-array lock (C1.2 vacuation-proofing): the support gate zeroes the rescue COVERAGE,
+    // but 'wrong' stays present at rank 2 via the phrase leg's char-prefix crumb ('stat' = the
+    // leading 4 chars of the normalized query). The lock pins order AND membership — a [0]-only
+    // assertion stays green if 'wrong' vanishes or a third record slips in.
+    expect(rankRecords(rs, 'stated rollback').map((r) => r.id)).toEqual(['target', 'wrong']);
   });
   it("CHARACTERIZATION (R4-5, accepted residual): a generic shared anchor re-opens the flip", () => {
     // Option A explicit risk acceptance (spec §2 RESOLVED round 4): binary support is
@@ -165,6 +169,9 @@ describe('ranking-level locks (FULL production formula via rankRecords)', () => 
     // sites (O_66 4->5, O_67 competitors). If a future guard closes this class, this test
     // SHOULD flip — update it consciously; do not "fix" the guard to keep it green.
     const rs = [rec('target', 'rollback procedure store'), rec('wrong', 'stat counter store')];
-    expect(rankRecords(rs, 'stated store rollback').map((r) => r.id)[0]).toBe('wrong');
+    // Full-array lock (C1.2): both records survive (shared 'store' anchor supports the rescue);
+    // the characterized residual is the ORDER, and the target's continued presence at rank 2 is
+    // part of the characterization — a [0]-only assertion could not see it vanish.
+    expect(rankRecords(rs, 'stated store rollback').map((r) => r.id)).toEqual(['wrong', 'target']);
   });
 });
