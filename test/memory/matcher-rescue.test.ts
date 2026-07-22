@@ -5,7 +5,7 @@
 //   class the test flips and must be consciously updated, not "fixed".
 import { describe, it, expect } from 'vitest';
 import {
-  inflectionRescue, concatRescue, tokenize,
+  inflectionRescue, concatRescue, semanticCoverage, tokenize, type Expansion,
 } from '../../src/memory/retrieval.js';
 
 describe('inflectionRescue (B-infl: suffix-allowlisted reverse prefix)', () => {
@@ -89,5 +89,37 @@ describe("concatRescue (A': adjacent-token concatenation equality)", () => {
   });
   it('CHARACTERIZATION: separator blindness — "complete. Task" == "complete task" (R2-2)', () => {
     expect(concatRescue('completetask', toks('complete. Task'))).toBe(true);
+  });
+});
+
+describe('semanticCoverage rescue wiring (support-required, R3-1)', () => {
+  it('no independent direct match -> rescues never fire (single-term compound query)', () => {
+    // the phrase lane serves single-term compound queries in production (spec §2, measured)
+    expect(semanticCoverage(['layers'], ['layer']).score).toBe(0);
+    expect(semanticCoverage(['completetask'], ['complete', 'task']).score).toBe(0);
+  });
+  it('an independent direct anchor opens the gate; rescue gets FULL credit and counts as lexical', () => {
+    const c = semanticCoverage(['layers', 'cache'], ['layer', 'cache']);
+    expect(c.score).toBe(1);          // cache direct, layers rescued at weight 1
+    expect(c.lexicalMatched).toBe(2); // rescue counts toward lexicalMatched (M6 lock)
+    expect(c.semanticWeight).toBe(0); // a rescue is lexical evidence, not semantic
+  });
+  it('gate identity: a record can never gain its FIRST lexical evidence from a rescue', () => {
+    // both terms individually rescueable, but neither matches directly -> nothing fires (§8.7)
+    const c = semanticCoverage(['completetask', 'layers'], ['complete', 'task', 'layer']);
+    expect(c.score).toBe(0);
+    expect(c.lexicalMatched).toBe(0);
+  });
+  it('the neighbor-presence predicate stays exact/forward-prefix — rescues NOT wired in (R-F5)', () => {
+    const EXP: Expansion = new Map([['erase', [{ token: 'completetask', w: 0.9 }]]]);
+    // support exists ('cache' direct) and the record holds complete+task adjacently, but the
+    // NEIGHBOR token 'completetask' must not become "present" via concatenation.
+    const c = semanticCoverage(['erase', 'cache'], ['complete', 'task', 'cache'], EXP, 1);
+    expect(c.semanticWeight).toBe(0);
+  });
+  it('weighted path: rescue credit scales with the term weight like a direct match', () => {
+    const w = (t: string): number => (t === 'layers' ? 4 : 1);
+    const c = semanticCoverage(['layers', 'cache'], ['layer', 'cache'], undefined, 1, w);
+    expect(c.score).toBe(1); // (4 + 1) / (4 + 1) — full credit at weight w, denominator unchanged
   });
 });

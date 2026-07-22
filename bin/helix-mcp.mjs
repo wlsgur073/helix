@@ -13168,18 +13168,51 @@ function isStopword(w) {
 function meaningfulTokens(tokens) {
   return tokens.filter((t) => !isStopword(t));
 }
+var INFLECTION_SUFFIXES = /* @__PURE__ */ new Set(["s", "es", "d", "ed", "ing"]);
+var ASCII_TERM = /^[a-z0-9]+$/;
+function inflectionRescue(t, docTokens) {
+  if (!ASCII_TERM.test(t)) return false;
+  for (const d of docTokens) {
+    if (d.length >= 4 && d.length < t.length && t.startsWith(d) && INFLECTION_SUFFIXES.has(t.slice(d.length))) return true;
+  }
+  return false;
+}
+function concatRescue(t, docTokens) {
+  if (t.length < 6 || !ASCII_TERM.test(t)) return false;
+  for (let i = 0; i < docTokens.length; i += 1) {
+    const first = docTokens[i];
+    if (first.length < 3 || isStopword(first) || !t.startsWith(first) || first.length >= t.length) continue;
+    let acc = first;
+    for (let j = i + 1; j < docTokens.length && acc.length < t.length; j += 1) {
+      const next = docTokens[j];
+      if (next.length < 3 || isStopword(next)) break;
+      acc += next;
+      if (!t.startsWith(acc)) break;
+      if (acc === t) return true;
+    }
+  }
+  return false;
+}
 function semanticCoverage(qTerms, docTokens, expansion, discount = 1, weights) {
   if (qTerms.length === 0) return { score: 0, lexicalMatched: 0, semanticWeight: 0 };
   const docSet = new Set(docTokens);
   const present = (tok) => docSet.has(tok) || tok.length >= 3 && docTokens.some((d) => d.startsWith(tok));
+  const direct = qTerms.map((t) => present(t));
+  const support = direct.some(Boolean);
   let lexicalMatched = 0;
   let semanticWeight = 0;
   let num = 0;
   let den = 0;
-  for (const t of qTerms) {
+  for (let i = 0; i < qTerms.length; i += 1) {
+    const t = qTerms[i];
     const w = weights ? weights(t) : 1;
     den += w;
-    if (present(t)) {
+    if (direct[i]) {
+      lexicalMatched += 1;
+      num += w;
+      continue;
+    }
+    if (support && (concatRescue(t, docTokens) || inflectionRescue(t, docTokens))) {
       lexicalMatched += 1;
       num += w;
       continue;

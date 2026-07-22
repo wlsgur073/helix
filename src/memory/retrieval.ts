@@ -161,6 +161,16 @@ export interface SemCoverage { score: number; lexicalMatched: number; semanticWe
  * and its denominator share, so the score stays in [0,1] and CONSTANT weights reduce to the
  * unweighted formula exactly. `lexicalMatched`/`semanticWeight` stay UNWEIGHTED — they feed the
  * semantic-only gate, whose semantics this change must not move.
+ *
+ * 2026-07 matcher repair (spec 2026-07-21): a direct-missed term can be rescued by two
+ * ASCII-only matchers — concatRescue (A') and inflectionRescue (B-infl) — but ONLY on a record
+ * already holding >= 1 independent direct match on ANOTHER query term (support-required, R3-1:
+ * rescue evidence for records already in the query's lexical neighborhood, never a standalone
+ * anchor). A rescue is therefore never a record's FIRST lexical evidence, so the semantic-only
+ * gate classification is identical to the pre-rescue scorer by construction. Rescued terms get
+ * FULL weight and count in `lexicalMatched`; `semanticWeight` never includes rescues. The
+ * neighbor `present` predicate deliberately stays exact/forward-prefix (R-F5 predicate split —
+ * widening it would silently widen synonym matching).
  */
 export function semanticCoverage(
   qTerms: string[], docTokens: string[], expansion?: Expansion, discount = 1,
@@ -170,14 +180,23 @@ export function semanticCoverage(
   const docSet = new Set(docTokens);
   const present = (tok: string): boolean =>
     docSet.has(tok) || (tok.length >= 3 && docTokens.some((d) => d.startsWith(tok)));
+  // Pass 1 — direct evidence only (exact/forward-prefix). Rescues below may fire only when at
+  // least one OTHER term matched directly; a term being rescued is by definition not direct,
+  // so `some(Boolean)` over all terms is exactly "another term anchors this record".
+  const direct = qTerms.map((t) => present(t));
+  const support = direct.some(Boolean);
   let lexicalMatched = 0;
   let semanticWeight = 0;
   let num = 0;
   let den = 0;
-  for (const t of qTerms) {
+  for (let i = 0; i < qTerms.length; i += 1) {
+    const t = qTerms[i]!;
     const w = weights ? weights(t) : 1;
     den += w;
-    if (present(t)) { lexicalMatched += 1; num += w; continue; }
+    if (direct[i]) { lexicalMatched += 1; num += w; continue; }
+    if (support && (concatRescue(t, docTokens) || inflectionRescue(t, docTokens))) {
+      lexicalMatched += 1; num += w; continue;
+    }
     const neigh = expansion?.get(t);
     if (neigh) {
       let best = 0;
