@@ -70,19 +70,31 @@ describe('withFileLock (link-published)', () => {
     // it — a mid-acquire race. So: a LIVE holder pins us in the acquire loop (EEXIST path), then a
     // SEPARATE process removes the whole dir (this thread is blocked in Atomics.wait, so a same-thread
     // timer can't fire). Every subsequent publish attempt then throws ENOENT and MUST still budget out.
+    // The vanish is a RENAME, not rmSync (C2.1 de-flake): recursive rm walks unlink→rmdir, and in
+    // between the lock NAME is legitimately free while the dir still exists — a waiter waking in that
+    // window CORRECTLY acquires (observed ~2/10 full-suite runs). rename is one syscall: no
+    // intermediate free-lock state exists, so every post-rename attempt deterministically ENOENTs —
+    // which is exactly the state under test, and the loop sees the same errno a real rm -rf ends in.
     // Mutation guard: reverting the fix to a bare `continue` spins ENOENT with no sleep/no budget —
-    // the test then hangs to vitest's default 5s kill (RED) instead of timing out here at ~maxWaitMs.
+    // observed 2026-07-22: the sync spin blocks the worker's event loop, so vitest's own test
+    // timeout never fires either; the run hangs outright (>120s, killed externally). RED by hang.
     const d = mkdtempSync(join(tmpdir(), 'helix-lock-enoent-'));
+    const gone = `${d}-gone`;
     const ledger = join(d, 'ledger.jsonl');
     writeFileSync(ledger, '');
     const liveHolder = { ...selfIdentity('f'.repeat(32)), threadId: 99 }; // same pid+ticks, diff thread => alive => never stolen
     writeLockFileForTest(lockPathOf(ledger), liveHolder);
-    const killer = spawn(process.execPath, ['-e', `require('fs').rmSync(${JSON.stringify(d)}, { recursive: true, force: true })`], { stdio: 'ignore' });
+    const killer = spawn(process.execPath, ['-e', `require('fs').renameSync(${JSON.stringify(d)}, ${JSON.stringify(gone)})`], { stdio: 'ignore' });
     const t0 = Date.now();
-    expect(() => withFileLock(ledger, () => 1, { maxWaitMs: 500 })).toThrow(/timed out/);
-    const elapsed = Date.now() - t0;
-    killer.kill();
-    expect(elapsed).toBeLessThan(2000); // budgeted (~maxWaitMs); a non-yielding spin would only end at the 5s hard-kill
+    try {
+      expect(() => withFileLock(ledger, () => 1, { maxWaitMs: 1000 })).toThrow(/timed out/);
+      const elapsed = Date.now() - t0;
+      expect(elapsed).toBeLessThan(3000); // budgeted (~maxWaitMs); a non-yielding spin would only end at the 5s hard-kill
+    } finally {
+      killer.kill();
+      rmSync(gone, { recursive: true, force: true });
+      rmSync(d, { recursive: true, force: true }); // only present if the child never got to rename
+    }
   });
   it('ctx.stillOwned() is true while held and false after a foreign replacement', () => {
     const t = target();
