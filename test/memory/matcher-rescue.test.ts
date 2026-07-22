@@ -5,7 +5,7 @@
 //   class the test flips and must be consciously updated, not "fixed".
 import { describe, it, expect } from 'vitest';
 import {
-  inflectionRescue,
+  inflectionRescue, concatRescue, tokenize,
 } from '../../src/memory/retrieval.js';
 
 describe('inflectionRescue (B-infl: suffix-allowlisted reverse prefix)', () => {
@@ -41,4 +41,53 @@ describe('inflectionRescue (B-infl: suffix-allowlisted reverse prefix)', () => {
     'CHARACTERIZATION: false morphology %s <- %s DOES match (accepted residual)', (t, dd) => {
       expect(inflectionRescue(t, [dd])).toBe(true);
     });
+});
+
+describe("concatRescue (A': adjacent-token concatenation equality)", () => {
+  const toks = (s: string): string[] => tokenize(s);
+  // Positives — record-side tokenizer split an identifier the query carries jammed-lowercase.
+  it('camelCase-split identifier: completetask <- "first applied in completeTask here"', () => {
+    expect(concatRescue('completetask', toks('first applied in completeTask here'))).toBe(true);
+  });
+  it('searchtasks <- "store function searchTasks does"', () => {
+    expect(concatRescue('searchtasks', toks('store function searchTasks does'))).toBe(true);
+  });
+  it('space-separated content words match too (token-join semantics, R-F8/R2-2)', () => {
+    expect(concatRescue('completetask', toks('complete task'))).toBe(true);
+  });
+  it('three-constituent join', () => {
+    expect(concatRescue('storetaskindex', toks('store task index'))).toBe(true);
+  });
+  // Blocked classes.
+  it('mid-word substring never matches: search vs research (equality, not substring)', () => {
+    expect(concatRescue('search', toks('prior research notes'))).toBe(false);
+  });
+  it('non-adjacent constituents never match', () => {
+    expect(concatRescue('completetask', toks('complete big task'))).toBe(false);
+  });
+  it.each([
+    ['invalid', 'recovery works in valid state'],
+    ['insecure', 'runs in secure mode'],
+    ['notable', 'this is not able to run'],
+  ])('meaning-inversion join blocked (R2-3 constituent guard): %s', (t, src) => {
+    expect(concatRescue(t, toks(src))).toBe(false);
+  });
+  it('short constituent blocked: commands <- "the command s parser"', () => {
+    expect(concatRescue('commands', toks('the command s parser'))).toBe(false);
+  });
+  it('term shorter than 6 never matches', () => {
+    expect(concatRescue('dolog', toks('do log'))).toBe(false);
+  });
+  it('Cyrillic is out of scope (R3-3): only the ASCII gate blocks this one', () => {
+    // 'под'/'ход' are 3-char non-(EN/KO)-stopword constituents — length/stopword guards
+    // would NOT block; the explicit ASCII restriction must (spec §8.4).
+    expect(concatRescue('подход', toks('под ход'))).toBe(false);
+  });
+  // Characterized residuals (ACCEPTED, spec §2).
+  it('CHARACTERIZATION: content-word join forming another word: office <- "off ice"', () => {
+    expect(concatRescue('office', toks('puck slides off ice fast'))).toBe(true);
+  });
+  it('CHARACTERIZATION: separator blindness — "complete. Task" == "complete task" (R2-2)', () => {
+    expect(concatRescue('completetask', toks('complete. Task'))).toBe(true);
+  });
 });

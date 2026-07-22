@@ -96,6 +96,36 @@ export function inflectionRescue(t: string, docTokens: string[]): boolean {
 }
 
 /**
+ * A': adjacent-token concatenation rescue. True iff `t` (length >= 6, ASCII) EQUALS the
+ * concatenation of >= 2 ADJACENT record tokens where every constituent is >= 3 chars AND a
+ * non-stopword. Repairs the class where the record-side tokenizer split an identifier the
+ * query carries jammed-lowercase (`completetask` == `complete`+`task` from `completeTask`).
+ * Equality only — `search` never matches inside `research` (the substring alternative was
+ * measured equal on probes and REJECTED for reintroducing the mid-word class). The
+ * constituent guard blocks meaning-inversion joins (`invalid` <- `in`+`valid`: `in` is short
+ * AND a stopword). Semantics are honestly token-join, not identifier-only: `complete task`
+ * and `complete. Task` tokenize identically, so cross-separator content-word joins match by
+ * design (documented residual: `office` <- `off`+`ice`). Min term length 6 is a provisional
+ * post-selection guard (spec §7).
+ */
+export function concatRescue(t: string, docTokens: string[]): boolean {
+  if (t.length < 6 || !ASCII_TERM.test(t)) return false;
+  for (let i = 0; i < docTokens.length; i += 1) {
+    const first = docTokens[i]!;
+    if (first.length < 3 || isStopword(first) || !t.startsWith(first) || first.length >= t.length) continue;
+    let acc = first;
+    for (let j = i + 1; j < docTokens.length && acc.length < t.length; j += 1) {
+      const next = docTokens[j]!;
+      if (next.length < 3 || isStopword(next)) break;
+      acc += next;
+      if (!t.startsWith(acc)) break;
+      if (acc === t) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Fraction of unique meaningful query tokens present in the record.
  * Match = exact token equality, OR (token length >= 3) a record token starts with it
  * (prefix expansion: auth -> authentication; deliberately prefix, not substring, to avoid port -> report).
