@@ -5,9 +5,20 @@ All notable changes to Helix are documented here. This project follows
 
 ## [Unreleased]
 
-## [0.2.0] — 2026-07-20
-
 ### Added
+- Trust-indexed, verifiable cross-session memory: an append-only JSONL ledger with a
+  provenance firewall (fail-closed promotion), `Fresh / Verified / Suspect` trust
+  states, blast-radius re-verify-before-use, crash-safe compaction, and a
+  cross-process lock.
+- Layered memory scope: a global ledger plus an ownership-gated per-project ledger
+  (`helix_memory_adopt`, default-deny).
+- Lexical recall ranker (coverage / phrase-first, BM25-assisted).
+- Untrusted-content quarantine: NFKC/control/bidi normalization + per-line
+  datamarking + a per-call 128-bit nonce frame.
+- Optional Codex dual-verify (off by default) with a deterministic egress guard
+  (secret / PII / memory-echo), plus `helix_codex_status` and an opt-in content log.
+- Seven MCP tools and SessionStart/SessionEnd hooks, installable as a Claude Code
+  plugin with self-contained committed bundles (no `npm install` to use).
 - Codex 5.6 reasoning efforts. `dualVerify.effort` now accepts `max` and `ultra`. Per-model support
   varies and Helix does not arbitrate it — `codex debug models` is the authority.
 - `helix_codex_status` now reports the effective model, the configured effort, and the run timeout.
@@ -220,6 +231,10 @@ All notable changes to Helix are documented here. This project follows
   torn-line, instead of letting a downstream predicate dereference it.
 
 ### Security
+- Secret-scan redaction on the memory write path; the dual-verify egress guard
+  hard-blocks credential tokens (override-proof).
+- Provenance firewall: agreement from an external model never promotes to `Verified`.
+- Content-free audit log; the Codex content log is opt-in, `0o600`, and capped.
 - The dual-verify egress firewall now scans the exact normalized bytes it transmits on the
   memory-echo leg, instead of a differently-normalized copy. Previously, zero-width and confusable
   padding interleaved into a memory was invisible to the scan but still present on the wire, so it
@@ -231,32 +246,3 @@ All notable changes to Helix are documented here. This project follows
 - Codex's stderr on a failed dual-verify run is now rendered inside a nonce-framed, datamarked
   quarantine block in the host-visible error, instead of interpolated as a plain line — external
   process output is untrusted content and is now handled like any other.
-
-## [0.1.0] — 2026-06-18
-
-First public release.
-
-### Added
-- Trust-indexed, verifiable cross-session memory: an append-only JSONL ledger with a
-  provenance firewall (fail-closed promotion), `Fresh / Verified / Suspect` trust
-  states, blast-radius re-verify-before-use, crash-safe compaction, and a
-  cross-process lock.
-- Layered memory scope: a global ledger plus an ownership-gated per-project ledger
-  (`helix_memory_adopt`, default-deny).
-- Lexical recall ranker (coverage / phrase-first, BM25-assisted).
-- Untrusted-content quarantine: NFKC/control/bidi normalization + per-line
-  datamarking + a per-call 128-bit nonce frame.
-- Optional Codex dual-verify (off by default) with a deterministic egress guard
-  (secret / PII / memory-echo), plus `helix_codex_status` and an opt-in content log.
-- Seven MCP tools and SessionStart/SessionEnd hooks, installable as a Claude Code
-  plugin with self-contained committed bundles (no `npm install` to use).
-
-### Security
-- Secret-scan redaction on the memory write path; the dual-verify egress guard
-  hard-blocks credential tokens (override-proof).
-- Provenance firewall: agreement from an external model never promotes to `Verified`.
-- Content-free audit log; the Codex content log is opt-in, `0o600`, and capped.
-
-[Unreleased]: https://github.com/wlsgur073/helix/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/wlsgur073/helix/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/wlsgur073/helix/releases/tag/v0.1.0
