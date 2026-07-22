@@ -126,19 +126,15 @@ export function concatRescue(t: string, docTokens: string[]): boolean {
 }
 
 /**
- * Fraction of unique meaningful query tokens present in the record.
+ * Fraction of unique meaningful query tokens present in the record (equal weights).
  * Match = exact token equality, OR (token length >= 3) a record token starts with it
- * (prefix expansion: auth -> authentication; deliberately prefix, not substring, to avoid port -> report).
+ * (prefix expansion: auth -> authentication; deliberately prefix, not substring, to avoid
+ * port -> report), OR a support-gated rescue matcher (concatRescue / inflectionRescue — see
+ * semanticCoverage). Delegates to semanticCoverage with no expansion so the documented
+ * equality (semanticCoverage score === coverageScore) holds by construction (R-F6).
  */
 export function coverageScore(qTerms: string[], docTokens: string[]): number {
-  if (qTerms.length === 0) return 0;
-  const docSet = new Set(docTokens);
-  let matched = 0;
-  for (const t of qTerms) {
-    if (docSet.has(t)) { matched += 1; continue; }
-    if (t.length >= 3 && docTokens.some((d) => d.startsWith(t))) matched += 1;
-  }
-  return matched / qTerms.length;
+  return semanticCoverage(qTerms, docTokens).score;
 }
 
 // EH-3: semantic recall via precomputed synonym expansion.

@@ -6,7 +6,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   inflectionRescue, concatRescue, semanticCoverage, tokenize, type Expansion,
+  coverageScore, rankRecords,
 } from '../../src/memory/retrieval.js';
+import type { MemoryRecord } from '../../src/types.js';
 
 describe('inflectionRescue (B-infl: suffix-allowlisted reverse prefix)', () => {
   // Positives — the reverse-inflection direction the forward prefix cannot see.
@@ -121,5 +123,48 @@ describe('semanticCoverage rescue wiring (support-required, R3-1)', () => {
     const w = (t: string): number => (t === 'layers' ? 4 : 1);
     const c = semanticCoverage(['layers', 'cache'], ['layer', 'cache'], undefined, 1, w);
     expect(c.score).toBe(1); // (4 + 1) / (4 + 1) — full credit at weight w, denominator unchanged
+  });
+});
+
+function rec(id: string, content: string): MemoryRecord {
+  return { id, tx: '2026-01-01T00:00:00.000Z', validFrom: '2026-01-01T00:00:00.000Z', validTo: null,
+    type: 'assert', state: 'Fresh', content, provenance: { source: 'user', sessionId: 'cli' },
+    supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal' };
+}
+
+describe('coverageScore delegates to semanticCoverage (R-F6 docstring contract)', () => {
+  it('equals lexical-only semanticCoverage.score on varied inputs (parity property)', () => {
+    const cases: Array<[string[], string[]]> = [
+      [['delete'], ['delete', 'task']],
+      [['auth'], ['authentication', 'flow']],
+      [['layers', 'cache'], ['layer', 'cache']],
+      [['completetask', 'search'], ['complete', 'task', 'search', 'index']],
+      [['nothing'], ['else', 'here']],
+      [[], ['x']],
+    ];
+    for (const [q, d] of cases) {
+      expect(coverageScore(q, d), JSON.stringify(q)).toBe(semanticCoverage(q, d).score);
+    }
+  });
+  it('rescues reach coverageScore too (delegation is live, not a copy)', () => {
+    expect(coverageScore(['layers', 'cache'], ['layer', 'cache'])).toBe(1);
+  });
+});
+
+describe('ranking-level locks (FULL production formula via rankRecords)', () => {
+  it('R3-1 negative: a false-morphology rescue cannot outrank the true target (support gate)', () => {
+    // Codex round-3 counterexample, adjudicated ACCEPTED: without the support gate,
+    // stated<-stat full-idf credit lifts 'wrong' to 0.422 past the target's 0.212 (spec §2).
+    const rs = [rec('target', 'rollback procedure'), rec('wrong', 'stat counter')];
+    expect(rankRecords(rs, 'stated rollback').map((r) => r.id)[0]).toBe('target');
+  });
+  it("CHARACTERIZATION (R4-5, accepted residual): a generic shared anchor re-opens the flip", () => {
+    // Option A explicit risk acceptance (spec §2 RESOLVED round 4): binary support is
+    // bypassable via a low-idf shared anchor ('store'). Per-rescue audit over both frozen
+    // manifests: 351 supported rescues, 5 harmful, ALL at the two documented-limitation
+    // sites (O_66 4->5, O_67 competitors). If a future guard closes this class, this test
+    // SHOULD flip — update it consciously; do not "fix" the guard to keep it green.
+    const rs = [rec('target', 'rollback procedure store'), rec('wrong', 'stat counter store')];
+    expect(rankRecords(rs, 'stated store rollback').map((r) => r.id)[0]).toBe('wrong');
   });
 });
