@@ -71,6 +71,30 @@ export function meaningfulTokens(tokens: string[]): string[] {
   return tokens.filter((t) => !isStopword(t));
 }
 
+// 2026-07 matcher-asymmetry repair (spec 2026-07-21). Two support-gated rescue matchers for
+// query terms the exact/forward-prefix matcher misses. Both are ASCII-only (R3-3: the tokenizer
+// routes ALL non-CJK scripts into the latin run, and the stopword guard only knows
+// English/Korean) and fire only via semanticCoverage's support-required gate (R3-1).
+const INFLECTION_SUFFIXES = new Set(['s', 'es', 'd', 'ed', 'ing']);
+const ASCII_TERM = /^[a-z0-9]+$/;
+
+/**
+ * B-infl: reverse-inflection rescue. True iff some record token (length >= 4, a PROPER prefix
+ * of `t`) leaves a remainder in the inflection allowlist — query `layers`/`tested` reach record
+ * `layer`/`test`, the direction the forward prefix cannot see. The allowlist (not a length cap)
+ * is what rejects planet<-plan / portal<-port (R-F7). Known residual: suffix SHAPE only, not
+ * lemma identity — united<-unit still matches (R2-4; support-gated, fixture-characterized).
+ * Guard constants are provisional post-selection values (spec §7): min stem 4, allowlist
+ * {s, es, d, ed, ing}.
+ */
+export function inflectionRescue(t: string, docTokens: string[]): boolean {
+  if (!ASCII_TERM.test(t)) return false;
+  for (const d of docTokens) {
+    if (d.length >= 4 && d.length < t.length && t.startsWith(d) && INFLECTION_SUFFIXES.has(t.slice(d.length))) return true;
+  }
+  return false;
+}
+
 /**
  * Fraction of unique meaningful query tokens present in the record.
  * Match = exact token equality, OR (token length >= 3) a record token starts with it
