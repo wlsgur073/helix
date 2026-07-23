@@ -31,17 +31,25 @@ posixOnly('suspension and death across real processes', () => {
     const d = mkdtempSync(join(tmpdir(), 'helix-d3-'));
     const target = join(d, 'ledger.jsonl'); writeFileSync(target, '');
     const w = spawnWorker(holdWorker, target, d, 4_000);
-    await waitFor(() => existsSync(join(d, 'acquired')), 5_000);
-    process.kill(w.pid!, 'SIGSTOP');
-    await waitFor(() => procState(w.pid!) === 'T', 2_000);           // provably suspended
-    const old = new Date(Date.now() - 60_000);
-    utimesSync(lockPathOf(target), old, old);                        // pre-age FAR past the old 10 s stale-age threshold:
-    // an age-steal mutant steals instantly here (RED); the fixed code respects the live holder.
-    expect(() => withFileLock(target, () => 1, { maxWaitMs: 1_500 })).toThrow(/timed out/i);
-    expect(existsSync(lockPathOf(target))).toBe(true);
-    process.kill(w.pid!, 'SIGCONT');
-    await waitFor(() => existsSync(join(d, 'released')), 10_000);    // holder resumed and finished cleanly
-    expect(existsSync(lockPathOf(target))).toBe(false);
+    try {
+      await waitFor(() => existsSync(join(d, 'acquired')), 5_000);
+      process.kill(w.pid!, 'SIGSTOP');
+      await waitFor(() => procState(w.pid!) === 'T', 2_000);           // provably suspended
+      const old = new Date(Date.now() - 60_000);
+      utimesSync(lockPathOf(target), old, old);                        // pre-age FAR past the old 10 s stale-age threshold:
+      // an age-steal mutant steals instantly here (RED); the fixed code respects the live holder.
+      expect(() => withFileLock(target, () => 1, { maxWaitMs: 1_500 })).toThrow(/timed out/i);
+      expect(existsSync(lockPathOf(target))).toBe(true);
+      process.kill(w.pid!, 'SIGCONT');
+      await waitFor(() => existsSync(join(d, 'released')), 10_000);    // holder resumed and finished cleanly
+      expect(existsSync(lockPathOf(target))).toBe(false);
+    } finally {
+      // If any assertion above throws BEFORE the SIGCONT, the child would be left SIGSTOPped forever,
+      // holding its lock and contaminating later measurements. Always resume, then best-effort reap
+      // (both no-op on the happy path, where the holder has already exited cleanly).
+      try { process.kill(w.pid!, 'SIGCONT'); } catch { /* already resumed or gone */ }
+      try { process.kill(w.pid!, 'SIGKILL'); } catch { /* already gone */ }
+    }
   }, 20_000);
 
   it('a SIGKILLed holder IS reclaimed and a new acquirer proceeds', async () => {

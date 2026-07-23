@@ -183,28 +183,31 @@ describe('compactLedger HMAC-aware (via store permanent-erase)', () => {
 
   it('preserves a genuine SIGNED demotion (Suspect) across compaction; the item stays Suspect on replay', () => {
     const { store, ledger } = tmpStore();
+    // Fixed LOW-ENTROPY path on purpose: this path is committed into ledger content, and the
+    // write-path secret scanner redacts any high-entropy segment to [redacted:high-entropy] — so a
+    // unique/random probe path would be redacted out and break the file-contains binding
+    // (checkBinding needs the path present in content). The probe is intentionally NOT deleted and
+    // its content is constant, so concurrent runs sharing the reused file never flip the recheck
+    // outcome; the previous finally-rmSync could delete another run's probe mid-recheck (the
+    // shared-path flake this removes).
     const probeDir = join(tmpdir(), 'helix-demote-probe');
     mkdirSync(probeDir, { recursive: true });
     const probe = join(probeDir, 'probe.txt');
     writeFileSync(probe, 'placeholder file without the marker');
-    try {
-      const a = store.commit({ content: `deploy note: ${probe} must contain ENABLED_FLAG`, source: 'agent-inference' });
-      const rc = store.recheck(a.id, { kind: 'file-contains', path: probe, pattern: 'ENABLED_FLAG' });
-      expect(rc.record?.type).toBe('verify');
-      expect(rc.record?.state).toBe('Suspect');
-      expect(rc.record?.mac).toBeTruthy();
-      expect(store.recall('deploy').items.find((i) => i.record.id === a.id)!.record.state).toBe('Suspect');
-      const c = store.commit({ content: 'gamma fact', source: 'user' });
-      store.erase(c.id, { permanent: true });
-      const items = store.recall('deploy').items;
-      expect(items.find((i) => i.record.id === a.id)!.record.state).toBe('Suspect');
-      const after = parseLedger(ledger);
-      expect(after.some((r) => r.type === 'verify' && r.supersedes === a.id && r.state === 'Suspect' && !!r.mac)).toBe(true);
-      expect(after.find((r) => r.id.startsWith('integrity_'))).toBeUndefined();
-      expect(items.find((i) => i.record.id === c.id)).toBeUndefined();
-    } finally {
-      rmSync(probeDir, { recursive: true, force: true });
-    }
+    const a = store.commit({ content: `deploy note: ${probe} must contain ENABLED_FLAG`, source: 'agent-inference' });
+    const rc = store.recheck(a.id, { kind: 'file-contains', path: probe, pattern: 'ENABLED_FLAG' });
+    expect(rc.record?.type).toBe('verify');
+    expect(rc.record?.state).toBe('Suspect');
+    expect(rc.record?.mac).toBeTruthy();
+    expect(store.recall('deploy').items.find((i) => i.record.id === a.id)!.record.state).toBe('Suspect');
+    const c = store.commit({ content: 'gamma fact', source: 'user' });
+    store.erase(c.id, { permanent: true });
+    const items = store.recall('deploy').items;
+    expect(items.find((i) => i.record.id === a.id)!.record.state).toBe('Suspect');
+    const after = parseLedger(ledger);
+    expect(after.some((r) => r.type === 'verify' && r.supersedes === a.id && r.state === 'Suspect' && !!r.mac)).toBe(true);
+    expect(after.find((r) => r.id.startsWith('integrity_'))).toBeUndefined();
+    expect(items.find((i) => i.record.id === c.id)).toBeUndefined();
   });
 });
 
