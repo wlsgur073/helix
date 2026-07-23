@@ -183,14 +183,15 @@ describe('compactLedger HMAC-aware (via store permanent-erase)', () => {
 
   it('preserves a genuine SIGNED demotion (Suspect) across compaction; the item stays Suspect on replay', () => {
     const { store, ledger } = tmpStore();
-    // Fixed LOW-ENTROPY path on purpose: this path is committed into ledger content, and the
-    // write-path secret scanner redacts any high-entropy segment to [redacted:high-entropy] — so a
-    // unique/random probe path would be redacted out and break the file-contains binding
-    // (checkBinding needs the path present in content). The probe is intentionally NOT deleted and
-    // its content is constant, so concurrent runs sharing the reused file never flip the recheck
-    // outcome; the previous finally-rmSync could delete another run's probe mid-recheck (the
-    // shared-path flake this removes).
-    const probeDir = join(tmpdir(), 'helix-demote-probe');
+    // This path is committed into ledger content, and the write-path secret scanner redacts any
+    // high-entropy segment to [redacted:high-entropy] — so the probe must be a FIXED, LOW-ENTROPY
+    // name (a unique/random path would be redacted out and break the file-contains binding, which
+    // needs the path present in content). It is placed under the REAL system temp (HELIX_TEST_SYS_TMP),
+    // NOT the redirected per-run root, so its path stays low-entropy and it is never swept by the
+    // per-run teardown. With constant content and no delete, concurrent runs sharing this one reused
+    // file never flip the recheck outcome (the previous finally-rmSync could delete another run's probe
+    // mid-recheck — the shared-path flake this removes).
+    const probeDir = join(process.env.HELIX_TEST_SYS_TMP ?? tmpdir(), 'helix-demote-probe');
     mkdirSync(probeDir, { recursive: true });
     const probe = join(probeDir, 'probe.txt');
     writeFileSync(probe, 'placeholder file without the marker');

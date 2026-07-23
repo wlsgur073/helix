@@ -1,50 +1,31 @@
-import { readdirSync, lstatSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const TEST_TMP_PREFIX = 'helix-'; // the dash excludes the runtime corral dir named exactly "helix"
-
-// No vitest run takes anywhere near this long, so a helix-* temp dir older than the grace period is
-// provably an orphan from a FINISHED (or crashed) run — never a live concurrent one. We deliberately
-// NEVER delete recent dirs (this run's OR a concurrent run's): the old teardown deleted every dir
-// with mtime >= this run's start, which under a second overlapping `vitest run` yanked that run's
-// still-live fixtures out mid-operation (renameSync/linkSync ENOENT, deleted probe files) — the
-// cross-run collision that made the suite flake under parallel load. Trade-off: this run's own dirs
-// leak until a later run reaps them (CI /tmp is ephemeral; locally the OS temp policy also cleans up).
-const REAP_GRACE_MS = 30 * 60 * 1000; // 30 minutes
-
-export interface TempEntry { name: string; isDir: boolean; mtimeMs: number }
-
-/** Pure: names of helix-* directories old enough to be orphans from a finished run (mtime strictly
- *  older than nowMs - graceMs). Recent dirs — this run's and any concurrent run's live fixtures —
- *  are never selected, which is what makes two simultaneous runs safe. */
-export function selectReapableTempDirs(entries: TempEntry[], nowMs: number, graceMs: number): string[] {
-  const cutoff = nowMs - graceMs;
-  return entries
-    .filter((e) => e.isDir && e.name.startsWith(TEST_TMP_PREFIX) && e.mtimeMs < cutoff)
-    .map((e) => e.name);
-}
-
-/** vitest globalSetup: the returned teardown reaps only OLD helix-* temp dirs (orphans), never recent
- *  ones, so concurrent runs can't delete each other's live fixtures. Best-effort — never fails a run.
- *  Residual: a HELIX_HOME pointed at a long-idle <systmp>/helix-* dir could be reaped by a test run;
- *  don't keep real data under the system temp dir's helix-* namespace while running the suite. */
+// vitest globalSetup: give THIS run a PRIVATE temp root and point the temp-dir env vars at it, so
+// every fixture's os.tmpdir() lands inside it WITHOUT any fixture change. Teardown removes ONLY this
+// run's root — never a shared helix-* namespace by mtime or age — so:
+//   - two concurrent `vitest run` invocations can never delete each other's live fixtures (the
+//     cross-run collision that made the suite flake under parallel load);
+//   - there is no aging window that can delete a retained fixture mid-use;
+//   - a real HELIX_HOME that happens to sit under the system temp dir is never swept.
+// The run-root NAME may be high-entropy (mkdtemp) — it is a CLEANUP identity, never committed into
+// ledger content, so it does not interact with the write-path secret scanner. The one test that DOES
+// commit a temp path into content (compaction's file-contains probe) reads HELIX_TEST_SYS_TMP to place
+// that probe under the REAL (unredirected) system temp at a low-entropy fixed name, where it is not
+// redacted and — with constant content and no delete — is harmless to share across runs.
 export default function setup(): () => void {
+  const sysTmp = tmpdir(); // the real system temp, captured BEFORE redirect
+  const runRoot = mkdtempSync(join(sysTmp, 'helix-testrun-'));
+  const prev = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
+  process.env.HELIX_TEST_SYS_TMP = sysTmp;
+  process.env.TMPDIR = runRoot;
+  process.env.TMP = runRoot;
+  process.env.TEMP = runRoot;
   return () => {
-    try {
-      const root = tmpdir();
-      const now = Date.now();
-      const entries: TempEntry[] = [];
-      for (const d of readdirSync(root, { withFileTypes: true })) {
-        if (!d.name.startsWith(TEST_TMP_PREFIX)) continue;
-        try {
-          const st = lstatSync(join(root, d.name));
-          entries.push({ name: d.name, isDir: st.isDirectory(), mtimeMs: st.mtimeMs });
-        } catch { /* vanished -> skip */ }
-      }
-      for (const name of selectReapableTempDirs(entries, now, REAP_GRACE_MS)) {
-        try { rmSync(join(root, name), { recursive: true, force: true }); } catch { /* best-effort */ }
-      }
-    } catch { /* teardown is best-effort */ }
+    process.env.TMPDIR = prev.TMPDIR;
+    process.env.TMP = prev.TMP;
+    process.env.TEMP = prev.TEMP;
+    try { rmSync(runRoot, { recursive: true, force: true }); } catch { /* teardown is best-effort */ }
   };
 }

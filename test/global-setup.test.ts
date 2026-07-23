@@ -1,33 +1,27 @@
 import { describe, it, expect } from 'vitest';
-import { selectReapableTempDirs } from './global-setup.js';
+import { tmpdir } from 'node:os';
+import { mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
 
-describe('selectReapableTempDirs (pure)', () => {
-  const now = 10_000_000;
-  const grace = 30 * 60 * 1000;
-
-  it('reaps helix- dirs older than the grace window (orphans from finished runs)', () => {
-    const entries = [
-      { name: 'helix-old-abc', isDir: true, mtimeMs: now - grace - 1 }, // just past cutoff -> reap
-      { name: 'helix-ancient', isDir: true, mtimeMs: now - grace * 10 }, // very old -> reap
-    ];
-    expect(selectReapableTempDirs(entries, now, grace).sort()).toEqual(['helix-ancient', 'helix-old-abc']);
+// globalSetup redirects the temp base to a PRIVATE per-run root (helix-testrun-*) and removes only
+// that root at teardown, so two concurrent `vitest run` invocations never delete each other's live
+// fixtures and a real HELIX_HOME under the system temp dir is never swept. These run in a worker, so
+// they also prove the redirect reached the worker env. If this regresses, fixtures fall back to the
+// shared /tmp helix-* namespace and the cross-run collision (the flaky ENOENT class) returns.
+describe('per-run temp isolation (global-setup)', () => {
+  it('os.tmpdir() inside a worker resolves to this run private root', () => {
+    expect(tmpdir()).toMatch(/helix-testrun-[^/\\]+$/);
   });
 
-  it('never reaps recent dirs — this run OR a concurrent run\'s live fixtures', () => {
-    const entries = [
-      { name: 'helix-mine', isDir: true, mtimeMs: now - 5 },            // this run, seconds old
-      { name: 'helix-concurrent', isDir: true, mtimeMs: now - grace + 1 }, // a live concurrent run, just inside grace
-      { name: 'helix-edge', isDir: true, mtimeMs: now - grace },        // exactly grace old -> NOT strictly older -> kept
-    ];
-    expect(selectReapableTempDirs(entries, now, grace)).toEqual([]);
+  it('a fixture mkdtemp lands inside the per-run root (so teardown removes only this run)', () => {
+    const d = mkdtempSync(join(tmpdir(), 'helix-probe-'));
+    expect(d).toMatch(/helix-testrun-[^/\\]+[/\\]helix-probe-/);
   });
 
-  it('skips non-helix names, the bare "helix" corral, and non-directories even when old', () => {
-    const entries = [
-      { name: 'other-old', isDir: true, mtimeMs: now - grace * 5 },     // not helix-
-      { name: 'helix', isDir: true, mtimeMs: now - grace * 5 },         // runtime corral, no dash
-      { name: 'helix-file', isDir: false, mtimeMs: now - grace * 5 },   // not a directory
-    ];
-    expect(selectReapableTempDirs(entries, now, grace)).toEqual([]);
+  it('exposes the real (unredirected) system temp for the rare test that commits a temp path', () => {
+    const sys = process.env.HELIX_TEST_SYS_TMP;
+    expect(sys).toBeTruthy();
+    expect(tmpdir().startsWith(sys!)).toBe(true); // the run root lives under the real system temp
+    expect(sys).not.toMatch(/helix-testrun-/);    // ...but the real temp itself is NOT the run root
   });
 });

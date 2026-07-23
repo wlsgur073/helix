@@ -11,11 +11,17 @@ import { join, resolve } from 'node:path';
 const posixOnly = describe.skipIf(process.platform === 'win32');
 
 let worker: string;
+let mintWorker: string;
 beforeAll(async () => {
   const dir = mkdtempSync(join(tmpdir(), 'helix-adoptworkers-'));
   worker = join(dir, 'adopt.mjs');
+  mintWorker = join(dir, 'mint.mjs');
   await build({
     entryPoints: ['scripts/adopt-worker.ts'], outfile: worker,
+    bundle: true, platform: 'node', format: 'esm', target: 'node20', logLevel: 'silent',
+  });
+  await build({
+    entryPoints: ['scripts/global-nonce-worker.ts'], outfile: mintWorker,
     bundle: true, platform: 'node', format: 'esm', target: 'node20', logLevel: 'silent',
   });
 }, 30_000);
@@ -60,23 +66,30 @@ posixOnly('concurrent adoption (registry lock + atomic publish)', () => {
     expect(Object.keys(reg).filter((k) => k !== '@global').length).toBe(WORKERS * PER);
   }, 40_000);
 
-  it('concurrent global-nonce mint converges on a single stable nonce', async () => {
+  it('concurrent globalScopeNonce mint converges on ONE stable nonce (double-checked lock)', async () => {
     const run = mkdtempSync(join(tmpdir(), 'helix-globalmint-run-'));
     const home = join(run, 'home'); mkdirSync(home, { recursive: true });
-    // Each worker adopts one project (which reads/derives), and separately we read the @global nonce
-    // after the storm: concurrent adopts must not tear or fork the @global entry.
+    // N processes each call globalScopeNonce(home) on a virgin home at the same instant. Without the
+    // lock's double-checked re-read, each racer would mint and persist its OWN nonce (last writer
+    // wins, but every process returns a different value); the lock must make all of them observe the
+    // single winning nonce.
     const WORKERS = 10;
     const goFile = join(run, 'go');
-    const rootsPerWorker = Array.from({ length: WORKERS }, (_, w) => {
-      const r = join(run, `p-${w}`); mkdirSync(r, { recursive: true }); return [r];
-    });
-    const ready = rootsPerWorker.map((_, w) => join(run, `ready-${w}`));
-    const procs = spawnAll(worker, home, goFile, ready, rootsPerWorker);
+    const ready = Array.from({ length: WORKERS }, (_, w) => join(run, `ready-${w}`));
+    const out = Array.from({ length: WORKERS }, (_, w) => join(run, `out-${w}`));
+    const procs = ready.map((r, w) =>
+      spawn(process.execPath, [mintWorker, home, goFile, r, out[w]!], { stdio: 'ignore' }));
     const exits = exitsOf(procs);
     await waitFor(() => ready.every((f) => existsSync(f)), 15_000);
     writeFileSync(goFile, 'go');
     expect((await exits).every((c) => c === 0)).toBe(true);
-    const reg = JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')) as Record<string, unknown>;
-    expect(Object.keys(reg).filter((k) => k !== '@global').length).toBe(WORKERS); // all adoptions kept
+
+    const observed = out.map((o) => readFileSync(o, 'utf8').trim());
+    const unique = new Set(observed);
+    expect(unique.size).toBe(1);                     // every process observed the SAME nonce
+    const nonce = [...unique][0]!;
+    expect(nonce).toMatch(/^[0-9a-f]+$/);            // a real minted nonce, not "null"
+    const reg = JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')) as Record<string, { macNonce?: string }>;
+    expect(reg['@global']!.macNonce).toBe(nonce);    // and that exact nonce is what persisted
   }, 40_000);
 });
