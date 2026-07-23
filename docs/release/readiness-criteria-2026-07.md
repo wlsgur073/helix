@@ -1,10 +1,11 @@
-# Service-readiness criteria + redo roadmap — DRAFT (not ratified)
+# Service-readiness criteria + redo roadmap — RATIFIED 2026-07-24
 
-Date: 2026-07-22 · Status: **DRAFT — awaiting owner ratification.** Owner decisions Q2 and Q3
-landed 2026-07-22 (§7); the sole remaining blocker is Q1, the owner's felt-gaps enumeration,
-deferred to a follow-up session — per the cross-review verdict, completeness is impossible
-before that list lands. Companion to `gate-decision-2026-07-22.md`, which governs all
-recall-quality claims (locked template) and the protocol-v2 path.
+Date: 2026-07-22 (ratified 2026-07-24) · Status: **RATIFIED.** All owner decisions are closed: Q2 and
+Q3 landed 2026-07-22 (§7), and Q1 — the owner's felt-gaps enumeration, the sole remaining blocker —
+was resolved 2026-07-24 by a domain-by-domain owner interview: all 13 enumerated gaps map to a
+criterion or an accepted v0.1 limitation (§7 Q1, §9), and the owner confirmed NONE is a personal-scale
+correctness blocker. Companion to `gate-decision-2026-07-22.md`, which governs all recall-quality
+claims (locked template) and the protocol-v2 path.
 
 Scope guard: v0.1 of a personal-scale tool. Every criterion cites a recorded defect, lesson,
 or prior-approved requirement; anything else is gold-plating and was deliberately excluded.
@@ -24,6 +25,38 @@ or prior-approved requirement; anything else is gold-plating and was deliberatel
   the v2 freeze MUST include a prospectively frozen OFFLINE rule for classifying new
   superset-competition (O_67-class) cases — without it the exercised/unexercised report
   required by gate-decision D5 cannot be produced.
+- **C1.4 Registry-as-trust-store hardening + mixed-key deletion fix (SHIPPED local; round-4/5 Codex
+  compare).** The ownership registry (`~/.helix/projects.json`) is a trust store — its per-scope MAC
+  nonce selects the ledger verification subkey — but was not hardened like the ledger/master-key: a
+  wrong/lost/aliased/corrupt nonce let compaction physically DELETE genuine signed verifies (plus a
+  false integrity marker), unrecoverably. Hardened over PR-1..F/G/H (commits 8f46462..86fd151),
+  keystoned by the nonce-continuity compaction chokepoint. Round-4 compare then DIVERGED: the
+  chokepoint's EXISTENTIAL test ("does any verify validate?") still allowed a MIXED-KEY deletion —
+  genuine rows under nonce N1, a lost/rotated/aliased registry rotates to N2, Helix itself signs ONE
+  new verify under N2 which "proves" the key and licenses deletion of the entire N1 lineage. Codex
+  found it, reproduced end-to-end (keepSurvives false->true, false marker minted), and it was fixed
+  @ 7d8909d with a SINGLE-LINEAGE gate (`planCompaction` drops a verify only when the resolved key
+  proves a single keyId lineage — `keyProven AND singleLineage`; `provesKey` now FAIL-CLOSED). Round-5
+  compare CONVERGED: Codex independently verified (against the bundled planner) that the deletion class
+  is CLOSED for all shipped MemoryStore/MCP paths, the exact N1->N2 sequence included. So the chokepoint
+  now GENUINELY satisfies the F3 deletion-stopgap; F3's absent-vs-lost create-once MINTING design stays
+  deferred (the gate covers the DELETION half — a mis-mint's effect is now non-destructive).
+  TRACKED LIMITATIONS on the deletion axis (recorded honestly, NOT "harmless" — round-5 Codex):
+  (i) `keyId` is a 64-bit truncation (`keyIdOf`, ledger-mac.ts:77): two subkeys colliding on keyId
+  (~2^-64, not deliberately exploitable in the ledger-only attacker model) would defeat the
+  single-lineage gate — widening the lineage commitment to >=128 bits is future hardening.
+  (ii) exported `compactLedger` called with NEITHER HMAC predicate uses legacy bake-and-drop and
+  deletes live-target verifies; NOT reachable via MemoryStore/MCP (both production callers pass both
+  predicates) — a low-level API footgun to type-harden later.
+  (iii) three round-4 findings, confirmed by round-5 as correctly OUT of the deletion-blocker scope but
+  genuine: `.owner` reused-path trust-LAUNDERING (copied same-path rows validate under an inherited
+  nonce — a conferral vector, not deletion; the "launders nothing" comment is inaccurate; a
+  repair-vs-adopt ceremony split is owed); witnessed-append AUDIT mislabel (a confirm whose verify row
+  lands but whose witness advance throws is audited `rejected`); post-stamp `.helix` symlink /
+  project-to-project alias coverage (an alias-PREVENTION gap, rendered non-destructive by the gate).
+  Deploy dependency: the fix protects only sessions served by the redeployed plugin — the cold-process
+  barrier (SECURITY.md) must hold so no pre-fix MCP process compacts with the old bytes. (The running
+  plugin was still pre-fix 74f3621 at ratification time; redeploy is a release precondition, not hygiene.)
 
 ## 2. Quality gates
 
@@ -140,11 +173,12 @@ The prior approved design's clean-room tier and drill set are carried forward IN
 
 ## 7. Owner decisions (ratification gate)
 
-- **Q1 (R6) — OPEN, the sole remaining ratification blocker.** The stand-down reason ("many
-  shortcomings") is still un-enumerated; the owner will supply the felt-gaps list in a
-  follow-up session (decided 2026-07-22: deferred, not skipped). This document is complete
-  only when that list is folded in and each item maps to a criterion or an explicit
-  rejection.
+- **Q1 (R6) — RESOLVED 2026-07-24 (felt-gaps enumerated and mapped; ratification unblocked).** The
+  stand-down "shortcomings" were enumerated in a domain-by-domain owner interview. All 13 gaps map to
+  an existing criterion or an explicitly ACCEPTED v0.1 limitation, and the owner confirmed NONE is a
+  personal-scale correctness blocker (scope guard: a maturity/measurement/UX gap is not a correctness
+  blocker). The full enumeration and disposition are recorded in §9; the three items the interview
+  newly surfaced are the accepted limitations L1–L3 there.
 - **Q2 — DECIDED 2026-07-22: both remedies.** v0.1 does not silently accept unbounded
   imported/team ledgers; it ships the supported-scale statement (C4.9) AND the local
   content-free advisory (C4.10).
@@ -166,3 +200,44 @@ residual adopted into C4.9). Several suspected-missing items were found already 
 downgraded from "create" to "verify". Convergence not yet declared: this draft is one round
 in; ratification (§7) gates the next step, and a follow-up round on the ratified version is
 budgeted.
+
+Round-4/5 registry-hardening reconciliation (Codex compare, SYMMETRIC — the why-log the code and
+changelog do not preserve). The answer-first draft claimed the nonce-continuity chokepoint closed the
+genuine-verify deletion class. Round-4 compare DIVERGED: Codex, answering the neutral question
+independently, found a mixed-key sequence the draft missed (one new verify signed under a rotated
+nonce "proves" the key and licenses deleting the prior lineage). It was reproduced end-to-end
+(keepSurvives false->true), conceded without defense, and fixed @ 7d8909d (single-lineage gate +
+provesKey fail-closed + durable-write unification: master-key/audit via `writeAll`, Buffer + zero-
+progress guard, audit first-create dir fsync). Round-5 compare CONVERGED: Codex independently verified
+the class is closed for all shipped paths and CALIBRATED the claim from absolute to
+practical-plus-two-tracked-residuals — the 64-bit keyId-collision (~2^-64) and the legacy
+`compactLedger` footgun, both now recorded in C1.4 as limitations, not dismissed — and confirmed
+#3/#4/#6 correctly deferred AS LIMITATIONS. Lessons: (a) an existential "some key validates" is not
+lineage continuity — the fix keys on the per-record `keyId` lineage, not on any-verify-validates;
+(b) the SYMMETRIC compare (not critique) surfaced the miss precisely because Codex reasoned to the
+neutral question independently rather than attacking the draft — one question, two minds, facts
+deciding; (c) "negligible" is not "absent" — a 2^-64 residual is recorded, not waved away.
+
+## 9. Q1 felt-gaps enumeration & disposition (ratification record, 2026-07-24)
+
+The owner's stand-down "shortcomings" were enumerated in a domain-by-domain interview — 13 gaps, each
+mapped to a criterion or an accepted v0.1 limitation. The owner confirmed none is a personal-scale
+correctness blocker (scope guard: v0.1 of a personal-scale tool — a maturity, measurement, or UX gap
+is not a correctness blocker). This is the list §7 Q1 required; folding it in unblocked ratification.
+
+Covered by existing criteria (no new work): recall ranking → C1.2 / C1.3 / C5.2; deletion-and-trust
+residue → C1.4; concurrency corners → C2.1 + the lock-durability bucket; platform coverage → C4.9;
+unconfined-agent acceptance → C3.2; deploy manual-ness / fragility → C4.1 / C4.8 + C1.4's cold-process
+dependency; pilot unexecuted → C5.2 / Q3; scale threshold adoption-coupled → §6; latency
+live-distribution → C4.9 / C4.10; Hit@1 / O_67 exposure → C5.2 / Q3.
+
+Newly surfaced by the interview, recorded as ACCEPTED v0.1 limitations (tracked, not blockers):
+- **L1 Trust-tier decision-efficacy is unevaluated.** The two-tier ladder (Corroborated/Verified) is
+  SHIPPED (@ 6833ff6), but whether the tiers measurably improve the user's decisions is not evaluated —
+  that needs usage data and folds into the pilot's remit. Accepted for v0.1.
+- **L2 No one-step undo for permanent lifecycle operations.** A soft erase is a recoverable tombstone,
+  but a permanent erase or a wrong supersede has no one-step undo; recovery is by re-commit. Accepted;
+  a short recovery playbook is owed in docs (tracked, not a blocker).
+- **L3 Provenance boundary clarity.** The provenance WIRING is audited closed (C1.1), but the
+  user-relayed vs agent-inference boundary can read as ambiguous in use — a docs/UX limitation,
+  accepted for v0.1.
