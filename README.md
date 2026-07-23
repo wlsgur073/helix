@@ -21,7 +21,7 @@ claude plugin marketplace add wlsgur073/helix
 claude plugin install helix@helix
 ```
 
-Restart Claude Code, then confirm the server is live with `/mcp` (you should see **helix**). Update later with `claude plugin update helix`; remove with `claude plugin uninstall helix`.
+Restart Claude Code, then confirm the server is live with `/mcp` (you should see **helix**). Update later with `claude plugin update helix`; remove with `claude plugin uninstall helix`. Two update caveats: `plugin update` skips reinstalling when the version string is unchanged (the cache is keyed by version) — for a same-version refresh (e.g. tracking a development branch) run `claude plugin uninstall helix` then `claude plugin install helix@helix` instead. And new bytes serve **new** Claude Code sessions only: restart Claude Code after any update (`/clear` does not restart the MCP server). Maintainers: full procedure in `docs/release/deploy-runbook.md`.
 
 ## What you get
 

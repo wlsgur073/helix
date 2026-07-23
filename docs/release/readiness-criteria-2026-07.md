@@ -15,10 +15,11 @@ or prior-approved requirement; anything else is gold-plating and was deliberatel
   promotion; erase/compaction routing) were audited CLOSED on 2026-07-17 (committed probe
   tests, all passing). Criterion: re-run the committed probe suite at release time as an
   acceptance drill — no new wiring.
-- **C1.2 Matcher follow-up triage.** Pre-release: promote the two ranking locks from
-  first-element-only to full-array assertions (vacuation-proofing) + fix the stale
-  "(exact back-compat)" comment referent. Post-v1 (explicitly deferred): query-dependent
-  firing counters (needs its own privacy adjudication); runtime canonicality metadata.
+- **C1.2 Matcher follow-up triage.** Pre-release part DONE 2026-07-22: the two ranking locks
+  promoted from first-element-only to full-array assertions (mutation-verified both ways) and
+  the stale "(exact back-compat)" comment referent fixed. Post-v1 (explicitly deferred):
+  query-dependent firing counters (needs its own privacy adjudication); runtime canonicality
+  metadata.
 - **C1.3 v2 offline O_67-class rule.** Deferring runtime canonicality metadata is fine, but
   the v2 freeze MUST include a prospectively frozen OFFLINE rule for classifying new
   superset-competition (O_67-class) cases — without it the exercised/unexercised report
@@ -26,9 +27,11 @@ or prior-approved requirement; anything else is gold-plating and was deliberatel
 
 ## 2. Quality gates
 
-- **C2.1 Flaky lock test.** The lock-liveness timing test (rmSync-race assertion, roughly
-  1-in-3 failure under load) is fixed via a deterministic stress harness, or quarantined WITH:
-  recorded cause, a tracked issue, an expiry date, and redundant invariant coverage.
+- **C2.1 Flaky lock test (DONE 2026-07-22).** Root-caused: the test's rmSync adversary passes
+  through a legal intermediate state (lock name free, dir alive) where acquisition is correct
+  behavior — a test-design defect, not an implementation bug. Fixed deterministically: the
+  vanish is now an atomic renameSync (no intermediate state exists). Evidence: 0/12 failed
+  full-suite runs under the previously reproducing condition (was 2/10).
   Blanket "N consecutive green suites" was considered and REJECTED as statistically weak.
 - **C2.2 Egress false-positive class.** Long hyphen-chains containing digits still trip the
   entropy leg (fired twice on real governance filenames, most recently on this cycle's own
@@ -65,11 +68,12 @@ The prior approved design's clean-room tier and drill set are carried forward IN
 - **C4.7 Uninstall/data-removal statement (NEW — genuine gap).** README documents the
   uninstall command only; it must state what remains afterward (`~/.helix/` global ledger,
   keys, metrics, witness state; per-project `.helix/`) and give full-removal steps.
-- **C4.8 Deploy runbook in-repo (NEW).** The same-version cache trap (plugin update
-  cache-skips; uninstall+install required) and the MCP launch barrier (new CLI process
-  required after install) live only in session memory today; README even recommends plain
-  `plugin update` (line 24). A service cannot depend on an assistant's memory: write the
-  runbook into the repo and fix the README caveat.
+- **C4.8 Deploy runbook in-repo (DONE 2026-07-22).** The same-version cache trap (plugin
+  update cache-skips; uninstall+install required) and the MCP launch barrier (new CLI process
+  required after install) previously lived only in session memory, and README recommended
+  plain `plugin update` unconditionally. Now: `deploy-runbook.md` (this directory) carries the
+  full maintainer procedure + verification commands, and README's install section carries the
+  user-facing caveats.
 - **C4.9 Supported-platforms statement (NEW).** Runtime Node ≥ 20 vs development Node ≥ 24 is
   a documented split (README line 229) — restate it in one place users read, plus the
   UTF-8/cp949 console lesson for Korean Windows, and the validated-platform list (WSL2 is the
@@ -94,9 +98,9 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   and the honest starvation clause.)
 - **C5.3 Ordering.** Every criterion in this document lands BEFORE the v2 freeze (D3: any
   intervening change resets the untouched window).
-- **C5.4 Historical marker.** `audit-2026-07.md` still narrates the stood-down 0.2.0 flip in
-  future tense; mark it historical (one-line status header) so tracked release docs carry no
-  stale forward-looking claims.
+- **C5.4 Historical marker (DONE 2026-07-22, landed with this document's first commit).**
+  `audit-2026-07.md` narrated the stood-down 0.2.0 flip in future tense; it now carries a
+  HISTORICAL status header so tracked release docs make no stale forward-looking claims.
 
 ## 6. Recall-index scale governance (Part B disposition, promoted to tracked docs)
 
