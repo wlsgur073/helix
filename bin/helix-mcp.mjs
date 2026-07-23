@@ -14569,9 +14569,18 @@ function entropy(s) {
 function isHighEntropyToken(tok) {
   return tok.length >= 24 && /[A-Za-z]/.test(tok) && /[0-9]/.test(tok) && entropy(tok) >= 3.5;
 }
+function stripWrapper(t) {
+  return t.replace(/^[`'"([{<*_~]+/, "").replace(/[`'"’)\]}>*_~.,;:!?]+$/, "");
+}
 function isHexCore(t) {
-  const core = t.replace(/^[`'"([{<*_~]+/, "").replace(/[`'"’)\]}>*_~.,;:!?]+$/, "");
-  return /^[0-9a-fA-F]{24,}$/.test(core);
+  return /^[0-9a-fA-F]{24,}$/.test(stripWrapper(t));
+}
+function isBenignWordChain(t) {
+  const segments = stripWrapper(t).split(/[-._/]+/).filter((s) => s !== "");
+  if (segments.length < 2) return false;
+  return segments.every(
+    (s) => /^[A-Za-z]+$/.test(s) || /^[0-9]{1,4}$/.test(s) || s.length <= 8 && /^[A-Za-z]+[0-9]{1,3}$/.test(s)
+  );
 }
 function mergeSpans(spans) {
   const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
@@ -14602,7 +14611,14 @@ function findSecrets(content) {
   const tok = /\S+/g;
   for (let m = tok.exec(content); m !== null; m = tok.exec(content)) {
     if (isHighEntropyToken(m[0])) {
-      spans.push({ start: m.index, end: m.index + m[0].length, kind: "high-entropy", tier: "entropy", entropyHex: isHexCore(m[0]) });
+      spans.push({
+        start: m.index,
+        end: m.index + m[0].length,
+        kind: "high-entropy",
+        tier: "entropy",
+        entropyHex: isHexCore(m[0]),
+        entropyWordChain: isBenignWordChain(m[0])
+      });
     }
   }
   return mergeSpans(spans);
@@ -24095,7 +24111,7 @@ function scanText(text) {
     secretNamed: secretSpans.some((s) => s.tier === "named"),
     secretHeuristic: secretSpans.some((s) => s.tier === "heuristic"),
     secretEntropy: secretSpans.some(
-      (s) => s.tier === "entropy" && (!s.entropyHex || nearCredential(text, s.start, s.end))
+      (s) => s.tier === "entropy" && (!(s.entropyHex || s.entropyWordChain) || nearCredential(text, s.start, s.end))
     ),
     piiKinds: [...new Set(piiHits.map((h) => h.kind))],
     highKinds: [...new Set(highHits.map((h) => h.kind))],
@@ -24191,7 +24207,7 @@ function classifyEgress(input) {
     legs,
     piiKinds,
     echoMemoryIds,
-    reason: secretHit ? "pass: hex-literal entropy exempt (audit-only)" : "pass: no egress legs",
+    reason: secretHit ? "pass: exempt entropy (hex or word-chain, audit-only)" : "pass: no egress legs",
     ...outcome
   };
 }

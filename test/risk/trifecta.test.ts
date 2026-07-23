@@ -636,7 +636,7 @@ describe('D1: classifier reports leg OUTCOMES, not just detections', () => {
       /^blocked: bulk low-severity PII \(\d+ hits\)$/,
       /^allowed_override: .+$/,   // label only; the label set is the same closed list without the "blocked: " prefix
       /^pass: low-severity PII \(\d+ hits, audit-only\)$/,
-      /^pass: hex-literal entropy exempt \(audit-only\)$/,
+      /^pass: exempt entropy \(hex or word-chain, audit-only\)$/,
       /^pass: no egress legs$/,
     ];
     const samples: EgressVerdict[] = [
@@ -657,5 +657,42 @@ describe('D1: classifier reports leg OUTCOMES, not just detections', () => {
     expect(v.releasedLegs).toEqual(['piiHigh']);      // ONLY the policy-released key
     expect(v.auditOnlyLegs).toEqual(['secret']);      // the hex secret was never gated
     expect(v.legs).toEqual(['secret', 'pii']);        // both DETECTED
+  });
+});
+
+describe('C2.2: egress word-chain entropy exemption + credential proximity guard', () => {
+  // The FP class that fired twice on real governance filenames (long hyphen chains with digits):
+  // a chain of individually low-entropy segments is released on egress like EH-4's hex literals —
+  // UNLESS a credential keyword sits in the same statement. Covert re-encoding of a secret as an
+  // all-benign chain is an explicit NON-GOAL of this low-confidence net (an injected agent can
+  // always re-encode past a char-level detector; the net exists for accidental inclusions).
+  const FP1 = 'docs/release/gate-decision-2026-07-22.md';
+  const FP2 = 'helix-docs-backup-2026-07-22-specs.tar.gz';
+  const block = (texts: string[]): string =>
+    classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy: ALL('block') }).decision;
+
+  it('PASS: the two real observed FP tokens, bare and backticked', () => {
+    expect(block([`the decision is recorded in ${FP1} today`])).toBe('pass');
+    expect(block(['archived to `' + FP2 + '` after review'])).toBe('pass');
+  });
+  it('PASS reason names the exempt-entropy audit-only fallthrough', () => {
+    const v = classifyEgress({ texts: [`see ${FP1}`], outbound: normalizeUntrusted(`see ${FP1}`), ledger: [], policy: ALL('block') });
+    expect(v.reason).toBe('pass: exempt entropy (hex or word-chain, audit-only)');
+  });
+  it('BLOCK: a credential keyword in the same statement guards the chain', () => {
+    expect(block([`password: ${FP1}`])).toBe('blocked');
+    // 'secret' is in CREDENTIAL_CONTEXT; bare "api key" (space form) deliberately is not — the
+    // guard's pre-existing keyword contract, unchanged by C2.2.
+    expect(block([`the deploy secret is ${FP2}`])).toBe('blocked');
+  });
+  it('BLOCK: a chain carrying one long mixed-alnum segment stays in the net', () => {
+    expect(block(['leaked prod-api-token-Zx9fQ2Lm8Kp3Vt5Rw7 today'])).toBe('blocked');
+  });
+  it('BLOCK: interleaved mixed segments stay in the net', () => {
+    expect(block(['code a1b2-c3d4-e5f6-g7h8-i9j0-k1l2 given'])).toBe('blocked');
+  });
+  it('BLOCK: a mid-length digit-run segment (12-digit id class) stays in the net', () => {
+    // Locks the <=4 digit cap specifically: a {1,12} loosening would exempt this chain.
+    expect(block(['ref team-123456789012-prod-rollout today'])).toBe('blocked');
   });
 });

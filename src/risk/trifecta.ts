@@ -170,7 +170,9 @@ function scanText(text: string): Scan {
   // and 'entropy' are low-confidence and policy-gated by their own legs. An overlapping
   // provider+heuristic span merges to tier='named' (secret-scan.mergeSpans), so secretNamed wins it.
   // EH-4: a hex-shaped entropy span (entropyHex) is released on egress UNLESS a credential keyword
-  // is in the same statement. Rich-alphabet entropy spans (!entropyHex) still block.
+  // is in the same statement. C2.2 extends the same shape to benign word-chains (entropyWordChain —
+  // dated filenames / governance paths, the FP class that fired on real artifact names), under the
+  // SAME keyword guard. Rich-alphabet, non-chain entropy spans still block.
   const piiHits = detectPII(text);
   const highHits = piiHits.filter((h) => h.severity === 'high');
   return {
@@ -178,7 +180,7 @@ function scanText(text: string): Scan {
     secretNamed: secretSpans.some((s) => s.tier === 'named'),
     secretHeuristic: secretSpans.some((s) => s.tier === 'heuristic'),
     secretEntropy: secretSpans.some(
-      (s) => s.tier === 'entropy' && (!s.entropyHex || nearCredential(text, s.start, s.end)),
+      (s) => s.tier === 'entropy' && (!(s.entropyHex || s.entropyWordChain) || nearCredential(text, s.start, s.end)),
     ),
     piiKinds: [...new Set(piiHits.map((h) => h.kind))],
     highKinds: [...new Set(highHits.map((h) => h.kind))],
@@ -311,14 +313,15 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
     // single low-severity standalone PII (< N, no other leg) -> audit-only pass.
     return { decision: 'pass', legs, piiKinds, echoMemoryIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)`, ...outcome };
   }
-  // EH-4: an exempt-hex entropy span is the only secret span that reaches this fallthrough with
-  // secretHit true (named/heuristic/non-hex-entropy all decide earlier), so label the pass honestly.
+  // EH-4 + C2.2: an exempt entropy span (hex literal or benign word-chain) is the only secret span
+  // that reaches this fallthrough with secretHit true (named/heuristic/non-exempt-entropy all decide
+  // earlier), so label the pass honestly.
   return {
     decision: 'pass',
     legs,
     piiKinds,
     echoMemoryIds,
-    reason: secretHit ? 'pass: hex-literal entropy exempt (audit-only)' : 'pass: no egress legs',
+    reason: secretHit ? 'pass: exempt entropy (hex or word-chain, audit-only)' : 'pass: no egress legs',
     ...outcome,
   };
 }

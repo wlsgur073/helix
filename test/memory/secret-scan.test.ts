@@ -132,3 +132,54 @@ describe('EH-4: findSecrets tags entropy spans with entropyHex', () => {
     expect(r.content).toBe('deployed commit [redacted:high-entropy] to prod');
   });
 });
+
+describe('C2.2: findSecrets tags entropy spans with entropyWordChain', () => {
+  const chainOf = (text: string) => findSecrets(text).find((s) => s.tier === 'entropy');
+
+  it('true for the real observed FP: a dated governance filename path', () => {
+    const e = chainOf('see docs/release/gate-decision-2026-07-22.md for the policy');
+    expect(e).toBeDefined();
+    expect(e!.entropyWordChain).toBe(true);
+  });
+  it('true for the real observed FP: a dated backup-archive filename', () => {
+    const e = chainOf('archived to helix-docs-backup-2026-07-22-specs.tar.gz yesterday');
+    expect(e).toBeDefined();
+    expect(e!.entropyWordChain).toBe(true);
+  });
+  it('true when the token is backtick-wrapped (wrapper strip, EH-4 parallel)', () => {
+    const e = chainOf('the file `helix-docs-backup-2026-07-22-specs.tar.gz` moved');
+    expect(e).toBeDefined();
+    expect(e!.entropyWordChain).toBe(true);
+  });
+  it('true for word+short-digit-suffix segments (specs2 / v2 style) and all-short-digit date chains', () => {
+    const a = chainOf('kept helix-docs-backup-2026-07-22-specs2.tar.gz around');
+    expect(a?.entropyWordChain).toBe(true);
+    const b = chainOf('window 2026-07-22/2026-08-19-0102 spans the freeze');
+    if (b !== undefined) expect(b.entropyWordChain).toBe(true); // may not even reach the entropy net
+  });
+  it('FALSE: a chain whose last segment is a long mixed-alnum secret chunk', () => {
+    const e = chainOf('leaked prod-api-token-Zx9fQ2Lm8Kp3Vt5Rw7 today');
+    expect(e).toBeDefined();
+    expect(e!.entropyWordChain).toBe(false);
+  });
+  it('FALSE: interleaved mixed-alnum segments (a1b2 shapes)', () => {
+    const e = chainOf('code a1b2-c3d4-e5f6-g7h8-i9j0-k1l2 given');
+    expect(e).toBeDefined();
+    expect(e!.entropyWordChain).toBe(false);
+  });
+  it('FALSE: a digit run longer than 4 in any segment', () => {
+    const e = chainOf('ref build-1234567890123456-log-entry today');
+    expect(e).toBeDefined();
+    expect(e!.entropyWordChain).toBe(false);
+  });
+  it('FALSE: a single-segment mixed token is not a chain (classic secret shape stays in the net)', () => {
+    const e = chainOf('token Zx9fQ2Lm8Kp3Vt5Rw7Aq1Bc2 here');
+    expect(e).toBeDefined();
+    expect(e!.entropyWordChain).toBe(false);
+  });
+  it('write-path: the exempt filename STILL redacts (exemption is egress-gate-only, EH-4 symmetry)', () => {
+    const content = 'kept docs/release/gate-decision-2026-07-22.md tracked';
+    const r = redactSecrets(content, findSecrets(content));
+    expect(r.content).toBe('kept [redacted:high-entropy] tracked');
+  });
+});

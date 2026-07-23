@@ -21,6 +21,11 @@ export interface SecretSpan {
    *  is pure hex >= 24 (git SHA / digest / hex id). Read ONLY by the egress gate; never affects
    *  write-path redaction. */
   entropyHex?: boolean;
+  /** C2.2: set on entropy-tier spans only — true iff the stripped core is a separator-joined chain
+   *  of individually low-entropy segments (dated filenames, governance doc paths — the FP class
+   *  that fired twice on real artifact names). Read ONLY by the egress gate, exactly like
+   *  entropyHex; never affects write-path redaction. */
+  entropyWordChain?: boolean;
 }
 
 // Named patterns run before the entropy net so redactions carry a precise kind
@@ -65,13 +70,38 @@ function isHighEntropyToken(tok: string): boolean {
   return tok.length >= 24 && /[A-Za-z]/.test(tok) && /[0-9]/.test(tok) && entropy(tok) >= 3.5;
 }
 
+/** Strip the defined wrapper-punctuation set from the ends of a token — NEVER letters or digits,
+ *  and never interior characters (the EH-4 greedy-strip lesson: a strip that can eat part of a real
+ *  secret manufactures a false exemption from the remainder). Shared by both entropy exemptions. */
+function stripWrapper(t: string): string {
+  return t.replace(/^[`'"([{<*_~]+/, '').replace(/[`'"’)\]}>*_~.,;:!?]+$/, '');
+}
+
 /** EH-4: true iff T's wrapper-punctuation-stripped core is pure hex >= 24 chars (git SHA / digest /
  *  hex id shape). Strips ONLY a defined wrapper-punctuation set — NEVER letters or digits — so a
  *  rich-alphabet token whose non-hex chars sit only at the ends (e.g. `g<40 hex>z`) is NOT hex-shaped,
  *  and every `label=<hex>` / `0x<hex>` form keeps an interior non-hex char and is NOT hex-shaped. */
 export function isHexCore(t: string): boolean {
-  const core = t.replace(/^[`'"([{<*_~]+/, '').replace(/[`'"’)\]}>*_~.,;:!?]+$/, '');
-  return /^[0-9a-fA-F]{24,}$/.test(core);
+  return /^[0-9a-fA-F]{24,}$/.test(stripWrapper(t));
+}
+
+/** C2.2: true iff T's stripped core is a chain (>= 2 segments over -._/ separators) in which EVERY
+ *  segment is individually low-entropy: pure alphabetic (any length), pure digits of <= 4 (years,
+ *  months, days, small counters), or a word with a short trailing digit suffix (v2, specs2, api03,
+ *  sha256 — <= 8 chars total, digits only at the end). ONE disqualifying segment keeps the whole
+ *  token in the entropy net — no partial credit (anti-greedy, mirroring the EH-4 lesson): a chain
+ *  smuggling one long mixed-alnum or long-digit segment (an embedded key chunk, a 12-digit id) is
+ *  NOT exempt. Deliberate NON-GOAL: covert re-encoding of a secret as an all-benign chain — a
+ *  char-level low-confidence net cannot police re-encoding (an adversary can always spell a secret
+ *  as words); this net exists for ACCIDENTAL inclusions, and accidental keys virtually always carry
+ *  a high-entropy segment. Read only by the egress gate (like isHexCore); write-path redaction is
+ *  unaffected. */
+export function isBenignWordChain(t: string): boolean {
+  const segments = stripWrapper(t).split(/[-._/]+/).filter((s) => s !== '');
+  if (segments.length < 2) return false;
+  return segments.every(
+    (s) => /^[A-Za-z]+$/.test(s) || /^[0-9]{1,4}$/.test(s) || (s.length <= 8 && /^[A-Za-z]+[0-9]{1,3}$/.test(s)),
+  );
 }
 
 /** Merge overlapping spans into non-overlapping ones (required for safe in-place redaction).
@@ -109,7 +139,10 @@ export function findSecrets(content: string): SecretSpan[] {
   const tok = /\S+/g;
   for (let m = tok.exec(content); m !== null; m = tok.exec(content)) {
     if (isHighEntropyToken(m[0])) {
-      spans.push({ start: m.index, end: m.index + m[0].length, kind: 'high-entropy', tier: 'entropy', entropyHex: isHexCore(m[0]) });
+      spans.push({
+        start: m.index, end: m.index + m[0].length, kind: 'high-entropy', tier: 'entropy',
+        entropyHex: isHexCore(m[0]), entropyWordChain: isBenignWordChain(m[0]),
+      });
     }
   }
   return mergeSpans(spans);
