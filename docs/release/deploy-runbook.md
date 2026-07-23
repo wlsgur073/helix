@@ -63,6 +63,19 @@ old bytes write records the new bytes cannot support (or vice versa). Deploy the
 SAME change window as the format change lands, and prefer the barrier-compliant order:
 install first, then let only new processes write.
 
+## Registry-safety mixed-version window (ownership hardening)
+
+The ownership-registry hardening is a mixed-window case in its own right, distinct from a
+ledger-format change. Pre-hardening bytes write `~/.helix/projects.json` WITHOUT a lock and rotate a
+project's MAC nonce on every re-adopt. So while ANY pre-hardening session is still running (the launch
+barrier not yet honored everywhere), a concurrent adopt or first-commit from an old-byte session can
+still lose a registry entry or rotate a nonce — the exact corruption the new bytes prevent — after
+which a later compaction can delete genuine verifies. Treat it like a format change: after installing
+the hardened bytes, restart EVERY live session so no old-byte writer remains, and avoid concurrent
+adopts across the window until all sessions run the hardened bytes. The launch barrier alone
+guarantees a session serves new bytes; registry SAFETY additionally requires that no old-byte writer
+survives anywhere.
+
 ## Version-bumped releases (the end-user case)
 
 A normal version bump does not hit the cache trap — `claude plugin update helix` installs into

@@ -24384,28 +24384,34 @@ async function dualVerify(params, deps) {
 }
 
 // src/audit.ts
-import { appendFileSync, mkdirSync as mkdirSync6 } from "node:fs";
+import { mkdirSync as mkdirSync6, openSync as openSync4, writeSync as writeSync4, fsyncSync as fsyncSync4, closeSync as closeSync4 } from "node:fs";
 import { dirname as dirname9 } from "node:path";
 function appendAudit(path, event) {
   mkdirSync6(dirname9(path), { recursive: true });
-  appendFileSync(path, JSON.stringify(event) + "\n");
+  const fd = openSync4(path, "a");
+  try {
+    writeSync4(fd, JSON.stringify(event) + "\n");
+    fsyncSync4(fd);
+  } finally {
+    closeSync4(fd);
+  }
 }
 
 // src/server/handlers.ts
 import { readFileSync as readFileSync12 } from "node:fs";
 
 // src/codex-log.ts
-import { mkdirSync as mkdirSync7, readFileSync as readFileSync11, writeFileSync as writeFileSync2, openSync as openSync4, writeSync as writeSync4, closeSync as closeSync4 } from "node:fs";
+import { mkdirSync as mkdirSync7, readFileSync as readFileSync11, writeFileSync as writeFileSync2, openSync as openSync5, writeSync as writeSync5, closeSync as closeSync5 } from "node:fs";
 import { dirname as dirname10 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
   try {
     mkdirSync7(dirname10(path), { recursive: true });
-    const fd = openSync4(path, "a", 384);
+    const fd = openSync5(path, "a", 384);
     try {
-      writeSync4(fd, JSON.stringify(entry) + "\n");
+      writeSync5(fd, JSON.stringify(entry) + "\n");
     } finally {
-      closeSync4(fd);
+      closeSync5(fd);
     }
     const lines = readFileSync11(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
@@ -24966,7 +24972,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
 var realCodexRunner = createCodexRunner();
 
 // src/metrics.ts
-import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync9 } from "node:fs";
+import { appendFileSync, mkdirSync as mkdirSync9 } from "node:fs";
 import { dirname as dirname12 } from "node:path";
 import { randomUUID as randomUUID2 } from "node:crypto";
 var noopMetricsSink = {
@@ -24980,7 +24986,7 @@ function createMetricsSink(path, enabled, deps = {}) {
   if (!enabled) return noopMetricsSink;
   const append = deps.append ?? ((p, line) => {
     mkdirSync9(dirname12(p), { recursive: true });
-    appendFileSync2(p, line, { mode: 384 });
+    appendFileSync(p, line, { mode: 384 });
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const genId = deps.genId ?? (() => `o_${randomUUID2()}`);

@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 /** Schema note (append-only history): `decidedLeg` replaces the mis-named `blockedLeg` (an
@@ -24,8 +24,9 @@ export interface DualVerifyAudit {
   echoMemoryIds?: string[];                                            // ledger IDs, never text
 }
 
-/** Erase audit (F1): EVERY helix_memory_erase is recorded so a poisoned/erroneous erase that
- *  suppresses an authoritative fact is detectable in audit.jsonl. The MCP tool is soft-only
+/** Erase audit (F1): every helix_memory_erase is recorded — best-effort (the fsync'd row is appended
+ *  after the fsync'd erase, so a crash in the narrow gap can miss it; see appendAudit) — so a
+ *  poisoned/erroneous erase that suppresses an authoritative fact is detectable in audit.jsonl. The MCP tool is soft-only
  *  (`soft: true`); `soft: false` marks the out-of-band permanent/compaction path. Content-free
  *  by design — only the id is recorded, never the erased text. */
 export interface EraseAudit {
@@ -35,8 +36,9 @@ export interface EraseAudit {
   soft: boolean; // true = tombstone-only (recoverable); false = physical compaction (right-to-erasure)
 }
 
-/** Verify audit (two-tier trust ladder): EVERY trust transition attempt (recheck / confirm) is
- *  recorded — including rejected and contested outcomes — so a poisoned/erroneous promotion or a
+/** Verify audit (two-tier trust ladder): every trust transition attempt (recheck / confirm) is
+ *  recorded — including rejected and contested outcomes — best-effort (the fsync'd row is written
+ *  after the fsync'd transition; see appendAudit) — so a poisoned/erroneous promotion or a
  *  silently-dropped corroboration is detectable in audit.jsonl. Content-free by design: ids /
  *  enums / booleans ONLY, NEVER a matched span, file path, or check pattern. `outcome` is an INLINE
  *  shape (not firewall's VerifyOutcome) to keep audit decoupled from the check engine. */
@@ -53,8 +55,12 @@ export interface VerifyAudit {
 
 export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit;
 
-/** Append one audit event as a JSONL line. Creates parent dirs as needed. */
+/** Append one audit event as a JSONL line, fsync'd so a written row survives power loss. Creates
+ *  parent dirs as needed. Completeness is best-effort, NOT transactional: the row is appended AFTER
+ *  the action it records (the erase/verify, itself fsynced), so a crash in the narrow window between
+ *  the two can leave the action durable with its audit row absent. Durable-once-written. */
 export function appendAudit(path: string, event: AuditEvent): void {
   mkdirSync(dirname(path), { recursive: true });
-  appendFileSync(path, JSON.stringify(event) + '\n');
+  const fd = openSync(path, 'a');
+  try { writeSync(fd, JSON.stringify(event) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
 }
