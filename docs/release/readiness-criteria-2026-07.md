@@ -33,9 +33,17 @@ or prior-approved requirement; anything else is gold-plating and was deliberatel
   vanish is now an atomic renameSync (no intermediate state exists). Evidence: 0/12 failed
   full-suite runs under the previously reproducing condition (was 2/10).
   Blanket "N consecutive green suites" was considered and REJECTED as statistically weak.
-- **C2.2 Egress false-positive class.** Long hyphen-chains containing digits still trip the
-  entropy leg (fired twice on real governance filenames, most recently on this cycle's own
-  gate-decision filename). Fix the class, or ship in-product guidance on rewording.
+- **C2.2 Egress false-positive class (DONE 2026-07-22).** Long hyphen-chains containing digits
+  tripped the entropy leg (fired twice on real governance filenames, most recently on this
+  cycle's own gate-decision filename). Fixed as an EH-4-parallel gate-time exemption:
+  `entropyWordChain` — a separator-joined chain (≥2 segments over `-._/`) in which EVERY
+  segment is individually low-entropy (pure alpha; digits ≤4; word+digit-suffix ≤8) is
+  released on egress UNLESS a credential keyword sits in the same statement. One
+  disqualifying segment keeps the token in the net (anti-greedy); write-path redaction
+  unchanged; covert re-encoding is an explicit non-goal of this low-confidence net. TDD'd
+  (both real FP tokens pass; mixed-segment/interleave/digit-run/single-segment adversaries
+  still block; keyword guard locked) + mutation-verified (digit-cap loosening to {1,12}
+  turns its lock RED). LIVE only after the next plugin deploy.
 - **C2.3 Green at freeze.** Full suite + typecheck green at the v2 freeze commit; any
   readiness fix landing after the freeze resets the holdout window (gate-decision D3), so all
   fixes in this document precede the freeze.
