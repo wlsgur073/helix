@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, openSync, writeSync, closeSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 /** Outcome of a Helix-mediated Codex call. Only 'sent' carries prompt/response content. */
@@ -27,13 +27,14 @@ export const MAX_ENTRIES = 1000;
  */
 export function appendCodexLog(path: string, entry: CodexLogEntry): void {
   try {
-    const fresh = !existsSync(path);
     mkdirSync(dirname(path), { recursive: true });
-    appendFileSync(path, JSON.stringify(entry) + '\n');
-    if (fresh) {
-      try { chmodSync(path, 0o600); } catch { /* best-effort on Windows */ }
-    }
-    // Soft retention cap (best-effort; a rare two-session race only momentarily over/undershoots).
+    // Create owner-only AT OPEN TIME (the mode applies when the file is created), so the exact
+    // prompt/response bytes are never briefly group/world-readable and a crash before a separate
+    // chmod can never leave them that way permanently.
+    const fd = openSync(path, 'a', 0o600);
+    try { writeSync(fd, JSON.stringify(entry) + '\n'); } finally { closeSync(fd); }
+    // Soft retention cap (best-effort; an unlocked read-modify-write — a rare two-session race can
+    // momentarily over/undershoot the cap). The rewrite preserves the existing 0o600 mode.
     const lines = readFileSync(path, 'utf8').split('\n').filter((l) => l !== '');
     if (lines.length > MAX_ENTRIES) {
       writeFileSync(path, lines.slice(lines.length - MAX_ENTRIES).join('\n') + '\n');

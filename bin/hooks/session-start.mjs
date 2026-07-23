@@ -1,5 +1,5 @@
 // src/hooks/session-start.ts
-import { writeSync as writeSync2 } from "node:fs";
+import { writeSync as writeSync3 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join6, resolve as resolve3 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -158,8 +158,8 @@ function formatSessionStartContext(records, nonce, opts = {}) {
 
 // src/memory/ownership.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync as readFileSync3, writeFileSync as writeFileSync2, renameSync, unlinkSync as unlinkSync2 } from "node:fs";
-import { join as join2, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync as readFileSync3, renameSync, unlinkSync as unlinkSync2, lstatSync as lstatSync2, openSync, writeSync, fsyncSync, closeSync } from "node:fs";
+import { join as join2, resolve, dirname as dirname2 } from "node:path";
 
 // src/memory/lock.ts
 import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from "node:fs";
@@ -448,27 +448,63 @@ function registryPath(home) {
 function ownerFile(projectRoot) {
   return join2(projectRoot, ".helix", ".owner");
 }
+function isPlainObject(x) {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+function isValidRegistry(x) {
+  if (!isPlainObject(x)) return false;
+  for (const v of Object.values(x)) {
+    if (!isPlainObject(v)) return false;
+    if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
+  }
+  return true;
+}
 function loadRegistry(home) {
+  const path = registryPath(home);
+  let st;
+  try {
+    st = lstatSync2(path);
+  } catch (e) {
+    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
+  }
+  if (st.isSymbolicLink()) return { kind: "corrupt" };
   let text;
   try {
-    text = readFileSync3(registryPath(home), "utf8");
-  } catch {
-    return { kind: "absent" };
-  }
-  try {
-    return { kind: "ok", reg: JSON.parse(text) };
+    text = readFileSync3(path, "utf8");
   } catch {
     return { kind: "corrupt" };
   }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { kind: "corrupt" };
+  }
+  if (!isValidRegistry(parsed)) return { kind: "corrupt" };
+  return { kind: "ok", reg: parsed };
 }
 function readRegistry(home) {
   const r = loadRegistry(home);
   return r.kind === "ok" ? r.reg : {};
 }
-function atomicWriteRegistry(home, reg) {
-  const path = registryPath(home);
+function assertNotSymlink(path, what) {
+  let st;
+  try {
+    st = lstatSync2(path);
+  } catch {
+    return;
+  }
+  if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
+}
+function atomicWriteFile(path, data, mode) {
   const tmp = `${path}.${randomBytes3(8).toString("hex")}.tmp`;
-  writeFileSync2(tmp, JSON.stringify(reg, null, 2));
+  const fd = openSync(tmp, "wx", mode);
+  try {
+    writeSync(fd, data);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   try {
     renameSync(tmp, path);
   } catch (e) {
@@ -478,6 +514,24 @@ function atomicWriteRegistry(home, reg) {
     }
     throw e;
   }
+  let dfd;
+  try {
+    dfd = openSync(dirname2(path), "r");
+    fsyncSync(dfd);
+  } catch {
+  } finally {
+    if (dfd !== void 0) {
+      try {
+        closeSync(dfd);
+      } catch {
+      }
+    }
+  }
+}
+function atomicWriteRegistry(home, reg) {
+  const path = registryPath(home);
+  assertNotSymlink(path, "registry");
+  atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
 }
 function readOwner(projectRoot) {
   try {
@@ -573,12 +627,12 @@ function classifyWitness(bytes, entry, journal) {
 // src/memory/witness-store.ts
 import { randomBytes as randomBytes5, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { mkdirSync as mkdirSync3, readFileSync as readFileSync5 } from "node:fs";
-import { dirname as dirname3, join as join4, resolve as resolve2 } from "node:path";
+import { dirname as dirname4, join as join4, resolve as resolve2 } from "node:path";
 
 // src/memory/ledger-mac.ts
 import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
-import { openSync, writeSync, fsyncSync, closeSync, readFileSync as readFileSync4, linkSync as linkSync2, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
-import { dirname as dirname2, join as join3 } from "node:path";
+import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync4, linkSync as linkSync2, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
+import { dirname as dirname3, join as join3 } from "node:path";
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 function digestContent(content) {
   return createHash2("sha256").update(Buffer.from(content, "utf8")).digest("hex");
@@ -951,7 +1005,7 @@ function verifiedLiveWitnessed(ledger, home, projectRoot) {
 
 // src/metrics.ts
 import { appendFileSync, mkdirSync as mkdirSync5 } from "node:fs";
-import { dirname as dirname4 } from "node:path";
+import { dirname as dirname5 } from "node:path";
 import { randomUUID } from "node:crypto";
 var noopMetricsSink = {
   emitReplay: () => {
@@ -963,7 +1017,7 @@ var noopMetricsSink = {
 function createMetricsSink(path, enabled, deps = {}) {
   if (!enabled) return noopMetricsSink;
   const append = deps.append ?? ((p, line) => {
-    mkdirSync5(dirname4(p), { recursive: true });
+    mkdirSync5(dirname5(p), { recursive: true });
     appendFileSync(p, line, { mode: 384 });
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
@@ -1130,7 +1184,7 @@ async function main() {
       witnessNotes,
       unionRows: unionPhysicalRows(replays)
     });
-    if (text !== "") writeSync2(1, text + "\n");
+    if (text !== "") writeSync3(1, text + "\n");
     const sink = createMetricsSink(join6(home, "metrics.jsonl"), metricsEnabledFromGlobalConfig(home));
     for (const rp of replays) {
       sink.emitReplay({

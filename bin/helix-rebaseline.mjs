@@ -1,7 +1,7 @@
 // scripts/rebaseline-cli.ts
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
-import { isAbsolute, dirname as dirname6, join as join6 } from "node:path";
+import { isAbsolute, dirname as dirname7, join as join6 } from "node:path";
 import { mkdirSync as mkdirSync4 } from "node:fs";
 
 // src/memory/lock.ts
@@ -668,7 +668,7 @@ function readLedgerBytes(path) {
 }
 
 // src/memory/ownership.ts
-import { join as join5, resolve as resolve2 } from "node:path";
+import { join as join5, resolve as resolve2, dirname as dirname6 } from "node:path";
 function projectLedgerPath(projectRoot) {
   return join5(projectRoot, ".helix", "memory.jsonl");
 }
@@ -726,7 +726,7 @@ async function main(argv, deps = {}) {
     const home = resolveHome(env);
     const ledger = scope === "global" ? resolveGlobalLedger(env, home) : projectLedgerPath(scope);
     const scopeKey = scope === "global" ? scopeKeyOf(home) : scopeKeyOf(home, scope);
-    mkdirSync4(dirname6(ledger), { recursive: true });
+    mkdirSync4(dirname7(ledger), { recursive: true });
     const code = await withFileLockAsync(ledger, async () => {
       const displayedBytes = readLedgerBytes(ledger);
       const displayedHash = sha256Hex(displayedBytes);

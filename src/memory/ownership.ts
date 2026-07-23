@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
+import { join, resolve, dirname } from 'node:path';
 import { withFileLock } from './lock.js';
 
 /** The in-repo project ledger path for a project root. */
@@ -21,12 +21,40 @@ function ownerFile(projectRoot: string): string { return join(projectRoot, '.hel
  *  (present but unparseable — must NOT be silently overwritten, or a torn concurrent write would
  *  cost every prior adoption's nonce). Read-only callers collapse both non-ok cases to {}. */
 type RegistryRead = { kind: 'ok'; reg: Registry } | { kind: 'absent' } | { kind: 'corrupt' };
+
+function isPlainObject(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null && !Array.isArray(x);
+}
+/** Runtime shape gate: a registry MUST be a plain object whose every entry has string stamp/
+ *  adoptedAt/macNonce. Valid JSON is not enough — an array accepts `reg['@global']=…` and then
+ *  serializes back to `[]`, dropping the nonce (so every read re-mints a different one); `null`/a
+ *  primitive makes lock-free readers throw. Anything off-shape is treated as corrupt (fail closed). */
+function isValidRegistry(x: unknown): x is Registry {
+  if (!isPlainObject(x)) return false;
+  for (const v of Object.values(x)) {
+    if (!isPlainObject(v)) return false;
+    if (typeof v.stamp !== 'string' || typeof v.adoptedAt !== 'string' || typeof v.macNonce !== 'string') return false;
+  }
+  return true;
+}
+
 function loadRegistry(home: string): RegistryRead {
+  const path = registryPath(home);
+  let st;
+  // Only a genuinely MISSING file (ENOENT) is "first use" and safe to mint into. Any other lstat
+  // failure means the registry is PRESENT but unreadable — minting over it would overwrite live
+  // nonces and drive compaction to delete genuine verifies, so fail closed.
+  try { st = lstatSync(path); }
+  catch (e) { return (e as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'absent' } : { kind: 'corrupt' }; }
+  if (st.isSymbolicLink()) return { kind: 'corrupt' }; // never FOLLOW a symlinked registry (lock-split)
   let text: string;
-  try { text = readFileSync(registryPath(home), 'utf8'); }
-  catch { return { kind: 'absent' }; } // ENOENT / unreadable -> treat as first use
-  try { return { kind: 'ok', reg: JSON.parse(text) as Registry }; }
-  catch { return { kind: 'corrupt' }; } // present but malformed -> caller decides (never clobber)
+  try { text = readFileSync(path, 'utf8'); }
+  catch { return { kind: 'corrupt' }; } // present but unreadable (EISDIR / EACCES / I/O error)
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); }
+  catch { return { kind: 'corrupt' }; } // present but not JSON
+  if (!isValidRegistry(parsed)) return { kind: 'corrupt' }; // valid JSON, wrong shape
+  return { kind: 'ok', reg: parsed };
 }
 
 function readRegistry(home: string): Registry {
@@ -34,15 +62,37 @@ function readRegistry(home: string): Registry {
   return r.kind === 'ok' ? r.reg : {}; // read-only callers fail-closed to empty (not owned / null nonce)
 }
 
-/** Atomic registry publish (tmp + rename on the same filesystem). Lock-free readers (isOwned,
- *  scopeNonce) therefore see EITHER the old registry OR the new one, never a torn in-place write —
- *  which, unhandled, would corrupt-read and (via globalScopeNonce's mint) overwrite live nonces. */
-function atomicWriteRegistry(home: string, reg: Registry): void {
-  const path = registryPath(home);
+function assertNotSymlink(path: string, what: string): void {
+  let st;
+  try { st = lstatSync(path); } catch { return; } // absent/unreadable -> nothing to reject here
+  if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
+}
+
+/** Atomic, crash-durable, symlink-safe write: create a fresh tmp with owner-only mode (never briefly
+ *  world-readable), fsync it, rename over the destination — which REPLACES a symlink at the name
+ *  rather than following it, so a hostile `.owner -> arbitrary-file` symlink cannot redirect a write —
+ *  then fsync the directory so the rename survives power loss. Lock-free readers therefore see EITHER
+ *  the old file OR the new one, never a torn write. */
+function atomicWriteFile(path: string, data: string, mode: number): void {
   const tmp = `${path}.${randomBytes(8).toString('hex')}.tmp`;
-  writeFileSync(tmp, JSON.stringify(reg, null, 2));
+  const fd = openSync(tmp, 'wx', mode);
+  try { writeSync(fd, data); fsyncSync(fd); } finally { closeSync(fd); }
   try { renameSync(tmp, path); }
   catch (e) { try { unlinkSync(tmp); } catch { /* orphan tmp — harmless */ } throw e; }
+  let dfd: number | undefined;
+  try { dfd = openSync(dirname(path), 'r'); fsyncSync(dfd); }
+  catch { /* directory fsync is best-effort (not all platforms permit it) */ }
+  finally { if (dfd !== undefined) { try { closeSync(dfd); } catch { /* ignore */ } } }
+}
+
+function atomicWriteRegistry(home: string, reg: Registry): void {
+  const path = registryPath(home);
+  assertNotSymlink(path, 'registry'); // a symlinked registry would split the file lock across processes
+  atomicWriteFile(path, JSON.stringify(reg, null, 2), 0o600);
+}
+
+function atomicWriteOwner(projectRoot: string, stamp: string): void {
+  atomicWriteFile(ownerFile(projectRoot), stamp, 0o600);
 }
 
 function readOwner(projectRoot: string): string | null {
@@ -119,7 +169,7 @@ export function stampOwnership(
     const macNonce = existing?.macNonce ?? gen();
     const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => new Date().toISOString()))();
     mkdirSync(join(projectRoot, '.helix'), { recursive: true });
-    writeFileSync(ownerFile(projectRoot), stamp);
+    atomicWriteOwner(projectRoot, stamp); // rename-based: never follows a symlinked .owner
     reg[key] = { stamp, adoptedAt, macNonce };
     atomicWriteRegistry(home, reg);
   });

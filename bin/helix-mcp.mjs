@@ -6888,7 +6888,7 @@ var require_dist = __commonJS({
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
 import { join as join10, resolve as resolve3 } from "node:path";
-import { existsSync as existsSync7 } from "node:fs";
+import { existsSync as existsSync6 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -13014,7 +13014,7 @@ var StdioServerTransport = class {
 // src/memory/store.ts
 import { randomUUID } from "node:crypto";
 import { existsSync as existsSync3, readFileSync as readFileSync9, statSync as statSync4 } from "node:fs";
-import { dirname as dirname7 } from "node:path";
+import { dirname as dirname8 } from "node:path";
 
 // src/memory/ledger.ts
 import { readFileSync as readFileSync5, mkdirSync as mkdirSync3, statSync as statSync2 } from "node:fs";
@@ -14797,8 +14797,8 @@ function frameAsData(scoped, nonce) {
 
 // src/memory/ownership.ts
 import { randomBytes as randomBytes6 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync as mkdirSync5, readFileSync as readFileSync8, writeFileSync as writeFileSync2, renameSync as renameSync2, unlinkSync as unlinkSync4 } from "node:fs";
-import { join as join5, resolve as resolve2 } from "node:path";
+import { existsSync as existsSync2, mkdirSync as mkdirSync5, readFileSync as readFileSync8, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync2, openSync as openSync3, writeSync as writeSync3, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
+import { join as join5, resolve as resolve2, dirname as dirname7 } from "node:path";
 var GLOBAL_KEY = "@global";
 function registryPath(home2) {
   return join5(home2, "projects.json");
@@ -14806,27 +14806,63 @@ function registryPath(home2) {
 function ownerFile(projectRoot2) {
   return join5(projectRoot2, ".helix", ".owner");
 }
+function isPlainObject2(x) {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+function isValidRegistry(x) {
+  if (!isPlainObject2(x)) return false;
+  for (const v of Object.values(x)) {
+    if (!isPlainObject2(v)) return false;
+    if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
+  }
+  return true;
+}
 function loadRegistry(home2) {
+  const path = registryPath(home2);
+  let st;
+  try {
+    st = lstatSync2(path);
+  } catch (e) {
+    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
+  }
+  if (st.isSymbolicLink()) return { kind: "corrupt" };
   let text;
   try {
-    text = readFileSync8(registryPath(home2), "utf8");
-  } catch {
-    return { kind: "absent" };
-  }
-  try {
-    return { kind: "ok", reg: JSON.parse(text) };
+    text = readFileSync8(path, "utf8");
   } catch {
     return { kind: "corrupt" };
   }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { kind: "corrupt" };
+  }
+  if (!isValidRegistry(parsed)) return { kind: "corrupt" };
+  return { kind: "ok", reg: parsed };
 }
 function readRegistry(home2) {
   const r = loadRegistry(home2);
   return r.kind === "ok" ? r.reg : {};
 }
-function atomicWriteRegistry(home2, reg) {
-  const path = registryPath(home2);
+function assertNotSymlink(path, what) {
+  let st;
+  try {
+    st = lstatSync2(path);
+  } catch {
+    return;
+  }
+  if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
+}
+function atomicWriteFile(path, data, mode) {
   const tmp = `${path}.${randomBytes6(8).toString("hex")}.tmp`;
-  writeFileSync2(tmp, JSON.stringify(reg, null, 2));
+  const fd = openSync3(tmp, "wx", mode);
+  try {
+    writeSync3(fd, data);
+    fsyncSync3(fd);
+  } finally {
+    closeSync3(fd);
+  }
   try {
     renameSync2(tmp, path);
   } catch (e) {
@@ -14836,6 +14872,27 @@ function atomicWriteRegistry(home2, reg) {
     }
     throw e;
   }
+  let dfd;
+  try {
+    dfd = openSync3(dirname7(path), "r");
+    fsyncSync3(dfd);
+  } catch {
+  } finally {
+    if (dfd !== void 0) {
+      try {
+        closeSync3(dfd);
+      } catch {
+      }
+    }
+  }
+}
+function atomicWriteRegistry(home2, reg) {
+  const path = registryPath(home2);
+  assertNotSymlink(path, "registry");
+  atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
+}
+function atomicWriteOwner(projectRoot2, stamp) {
+  atomicWriteFile(ownerFile(projectRoot2), stamp, 384);
 }
 function readOwner(projectRoot2) {
   try {
@@ -14869,7 +14926,7 @@ function stampOwnership(projectRoot2, home2, opts = {}) {
     const macNonce = existing?.macNonce ?? gen();
     const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
     mkdirSync5(join5(projectRoot2, ".helix"), { recursive: true });
-    writeFileSync2(ownerFile(projectRoot2), stamp);
+    atomicWriteOwner(projectRoot2, stamp);
     reg[key] = { stamp, adoptedAt, macNonce };
     atomicWriteRegistry(home2, reg);
   });
@@ -15059,7 +15116,7 @@ var MemoryStore = class {
   }
   /** Where the ledger-MAC master key + scope-nonce registry live (defaults next to the global ledger). */
   homeDir() {
-    return this.opts.home ?? dirname7(this.global);
+    return this.opts.home ?? dirname8(this.global);
   }
   /** Which scope (project root, or undefined for global) a ledger path belongs to. */
   scopeRootOf(ledger) {
@@ -15741,7 +15798,7 @@ var MemoryStore = class {
     if (p && isOwned(p.root, p.home)) scopes.push({ ledger: p.ledger, root: p.root });
     const home2 = this.homeDir();
     for (const s of scopes) {
-      if (!existsSync3(dirname7(s.ledger))) continue;
+      if (!existsSync3(dirname8(s.ledger))) continue;
       const scopeKey = scopeKeyOf(home2, s.root);
       try {
         withFileLock(s.ledger, () => {
@@ -22271,7 +22328,7 @@ var Protocol = class {
     };
   }
 };
-function isPlainObject2(value) {
+function isPlainObject3(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function mergeCapabilities(base, additional) {
@@ -22282,7 +22339,7 @@ function mergeCapabilities(base, additional) {
     if (addValue === void 0)
       continue;
     const baseValue = result[k];
-    if (isPlainObject2(baseValue) && isPlainObject2(addValue)) {
+    if (isPlainObject3(baseValue) && isPlainObject3(addValue)) {
       result[k] = { ...baseValue, ...addValue };
     } else {
       result[k] = addValue;
@@ -24317,9 +24374,9 @@ async function dualVerify(params, deps) {
 
 // src/audit.ts
 import { appendFileSync, mkdirSync as mkdirSync6 } from "node:fs";
-import { dirname as dirname8 } from "node:path";
+import { dirname as dirname9 } from "node:path";
 function appendAudit(path, event) {
-  mkdirSync6(dirname8(path), { recursive: true });
+  mkdirSync6(dirname9(path), { recursive: true });
   appendFileSync(path, JSON.stringify(event) + "\n");
 }
 
@@ -24327,23 +24384,21 @@ function appendAudit(path, event) {
 import { readFileSync as readFileSync12 } from "node:fs";
 
 // src/codex-log.ts
-import { appendFileSync as appendFileSync2, chmodSync as chmodSync2, existsSync as existsSync4, mkdirSync as mkdirSync7, readFileSync as readFileSync11, writeFileSync as writeFileSync3 } from "node:fs";
-import { dirname as dirname9 } from "node:path";
+import { mkdirSync as mkdirSync7, readFileSync as readFileSync11, writeFileSync as writeFileSync2, openSync as openSync4, writeSync as writeSync4, closeSync as closeSync4 } from "node:fs";
+import { dirname as dirname10 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
   try {
-    const fresh = !existsSync4(path);
-    mkdirSync7(dirname9(path), { recursive: true });
-    appendFileSync2(path, JSON.stringify(entry) + "\n");
-    if (fresh) {
-      try {
-        chmodSync2(path, 384);
-      } catch {
-      }
+    mkdirSync7(dirname10(path), { recursive: true });
+    const fd = openSync4(path, "a", 384);
+    try {
+      writeSync4(fd, JSON.stringify(entry) + "\n");
+    } finally {
+      closeSync4(fd);
     }
     const lines = readFileSync11(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
-      writeFileSync3(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
+      writeFileSync2(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
   } catch {
   }
@@ -24637,13 +24692,13 @@ async function handleDualVerify(args, deps) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync6, mkdirSync as mkdirSync8, mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync5, mkdirSync as mkdirSync8, mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join8, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync5, readdirSync as readdirSync3, lstatSync as lstatSync2, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync4, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join7 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
@@ -24659,7 +24714,7 @@ function shouldSweep(stampMtimeMs, nowMs, intervalMs) {
 }
 function sweepScratchRoot(root, nowMs = Date.now()) {
   try {
-    if (!existsSync5(root)) return;
+    if (!existsSync4(root)) return;
     const stampPath = join7(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
@@ -24672,7 +24727,7 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     for (const d of readdirSync3(root, { withFileTypes: true })) {
       if (!d.name.startsWith(SCRATCH_PREFIX)) continue;
       try {
-        const st = lstatSync2(join7(root, d.name));
+        const st = lstatSync3(join7(root, d.name));
         entries.push({ name: d.name, isDir: st.isDirectory(), mtimeMs: st.mtimeMs });
       } catch {
       }
@@ -24684,7 +24739,7 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
       }
     }
     try {
-      writeFileSync4(stampPath, "");
+      writeFileSync3(stampPath, "");
     } catch {
     }
   } catch {
@@ -24733,7 +24788,7 @@ async function resolveCodexInvocation() {
   let inv = null;
   try {
     const { stdout } = await execFileAsync("where", ["codex"], { timeout: 1e4 });
-    inv = interpretWhereOutput("win32", stdout ?? "", existsSync6);
+    inv = interpretWhereOutput("win32", stdout ?? "", existsSync5);
   } catch {
     inv = null;
   }
@@ -24900,8 +24955,8 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
 var realCodexRunner = createCodexRunner();
 
 // src/metrics.ts
-import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync9 } from "node:fs";
-import { dirname as dirname11 } from "node:path";
+import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync9 } from "node:fs";
+import { dirname as dirname12 } from "node:path";
 import { randomUUID as randomUUID2 } from "node:crypto";
 var noopMetricsSink = {
   emitReplay: () => {
@@ -24913,8 +24968,8 @@ var noopMetricsSink = {
 function createMetricsSink(path, enabled, deps = {}) {
   if (!enabled) return noopMetricsSink;
   const append = deps.append ?? ((p, line) => {
-    mkdirSync9(dirname11(p), { recursive: true });
-    appendFileSync3(p, line, { mode: 384 });
+    mkdirSync9(dirname12(p), { recursive: true });
+    appendFileSync2(p, line, { mode: 384 });
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const genId = deps.genId ?? (() => `o_${randomUUID2()}`);
@@ -25125,7 +25180,7 @@ var home = process.env.HELIX_HOME ?? join10(homedir3(), ".helix");
 var globalLedger = process.env.HELIX_LEDGER ?? join10(home, "memory.jsonl");
 var projectRoot = process.cwd();
 var projectLedger = join10(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync7(join10(projectRoot, ".helix")) && resolve3(projectLedger) !== resolve3(globalLedger);
+var projectActive = existsSync6(join10(projectRoot, ".helix")) && resolve3(projectLedger) !== resolve3(globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
 var config2 = loadConfig({ globalPath: join10(home, "config.json") });
 var metrics = createMetricsSink(join10(home, "metrics.jsonl"), config2.metrics.enabled);

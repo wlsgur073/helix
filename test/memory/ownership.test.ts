@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { isOwned, stampOwnership, projectLedgerPath, scopeNonce, globalScopeNonce } from '../../src/memory/ownership.js';
@@ -68,6 +68,68 @@ describe('ownership macNonce (project-binding salt)', () => {
     const { home } = dirs();
     const a = globalScopeNonce(home);
     expect(globalScopeNonce(home)).toBe(a);
+  });
+});
+
+describe('adoption is symlink-safe (F5/F7)', () => {
+  it('a symlinked .owner is NOT followed — adoption never overwrites the symlink target', () => {
+    const { home, proj } = dirs();
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    const victim = join(home, 'victim.txt');
+    mkdirSync(home, { recursive: true });
+    writeFileSync(victim, 'ORIGINAL-SECRET');
+    symlinkSync(victim, join(proj, '.helix', '.owner')); // hostile: .owner -> arbitrary file
+    stampOwnership(proj, home);
+    expect(readFileSync(victim, 'utf8')).toBe('ORIGINAL-SECRET'); // untouched
+    expect(lstatSync(join(proj, '.helix', '.owner')).isSymbolicLink()).toBe(false); // replaced by a real file
+    expect(isOwned(proj, home)).toBe(true); // adoption still succeeded
+  });
+
+  it('refuses to write through a symlinked registry (projects.json is a symlink)', () => {
+    const { home, proj } = dirs();
+    mkdirSync(home, { recursive: true });
+    const real = join(home, 'real-registry.json');
+    writeFileSync(real, '{}');
+    symlinkSync(real, join(home, 'projects.json')); // a symlinked registry splits the file lock
+    expect(() => stampOwnership(proj, home)).toThrow(/symlink|registry/i);
+  });
+});
+
+describe('registry robustness — unreadable + malformed (F1/F2)', () => {
+  const reg = (home: string) => join(home, 'projects.json');
+
+  it('a present-but-UNREADABLE registry (EISDIR, not ENOENT) is not treated as absent — globalScopeNonce fails closed', () => {
+    const { home } = dirs();
+    mkdirSync(reg(home)); // reading a directory throws EISDIR -> unreadable, must NOT mint over it
+    expect(globalScopeNonce(home)).toBeNull();
+  });
+
+  it('a present-but-unreadable registry makes stampOwnership fail closed (no clobber)', () => {
+    const { home, proj } = dirs();
+    mkdirSync(reg(home));
+    expect(() => stampOwnership(proj, home)).toThrow(/registry/i);
+  });
+
+  it('a truly ABSENT (ENOENT) registry still mints a first nonce', () => {
+    const { home } = dirs(); // no projects.json at all
+    expect(globalScopeNonce(home)).toMatch(/^[0-9a-f]+$/);
+  });
+
+  it('valid-JSON but non-object registries ([], null, string, number) are corrupt: never mint, never throw on read', () => {
+    for (const bad of ['[]', 'null', '"x"', '42']) {
+      const { home, proj } = dirs();
+      writeFileSync(reg(home), bad);
+      expect(globalScopeNonce(home), `mint on ${bad}`).toBeNull();      // never mints into a non-object
+      expect(() => isOwned(proj, home), `isOwned on ${bad}`).not.toThrow(); // null[key] must not throw
+      expect(isOwned(proj, home)).toBe(false);
+      expect(scopeNonce(proj, home)).toBeNull();
+    }
+  });
+
+  it('an entry with a non-string macNonce is treated as corrupt (stampOwnership fails closed)', () => {
+    const { home, proj } = dirs();
+    writeFileSync(reg(home), JSON.stringify({ [resolve(proj)]: { stamp: 'x', adoptedAt: 't', macNonce: 123 } }));
+    expect(() => stampOwnership(proj, home)).toThrow(/registry/i);
   });
 });
 

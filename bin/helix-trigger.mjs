@@ -1,6 +1,6 @@
 // scripts/trigger-measure.ts
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3 } from "node:fs";
-import { dirname, join as join3, resolve as resolve2 } from "node:path";
+import { dirname as dirname2, join as join3, resolve as resolve2 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // src/memory/fs-ops.ts
@@ -43,8 +43,8 @@ function writeAll(fs, fd, text) {
 }
 
 // src/memory/ownership.ts
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync as renameSync2, unlinkSync as unlinkSync2 } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync as renameSync2, unlinkSync as unlinkSync2, lstatSync, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
+import { join, resolve, dirname } from "node:path";
 function projectLedgerPath(projectRoot) {
   return join(projectRoot, ".helix", "memory.jsonl");
 }
@@ -54,18 +54,40 @@ function registryPath(home) {
 function ownerFile(projectRoot) {
   return join(projectRoot, ".helix", ".owner");
 }
+function isPlainObject(x) {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+function isValidRegistry(x) {
+  if (!isPlainObject(x)) return false;
+  for (const v of Object.values(x)) {
+    if (!isPlainObject(v)) return false;
+    if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
+  }
+  return true;
+}
 function loadRegistry(home) {
+  const path = registryPath(home);
+  let st;
+  try {
+    st = lstatSync(path);
+  } catch (e) {
+    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
+  }
+  if (st.isSymbolicLink()) return { kind: "corrupt" };
   let text;
   try {
-    text = readFileSync(registryPath(home), "utf8");
-  } catch {
-    return { kind: "absent" };
-  }
-  try {
-    return { kind: "ok", reg: JSON.parse(text) };
+    text = readFileSync(path, "utf8");
   } catch {
     return { kind: "corrupt" };
   }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { kind: "corrupt" };
+  }
+  if (!isValidRegistry(parsed)) return { kind: "corrupt" };
+  return { kind: "ok", reg: parsed };
 }
 function readRegistry(home) {
   const r = loadRegistry(home);
@@ -385,7 +407,7 @@ function validateRecordLine(line) {
 }
 function appendToSink(home, line, fs = realFsOps) {
   const path = join3(home, SINK_FILE);
-  mkdirSync2(dirname(path), { recursive: true });
+  mkdirSync2(dirname2(path), { recursive: true });
   const existedBefore = existsSync2(path);
   const fd = fs.openSync(path, "a", 384);
   try {
@@ -394,7 +416,7 @@ function appendToSink(home, line, fs = realFsOps) {
   } finally {
     fs.closeSync(fd);
   }
-  if (!existedBefore) fs.fsyncDir(dirname(path));
+  if (!existedBefore) fs.fsyncDir(dirname2(path));
 }
 function measureAndRecord(input, deps = {}) {
   const env = deps.env ?? process.env;
