@@ -84,10 +84,15 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   note; and the supported-scale statement (correctness at daily dogfood scale + frozen pilot
   corpus; latency benchmark-characterized, cold ≈150 ms near ~3.3k union rows; ≥~2,500 union
   rows outside the v0.1 envelope — pairs with the C4.10 advisory).
-- **C4.10 Local scale advisory (NEW — decided 2026-07-22, owner decision Q2).** Ship a local,
-  content-free advisory before the v2 freeze: when union ledger rows cross a soft threshold
-  (below the Stage-1 build trigger), surface a one-line session-start note. No telemetry —
-  the advisory is computed and shown on the user's machine only.
+- **C4.10 Local scale advisory (DONE 2026-07-22; decided same day, owner decision Q2).**
+  Implemented at SCALE_ADVISORY_ROWS = 2,000 union physical rows (80% of the Stage-1 build
+  trigger; the count is the sum of the same per-scope rows the replay sensor emits, so the
+  advisory and the real trigger measure the same quantity). One content-free line rides the
+  SessionStart trailer — outside the quarantined frame, outside the char budget, rendered even
+  when the record set is empty (a fat all-superseded ledger is exactly the signal). No
+  telemetry: computed and shown locally. TDD'd (boundary 2000/1999, empty-frame, saturation
+  survival, wiring helper) + verified end-to-end by spawning the rebuilt bundle on a
+  2,100-row fixture ledger. LIVE only after the next plugin deploy (deploy-runbook.md).
 
 ## 5. Evidence & protocol (v2 scheduling per gate-decision D2/D3)
 

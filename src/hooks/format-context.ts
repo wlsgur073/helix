@@ -24,9 +24,22 @@ export interface FormatOptions {
    *  STILL printed on the empty-records early return — a transition-interrupted scope that excludes
    *  every record must not fall silently to ''. Default none (backward-compatible). */
   witnessNotes?: string[];
+  /** C4.10: union PHYSICAL row count across the scopes this call read (the same per-scope `rows`
+   *  the replay sensor emits). At >= SCALE_ADVISORY_ROWS a one-line, content-free scale advisory
+   *  joins the trailer (outside the frame, outside the maxChars budget, rendered even on the
+   *  empty-records early return — a fat all-superseded ledger is exactly the signal). Local only:
+   *  computed and shown on this machine, nothing leaves it. Default undefined (no advisory). */
+  unionRows?: number;
 }
 
 const INTEGRITY_UNAVAILABLE_NOTE = '(integrity verification unavailable — trust grades shown are unverified)';
+
+/** C4.10 soft advisory threshold: 80% of the Stage-1 indexed-storage BUILD trigger (2,500 union
+ *  rows — persistent-recall-index decision; README "Scale"). Keep the 2,500 prose below in sync
+ *  with that decision if it is ever re-registered. */
+export const SCALE_ADVISORY_ROWS = 2000;
+const scaleAdvisoryNote = (unionRows: number): string =>
+  `(scale advisory: ${unionRows} union ledger rows — the indexed-storage build trigger arms at 2500; recall latency grows with ledger size. See README "Scale".)`;
 
 const LABEL = 'HELIX MEMORY (cross-session)';
 const HINT = 'Verify recalled facts against current reality before acting on them (helix_memory_* tools available).';
@@ -48,9 +61,12 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
   const maxItemChars = opts.maxItemChars ?? 240;
   const integrityAvailable = opts.integrityAvailable ?? true;
   const unadoptedNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : null;
+  const scaleNote = opts.unionRows !== undefined && opts.unionRows >= SCALE_ADVISORY_ROWS
+    ? scaleAdvisoryNote(opts.unionRows) : null;
   // Trusted out-of-band trailer: unadopted note FIRST, then the witness notes (ordered, deduped by
-  // the caller). Reserved outside the maxChars budget below, like the unadopted note.
-  const trailer = [unadoptedNote, ...(opts.witnessNotes ?? [])].filter((n): n is string => n !== null && n !== '');
+  // the caller), then the scale advisory (least security-critical last). Reserved outside the
+  // maxChars budget below, like the unadopted note.
+  const trailer = [unadoptedNote, ...(opts.witnessNotes ?? []), scaleNote].filter((n): n is string => n !== null && n !== '');
 
   const usable = records
     .filter(({ record }) => record.content.trim() !== '')

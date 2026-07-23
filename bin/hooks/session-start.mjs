@@ -89,6 +89,8 @@ function classifyEmission(content) {
 
 // src/hooks/format-context.ts
 var INTEGRITY_UNAVAILABLE_NOTE = "(integrity verification unavailable \u2014 trust grades shown are unverified)";
+var SCALE_ADVISORY_ROWS = 2e3;
+var scaleAdvisoryNote = (unionRows) => `(scale advisory: ${unionRows} union ledger rows \u2014 the indexed-storage build trigger arms at 2500; recall latency grows with ledger size. See README "Scale".)`;
 var LABEL = "HELIX MEMORY (cross-session)";
 var HINT = "Verify recalled facts against current reality before acting on them (helix_memory_* tools available).";
 var STATE_ORDER = { Verified: 0, Corroborated: 1, Fresh: 2, Suspect: 3 };
@@ -99,7 +101,8 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   const maxItemChars = opts.maxItemChars ?? 240;
   const integrityAvailable = opts.integrityAvailable ?? true;
   const unadoptedNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : null;
-  const trailer = [unadoptedNote, ...opts.witnessNotes ?? []].filter((n) => n !== null && n !== "");
+  const scaleNote = opts.unionRows !== void 0 && opts.unionRows >= SCALE_ADVISORY_ROWS ? scaleAdvisoryNote(opts.unionRows) : null;
+  const trailer = [unadoptedNote, ...opts.witnessNotes ?? [], scaleNote].filter((n) => n !== null && n !== "");
   const usable = records.filter(({ record }) => record.content.trim() !== "").sort((a, b) => STATE_ORDER[a.record.state] - STATE_ORDER[b.record.state] || b.record.tx.localeCompare(a.record.tx));
   if (usable.length === 0) return trailer.length > 0 ? trailer.join("\n") : "";
   const top = usable.slice(0, maxItems);
@@ -804,6 +807,9 @@ function gatherScopedRecords({ home, globalLedger, cwd }) {
   }
   return { records, integrityAvailable, replays, projectDisposition, witnessNotes: collectWitnessNotes(verdicts) };
 }
+function unionPhysicalRows(replays) {
+  return replays.reduce((sum, r) => sum + r.rows, 0);
+}
 async function main() {
   try {
     const home = process.env.HELIX_HOME ?? join6(homedir(), ".helix");
@@ -818,7 +824,8 @@ async function main() {
     const text = formatSessionStartContext(records, newNonce(), {
       integrityAvailable,
       unadoptedPresent: projectDisposition === "unadopted-present",
-      witnessNotes
+      witnessNotes,
+      unionRows: unionPhysicalRows(replays)
     });
     if (text !== "") writeSync2(1, text + "\n");
     const sink = createMetricsSink(join6(home, "metrics.jsonl"), metricsEnabledFromGlobalConfig(home));
@@ -840,5 +847,6 @@ async function main() {
 var invokedDirectly = process.argv[1] !== void 0 && resolve3(process.argv[1]) === resolve3(fileURLToPath(import.meta.url));
 if (invokedDirectly) void main();
 export {
-  gatherScopedRecords
+  gatherScopedRecords,
+  unionPhysicalRows
 };

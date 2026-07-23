@@ -105,6 +105,13 @@ export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): G
   return { records, integrityAvailable, replays, projectDisposition, witnessNotes: collectWitnessNotes(verdicts) };
 }
 
+/** C4.10: union PHYSICAL rows across the scopes a gather read — the sum of the same per-scope
+ *  `rows` the replay sensor emits, i.e. the Stage-1 trigger's union-physical-rows quantity. Pure;
+ *  main() feeds it to the renderer's scale advisory. */
+export function unionPhysicalRows(replays: ReadonlyArray<{ rows: number }>): number {
+  return replays.reduce((sum, r) => sum + r.rows, 0);
+}
+
 async function main(): Promise<void> {
   try {
     const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
@@ -119,6 +126,7 @@ async function main(): Promise<void> {
     const { records, integrityAvailable, replays, projectDisposition, witnessNotes } = gatherScopedRecords({ home, globalLedger, cwd });
     const text = formatSessionStartContext(records, newNonce(), {
       integrityAvailable, unadoptedPresent: projectDisposition === 'unadopted-present', witnessNotes,
+      unionRows: unionPhysicalRows(replays),
     });
     // Synchronous write to fd 1: process exit must not drop a buffered async pipe write on
     // Windows (which would inject an unterminated DATA block). No explicit exit() needed —
