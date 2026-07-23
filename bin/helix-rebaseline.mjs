@@ -290,7 +290,7 @@ function readdirSyncSafe(dir) {
 
 // src/memory/ledger.ts
 import { readFileSync as readFileSync5, mkdirSync as mkdirSync3, statSync as statSync2 } from "node:fs";
-import { dirname as dirname5 } from "node:path";
+import { dirname as dirname6 } from "node:path";
 
 // src/memory/fs-ops.ts
 import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, renameSync, unlinkSync as unlinkSync2, linkSync as linkSync2, fchmodSync, readdirSync as readdirSync2 } from "node:fs";
@@ -378,17 +378,30 @@ function fenceId(epoch, nonce) {
 // src/memory/witness-store.ts
 import { randomBytes as randomBytes3, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { mkdirSync as mkdirSync2, readFileSync as readFileSync4 } from "node:fs";
-import { dirname as dirname4, join as join4, resolve } from "node:path";
+import { dirname as dirname5, join as join5 } from "node:path";
+
+// src/memory/ownership.ts
+import { join as join3, resolve, dirname as dirname3 } from "node:path";
+function canonicalRoot(projectRoot) {
+  try {
+    return canonical(projectRoot);
+  } catch {
+    return resolve(projectRoot);
+  }
+}
+function projectLedgerPath(projectRoot) {
+  return join3(projectRoot, ".helix", "memory.jsonl");
+}
 
 // src/memory/ledger-mac.ts
 import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
 import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync } from "node:fs";
-import { dirname as dirname3, join as join3 } from "node:path";
+import { dirname as dirname4, join as join4 } from "node:path";
 var LedgerMacError = class extends Error {
 };
 var MASTER_LEN = 32;
 function masterPath(home) {
-  return join3(home, "ledger-mac-master.key");
+  return join4(home, "ledger-mac-master.key");
 }
 function ensureMaster(home) {
   const path = masterPath(home);
@@ -422,7 +435,7 @@ function ensureMaster(home) {
       } catch {
       }
     }
-    fsyncDir(dirname3(path));
+    fsyncDir(dirname4(path));
     if (published) return key;
     const winner = tryReadMasterStrict(path);
     if (!winner) throw new LedgerMacError("master key vanished during concurrent mint");
@@ -452,13 +465,13 @@ var NULL_FIELD = Buffer.from([0, 0, 0, 0, 0]);
 
 // src/memory/witness-store.ts
 function witnessPath(home) {
-  return join4(home, "witness.json");
+  return join5(home, "witness.json");
 }
 function witnessLogPath(home) {
-  return join4(home, "witness-log.jsonl");
+  return join5(home, "witness-log.jsonl");
 }
 function scopeKeyOf(home, projectRoot) {
-  return projectRoot === void 0 ? "@global" : resolve(projectRoot);
+  return projectRoot === void 0 ? "@global" : canonicalRoot(projectRoot);
 }
 var WitnessAdvanceError = class extends Error {
 };
@@ -496,7 +509,7 @@ function readStoreFileAt(path) {
   }
 }
 function writeStoreFileAt(path, store, fsOps = realFsOps) {
-  const dir = dirname4(path);
+  const dir = dirname5(path);
   const tmp = `${path}.w-${randomBytes3(16).toString("hex")}.tmp`;
   sweepOrphanTmps(path, { fsOps, keep: tmp });
   const fd = fsOps.openSync(tmp, "wx");
@@ -638,7 +651,7 @@ function witnessFenceRecord(epoch, nonce, tx) {
   };
 }
 function appendRecordUnlocked(rawPath, record, fsOps = realFsOps) {
-  mkdirSync3(dirname5(rawPath), { recursive: true });
+  mkdirSync3(dirname6(rawPath), { recursive: true });
   const path = canonical(rawPath);
   sweepOrphanTmps(path, { fsOps });
   const fd = fsOps.openSync(path, "a+");
@@ -656,7 +669,7 @@ function appendRecordUnlocked(rawPath, record, fsOps = realFsOps) {
   } finally {
     fsOps.closeSync(fd);
   }
-  fsOps.fsyncDir(dirname5(path));
+  fsOps.fsyncDir(dirname6(path));
 }
 function readLedgerBytes(path) {
   try {
@@ -665,12 +678,6 @@ function readLedgerBytes(path) {
     if (err.code === "ENOENT") return Buffer.alloc(0);
     throw err;
   }
-}
-
-// src/memory/ownership.ts
-import { join as join5, resolve as resolve2, dirname as dirname6 } from "node:path";
-function projectLedgerPath(projectRoot) {
-  return join5(projectRoot, ".helix", "memory.jsonl");
 }
 
 // scripts/rebaseline-cli.ts

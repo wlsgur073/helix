@@ -2980,7 +2980,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve4.call(this, root, ref);
+      let _sch = resolve2.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3007,7 +3007,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve4(root, ref) {
+    function resolve2(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3638,7 +3638,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve4(baseURI, relativeURI, options) {
+    function resolve2(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3896,7 +3896,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve4,
+      resolve: resolve2,
       resolveComponent,
       equal,
       serialize,
@@ -6887,7 +6887,7 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join10, resolve as resolve3 } from "node:path";
+import { join as join10 } from "node:path";
 import { existsSync as existsSync6 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
@@ -13000,12 +13000,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve4) => {
+    return new Promise((resolve2) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve4();
+        resolve2();
       } else {
-        this._stdout.once("drain", resolve4);
+        this._stdout.once("drain", resolve2);
       }
     });
   }
@@ -13017,9 +13017,9 @@ import { existsSync as existsSync3, readFileSync as readFileSync9, statSync as s
 import { dirname as dirname8 } from "node:path";
 
 // src/memory/ledger.ts
-import { readFileSync as readFileSync5, mkdirSync as mkdirSync3, statSync as statSync2 } from "node:fs";
-import { randomBytes as randomBytes4 } from "node:crypto";
-import { dirname as dirname5 } from "node:path";
+import { readFileSync as readFileSync6, mkdirSync as mkdirSync4, statSync as statSync2 } from "node:fs";
+import { randomBytes as randomBytes5 } from "node:crypto";
+import { dirname as dirname6 } from "node:path";
 
 // src/memory/firewall.ts
 var VERIFYING_SOURCES = /* @__PURE__ */ new Set(["user", "reality-check"]);
@@ -13701,14 +13701,188 @@ function fenceId(epoch, nonce) {
 }
 
 // src/memory/witness-store.ts
-import { randomBytes as randomBytes3, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { mkdirSync as mkdirSync2, readFileSync as readFileSync4 } from "node:fs";
-import { dirname as dirname4, join as join4, resolve } from "node:path";
+import { randomBytes as randomBytes4, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync5 } from "node:fs";
+import { dirname as dirname5, join as join5 } from "node:path";
+
+// src/memory/ownership.ts
+import { randomBytes as randomBytes2 } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync2, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
+import { join as join3, resolve, dirname as dirname3 } from "node:path";
+function canonicalRoot(projectRoot2) {
+  try {
+    return canonical(projectRoot2);
+  } catch {
+    return resolve(projectRoot2);
+  }
+}
+var GLOBAL_KEY = "@global";
+function registryPath(home2) {
+  return join3(home2, "projects.json");
+}
+function ownerFile(projectRoot2) {
+  return join3(projectRoot2, ".helix", ".owner");
+}
+function isPlainObject2(x) {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+function isValidRegistry(x) {
+  if (!isPlainObject2(x)) return false;
+  for (const v of Object.values(x)) {
+    if (!isPlainObject2(v)) return false;
+    if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
+  }
+  return true;
+}
+function loadRegistry(home2) {
+  const path = registryPath(home2);
+  let st;
+  try {
+    st = lstatSync2(path);
+  } catch (e) {
+    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
+  }
+  if (st.isSymbolicLink()) return { kind: "corrupt" };
+  let text;
+  try {
+    text = readFileSync3(path, "utf8");
+  } catch {
+    return { kind: "corrupt" };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { kind: "corrupt" };
+  }
+  if (!isValidRegistry(parsed)) return { kind: "corrupt" };
+  return { kind: "ok", reg: parsed };
+}
+function readRegistry(home2) {
+  const r = loadRegistry(home2);
+  return r.kind === "ok" ? r.reg : {};
+}
+function assertNotSymlink(path, what) {
+  let st;
+  try {
+    st = lstatSync2(path);
+  } catch {
+    return;
+  }
+  if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
+}
+function atomicWriteFile(path, data, mode) {
+  const tmp = `${path}.${randomBytes2(8).toString("hex")}.tmp`;
+  const fd = openSync2(tmp, "wx", mode);
+  try {
+    writeSync2(fd, data);
+    fsyncSync2(fd);
+  } finally {
+    closeSync2(fd);
+  }
+  try {
+    renameSync2(tmp, path);
+  } catch (e) {
+    try {
+      unlinkSync3(tmp);
+    } catch {
+    }
+    throw e;
+  }
+  let dfd;
+  try {
+    dfd = openSync2(dirname3(path), "r");
+    fsyncSync2(dfd);
+  } catch {
+  } finally {
+    if (dfd !== void 0) {
+      try {
+        closeSync2(dfd);
+      } catch {
+      }
+    }
+  }
+}
+function atomicWriteRegistry(home2, reg) {
+  const path = registryPath(home2);
+  assertNotSymlink(path, "registry");
+  atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
+}
+function atomicWriteOwner(projectRoot2, stamp) {
+  atomicWriteFile(ownerFile(projectRoot2), stamp, 384);
+}
+function readOwner(projectRoot2) {
+  try {
+    return readFileSync3(ownerFile(projectRoot2), "utf8").trim();
+  } catch {
+    return null;
+  }
+}
+function isOwned(projectRoot2, home2) {
+  const entry = readRegistry(home2)[canonicalRoot(projectRoot2)];
+  if (!entry) return false;
+  const stamp = readOwner(projectRoot2);
+  return stamp !== null && stamp === entry.stamp;
+}
+function projectDispositionOf(project2) {
+  if (!project2) return "inactive";
+  if (isOwned(project2.root, project2.home)) return "owned";
+  return existsSync(project2.ledger) ? "unadopted-present" : "inactive";
+}
+function stampOwnership(projectRoot2, home2, opts = {}) {
+  const gen = opts.genStamp ?? (() => randomBytes2(16).toString("hex"));
+  const key = canonicalRoot(projectRoot2);
+  mkdirSync(home2, { recursive: true });
+  withFileLock(registryPath(home2), () => {
+    const loaded = loadRegistry(home2);
+    if (loaded.kind === "corrupt")
+      throw new Error(`stampOwnership: registry at ${registryPath(home2)} is present but unparseable \u2014 restore it before adopting (refusing to overwrite and lose other projects)`);
+    const reg = loaded.kind === "ok" ? loaded.reg : {};
+    const existing = reg[key];
+    if (opts.autoAdoptLedger && !existing && existsSync(opts.autoAdoptLedger))
+      throw new Error("commit: a project memory file appeared here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it");
+    if (existing && readOwner(projectRoot2) !== existing.stamp)
+      throw new Error(`stampOwnership: ${key} has a registry entry but its .owner does not match \u2014 resolve the ambiguity (a foreign repo at a reused path vs a lost owner) before adopting`);
+    const stamp = existing?.stamp ?? gen();
+    const macNonce = existing?.macNonce ?? gen();
+    const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
+    mkdirSync(join3(projectRoot2, ".helix"), { recursive: true });
+    atomicWriteOwner(projectRoot2, stamp);
+    reg[key] = { stamp, adoptedAt, macNonce };
+    atomicWriteRegistry(home2, reg);
+  });
+}
+function scopeNonce(projectRoot2, home2) {
+  const entry = readRegistry(home2)[canonicalRoot(projectRoot2)];
+  return entry?.macNonce ?? null;
+}
+function globalScopeNonce(home2) {
+  const r = loadRegistry(home2);
+  if (r.kind === "corrupt") return null;
+  const fast = r.kind === "ok" ? r.reg[GLOBAL_KEY]?.macNonce : void 0;
+  if (fast) return fast;
+  mkdirSync(home2, { recursive: true });
+  try {
+    return withFileLock(registryPath(home2), () => {
+      const r2 = loadRegistry(home2);
+      if (r2.kind === "corrupt") return null;
+      const reg = r2.kind === "ok" ? r2.reg : {};
+      const existing = reg[GLOBAL_KEY]?.macNonce;
+      if (existing) return existing;
+      const macNonce = randomBytes2(16).toString("hex");
+      reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
+      atomicWriteRegistry(home2, reg);
+      return macNonce;
+    });
+  } catch {
+    return null;
+  }
+}
 
 // src/memory/ledger-mac.ts
-import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync } from "node:fs";
-import { dirname as dirname3, join as join3 } from "node:path";
+import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
+import { openSync as openSync3, writeSync as writeSync3, fsyncSync as fsyncSync3, closeSync as closeSync3, readFileSync as readFileSync4, linkSync as linkSync3, unlinkSync as unlinkSync4, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
+import { dirname as dirname4, join as join4 } from "node:path";
 var MAC_VERSION = 2;
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 function digestContent(content) {
@@ -13718,27 +13892,27 @@ var LedgerMacError = class extends Error {
 };
 var MASTER_LEN = 32;
 function masterPath(home2) {
-  return join3(home2, "ledger-mac-master.key");
+  return join4(home2, "ledger-mac-master.key");
 }
 function ensureMaster(home2) {
   const path = masterPath(home2);
   const existing = tryReadMasterStrict(path);
   if (existing) return existing;
-  mkdirSync(home2, { recursive: true });
+  mkdirSync2(home2, { recursive: true });
   return withFileLock(path, () => {
     const again = tryReadMasterStrict(path);
     if (again) return again;
     sweepOrphanTmps(path, {});
-    const key = randomBytes2(MASTER_LEN);
-    const tmp = `${path}.k-${randomBytes2(16).toString("hex")}.tmp`;
-    const fd = openSync2(tmp, "wx", 384);
+    const key = randomBytes3(MASTER_LEN);
+    const tmp = `${path}.k-${randomBytes3(16).toString("hex")}.tmp`;
+    const fd = openSync3(tmp, "wx", 384);
     let published = false;
     try {
       try {
-        writeSync2(fd, key);
-        fsyncSync2(fd);
+        writeSync3(fd, key);
+        fsyncSync3(fd);
       } finally {
-        closeSync2(fd);
+        closeSync3(fd);
       }
       try {
         linkSync3(tmp, path);
@@ -13748,11 +13922,11 @@ function ensureMaster(home2) {
       }
     } finally {
       try {
-        unlinkSync3(tmp);
+        unlinkSync4(tmp);
       } catch {
       }
     }
-    fsyncDir(dirname3(path));
+    fsyncDir(dirname4(path));
     if (published) return key;
     const winner = tryReadMasterStrict(path);
     if (!winner) throw new LedgerMacError("master key vanished during concurrent mint");
@@ -13762,7 +13936,7 @@ function ensureMaster(home2) {
 function tryReadMasterStrict(path) {
   let buf;
   try {
-    buf = readFileSync3(path);
+    buf = readFileSync4(path);
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -13842,13 +14016,13 @@ function verifyVerify(record2, subkey) {
 
 // src/memory/witness-store.ts
 function witnessPath(home2) {
-  return join4(home2, "witness.json");
+  return join5(home2, "witness.json");
 }
 function witnessLogPath(home2) {
-  return join4(home2, "witness-log.jsonl");
+  return join5(home2, "witness-log.jsonl");
 }
 function scopeKeyOf(home2, projectRoot2) {
-  return projectRoot2 === void 0 ? "@global" : resolve(projectRoot2);
+  return projectRoot2 === void 0 ? "@global" : canonicalRoot(projectRoot2);
 }
 var WitnessAdvanceError = class extends Error {
 };
@@ -13886,15 +14060,15 @@ function signedJournal(scopeKey, master, unsigned) {
 }
 function readStoreFileAt(path) {
   try {
-    const parsed = JSON.parse(readFileSync4(path, "utf8"));
+    const parsed = JSON.parse(readFileSync5(path, "utf8"));
     return { v: 1, scopes: parsed.scopes ?? {} };
   } catch {
     return { v: 1, scopes: {} };
   }
 }
 function writeStoreFileAt(path, store2, fsOps = realFsOps) {
-  const dir = dirname4(path);
-  const tmp = `${path}.w-${randomBytes3(16).toString("hex")}.tmp`;
+  const dir = dirname5(path);
+  const tmp = `${path}.w-${randomBytes4(16).toString("hex")}.tmp`;
   sweepOrphanTmps(path, { fsOps, keep: tmp });
   const fd = fsOps.openSync(tmp, "wx");
   try {
@@ -13950,7 +14124,7 @@ function appendWitnessLogLine(home2, line, fsOps) {
   }
 }
 function advanceWitness(home2, scopeKey, bytes, headTx, fsOps = realFsOps) {
-  mkdirSync2(home2, { recursive: true });
+  mkdirSync3(home2, { recursive: true });
   const master = ensureMaster(home2);
   const rawPath = witnessPath(home2);
   withFileLock(rawPath, () => {
@@ -13975,13 +14149,13 @@ function planTransition(home2, scopeKey, kind) {
   const entry = state.macInvalid ? null : state.entry;
   const pending = state.macInvalid ? null : state.journal;
   const epoch = Math.max((entry?.epoch ?? 0) + 1, pending ? pending.epoch + 1 : 0);
-  const nonce = randomBytes3(16).toString("hex");
+  const nonce = randomBytes4(16).toString("hex");
   const predecessor = entry ? { byteLength: entry.byteLength, prefixHash: entry.prefixHash } : null;
   const supersedes = pending?.nonce ?? null;
   return { epoch, nonce, predecessor, supersedes };
 }
 function openTransition(home2, scopeKey, plan, fsOps = realFsOps) {
-  mkdirSync2(home2, { recursive: true });
+  mkdirSync3(home2, { recursive: true });
   const master = ensureMaster(home2);
   const rawPath = witnessPath(home2);
   return withFileLock(rawPath, () => {
@@ -14013,7 +14187,7 @@ function openTransition(home2, scopeKey, plan, fsOps = realFsOps) {
   });
 }
 function completeTransition(home2, scopeKey, bytes, headTx, fsOps = realFsOps) {
-  mkdirSync2(home2, { recursive: true });
+  mkdirSync3(home2, { recursive: true });
   const master = ensureMaster(home2);
   const rawPath = witnessPath(home2);
   withFileLock(rawPath, () => {
@@ -14075,7 +14249,7 @@ function witnessFenceRecord(epoch, nonce, tx) {
   };
 }
 function appendRecordUnlocked(rawPath, record2, fsOps = realFsOps) {
-  mkdirSync3(dirname5(rawPath), { recursive: true });
+  mkdirSync4(dirname6(rawPath), { recursive: true });
   const path = canonical(rawPath);
   sweepOrphanTmps(path, { fsOps });
   const fd = fsOps.openSync(path, "a+");
@@ -14093,7 +14267,7 @@ function appendRecordUnlocked(rawPath, record2, fsOps = realFsOps) {
   } finally {
     fsOps.closeSync(fd);
   }
-  fsOps.fsyncDir(dirname5(path));
+  fsOps.fsyncDir(dirname6(path));
 }
 var MAX_PARSE_DEPTH = 64;
 function withinDepth(v, max) {
@@ -14136,7 +14310,7 @@ function parseLedgerText(text) {
 function parseLedger(path) {
   let text;
   try {
-    text = readFileSync5(path, "utf8");
+    text = readFileSync6(path, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") return [];
     throw err;
@@ -14145,7 +14319,7 @@ function parseLedger(path) {
 }
 function readLedgerBytes(path) {
   try {
-    return readFileSync5(path);
+    return readFileSync6(path);
   } catch (err) {
     if (err.code === "ENOENT") return Buffer.alloc(0);
     throw err;
@@ -14154,7 +14328,7 @@ function readLedgerBytes(path) {
 function readLedgerRaw(path) {
   let bytes;
   try {
-    bytes = readFileSync5(path);
+    bytes = readFileSync6(path);
   } catch (err) {
     if (err.code === "ENOENT") return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
     throw err;
@@ -14207,7 +14381,7 @@ function compactLedger(rawPath, opts) {
   return withFileLock(rawPath, (ctx) => {
     const path = canonical(rawPath);
     assertSingleLink(path);
-    const tmp = `${path}.c-${randomBytes4(16).toString("hex")}.tmp`;
+    const tmp = `${path}.c-${randomBytes5(16).toString("hex")}.tmp`;
     sweepOrphanTmps(path, { fsOps, keep: tmp });
     const fd = fsOps.openSync(tmp, "wx");
     let closed = false;
@@ -14254,7 +14428,7 @@ function compactLedger(rawPath, opts) {
       assertSingleLink(path);
       if (!ctx.stillOwned()) throw new Error("compactLedger: lock lost before rename");
       fsOps.renameSync(tmp, path);
-      fsOps.fsyncDir(dirname5(path));
+      fsOps.fsyncDir(dirname6(path));
       if (w && fenceTx !== null) {
         completeTransition(w.home, w.scopeKey, readLedgerBytes(path), fenceTx);
       }
@@ -14292,8 +14466,8 @@ function modeOf(path) {
 }
 
 // src/memory/witness-write.ts
-import { dirname as dirname6 } from "node:path";
-import { mkdirSync as mkdirSync4 } from "node:fs";
+import { dirname as dirname7 } from "node:path";
+import { mkdirSync as mkdirSync5 } from "node:fs";
 function appendWitnessedUnlocked(ledger, record2, home2, projectRoot2, op) {
   const key = scopeKeyOf(home2, projectRoot2);
   const bytes = readLedgerBytes(ledger);
@@ -14317,7 +14491,7 @@ function appendWitnessedUnlocked(ledger, record2, home2, projectRoot2, op) {
   }
 }
 function appendWitnessed(ledger, record2, home2, projectRoot2, op) {
-  mkdirSync4(dirname6(ledger), { recursive: true });
+  mkdirSync5(dirname7(ledger), { recursive: true });
   withFileLock(ledger, () => appendWitnessedUnlocked(ledger, record2, home2, projectRoot2, op));
 }
 
@@ -14632,7 +14806,7 @@ function redactSecrets(content, spans) {
 }
 
 // src/memory/reality-check.ts
-import { existsSync, readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
+import { existsSync as existsSync2, readFileSync as readFileSync7, statSync as statSync3 } from "node:fs";
 var INDETERMINATE = { ran: false, indeterminate: true, passed: false };
 var MAX_FILE_BYTES = 5e6;
 function runRealityCheck(check2) {
@@ -14640,13 +14814,13 @@ function runRealityCheck(check2) {
     switch (check2.kind) {
       case "file-exists": {
         if (typeof check2.path !== "string") return INDETERMINATE;
-        return { ran: true, indeterminate: false, passed: existsSync(check2.path) };
+        return { ran: true, indeterminate: false, passed: existsSync2(check2.path) };
       }
       case "file-contains": {
         if (typeof check2.path !== "string" || typeof check2.pattern !== "string") return INDETERMINATE;
-        if (!existsSync(check2.path)) return INDETERMINATE;
+        if (!existsSync2(check2.path)) return INDETERMINATE;
         if (statSync3(check2.path).size > MAX_FILE_BYTES) return INDETERMINATE;
-        const text = readFileSync6(check2.path, "utf8");
+        const text = readFileSync7(check2.path, "utf8");
         return { ran: true, indeterminate: false, passed: text.includes(check2.pattern) };
       }
       default:
@@ -14666,7 +14840,7 @@ function checkBinding(content, check2) {
 }
 
 // src/memory/expansion.ts
-import { readFileSync as readFileSync7 } from "node:fs";
+import { readFileSync as readFileSync8 } from "node:fs";
 import { fileURLToPath } from "node:url";
 var EXP_THETA = 0.5;
 var EXP_K = 8;
@@ -14698,7 +14872,7 @@ function defaultExpansion() {
   let txt;
   for (const u of candidates) {
     try {
-      txt = readFileSync7(fileURLToPath(u), "utf8");
+      txt = readFileSync8(fileURLToPath(u), "utf8");
       break;
     } catch {
     }
@@ -14725,9 +14899,9 @@ function requiresReverifyBeforeUse(item) {
 }
 
 // src/memory/content-frame.ts
-import { randomBytes as randomBytes5 } from "node:crypto";
+import { randomBytes as randomBytes6 } from "node:crypto";
 function newNonce() {
-  return randomBytes5(16).toString("hex");
+  return randomBytes6(16).toString("hex");
 }
 var FENCE_RUN = /[=\-~`*_‐‑‒–—―−─-╿]{3,}/gu;
 function breakFenceRuns(s) {
@@ -14793,169 +14967,6 @@ function frameAsData(scoped, nonce) {
     nonce,
     lines: scoped.map(({ record: record2, scope }) => ({ text: record2.content, mark: `DATA[${record2.state}:${scope}]| ` }))
   });
-}
-
-// src/memory/ownership.ts
-import { randomBytes as randomBytes6 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync as mkdirSync5, readFileSync as readFileSync8, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync2, openSync as openSync3, writeSync as writeSync3, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
-import { join as join5, resolve as resolve2, dirname as dirname7 } from "node:path";
-var GLOBAL_KEY = "@global";
-function registryPath(home2) {
-  return join5(home2, "projects.json");
-}
-function ownerFile(projectRoot2) {
-  return join5(projectRoot2, ".helix", ".owner");
-}
-function isPlainObject2(x) {
-  return typeof x === "object" && x !== null && !Array.isArray(x);
-}
-function isValidRegistry(x) {
-  if (!isPlainObject2(x)) return false;
-  for (const v of Object.values(x)) {
-    if (!isPlainObject2(v)) return false;
-    if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
-  }
-  return true;
-}
-function loadRegistry(home2) {
-  const path = registryPath(home2);
-  let st;
-  try {
-    st = lstatSync2(path);
-  } catch (e) {
-    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
-  }
-  if (st.isSymbolicLink()) return { kind: "corrupt" };
-  let text;
-  try {
-    text = readFileSync8(path, "utf8");
-  } catch {
-    return { kind: "corrupt" };
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { kind: "corrupt" };
-  }
-  if (!isValidRegistry(parsed)) return { kind: "corrupt" };
-  return { kind: "ok", reg: parsed };
-}
-function readRegistry(home2) {
-  const r = loadRegistry(home2);
-  return r.kind === "ok" ? r.reg : {};
-}
-function assertNotSymlink(path, what) {
-  let st;
-  try {
-    st = lstatSync2(path);
-  } catch {
-    return;
-  }
-  if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
-}
-function atomicWriteFile(path, data, mode) {
-  const tmp = `${path}.${randomBytes6(8).toString("hex")}.tmp`;
-  const fd = openSync3(tmp, "wx", mode);
-  try {
-    writeSync3(fd, data);
-    fsyncSync3(fd);
-  } finally {
-    closeSync3(fd);
-  }
-  try {
-    renameSync2(tmp, path);
-  } catch (e) {
-    try {
-      unlinkSync4(tmp);
-    } catch {
-    }
-    throw e;
-  }
-  let dfd;
-  try {
-    dfd = openSync3(dirname7(path), "r");
-    fsyncSync3(dfd);
-  } catch {
-  } finally {
-    if (dfd !== void 0) {
-      try {
-        closeSync3(dfd);
-      } catch {
-      }
-    }
-  }
-}
-function atomicWriteRegistry(home2, reg) {
-  const path = registryPath(home2);
-  assertNotSymlink(path, "registry");
-  atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
-}
-function atomicWriteOwner(projectRoot2, stamp) {
-  atomicWriteFile(ownerFile(projectRoot2), stamp, 384);
-}
-function readOwner(projectRoot2) {
-  try {
-    return readFileSync8(ownerFile(projectRoot2), "utf8").trim();
-  } catch {
-    return null;
-  }
-}
-function isOwned(projectRoot2, home2) {
-  const entry = readRegistry(home2)[resolve2(projectRoot2)];
-  if (!entry) return false;
-  const stamp = readOwner(projectRoot2);
-  return stamp !== null && stamp === entry.stamp;
-}
-function projectDispositionOf(project2) {
-  if (!project2) return "inactive";
-  if (isOwned(project2.root, project2.home)) return "owned";
-  return existsSync2(project2.ledger) ? "unadopted-present" : "inactive";
-}
-function stampOwnership(projectRoot2, home2, opts = {}) {
-  const gen = opts.genStamp ?? (() => randomBytes6(16).toString("hex"));
-  const key = resolve2(projectRoot2);
-  mkdirSync5(home2, { recursive: true });
-  withFileLock(registryPath(home2), () => {
-    const loaded = loadRegistry(home2);
-    if (loaded.kind === "corrupt")
-      throw new Error(`stampOwnership: registry at ${registryPath(home2)} is present but unparseable \u2014 restore it before adopting (refusing to overwrite and lose other projects)`);
-    const reg = loaded.kind === "ok" ? loaded.reg : {};
-    const existing = reg[key];
-    const stamp = existing?.stamp ?? gen();
-    const macNonce = existing?.macNonce ?? gen();
-    const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
-    mkdirSync5(join5(projectRoot2, ".helix"), { recursive: true });
-    atomicWriteOwner(projectRoot2, stamp);
-    reg[key] = { stamp, adoptedAt, macNonce };
-    atomicWriteRegistry(home2, reg);
-  });
-}
-function scopeNonce(projectRoot2, home2) {
-  const entry = readRegistry(home2)[resolve2(projectRoot2)];
-  return entry?.macNonce ?? null;
-}
-function globalScopeNonce(home2) {
-  const r = loadRegistry(home2);
-  if (r.kind === "corrupt") return null;
-  const fast = r.kind === "ok" ? r.reg[GLOBAL_KEY]?.macNonce : void 0;
-  if (fast) return fast;
-  mkdirSync5(home2, { recursive: true });
-  try {
-    return withFileLock(registryPath(home2), () => {
-      const r2 = loadRegistry(home2);
-      if (r2.kind === "corrupt") return null;
-      const reg = r2.kind === "ok" ? r2.reg : {};
-      const existing = reg[GLOBAL_KEY]?.macNonce;
-      if (existing) return existing;
-      const macNonce = randomBytes6(16).toString("hex");
-      reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
-      atomicWriteRegistry(home2, reg);
-      return macNonce;
-    });
-  } catch {
-    return null;
-  }
 }
 
 // src/memory/witness-read.ts
@@ -15241,7 +15252,7 @@ var MemoryStore = class {
           "commit: a project memory file exists here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it"
         );
       }
-      stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
+      stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });
     }
     return p.ledger;
   }
@@ -21894,7 +21905,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+        await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -21911,7 +21922,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve2, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -21989,7 +22000,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve4(parseResult.data);
+            resolve2(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -22250,12 +22261,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve2, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve4, interval);
+      const timeoutId = setTimeout(resolve2, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -23355,7 +23366,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+      await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -24796,7 +24807,7 @@ async function resolveCodexInvocation() {
   return inv;
 }
 function runCodex(inv, args, input, timeoutMs) {
-  return new Promise((resolve4, reject) => {
+  return new Promise((resolve2, reject) => {
     const child = spawn(inv.file, [...inv.argsPrefix, ...args], {
       stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"]
     });
@@ -24833,7 +24844,7 @@ function runCodex(inv, args, input, timeoutMs) {
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve4({ code, stdout, stderr });
+      resolve2({ code, stdout, stderr });
     });
     if (input !== null && child.stdin) {
       child.stdin.on("error", () => {
@@ -25180,7 +25191,7 @@ var home = process.env.HELIX_HOME ?? join10(homedir3(), ".helix");
 var globalLedger = process.env.HELIX_LEDGER ?? join10(home, "memory.jsonl");
 var projectRoot = process.cwd();
 var projectLedger = join10(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync6(join10(projectRoot, ".helix")) && resolve3(projectLedger) !== resolve3(globalLedger);
+var projectActive = existsSync6(join10(projectRoot, ".helix")) && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
 var config2 = loadConfig({ globalPath: join10(home, "config.json") });
 var metrics = createMetricsSink(join10(home, "metrics.jsonl"), config2.metrics.enabled);

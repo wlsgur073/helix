@@ -5,7 +5,8 @@
  *  re-derives its own view of the current disk state under its own lock acquisition. */
 import { randomBytes, createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
+import { canonicalRoot } from './ownership.js';
 import { withFileLock, canonical } from './lock.js';
 import { ensureMaster, tryReadMaster } from './ledger-mac.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
@@ -18,10 +19,12 @@ import {
 export function witnessPath(home: string): string { return join(home, 'witness.json'); }
 export function witnessLogPath(home: string): string { return join(home, 'witness-log.jsonl'); }
 
-/** Home-side scope identity — registry-key convention (ownership.ts:32): '@global' or the
- *  resolved absolute project root. NEVER the repo-side `.owner` stamp (adversary-writable). */
+/** Home-side scope identity — registry-key convention (ownership.canonicalRoot): '@global' or the
+ *  CANONICAL (symlink-resolved) absolute project root, so an aliased path can't split one physical
+ *  project into two witness scopes (must match ownership's nonce key exactly). NEVER the repo-side
+ *  `.owner` stamp (adversary-writable). */
 export function scopeKeyOf(home: string, projectRoot?: string): string {
-  return projectRoot === undefined ? '@global' : resolve(projectRoot);
+  return projectRoot === undefined ? '@global' : canonicalRoot(projectRoot);
 }
 
 export class WitnessAdvanceError extends Error {}

@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { MemoryStore } from '../memory/store.js';
 import { parseLedger } from '../memory/ledger.js';
 import { scanLegacyElevated } from '../memory/legacy-scan.js';
 import { subkeyForScope } from '../memory/verified-read.js';
+import { canonicalRoot } from '../memory/ownership.js';
 import { verifyVerify } from '../memory/ledger-mac.js';
 import { buildServer } from './helix-server.js';
 import { installSelfTermination } from './lifecycle.js';
@@ -24,7 +25,9 @@ const projectLedger = join(projectRoot, '.helix', 'memory.jsonl');
 // project layer) — so Helix never litters a non-Helix dir and a bare cwd stays global-only.
 // The cwd == ~ collision (project ledger == global ledger) also disables it.
 const projectActive = existsSync(join(projectRoot, '.helix'))
-  && resolve(projectLedger) !== resolve(globalLedger);
+  // realpath, not textual resolve: a symlinked .helix that points the project ledger AT the global
+  // ledger is ONE physical file — treat it as a collision and stay global-only.
+  && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
 const project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : undefined;
 
 // One config load drives both the store's metrics sink and the server deps. The real sink writes

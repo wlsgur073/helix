@@ -1,6 +1,6 @@
 // scripts/trigger-measure.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3 } from "node:fs";
-import { dirname as dirname2, join as join3, resolve as resolve2 } from "node:path";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync4 } from "node:fs";
+import { dirname as dirname3, join as join4, resolve as resolve2 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // src/memory/fs-ops.ts
@@ -43,16 +43,36 @@ function writeAll(fs, fd, text) {
 }
 
 // src/memory/ownership.ts
-import { existsSync, mkdirSync, readFileSync, renameSync as renameSync2, unlinkSync as unlinkSync2, lstatSync, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
-import { join, resolve, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync as readFileSync2, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync2, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
+import { join as join2, resolve, dirname as dirname2 } from "node:path";
+
+// src/memory/lock.ts
+import { readFileSync, writeFileSync, unlinkSync as unlinkSync2, linkSync as linkSync2, lstatSync, realpathSync, rmSync, readdirSync as readdirSync2 } from "node:fs";
+import { dirname, basename, join } from "node:path";
+function canonical(target) {
+  try {
+    return realpathSync(target);
+  } catch {
+    return join(realpathSync(dirname(target)), basename(target));
+  }
+}
+
+// src/memory/ownership.ts
+function canonicalRoot(projectRoot) {
+  try {
+    return canonical(projectRoot);
+  } catch {
+    return resolve(projectRoot);
+  }
+}
 function projectLedgerPath(projectRoot) {
-  return join(projectRoot, ".helix", "memory.jsonl");
+  return join2(projectRoot, ".helix", "memory.jsonl");
 }
 function registryPath(home) {
-  return join(home, "projects.json");
+  return join2(home, "projects.json");
 }
 function ownerFile(projectRoot) {
-  return join(projectRoot, ".helix", ".owner");
+  return join2(projectRoot, ".helix", ".owner");
 }
 function isPlainObject(x) {
   return typeof x === "object" && x !== null && !Array.isArray(x);
@@ -69,14 +89,14 @@ function loadRegistry(home) {
   const path = registryPath(home);
   let st;
   try {
-    st = lstatSync(path);
+    st = lstatSync2(path);
   } catch (e) {
     return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
   }
   if (st.isSymbolicLink()) return { kind: "corrupt" };
   let text;
   try {
-    text = readFileSync(path, "utf8");
+    text = readFileSync2(path, "utf8");
   } catch {
     return { kind: "corrupt" };
   }
@@ -95,22 +115,22 @@ function readRegistry(home) {
 }
 function readOwner(projectRoot) {
   try {
-    return readFileSync(ownerFile(projectRoot), "utf8").trim();
+    return readFileSync2(ownerFile(projectRoot), "utf8").trim();
   } catch {
     return null;
   }
 }
 function isOwned(projectRoot, home) {
-  const entry = readRegistry(home)[resolve(projectRoot)];
+  const entry = readRegistry(home)[canonicalRoot(projectRoot)];
   if (!entry) return false;
   const stamp = readOwner(projectRoot);
   return stamp !== null && stamp === entry.stamp;
 }
 
 // src/config.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readFileSync as readFileSync3 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
 var EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"];
 var MODES = ["compare", "critique"];
@@ -149,14 +169,14 @@ var DEFAULT_CONFIG = {
 };
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync2(path, "utf8"));
+    return JSON.parse(readFileSync3(path, "utf8"));
   } catch {
     return null;
   }
 }
 function loadConfig(opts = {}) {
-  const projectPath = opts.projectPath ?? join2(process.cwd(), ".helix", "config.json");
-  const globalPath = opts.globalPath ?? join2(homedir(), ".helix", "config.json");
+  const projectPath = opts.projectPath ?? join3(process.cwd(), ".helix", "config.json");
+  const globalPath = opts.globalPath ?? join3(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
   const seen = /* @__PURE__ */ new Set();
   const warn = (msg) => {
@@ -289,10 +309,10 @@ var METRICS_FILE = "metrics.jsonl";
 var CONFIG_FILE = "config.json";
 var GLOBAL_LEDGER_FILE = "memory.jsonl";
 function resolveHome(env) {
-  return env.HELIX_HOME ?? join3(homedir2(), ".helix");
+  return env.HELIX_HOME ?? join4(homedir2(), ".helix");
 }
 function resolveGlobalLedger(env, home) {
-  return env.HELIX_LEDGER ?? join3(home, GLOBAL_LEDGER_FILE);
+  return env.HELIX_LEDGER ?? join4(home, GLOBAL_LEDGER_FILE);
 }
 function readWholeFile(path, readFile) {
   let buf;
@@ -310,7 +330,7 @@ function toParticipant(id, outcome) {
   return outcome.state === "read" ? { id, state: "read", rows: outcome.rows, bytes: outcome.bytes } : { id, state: outcome.state };
 }
 function resolveProjectDisposition(root, home, globalLedger) {
-  if (!existsSync2(join3(root, ".helix"))) return "absent";
+  if (!existsSync2(join4(root, ".helix"))) return "absent";
   const distinctFromGlobal = resolve2(projectLedgerPath(root)) !== resolve2(globalLedger);
   return distinctFromGlobal && isOwned(root, home) ? "owned" : "unowned";
 }
@@ -355,7 +375,7 @@ function resolveMetrics(home, config, readFile) {
   if (config.metrics.enabled === false) return { state: "disabled", events: null };
   let buf;
   try {
-    buf = readFile(join3(home, METRICS_FILE));
+    buf = readFile(join4(home, METRICS_FILE));
   } catch (e) {
     const code = e?.code;
     return { state: code === "ENOENT" ? "absent" : "read-error", events: null };
@@ -406,8 +426,8 @@ function validateRecordLine(line) {
   return parsed;
 }
 function appendToSink(home, line, fs = realFsOps) {
-  const path = join3(home, SINK_FILE);
-  mkdirSync2(dirname2(path), { recursive: true });
+  const path = join4(home, SINK_FILE);
+  mkdirSync2(dirname3(path), { recursive: true });
   const existedBefore = existsSync2(path);
   const fd = fs.openSync(path, "a", 384);
   try {
@@ -416,18 +436,18 @@ function appendToSink(home, line, fs = realFsOps) {
   } finally {
     fs.closeSync(fd);
   }
-  if (!existedBefore) fs.fsyncDir(dirname2(path));
+  if (!existedBefore) fs.fsyncDir(dirname3(path));
 }
 function measureAndRecord(input, deps = {}) {
   const env = deps.env ?? process.env;
-  const readFile = deps.readFile ?? ((p) => readFileSync3(p));
+  const readFile = deps.readFile ?? ((p) => readFileSync4(p));
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const fsOps = deps.fs ?? realFsOps;
   const home = resolveHome(env);
   const globalLedger = resolveGlobalLedger(env, home);
   const disposition = resolveProjectDisposition(input.root, home, globalLedger);
   const participants = readTwoParticipants(globalLedger, input.root, home, disposition, readFile);
-  const config = loadConfig({ projectPath: join3(input.root, ".helix", CONFIG_FILE), globalPath: join3(home, CONFIG_FILE) });
+  const config = loadConfig({ projectPath: join4(input.root, ".helix", CONFIG_FILE), globalPath: join4(home, CONFIG_FILE) });
   const { state: metricsState, events } = resolveMetrics(home, config, readFile);
   const { unknownLines, unknownMaxOps } = summarizeUnknowns(events ?? []);
   const verdict = evaluateTrigger({ participants, metricsState, events });

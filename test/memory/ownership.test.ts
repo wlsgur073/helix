@@ -71,6 +71,62 @@ describe('ownership macNonce (project-binding salt)', () => {
   });
 });
 
+describe('auto-adopt TOCTOU guard (targetLedger)', () => {
+  it('refuses auto-adoption when a foreign ledger already exists at stamp time (re-checked under the lock)', () => {
+    const { home, proj } = dirs();
+    const ledger = join(proj, '.helix', 'memory.jsonl');
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    writeFileSync(ledger, '{"foreign":true}\n'); // a ledger Helix did not create
+    // auto-adopt (targetLedger's first-use path) must NOT silently adopt a foreign ledger that
+    // appeared in the check-then-stamp window.
+    expect(() => stampOwnership(proj, home, { autoAdoptLedger: ledger })).toThrow(/did not create|adopt/i);
+  });
+
+  it('auto-adopt still succeeds when no ledger exists (the normal first-use path)', () => {
+    const { home, proj } = dirs();
+    const ledger = join(proj, '.helix', 'memory.jsonl'); // does not exist
+    stampOwnership(proj, home, { autoAdoptLedger: ledger });
+    expect(isOwned(proj, home)).toBe(true);
+  });
+});
+
+describe('anti-laundering on a reused path — preserve only on .owner match (F6)', () => {
+  it('refuses to auto-restore the old stamp/nonce when the .owner no longer matches (foreign repo at a reused path)', () => {
+    const { home, proj } = dirs();
+    stampOwnership(proj, home);
+    // a foreign repo now sits at the same path: its .owner does not match the registry entry
+    writeFileSync(join(proj, '.helix', '.owner'), 'FOREIGN-STAMP');
+    expect(() => stampOwnership(proj, home)).toThrow(/owner|ambigu|resolve/i);
+  });
+
+  it('still preserves stamp+nonce for a genuine idempotent re-adopt (.owner matches)', () => {
+    const { home, proj } = dirs();
+    stampOwnership(proj, home);
+    const n1 = scopeNonce(proj, home);
+    stampOwnership(proj, home); // .owner still matches the entry -> preserve
+    expect(scopeNonce(proj, home)).toBe(n1);
+    expect(isOwned(proj, home)).toBe(true);
+  });
+});
+
+describe('project identity is canonical — path aliases map to one nonce (F4)', () => {
+  it('adopting the same physical project via a symlink alias reuses ONE nonce, not two', () => {
+    const { home } = dirs();
+    const realProj = mkdtempSync(join(tmpdir(), 'helix-realproj-'));
+    const aliasParent = mkdtempSync(join(tmpdir(), 'helix-alias-'));
+    const aliasProj = join(aliasParent, 'link');
+    symlinkSync(realProj, aliasProj); // aliasProj resolves to the SAME physical directory as realProj
+    stampOwnership(realProj, home);
+    const n1 = scopeNonce(realProj, home);
+    stampOwnership(aliasProj, home); // adopting via the alias must NOT mint a second nonce
+    expect(scopeNonce(aliasProj, home)).toBe(n1);
+    expect(scopeNonce(realProj, home)).toBe(n1);
+    expect(isOwned(aliasProj, home)).toBe(true);
+    const reg = JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8'));
+    expect(Object.keys(reg).filter((k) => k !== '@global')).toHaveLength(1); // one physical project -> one entry
+  });
+});
+
 describe('adoption is symlink-safe (F5/F7)', () => {
   it('a symlinked .owner is NOT followed — adoption never overwrites the symlink target', () => {
     const { home, proj } = dirs();

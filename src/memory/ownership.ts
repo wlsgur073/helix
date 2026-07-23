@@ -1,7 +1,16 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
-import { withFileLock } from './lock.js';
+import { withFileLock, canonical } from './lock.js';
+
+/** Canonical (symlink-resolved) project key so two path spellings of ONE physical project — a symlink,
+ *  a case alias — map to a SINGLE registry entry and nonce, matching the realpath-based ledger lock.
+ *  Falls back to textual resolve only when neither the root nor its parent exists (never throws, so
+ *  the disposition snapshot stays pure). On a normal (unsymlinked) path realpath === resolve, so
+ *  existing resolve-keyed entries keep their key — no migration. */
+export function canonicalRoot(projectRoot: string): string {
+  try { return canonical(projectRoot); } catch { return resolve(projectRoot); }
+}
 
 /** The in-repo project ledger path for a project root. */
 export function projectLedgerPath(projectRoot: string): string {
@@ -103,7 +112,7 @@ function readOwner(projectRoot: string): string | null {
 /** Owned iff the home registry has an entry for this absolute path whose stamp equals the
  *  repo-side .owner file. The registry lives in the user's home, so a cloned repo cannot forge it. */
 export function isOwned(projectRoot: string, home: string): boolean {
-  const entry = readRegistry(home)[resolve(projectRoot)];
+  const entry = readRegistry(home)[canonicalRoot(projectRoot)];
   if (!entry) return false;
   const stamp = readOwner(projectRoot);
   return stamp !== null && stamp === entry.stamp;
@@ -141,10 +150,10 @@ export function projectDispositionOf(
 export function stampOwnership(
   projectRoot: string,
   home: string,
-  opts: { now?: () => string; genStamp?: () => string } = {},
+  opts: { now?: () => string; genStamp?: () => string; autoAdoptLedger?: string } = {},
 ): void {
   const gen = opts.genStamp ?? (() => randomBytes(16).toString('hex'));
-  const key = resolve(projectRoot);
+  const key = canonicalRoot(projectRoot);
   mkdirSync(home, { recursive: true }); // the registry lock file needs `home` to exist first
   // Serialize every registry writer across concurrent sessions and publish atomically. Both the
   // .owner and the registry entry are written INSIDE the one lock, so they cannot mismatch and a
@@ -157,11 +166,23 @@ export function stampOwnership(
       throw new Error(`stampOwnership: registry at ${registryPath(home)} is present but unparseable — restore it before adopting (refusing to overwrite and lose other projects)`);
     const reg = loaded.kind === 'ok' ? loaded.reg : {};
     const existing = reg[key];
-    // Idempotent re-adoption (PR-1): if THIS home already registered this project, PRESERVE its
-    // stamp and macNonce. Minting a fresh macNonce here would silently invalidate — and, on the
-    // next compaction, DELETE + false-integrity-mark — every verify signed under the old subkey.
-    // A first adoption (no prior entry, incl. a FOREIGN ledger) still mints fresh, so pre-existing
-    // foreign records never launder into Verified.
+    // Auto-adopt TOCTOU guard: targetLedger only auto-adopts when NO ledger exists yet. Re-check that
+    // under the registry lock (as close to the write as possible) so a foreign ledger that appeared in
+    // the caller's check-then-stamp window is refused, not silently adopted past the explicit barrier.
+    if (opts.autoAdoptLedger && !existing && existsSync(opts.autoAdoptLedger))
+      throw new Error('commit: a project memory file appeared here that Helix did not create — adopt it explicitly (helix_memory_adopt) or remove it');
+    // Anti-laundering on a REUSED path (F6): only preserve when the repo's current .owner still
+    // matches the registry entry — i.e. it is genuinely the same, still-owned project. If an entry
+    // exists but .owner is absent/mismatched, the state is ambiguous (a lost/tampered owner to REPAIR
+    // vs a FOREIGN repo now at this path); auto-restoring the old stamp+nonce would let a foreign
+    // repo's copied records validate under the preserved subkey, or silently resurrect a stale
+    // project. Refuse and make the user resolve it explicitly.
+    if (existing && readOwner(projectRoot) !== existing.stamp)
+      throw new Error(`stampOwnership: ${key} has a registry entry but its .owner does not match — resolve the ambiguity (a foreign repo at a reused path vs a lost owner) before adopting`);
+    // Idempotent re-adoption (PR-1): a still-owned project PRESERVES its stamp and macNonce. Minting
+    // a fresh macNonce would silently invalidate — and, on the next compaction, DELETE +
+    // false-integrity-mark — every verify signed under the old subkey. A first adoption (no prior
+    // entry) mints fresh.
     const stamp = existing?.stamp ?? gen();
     // Second draw: a home-only per-project salt for the ledger MAC subkey. Bound to the
     // resolved project path in the home registry, NEVER written to the repo .owner file, so a
@@ -178,7 +199,7 @@ export function stampOwnership(
 /** The project's home-only MAC nonce (project-binding salt for the ledger HMAC subkey).
  *  Returns null for an unowned project. Lives only in the home registry, never in the repo. */
 export function scopeNonce(projectRoot: string, home: string): string | null {
-  const entry = readRegistry(home)[resolve(projectRoot)];
+  const entry = readRegistry(home)[canonicalRoot(projectRoot)];
   return entry?.macNonce ?? null;
 }
 

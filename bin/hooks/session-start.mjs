@@ -1,7 +1,7 @@
 // src/hooks/session-start.ts
 import { writeSync as writeSync3 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join6, resolve as resolve3 } from "node:path";
+import { join as join6, resolve as resolve2 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/memory/firewall.ts
@@ -438,6 +438,13 @@ function readdirSyncSafe(dir) {
 }
 
 // src/memory/ownership.ts
+function canonicalRoot(projectRoot) {
+  try {
+    return canonical(projectRoot);
+  } catch {
+    return resolve(projectRoot);
+  }
+}
 function projectLedgerPath(projectRoot) {
   return join2(projectRoot, ".helix", "memory.jsonl");
 }
@@ -541,7 +548,7 @@ function readOwner(projectRoot) {
   }
 }
 function isOwned(projectRoot, home) {
-  const entry = readRegistry(home)[resolve(projectRoot)];
+  const entry = readRegistry(home)[canonicalRoot(projectRoot)];
   if (!entry) return false;
   const stamp = readOwner(projectRoot);
   return stamp !== null && stamp === entry.stamp;
@@ -552,7 +559,7 @@ function projectDispositionOf(project) {
   return existsSync(project.ledger) ? "unadopted-present" : "inactive";
 }
 function scopeNonce(projectRoot, home) {
-  const entry = readRegistry(home)[resolve(projectRoot)];
+  const entry = readRegistry(home)[canonicalRoot(projectRoot)];
   return entry?.macNonce ?? null;
 }
 function globalScopeNonce(home) {
@@ -627,7 +634,7 @@ function classifyWitness(bytes, entry, journal) {
 // src/memory/witness-store.ts
 import { randomBytes as randomBytes5, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { mkdirSync as mkdirSync3, readFileSync as readFileSync5 } from "node:fs";
-import { dirname as dirname4, join as join4, resolve as resolve2 } from "node:path";
+import { dirname as dirname4, join as join4 } from "node:path";
 
 // src/memory/ledger-mac.ts
 import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
@@ -724,7 +731,7 @@ function witnessPath(home) {
   return join4(home, "witness.json");
 }
 function scopeKeyOf(home, projectRoot) {
-  return projectRoot === void 0 ? "@global" : resolve2(projectRoot);
+  return projectRoot === void 0 ? "@global" : canonicalRoot(projectRoot);
 }
 function macKeyFor(scopeKey, master) {
   return Buffer.from(hkdfSync2("sha256", master, Buffer.from(scopeKey), "helix-witness-mac-v1", 32));
@@ -1147,7 +1154,7 @@ function gatherScopedRecords({ home, globalLedger, cwd }) {
   let projectDisposition = "inactive";
   if (cwd) {
     const projLedger = projectLedgerPath(cwd);
-    if (resolve3(projLedger) !== resolve3(globalLedger)) {
+    if (resolve2(projLedger) !== resolve2(globalLedger)) {
       try {
         projectDisposition = projectDispositionOf({ root: cwd, home, ledger: projLedger });
         if (projectDisposition === "owned") {
@@ -1201,7 +1208,7 @@ async function main() {
   } catch {
   }
 }
-var invokedDirectly = process.argv[1] !== void 0 && resolve3(process.argv[1]) === resolve3(fileURLToPath(import.meta.url));
+var invokedDirectly = process.argv[1] !== void 0 && resolve2(process.argv[1]) === resolve2(fileURLToPath(import.meta.url));
 if (invokedDirectly) void main();
 export {
   gatherScopedRecords,

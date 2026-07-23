@@ -241,7 +241,9 @@ export class MemoryStore {
           'adopt it explicitly (helix_memory_adopt) or remove it',
         );
       }
-      stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
+      // autoAdoptLedger: re-check under the registry lock that no foreign ledger appeared between the
+      // existsSync above and the stamp — closing the check-then-adopt TOCTOU on the auto-adopt path.
+      stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });
     }
     return p.ledger;
   }
