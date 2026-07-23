@@ -65,20 +65,25 @@ The prior approved design's clean-room tier and drill set are carried forward IN
 - **C4.5** Uninstall/reinstall + disable/enable (documented data-preservation behavior holds).
 - **C4.6** Maintainer tabletop: hosting-account/token recovery + ledger master-key-loss drill.
   Tag signing stays out of scope until tags are actually signed.
-- **C4.7 Uninstall/data-removal statement (NEW — genuine gap).** README documents the
-  uninstall command only; it must state what remains afterward (`~/.helix/` global ledger,
-  keys, metrics, witness state; per-project `.helix/`) and give full-removal steps.
+- **C4.7 Uninstall/data-removal statement (DONE 2026-07-22).** README previously documented
+  the uninstall command only; it now has an "Uninstall & data removal" section: plugin
+  uninstall never touches data; what remains (`~/.helix/` global ledger, key, witness state,
+  metrics, registry; per-project `.helix/`); full-removal steps (enumerate adopted projects
+  from `projects.json` BEFORE deleting the registry); partial-removal key-loss note.
 - **C4.8 Deploy runbook in-repo (DONE 2026-07-22).** The same-version cache trap (plugin
   update cache-skips; uninstall+install required) and the MCP launch barrier (new CLI process
   required after install) previously lived only in session memory, and README recommended
   plain `plugin update` unconditionally. Now: `deploy-runbook.md` (this directory) carries the
   full maintainer procedure + verification commands, and README's install section carries the
   user-facing caveats.
-- **C4.9 Supported-platforms statement (NEW).** Runtime Node ≥ 20 vs development Node ≥ 24 is
-  a documented split (README line 229) — restate it in one place users read, plus the
-  UTF-8/cp949 console lesson for Korean Windows, and the validated-platform list (WSL2 is the
-  only continuously exercised environment today). Include the supported-scale statement from
-  §6 ("validated to N rows", N fixed from the pilot corpus and bench evidence).
+- **C4.9 Supported-platforms statement (DONE 2026-07-22).** README's Requirements section now
+  carries: the runtime ≥20 / dev ≥24 split restated at the point of install (engines field =
+  dev toolchain, not runtime floor); the platform list (Linux/WSL2 continuously exercised;
+  macOS expected-POSIX but not exercised; native Windows NOT currently validated — the lock
+  layer's hard-link semantics are POSIX-verified only); the cp949→UTF-8 Korean-Windows console
+  note; and the supported-scale statement (correctness at daily dogfood scale + frozen pilot
+  corpus; latency benchmark-characterized, cold ≈150 ms near ~3.3k union rows; ≥~2,500 union
+  rows outside the v0.1 envelope — pairs with the C4.10 advisory).
 - **C4.10 Local scale advisory (NEW — decided 2026-07-22, owner decision Q2).** Ship a local,
   content-free advisory before the v2 freeze: when union ledger rows cross a soft threshold
   (below the Stage-1 build trigger), surface a one-line session-start note. No telemetry —

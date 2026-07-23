@@ -8,9 +8,11 @@ It ships the **engine** — memory and dual-verify, exposed as MCP tools and ses
 
 ## Requirements
 
-- **Node.js ≥ 20 on your `PATH`.** Claude Code launches the MCP server and the session hooks with `node`; a standalone Claude Code install with no system Node.js cannot run them. Check with `node --version`.
+- **Node.js ≥ 20 on your `PATH`.** Claude Code launches the MCP server and the session hooks with `node`; a standalone Claude Code install with no system Node.js cannot run them. Check with `node --version`. (Node ≥ 20 *runs* the plugin; developing on the repo itself expects Node ≥ 24 — the `engines` field in `package.json` declares the dev toolchain, not the runtime floor.)
 - **Claude Code** — the host application.
 - **Codex CLI** — *optional*, only for the `helix_dual_verify` tool. Install it and sign in (`codex login`); dual-verify is **off by default**.
+- **Platforms.** Continuously exercised on Linux/WSL2 (daily autonomous use); macOS is expected to work (POSIX semantics, hard-link file locking) but is not continuously exercised; **native Windows is not currently validated** — the locking layer's hard-link semantics have only been verified on POSIX filesystems. On Korean Windows hosts, set the console to UTF-8 (`chcp 65001`) — a cp949 console garbles non-ASCII output from any CLI in the chain.
+- **Scale.** Correctness is exercised daily at tens-of-rows scale and was acceptance-tested on a frozen pilot corpus; recall latency is benchmark-characterized to a few thousand rows (cold-path ≈150 ms near ~3.3k union rows on the baseline machine). Treat ledgers **beyond ~2,500 union rows** (bulk imports, shared team ledgers) as outside the v0.1 validated envelope: an indexed-storage design is approved and deliberately unbuilt until real corpora approach that scale.
 
 No build or `npm install` is needed to *use* Helix — the runtime ships as self-contained bundles under `bin/`.
 
@@ -167,6 +169,18 @@ Helix's memory lives in plain files under your control. Back them up like any ot
 - **Key loss.** Without `ledger-mac-master.key`, no signed `verify` record can validate, so any grade a `verify` record conferred — `Corroborated`, `Verified`, or `Suspect` — reverts to `Fresh` until a new key signs fresh verifications; for `Suspect` that reversion is a trust *increase*, not fail-low: the item's displayed state quietly reads `Fresh` again and the session hint loses its Suspect-specific wording, though such items (always non-authoritative) remain flagged for confirmation on source grounds. A new key is minted automatically on the next write; re-elevate a fact with `helix_memory_confirm`, or re-run `helix_memory_recheck` to restore a lapsed `Suspect` label. Losing the key never loses content — only a verify-conferred grade is affected.
 - **Corruption.** A torn tail line (e.g. power loss mid-append) is repaired by the next writer, which prefixes a separator so its own record lands cleanly while the torn fragment is isolated as its own skipped line. A more structurally damaged line elsewhere in the ledger is simply excluded from the live view rather than guessed at or fabricated. Restore from backup for anything worse than a torn tail, and never hand-edit a ledger file while a session is running — Helix's own file lock coordinates only its own processes, not an external editor.
 - **Migration & downgrade honesty.** The ledger is append-only JSONL with no schema migrations to date, and Helix does not yet guarantee forward or backward compatibility across versions before 1.0. Keep your backups across upgrades.
+
+## Uninstall & data removal
+
+`claude plugin uninstall helix` removes the plugin from Claude Code — **it never touches your data**. Everything Helix wrote stays on disk: `~/.helix/` (global ledger, signing key, witness state, config, metrics, project registry) and every per-project `<project-root>/.helix/`.
+
+To remove the data too:
+
+1. **List adopted projects first** — the keys of `~/.helix/projects.json` (all except the `@global` entry) are the project roots that may carry a `<root>/.helix/` ledger. Read it *before* deleting `~/.helix/`, or you lose the list.
+2. Delete each `<project-root>/.helix/` you want gone (skip any a team shares via git).
+3. Delete `~/.helix/`.
+
+Partial-removal note: deleting only the signing key (`ledger-mac-master.key`) is the key-loss scenario above — verify-conferred grades revert to `Fresh`, content survives. Reinstalling the plugin later over surviving data just works (ledgers are plain files); restoring *older* copies of a ledger trips the rollback witness by design — see **Restoring** above.
 
 ## How it works
 
