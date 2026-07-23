@@ -1,6 +1,6 @@
 // scripts/trigger-measure.ts
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync4 } from "node:fs";
-import { dirname as dirname3, join as join4, resolve as resolve2 } from "node:path";
+import { dirname as dirname3, join as join4 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // src/memory/fs-ops.ts
@@ -331,7 +331,7 @@ function toParticipant(id, outcome) {
 }
 function resolveProjectDisposition(root, home, globalLedger) {
   if (!existsSync2(join4(root, ".helix"))) return "absent";
-  const distinctFromGlobal = resolve2(projectLedgerPath(root)) !== resolve2(globalLedger);
+  const distinctFromGlobal = canonicalRoot(projectLedgerPath(root)) !== canonicalRoot(globalLedger);
   return distinctFromGlobal && isOwned(root, home) ? "owned" : "unowned";
 }
 function readTwoParticipants(globalLedger, root, home, disposition, readFile) {

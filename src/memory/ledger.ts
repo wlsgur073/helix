@@ -248,6 +248,10 @@ export interface CompactOptions {
    * Omitted => legacy behaviour (bake state, drop all verifies) is unchanged.
    */
   keepValidVerify?: (r: MemoryRecord) => boolean;
+  /** Chokepoint gate: does the resolved key GENUINELY validate this verify (current-key MAC only,
+   *  not the future-version clause)? Compaction preserves ALL verifies unless at least one proves the
+   *  key, so a wrong/lost/aliased nonce can never delete genuine verifies. */
+  provesKey?: (r: MemoryRecord) => boolean;
   /** Injectable durable-fs seam: tests assert the fsync TARGET/ORDER and simulate write failures
    *  (ENOSPC, an unremovable orphan). Production omits it => `realFsOps`. */
   fsOps?: DurableFsOps;
@@ -294,9 +298,17 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   // target is no longer in `live`.
   let droppedForgedVerifies = 0;
   if (opts.keepValidVerify) {
-    for (const r of records) {
-      if (r.type !== 'verify' || !r.supersedes || !live.has(r.supersedes)) continue;
-      if (opts.keepValidVerify(r)) kept.push(r);
+    const eligible = records.filter((r) => r.type === 'verify' && r.supersedes && live.has(r.supersedes));
+    // Nonce-continuity chokepoint: only DROP a verify as "forged" when the resolved key is PROVEN
+    // correct for THIS ledger — i.e. it genuinely validates at least one verify here (`provesKey`).
+    // If it validates none (a wrong/lost/aliased/rotated/corrupt nonce), the KEY is wrong, not every
+    // verify forged (forgery needs the master key), so preserve ALL — like the key-absent branch.
+    // Kept forgeries stay Fresh-clamped on read (no trust); this only prevents the irreversible
+    // deletion of GENUINE verifies (and the false integrity marker it would mint). Absent provesKey
+    // (older callers) => proven, preserving prior behavior.
+    const keyProven = opts.provesKey === undefined || eligible.some((r) => opts.provesKey!(r));
+    for (const r of eligible) {
+      if (!keyProven || opts.keepValidVerify(r)) kept.push(r);
       else droppedForgedVerifies++;
     }
   }

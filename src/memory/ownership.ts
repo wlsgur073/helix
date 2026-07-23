@@ -77,15 +77,22 @@ function assertNotSymlink(path: string, what: string): void {
   if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
 }
 
+/** writeSync may write FEWER bytes than requested (a short write, e.g. at ENOSPC or on a signal).
+ *  Loop until every byte lands, or the truncated tmp would be renamed over the live registry. */
+function writeAll(fd: number, data: string): void {
+  const buf = Buffer.from(data, 'utf8');
+  for (let off = 0; off < buf.length; ) off += writeSync(fd, buf, off, buf.length - off);
+}
+
 /** Atomic, crash-durable, symlink-safe write: create a fresh tmp with owner-only mode (never briefly
- *  world-readable), fsync it, rename over the destination — which REPLACES a symlink at the name
- *  rather than following it, so a hostile `.owner -> arbitrary-file` symlink cannot redirect a write —
- *  then fsync the directory so the rename survives power loss. Lock-free readers therefore see EITHER
- *  the old file OR the new one, never a torn write. */
+ *  world-readable), write it in FULL, fsync it, rename over the destination — which REPLACES a symlink
+ *  at the name rather than following it, so a hostile `.owner -> arbitrary-file` symlink cannot
+ *  redirect a write — then fsync the directory so the rename survives power loss. Lock-free readers
+ *  therefore see EITHER the old file OR the new one, never a torn or partial write. */
 function atomicWriteFile(path: string, data: string, mode: number): void {
   const tmp = `${path}.${randomBytes(8).toString('hex')}.tmp`;
   const fd = openSync(tmp, 'wx', mode);
-  try { writeSync(fd, data); fsyncSync(fd); } finally { closeSync(fd); }
+  try { writeAll(fd, data); fsyncSync(fd); } finally { closeSync(fd); }
   try { renameSync(tmp, path); }
   catch (e) { try { unlinkSync(tmp); } catch { /* orphan tmp — harmless */ } throw e; }
   let dfd: number | undefined;
@@ -171,15 +178,12 @@ export function stampOwnership(
     // the caller's check-then-stamp window is refused, not silently adopted past the explicit barrier.
     if (opts.autoAdoptLedger && !existing && existsSync(opts.autoAdoptLedger))
       throw new Error('commit: a project memory file appeared here that Helix did not create — adopt it explicitly (helix_memory_adopt) or remove it');
-    // Anti-laundering on a REUSED path (F6): only preserve when the repo's current .owner still
-    // matches the registry entry — i.e. it is genuinely the same, still-owned project. If an entry
-    // exists but .owner is absent/mismatched, the state is ambiguous (a lost/tampered owner to REPAIR
-    // vs a FOREIGN repo now at this path); auto-restoring the old stamp+nonce would let a foreign
-    // repo's copied records validate under the preserved subkey, or silently resurrect a stale
-    // project. Refuse and make the user resolve it explicitly.
-    if (existing && readOwner(projectRoot) !== existing.stamp)
-      throw new Error(`stampOwnership: ${key} has a registry entry but its .owner does not match — resolve the ambiguity (a foreign repo at a reused path vs a lost owner) before adopting`);
-    // Idempotent re-adoption (PR-1): a still-owned project PRESERVES its stamp and macNonce. Minting
+    // Reused-path safety (F6, revised): earlier this REFUSED when the current .owner did not match the
+    // entry — but that bricked a legitimate lost-.owner repair with no recovery ceremony. Deletion
+    // safety now lives at the compaction chokepoint (a wrong/foreign key deletes no genuine verify) and
+    // the read-path clamp (foreign records stay Fresh), so preservation is safe even on a mismatch:
+    // repair restores the genuine nonce, and a foreign repo inheriting the old nonce launders nothing.
+    // Idempotent re-adoption (PR-1): a still-registered project PRESERVES its stamp and macNonce. Minting
     // a fresh macNonce would silently invalidate — and, on the next compaction, DELETE +
     // false-integrity-mark — every verify signed under the old subkey. A first adoption (no prior
     // entry) mints fresh.
@@ -189,7 +193,9 @@ export function stampOwnership(
     // record signed for one project cannot be transplanted into another (HKDF salt differs).
     const macNonce = existing?.macNonce ?? gen();
     const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => new Date().toISOString()))();
-    mkdirSync(join(projectRoot, '.helix'), { recursive: true });
+    const helixDir = join(projectRoot, '.helix');
+    assertNotSymlink(helixDir, '.helix directory'); // a symlinked .helix parent would redirect the .owner (and ledger) write out of the repo
+    mkdirSync(helixDir, { recursive: true });
     atomicWriteOwner(projectRoot, stamp); // rename-based: never follows a symlinked .owner
     reg[key] = { stamp, adoptedAt, macNonce };
     atomicWriteRegistry(home, reg);

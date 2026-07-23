@@ -503,11 +503,15 @@ function assertNotSymlink(path, what) {
   }
   if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
 }
+function writeAll(fd, data) {
+  const buf = Buffer.from(data, "utf8");
+  for (let off = 0; off < buf.length; ) off += writeSync(fd, buf, off, buf.length - off);
+}
 function atomicWriteFile(path, data, mode) {
   const tmp = `${path}.${randomBytes3(8).toString("hex")}.tmp`;
   const fd = openSync(tmp, "wx", mode);
   try {
-    writeSync(fd, data);
+    writeAll(fd, data);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
@@ -1154,7 +1158,7 @@ function gatherScopedRecords({ home, globalLedger, cwd }) {
   let projectDisposition = "inactive";
   if (cwd) {
     const projLedger = projectLedgerPath(cwd);
-    if (resolve2(projLedger) !== resolve2(globalLedger)) {
+    if (canonicalRoot(projLedger) !== canonicalRoot(globalLedger)) {
       try {
         projectDisposition = projectDispositionOf({ root: cwd, home, ledger: projLedger });
         if (projectDisposition === "owned") {

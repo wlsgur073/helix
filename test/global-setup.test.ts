@@ -2,6 +2,24 @@ import { describe, it, expect } from 'vitest';
 import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
+import { restoreEnv } from './global-setup.js';
+
+describe('restoreEnv (teardown env restore)', () => {
+  it('DELETES the var when the prior value was undefined — never the string "undefined"', () => {
+    delete process.env.HELIX_TEST_RESTORE_X;
+    process.env.HELIX_TEST_RESTORE_X = 'set-during-run';
+    restoreEnv('HELIX_TEST_RESTORE_X', undefined);
+    expect('HELIX_TEST_RESTORE_X' in process.env).toBe(false);
+    expect(process.env.HELIX_TEST_RESTORE_X).toBeUndefined();
+  });
+
+  it('restores a captured prior string value', () => {
+    process.env.HELIX_TEST_RESTORE_Y = 'changed';
+    restoreEnv('HELIX_TEST_RESTORE_Y', 'original');
+    expect(process.env.HELIX_TEST_RESTORE_Y).toBe('original');
+    delete process.env.HELIX_TEST_RESTORE_Y;
+  });
+});
 
 // globalSetup redirects the temp base to a PRIVATE per-run root (helix-testrun-*) and removes only
 // that root at teardown, so two concurrent `vitest run` invocations never delete each other's live

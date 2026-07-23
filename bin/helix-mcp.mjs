@@ -13771,11 +13771,15 @@ function assertNotSymlink(path, what) {
   }
   if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
 }
+function writeAll2(fd, data) {
+  const buf = Buffer.from(data, "utf8");
+  for (let off = 0; off < buf.length; ) off += writeSync2(fd, buf, off, buf.length - off);
+}
 function atomicWriteFile(path, data, mode) {
   const tmp = `${path}.${randomBytes2(8).toString("hex")}.tmp`;
   const fd = openSync2(tmp, "wx", mode);
   try {
-    writeSync2(fd, data);
+    writeAll2(fd, data);
     fsyncSync2(fd);
   } finally {
     closeSync2(fd);
@@ -13841,12 +13845,12 @@ function stampOwnership(projectRoot2, home2, opts = {}) {
     const existing = reg[key];
     if (opts.autoAdoptLedger && !existing && existsSync(opts.autoAdoptLedger))
       throw new Error("commit: a project memory file appeared here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it");
-    if (existing && readOwner(projectRoot2) !== existing.stamp)
-      throw new Error(`stampOwnership: ${key} has a registry entry but its .owner does not match \u2014 resolve the ambiguity (a foreign repo at a reused path vs a lost owner) before adopting`);
     const stamp = existing?.stamp ?? gen();
     const macNonce = existing?.macNonce ?? gen();
     const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
-    mkdirSync(join3(projectRoot2, ".helix"), { recursive: true });
+    const helixDir = join3(projectRoot2, ".helix");
+    assertNotSymlink(helixDir, ".helix directory");
+    mkdirSync(helixDir, { recursive: true });
     atomicWriteOwner(projectRoot2, stamp);
     reg[key] = { stamp, adoptedAt, macNonce };
     atomicWriteRegistry(home2, reg);
@@ -14349,9 +14353,10 @@ function planCompaction(records, opts) {
   }
   let droppedForgedVerifies = 0;
   if (opts.keepValidVerify) {
-    for (const r of records) {
-      if (r.type !== "verify" || !r.supersedes || !live.has(r.supersedes)) continue;
-      if (opts.keepValidVerify(r)) kept.push(r);
+    const eligible = records.filter((r) => r.type === "verify" && r.supersedes && live.has(r.supersedes));
+    const keyProven = opts.provesKey === void 0 || eligible.some((r) => opts.provesKey(r));
+    for (const r of eligible) {
+      if (!keyProven || opts.keepValidVerify(r)) kept.push(r);
       else droppedForgedVerifies++;
     }
   }
@@ -15172,6 +15177,12 @@ var MemoryStore = class {
   keepValidVerifyFor(subkey) {
     return subkey ? (r) => verifyVerify(r, subkey) && isKnownState(r.state) || typeof r.macVersion === "number" && Number.isSafeInteger(r.macVersion) && r.macVersion > MAC_VERSION : () => true;
   }
+  /** Chokepoint gate for compaction: does `subkey` GENUINELY validate this verify under the CURRENT
+   *  MAC version (no future-version clause)? If nothing in a ledger proves the key, the key is wrong
+   *  and compaction must preserve every verify rather than delete genuine ones as "forged". */
+  provesKeyFor(subkey) {
+    return subkey ? (r) => verifyVerify(r, subkey) && isKnownState(r.state) : () => false;
+  }
   /** Verifying projection for one ledger (R1 clamp / R2 MAC gate / R3 content binding). When no
    *  subkey is available every state is clamped to Fresh and keyAvailable is false. Delegates to the
    *  shared verified-read helper that the SessionStart hook also uses (provable consistency).
@@ -15413,7 +15424,8 @@ var MemoryStore = class {
       const gate = cheapGate({ rows: records.length, totalBytes, mtimeMs, nowMs, cfg });
       if (!gate.proceed) continue;
       const keepValidVerify = this.keepValidVerifyFor(r.subkey);
-      const { kept } = planCompaction(records, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify });
+      const provesKey = this.provesKeyFor(r.subkey);
+      const { kept } = planCompaction(records, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify, provesKey });
       const inputNonFence = records.filter((rec) => !rec.id.startsWith("witness_fence_"));
       const reclaimable = inputNonFence.length - kept.length;
       const reclaimableBytes = serializedBytes(inputNonFence) - serializedBytes(kept);
@@ -15425,6 +15437,7 @@ var MemoryStore = class {
         stats = compactLedger(r.ledger, {
           erasedIds: /* @__PURE__ */ new Set(),
           keepValidVerify,
+          provesKey,
           // Witnessed rewrite (spec §4.9): the auto-compaction is a prefix-changing rewrite, so it
           // advances the witness (plants a fence) — otherwise the next witnessed read would false-alarm.
           witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), r.root), now: () => this.now(), kind: "compaction" }
@@ -15788,6 +15801,7 @@ var MemoryStore = class {
       compactLedger(ledger, {
         erasedIds: /* @__PURE__ */ new Set([id]),
         keepValidVerify: this.keepValidVerifyFor(sk),
+        provesKey: this.provesKeyFor(sk),
         witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), this.scopeRootOf(ledger)), now: () => this.now(), kind: "erase" }
       });
     }
@@ -24390,7 +24404,8 @@ function appendAudit(path, event) {
   mkdirSync6(dirname9(path), { recursive: true });
   const fd = openSync4(path, "a");
   try {
-    writeSync4(fd, JSON.stringify(event) + "\n");
+    const buf = Buffer.from(JSON.stringify(event) + "\n", "utf8");
+    for (let off = 0; off < buf.length; ) off += writeSync4(fd, buf, off, buf.length - off);
     fsyncSync4(fd);
   } finally {
     closeSync4(fd);
@@ -24548,12 +24563,12 @@ function handleConfirm(store2, args, deps) {
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   try {
     store2.confirm(args.id);
-    appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "user", resultState: "Verified" });
-    return ok(`confirmed ${args.id}: Verified`);
   } catch (e) {
     appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "user", resultState: "rejected" });
     throw e;
   }
+  appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "user", resultState: "Verified" });
+  return ok(`confirmed ${args.id}: Verified`);
 }
 function codexLogCount(path) {
   try {

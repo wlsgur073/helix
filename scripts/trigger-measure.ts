@@ -7,10 +7,10 @@
 // (deps.readFile) and an injectable env seam (deps.env) so tests run fully hermetically — no real
 // ~/.helix is ever touched by a test that supplies deps.
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { realFsOps, writeAll, type DurableFsOps } from '../src/memory/fs-ops.js';
-import { isOwned, projectLedgerPath } from '../src/memory/ownership.js';
+import { isOwned, projectLedgerPath, canonicalRoot } from '../src/memory/ownership.js';
 import { loadConfig, type HelixConfig } from '../src/config.js';
 import { evaluateTrigger, type Leg, type MetricsEvent, type MetricsState, type ParticipantSize } from './trigger-eval.js';
 
@@ -100,7 +100,7 @@ function toParticipant(id: 'global' | 'project', outcome: ReadOutcome): Particip
  *  no project layer at all. Only 'owned' ever contributes bytes/rows — see readTwoParticipants. */
 export function resolveProjectDisposition(root: string, home: string, globalLedger: string): 'owned' | 'unowned' | 'absent' {
   if (!existsSync(join(root, '.helix'))) return 'absent';
-  const distinctFromGlobal = resolve(projectLedgerPath(root)) !== resolve(globalLedger);
+  const distinctFromGlobal = canonicalRoot(projectLedgerPath(root)) !== canonicalRoot(globalLedger); // realpath: a symlinked project ledger aliasing the global one is not a distinct participant
   return distinctFromGlobal && isOwned(root, home) ? 'owned' : 'unowned';
 }
 

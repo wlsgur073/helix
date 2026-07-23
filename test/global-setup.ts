@@ -14,18 +14,32 @@ import { join } from 'node:path';
 // commit a temp path into content (compaction's file-contains probe) reads HELIX_TEST_SYS_TMP to place
 // that probe under the REAL (unredirected) system temp at a low-entropy fixed name, where it is not
 // redacted and — with constant content and no delete — is harmless to share across runs.
+/** Restore an env var to a captured prior value, DELETING it when that value was undefined — because
+ *  `process.env.X = undefined` stores the literal string "undefined" (Node 24), which would poison
+ *  os.tmpdir() for anything sharing the process after teardown. */
+export function restoreEnv(key: string, prior: string | undefined): void {
+  if (prior === undefined) delete process.env[key];
+  else process.env[key] = prior;
+}
+
 export default function setup(): () => void {
   const sysTmp = tmpdir(); // the real system temp, captured BEFORE redirect
   const runRoot = mkdtempSync(join(sysTmp, 'helix-testrun-'));
-  const prev = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
+  const prev = {
+    TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP,
+    HELIX_TEST_SYS_TMP: process.env.HELIX_TEST_SYS_TMP,
+  };
   process.env.HELIX_TEST_SYS_TMP = sysTmp;
   process.env.TMPDIR = runRoot;
   process.env.TMP = runRoot;
   process.env.TEMP = runRoot;
   return () => {
-    process.env.TMPDIR = prev.TMPDIR;
-    process.env.TMP = prev.TMP;
-    process.env.TEMP = prev.TEMP;
+    restoreEnv('TMPDIR', prev.TMPDIR);
+    restoreEnv('TMP', prev.TMP);
+    restoreEnv('TEMP', prev.TEMP);
+    restoreEnv('HELIX_TEST_SYS_TMP', prev.HELIX_TEST_SYS_TMP);
+    // Best-effort: a normal-exit run removes its own root; a SIGKILL/crash cannot run teardown and
+    // leaves a helix-testrun-* root behind (rare; cleaned by the OS temp policy, not by another run).
     try { rmSync(runRoot, { recursive: true, force: true }); } catch { /* teardown is best-effort */ }
   };
 }

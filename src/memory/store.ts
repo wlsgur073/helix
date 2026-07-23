@@ -162,6 +162,13 @@ export class MemoryStore {
       : () => true;
   }
 
+  /** Chokepoint gate for compaction: does `subkey` GENUINELY validate this verify under the CURRENT
+   *  MAC version (no future-version clause)? If nothing in a ledger proves the key, the key is wrong
+   *  and compaction must preserve every verify rather than delete genuine ones as "forged". */
+  private provesKeyFor(subkey: Buffer | null): (r: MemoryRecord) => boolean {
+    return subkey ? (r) => verifyVerify(r, subkey) && isKnownState(r.state) : () => false;
+  }
+
   /** Verifying projection for one ledger (R1 clamp / R2 MAC gate / R3 content binding). When no
    *  subkey is available every state is clamped to Fresh and keyAvailable is false. Delegates to the
    *  shared verified-read helper that the SessionStart hook also uses (provable consistency).
@@ -449,7 +456,8 @@ export class MemoryStore {
       // could transiently return null (registry/master read failure), flipping the predicate to the
       // key-absent `() => true` and preserving forgeries the plan counted as dropped.
       const keepValidVerify = this.keepValidVerifyFor(r.subkey);
-      const { kept } = planCompaction(records, { erasedIds: new Set(), keepValidVerify });
+      const provesKey = this.provesKeyFor(r.subkey);
+      const { kept } = planCompaction(records, { erasedIds: new Set(), keepValidVerify, provesKey });
       // Fence-net the reclaim estimate: a witnessed compaction ALWAYS re-plants exactly one epoch
       // fence, and planCompaction ALWAYS drops any existing fence from `kept`. So a lone stale fence is
       // NOT net-reclaimable — it is dropped and immediately re-added. Counting it would make a
@@ -467,7 +475,7 @@ export class MemoryStore {
       let stats: CompactionStats | null = null;   // null <=> the compaction threw <=> nothing happened
       try {
         stats = compactLedger(r.ledger, {
-          erasedIds: new Set(), keepValidVerify,
+          erasedIds: new Set(), keepValidVerify, provesKey,
           // Witnessed rewrite (spec §4.9): the auto-compaction is a prefix-changing rewrite, so it
           // advances the witness (plants a fence) — otherwise the next witnessed read would false-alarm.
           witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), r.root), now: () => this.now(), kind: 'compaction' },
@@ -867,7 +875,7 @@ export class MemoryStore {
       // the witness transition (kind:'erase') — otherwise the next witnessed read would false-alarm.
       const sk = this.subkeyForLedger(ledger);
       compactLedger(ledger, {
-        erasedIds: new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk),
+        erasedIds: new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk), provesKey: this.provesKeyFor(sk),
         witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), this.scopeRootOf(ledger)), now: () => this.now(), kind: 'erase' },
       });
     }

@@ -13,7 +13,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatSessionStartContext } from './format-context.js';
 import { newNonce, collectWitnessNotes } from '../memory/content-frame.js';
-import { projectDispositionOf, projectLedgerPath, type ProjectDisposition } from '../memory/ownership.js';
+import { projectDispositionOf, projectLedgerPath, canonicalRoot, type ProjectDisposition } from '../memory/ownership.js';
 import { verifiedLiveWitnessed, type ReplayStats } from '../memory/verified-read.js';
 import { enforceWitnessProjection } from '../memory/verified-projection.js';
 import type { WitnessVerdict } from '../memory/witness-core.js';
@@ -83,7 +83,7 @@ export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): G
     const projLedger = projectLedgerPath(cwd);
     // guard: never read the global ledger as a "project" layer (cwd == ~ collision) — the SAME guard
     // gates both the disposition snapshot and the read below, so the two can never disagree.
-    if (resolve(projLedger) !== resolve(globalLedger)) {
+    if (canonicalRoot(projLedger) !== canonicalRoot(globalLedger)) { // realpath: a symlinked project ledger aliasing the global one is one file -> not a project layer
       try {
         // B2: the SAME shared tri-state predicate the store uses, from the same descriptor shape —
         // computed ONCE and reused to gate the read immediately below (mirrors store.ts's

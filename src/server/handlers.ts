@@ -189,12 +189,14 @@ export function handleConfirm(store: MemoryStore, args: { id: string }, deps: Re
   const ts = (deps.now ?? (() => new Date().toISOString()))();
   try {
     store.confirm(args.id);
-    appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'Verified' });
-    return ok(`confirmed ${args.id}: Verified`);
   } catch (e) {
     appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'rejected' });
     throw e;
   }
+  // Confirm SUCCEEDED. Audit it as Verified AFTER the try, so a failure of the (now fsync'd) audit
+  // append is a logging failure — never mis-recorded as a 'rejected' confirm.
+  appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'Verified' });
+  return ok(`confirmed ${args.id}: Verified`);
 }
 
 export interface CodexStatusDeps {

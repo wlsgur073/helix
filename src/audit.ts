@@ -62,5 +62,10 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit;
 export function appendAudit(path: string, event: AuditEvent): void {
   mkdirSync(dirname(path), { recursive: true });
   const fd = openSync(path, 'a');
-  try { writeSync(fd, JSON.stringify(event) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
+  try {
+    // writeSync may short-write; loop until the whole line lands so a truncated row is never fsynced.
+    const buf = Buffer.from(JSON.stringify(event) + '\n', 'utf8');
+    for (let off = 0; off < buf.length; ) off += writeSync(fd, buf, off, buf.length - off);
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
 }

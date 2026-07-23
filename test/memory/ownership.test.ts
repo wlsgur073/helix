@@ -90,20 +90,28 @@ describe('auto-adopt TOCTOU guard (targetLedger)', () => {
   });
 });
 
-describe('anti-laundering on a reused path — preserve only on .owner match (F6)', () => {
-  it('refuses to auto-restore the old stamp/nonce when the .owner no longer matches (foreign repo at a reused path)', () => {
-    const { home, proj } = dirs();
-    stampOwnership(proj, home);
-    // a foreign repo now sits at the same path: its .owner does not match the registry entry
-    writeFileSync(join(proj, '.helix', '.owner'), 'FOREIGN-STAMP');
-    expect(() => stampOwnership(proj, home)).toThrow(/owner|ambigu|resolve/i);
-  });
-
-  it('still preserves stamp+nonce for a genuine idempotent re-adopt (.owner matches)', () => {
+describe('re-adoption preserves the nonce; deletion-safety is the compaction chokepoint (F6)', () => {
+  it('preserves stamp+nonce and restores .owner even when the current .owner mismatches (no brick)', () => {
     const { home, proj } = dirs();
     stampOwnership(proj, home);
     const n1 = scopeNonce(proj, home);
-    stampOwnership(proj, home); // .owner still matches the entry -> preserve
+    const stamp1 = readFileSync(join(proj, '.helix', '.owner'), 'utf8');
+    // A lost/tampered .owner (or a foreign repo at a reused path): earlier this THREW and bricked a
+    // legitimate repair. Now it preserves the nonce (so genuine verifies keep validating) and restores
+    // .owner to the entry's stamp. Safety against a foreign repo's records is the compaction chokepoint
+    // (a wrong key deletes nothing) plus the read-path clamp (foreign records stay Fresh), not a refusal.
+    writeFileSync(join(proj, '.helix', '.owner'), 'MISMATCH');
+    stampOwnership(proj, home);
+    expect(scopeNonce(proj, home)).toBe(n1);
+    expect(readFileSync(join(proj, '.helix', '.owner'), 'utf8')).toBe(stamp1);
+    expect(isOwned(proj, home)).toBe(true);
+  });
+
+  it('idempotent re-adopt of a still-owned project preserves stamp+nonce', () => {
+    const { home, proj } = dirs();
+    stampOwnership(proj, home);
+    const n1 = scopeNonce(proj, home);
+    stampOwnership(proj, home);
     expect(scopeNonce(proj, home)).toBe(n1);
     expect(isOwned(proj, home)).toBe(true);
   });
@@ -139,6 +147,13 @@ describe('adoption is symlink-safe (F5/F7)', () => {
     expect(readFileSync(victim, 'utf8')).toBe('ORIGINAL-SECRET'); // untouched
     expect(lstatSync(join(proj, '.helix', '.owner')).isSymbolicLink()).toBe(false); // replaced by a real file
     expect(isOwned(proj, home)).toBe(true); // adoption still succeeded
+  });
+
+  it('refuses to write .owner through a symlinked .helix parent directory (H2)', () => {
+    const { home, proj } = dirs();
+    const evil = mkdtempSync(join(tmpdir(), 'helix-evil-'));
+    symlinkSync(evil, join(proj, '.helix')); // hostile: .helix -> attacker-controlled dir
+    expect(() => stampOwnership(proj, home)).toThrow(/\.helix|symlink/i);
   });
 
   it('refuses to write through a symlinked registry (projects.json is a symlink)', () => {
