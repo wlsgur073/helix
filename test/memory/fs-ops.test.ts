@@ -18,4 +18,19 @@ describe('fs-ops seam', () => {
   it('fsyncDir is best-effort: never throws, even on a non-directory path', () => {
     expect(() => fsyncDir('/definitely/not/a/dir')).not.toThrow();
   });
+  it('writeAll writes raw Buffer bytes verbatim (no utf8 round-trip for binary trust-store writes)', () => {
+    const d = mkdtempSync(join(tmpdir(), 'fsops-'));
+    const f = join(d, 'key.bin');
+    const key = Buffer.from([0xff, 0x00, 0x80, 0xfe, 0x7f]); // bytes a utf8 decode would not preserve
+    const fd = realFsOps.openSync(f, 'wx');
+    try { writeAll(realFsOps, fd, key); } finally { realFsOps.closeSync(fd); }
+    expect(readFileSync(f)).toEqual(key);
+  });
+  it('writeAll throws on a zero-progress write instead of looping forever', () => {
+    const d = mkdtempSync(join(tmpdir(), 'fsops-'));
+    const f = join(d, 'z.txt');
+    const stuck = { ...realFsOps, writeSync: () => 0 }; // never makes forward progress
+    const fd = realFsOps.openSync(f, 'wx');
+    try { expect(() => writeAll(stuck, fd, 'abc')).toThrow(/zero-progress/); } finally { realFsOps.closeSync(fd); }
+  });
 });

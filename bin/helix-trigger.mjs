@@ -36,10 +36,14 @@ var realFsOps = {
   readdirSync: (d) => readdirSync(d),
   fsyncDir
 };
-function writeAll(fs, fd, text) {
-  const buf = Buffer.from(text, "utf8");
+function writeAll(fs, fd, data) {
+  const buf = typeof data === "string" ? Buffer.from(data, "utf8") : data;
   let off = 0;
-  while (off < buf.length) off += fs.writeSync(fd, buf, off, buf.length - off);
+  while (off < buf.length) {
+    const n = fs.writeSync(fd, buf, off, buf.length - off);
+    if (n <= 0) throw new Error(`writeAll: zero-progress write (${n} of ${buf.length - off} remaining bytes)`);
+    off += n;
+  }
 }
 
 // src/memory/ownership.ts

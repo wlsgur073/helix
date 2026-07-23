@@ -325,10 +325,14 @@ var realFsOps = {
   readdirSync: (d) => readdirSync2(d),
   fsyncDir
 };
-function writeAll(fs, fd, text) {
-  const buf = Buffer.from(text, "utf8");
+function writeAll(fs, fd, data) {
+  const buf = typeof data === "string" ? Buffer.from(data, "utf8") : data;
   let off = 0;
-  while (off < buf.length) off += fs.writeSync(fd, buf, off, buf.length - off);
+  while (off < buf.length) {
+    const n = fs.writeSync(fd, buf, off, buf.length - off);
+    if (n <= 0) throw new Error(`writeAll: zero-progress write (${n} of ${buf.length - off} remaining bytes)`);
+    off += n;
+  }
 }
 
 // src/memory/ledger-sweep.ts
@@ -395,7 +399,7 @@ function projectLedgerPath(projectRoot) {
 
 // src/memory/ledger-mac.ts
 import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync } from "node:fs";
+import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync } from "node:fs";
 import { dirname as dirname4, join as join4 } from "node:path";
 var LedgerMacError = class extends Error {
 };
@@ -418,7 +422,7 @@ function ensureMaster(home) {
     let published = false;
     try {
       try {
-        writeSync2(fd, key);
+        writeAll(realFsOps, fd, key);
         fsyncSync2(fd);
       } finally {
         closeSync2(fd);

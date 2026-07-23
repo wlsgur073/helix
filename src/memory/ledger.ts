@@ -249,8 +249,10 @@ export interface CompactOptions {
    */
   keepValidVerify?: (r: MemoryRecord) => boolean;
   /** Chokepoint gate: does the resolved key GENUINELY validate this verify (current-key MAC only,
-   *  not the future-version clause)? Compaction preserves ALL verifies unless at least one proves the
-   *  key, so a wrong/lost/aliased nonce can never delete genuine verifies. */
+   *  not the future-version clause)? A verify is dropped as forged ONLY when the key is proven (at
+   *  least one eligible verify validates) AND the ledger is a single keyId lineage — so a wrong/lost/
+   *  aliased nonce, or a genuine competing lineage, can never delete genuine verifies. FAIL-CLOSED:
+   *  when omitted, continuity is treated as UNPROVEN (preserve all), never assumed proven. */
   provesKey?: (r: MemoryRecord) => boolean;
   /** Injectable durable-fs seam: tests assert the fsync TARGET/ORDER and simulate write failures
    *  (ENOSPC, an unremovable orphan). Production omits it => `realFsOps`. */
@@ -299,16 +301,28 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   let droppedForgedVerifies = 0;
   if (opts.keepValidVerify) {
     const eligible = records.filter((r) => r.type === 'verify' && r.supersedes && live.has(r.supersedes));
-    // Nonce-continuity chokepoint: only DROP a verify as "forged" when the resolved key is PROVEN
-    // correct for THIS ledger — i.e. it genuinely validates at least one verify here (`provesKey`).
-    // If it validates none (a wrong/lost/aliased/rotated/corrupt nonce), the KEY is wrong, not every
-    // verify forged (forgery needs the master key), so preserve ALL — like the key-absent branch.
-    // Kept forgeries stay Fresh-clamped on read (no trust); this only prevents the irreversible
-    // deletion of GENUINE verifies (and the false integrity marker it would mint). Absent provesKey
-    // (older callers) => proven, preserving prior behavior.
-    const keyProven = opts.provesKey === undefined || eligible.some((r) => opts.provesKey!(r));
+    // Nonce-continuity chokepoint (round-4 mixed-lineage hardening, Codex compare). Compaction may DROP
+    // a verify as "forged" ONLY when the resolved key proves a SINGLE lineage owns this ledger — BOTH
+    // conditions below, together:
+    //   (1) keyProven — the resolved key genuinely validates at least one eligible verify here. Absent
+    //       `provesKey` is now FAIL-CLOSED (unproven), NOT the prior fail-open "assume proven": a caller
+    //       that cannot demonstrate continuity must never license deletion.
+    //   (2) singleLineage — every eligible verify carries the SAME keyId. A verify signed under a
+    //       DIFFERENT nonce (a lost/rotated/aliased registry, after Helix itself signs ONE new verify
+    //       under the replacement) is GENUINE yet invalid under the resolved key; MAC alone cannot tell
+    //       it from a forgery — only keyId can. The existential test the old chokepoint used (does ANY
+    //       verify validate?) let a single new-lineage verify "prove" the key and then delete the entire
+    //       prior lineage as "forged". So if a competing keyId is present the ledger holds >=2 lineages;
+    //       the resolved key cannot prove the others forged (forgery needs the master key) -> PRESERVE
+    //       ALL and mint NO marker, exactly like the key-absent branch.
+    // Kept non-validating rows stay Fresh-clamped on read (no trust); this only prevents the irreversible
+    // DELETION of a genuine lineage (and the false integrity marker such a mass drop would mint).
+    const keyProven = opts.provesKey !== undefined && eligible.some((r) => opts.provesKey!(r));
+    const distinctKeyIds = new Set(eligible.map((r) => r.keyId).filter((k): k is string => k !== undefined));
+    const singleLineage = distinctKeyIds.size <= 1;
+    const mayDrop = keyProven && singleLineage;
     for (const r of eligible) {
-      if (!keyProven || opts.keepValidVerify(r)) kept.push(r);
+      if (!mayDrop || opts.keepValidVerify(r)) kept.push(r);
       else droppedForgedVerifies++;
     }
   }

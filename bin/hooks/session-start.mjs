@@ -1,5 +1,5 @@
 // src/hooks/session-start.ts
-import { writeSync as writeSync3 } from "node:fs";
+import { writeSync as writeSync2 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join6, resolve as resolve2 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -642,7 +642,7 @@ import { dirname as dirname4, join as join4 } from "node:path";
 
 // src/memory/ledger-mac.ts
 import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync4, linkSync as linkSync2, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
+import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync4, linkSync as linkSync2, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
 import { dirname as dirname3, join as join3 } from "node:path";
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 function digestContent(content) {
@@ -1195,7 +1195,7 @@ async function main() {
       witnessNotes,
       unionRows: unionPhysicalRows(replays)
     });
-    if (text !== "") writeSync3(1, text + "\n");
+    if (text !== "") writeSync2(1, text + "\n");
     const sink = createMetricsSink(join6(home, "metrics.jsonl"), metricsEnabledFromGlobalConfig(home));
     for (const rp of replays) {
       sink.emitReplay({

@@ -6888,7 +6888,7 @@ var require_dist = __commonJS({
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
 import { join as join10 } from "node:path";
-import { existsSync as existsSync6 } from "node:fs";
+import { existsSync as existsSync7 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -13647,10 +13647,14 @@ var realFsOps = {
   readdirSync: (d) => readdirSync2(d),
   fsyncDir
 };
-function writeAll(fs, fd, text) {
-  const buf = Buffer.from(text, "utf8");
+function writeAll(fs, fd, data) {
+  const buf = typeof data === "string" ? Buffer.from(data, "utf8") : data;
   let off = 0;
-  while (off < buf.length) off += fs.writeSync(fd, buf, off, buf.length - off);
+  while (off < buf.length) {
+    const n = fs.writeSync(fd, buf, off, buf.length - off);
+    if (n <= 0) throw new Error(`writeAll: zero-progress write (${n} of ${buf.length - off} remaining bytes)`);
+    off += n;
+  }
 }
 
 // src/memory/ledger-sweep.ts
@@ -13885,7 +13889,7 @@ function globalScopeNonce(home2) {
 
 // src/memory/ledger-mac.ts
 import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
-import { openSync as openSync3, writeSync as writeSync3, fsyncSync as fsyncSync3, closeSync as closeSync3, readFileSync as readFileSync4, linkSync as linkSync3, unlinkSync as unlinkSync4, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
+import { openSync as openSync3, fsyncSync as fsyncSync3, closeSync as closeSync3, readFileSync as readFileSync4, linkSync as linkSync3, unlinkSync as unlinkSync4, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
 import { dirname as dirname4, join as join4 } from "node:path";
 var MAC_VERSION = 2;
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
@@ -13913,7 +13917,7 @@ function ensureMaster(home2) {
     let published = false;
     try {
       try {
-        writeSync3(fd, key);
+        writeAll(realFsOps, fd, key);
         fsyncSync3(fd);
       } finally {
         closeSync3(fd);
@@ -14354,9 +14358,12 @@ function planCompaction(records, opts) {
   let droppedForgedVerifies = 0;
   if (opts.keepValidVerify) {
     const eligible = records.filter((r) => r.type === "verify" && r.supersedes && live.has(r.supersedes));
-    const keyProven = opts.provesKey === void 0 || eligible.some((r) => opts.provesKey(r));
+    const keyProven = opts.provesKey !== void 0 && eligible.some((r) => opts.provesKey(r));
+    const distinctKeyIds = new Set(eligible.map((r) => r.keyId).filter((k) => k !== void 0));
+    const singleLineage = distinctKeyIds.size <= 1;
+    const mayDrop = keyProven && singleLineage;
     for (const r of eligible) {
-      if (!keyProven || opts.keepValidVerify(r)) kept.push(r);
+      if (!mayDrop || opts.keepValidVerify(r)) kept.push(r);
       else droppedForgedVerifies++;
     }
   }
@@ -24398,25 +24405,26 @@ async function dualVerify(params, deps) {
 }
 
 // src/audit.ts
-import { mkdirSync as mkdirSync6, openSync as openSync4, writeSync as writeSync4, fsyncSync as fsyncSync4, closeSync as closeSync4 } from "node:fs";
+import { mkdirSync as mkdirSync6, openSync as openSync4, existsSync as existsSync4, fsyncSync as fsyncSync4, closeSync as closeSync4 } from "node:fs";
 import { dirname as dirname9 } from "node:path";
 function appendAudit(path, event) {
   mkdirSync6(dirname9(path), { recursive: true });
+  const isNew = !existsSync4(path);
   const fd = openSync4(path, "a");
   try {
-    const buf = Buffer.from(JSON.stringify(event) + "\n", "utf8");
-    for (let off = 0; off < buf.length; ) off += writeSync4(fd, buf, off, buf.length - off);
+    writeAll(realFsOps, fd, JSON.stringify(event) + "\n");
     fsyncSync4(fd);
   } finally {
     closeSync4(fd);
   }
+  if (isNew) fsyncDir(dirname9(path));
 }
 
 // src/server/handlers.ts
 import { readFileSync as readFileSync12 } from "node:fs";
 
 // src/codex-log.ts
-import { mkdirSync as mkdirSync7, readFileSync as readFileSync11, writeFileSync as writeFileSync2, openSync as openSync5, writeSync as writeSync5, closeSync as closeSync5 } from "node:fs";
+import { mkdirSync as mkdirSync7, readFileSync as readFileSync11, writeFileSync as writeFileSync2, openSync as openSync5, writeSync as writeSync3, closeSync as closeSync5 } from "node:fs";
 import { dirname as dirname10 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
@@ -24424,7 +24432,7 @@ function appendCodexLog(path, entry) {
     mkdirSync7(dirname10(path), { recursive: true });
     const fd = openSync5(path, "a", 384);
     try {
-      writeSync5(fd, JSON.stringify(entry) + "\n");
+      writeSync3(fd, JSON.stringify(entry) + "\n");
     } finally {
       closeSync5(fd);
     }
@@ -24724,13 +24732,13 @@ async function handleDualVerify(args, deps) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync5, mkdirSync as mkdirSync8, mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync6, mkdirSync as mkdirSync8, mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join8, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync4, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { existsSync as existsSync5, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join7 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
@@ -24746,7 +24754,7 @@ function shouldSweep(stampMtimeMs, nowMs, intervalMs) {
 }
 function sweepScratchRoot(root, nowMs = Date.now()) {
   try {
-    if (!existsSync4(root)) return;
+    if (!existsSync5(root)) return;
     const stampPath = join7(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
@@ -24820,7 +24828,7 @@ async function resolveCodexInvocation() {
   let inv = null;
   try {
     const { stdout } = await execFileAsync("where", ["codex"], { timeout: 1e4 });
-    inv = interpretWhereOutput("win32", stdout ?? "", existsSync5);
+    inv = interpretWhereOutput("win32", stdout ?? "", existsSync6);
   } catch {
     inv = null;
   }
@@ -25212,7 +25220,7 @@ var home = process.env.HELIX_HOME ?? join10(homedir3(), ".helix");
 var globalLedger = process.env.HELIX_LEDGER ?? join10(home, "memory.jsonl");
 var projectRoot = process.cwd();
 var projectLedger = join10(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync6(join10(projectRoot, ".helix")) && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
+var projectActive = existsSync7(join10(projectRoot, ".helix")) && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
 var config2 = loadConfig({ globalPath: join10(home, "config.json") });
 var metrics = createMetricsSink(join10(home, "metrics.jsonl"), config2.metrics.enabled);

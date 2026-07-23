@@ -42,9 +42,12 @@ describe('compaction nonce-continuity chokepoint', () => {
     const store = new MemoryStore(ledger, { sessionId: 's', home });
     const keep = store.commit({ content: 'keep me alpha', source: 'user' });
     store.confirm(keep.id); // genuine verify (proves the key)
-    // append a forged verify (invalid MAC) for a second live fact
+    // A realistic forgery must claim the CURRENT lineage's keyId: a DIFFERENT keyId now reads as a
+    // competing GENUINE lineage and is preserved (round-4 mixed-lineage gate), not dropped. Reuse the
+    // genuine verify's keyId so this stays a same-lineage, bad-MAC forgery the proven key can drop.
+    const genuineKeyId = parseLedger(ledger).find((r) => r.type === 'verify' && r.supersedes === keep.id)!.keyId!;
     const other = store.commit({ content: 'other fact gamma', source: 'user' });
-    appendForged(ledger, other.id);
+    appendForged(ledger, other.id, genuineKeyId);
     const gone = store.commit({ content: 'erase me beta', source: 'user' });
     store.erase(gone.id, { permanent: true });
     const after = parseLedger(ledger);
@@ -53,11 +56,11 @@ describe('compaction nonce-continuity chokepoint', () => {
   });
 });
 
-function appendForged(ledger: string, targetId: string): void {
+function appendForged(ledger: string, targetId: string, keyId: string): void {
   const ts = '2026-07-01T00:00:00.000Z';
   writeFileSync(ledger, readFileSync(ledger, 'utf8') + JSON.stringify({
     id: 'forged_1', tx: ts, validFrom: ts, validTo: null, type: 'verify', state: 'Verified', content: '',
     provenance: { source: 'user', sessionId: 's' }, supersedes: targetId, blastRadius: null,
-    reverifyTrigger: null, classification: 'normal', gen: 1, targetDigest: 'x', mac: 'junk', keyId: 'junk',
+    reverifyTrigger: null, classification: 'normal', gen: 1, targetDigest: 'x', mac: 'junk', keyId,
   }) + '\n');
 }

@@ -1,5 +1,6 @@
-import { mkdirSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
+import { mkdirSync, openSync, existsSync, fsyncSync, closeSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { writeAll, realFsOps, fsyncDir } from './memory/fs-ops.js';
 
 /** Schema note (append-only history): `decidedLeg` replaces the mis-named `blockedLeg` (an
  *  `allowed_override` used to write its DECIDER into a field literally called `blockedLeg`,
@@ -58,14 +59,17 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit;
 /** Append one audit event as a JSONL line, fsync'd so a written row survives power loss. Creates
  *  parent dirs as needed. Completeness is best-effort, NOT transactional: the row is appended AFTER
  *  the action it records (the erase/verify, itself fsynced), so a crash in the narrow window between
- *  the two can leave the action durable with its audit row absent. Durable-once-written. */
+ *  the two can leave the action durable with its audit row absent. Durable-once-written: the row bytes
+ *  are fsync'd, and on FIRST creation the parent directory is fsync'd too, so the new file's directory
+ *  entry is durable — not just its inode (a crash could otherwise lose the whole freshly-created file). */
 export function appendAudit(path: string, event: AuditEvent): void {
   mkdirSync(dirname(path), { recursive: true });
+  const isNew = !existsSync(path);
   const fd = openSync(path, 'a');
   try {
-    // writeSync may short-write; loop until the whole line lands so a truncated row is never fsynced.
-    const buf = Buffer.from(JSON.stringify(event) + '\n', 'utf8');
-    for (let off = 0; off < buf.length; ) off += writeSync(fd, buf, off, buf.length - off);
+    // writeAll loops short writes (a truncated row is never fsynced) and guards a zero-progress write.
+    writeAll(realFsOps, fd, JSON.stringify(event) + '\n');
     fsyncSync(fd);
   } finally { closeSync(fd); }
+  if (isNew) fsyncDir(dirname(path)); // first creation: make the directory entry durable, not just the bytes
 }

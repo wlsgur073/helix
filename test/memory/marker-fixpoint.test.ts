@@ -16,7 +16,9 @@ const forgedLedger = (): MemoryRecord[] => [
   base({ id: 'm_1', content: 'the deploy target is staging' }),
   base({ id: 'v_forged', type: 'verify', state: 'Verified', supersedes: 'm_1', content: '' }), // no mac => forged
 ];
-const keepValidVerify = (_r: MemoryRecord) => false; // treat every verify as forged, for the test
+// treat every verify as forged, for the test; paired with `provesKey: () => true` at each call site
+// because the round-4 mixed-lineage gate is FAIL-CLOSED: a drop needs an explicitly proven key.
+const keepValidVerify = (_r: MemoryRecord) => false;
 
 describe('D2: the integrity marker is a coalesced canonical fixpoint', () => {
   it('survives a SECOND compaction, byte-identical', () => {
@@ -24,11 +26,11 @@ describe('D2: the integrity marker is a coalesced canonical fixpoint', () => {
     try {
       const path = join(dir, 'm.jsonl');
       for (const r of forgedLedger()) writeFileSync(path, JSON.stringify(r) + '\n', { flag: 'a' });
-      compactLedger(path, { erasedIds: new Set(), keepValidVerify });
+      compactLedger(path, { erasedIds: new Set(), keepValidVerify, provesKey: () => true });
       const after1 = readFileSync(path, 'utf8');
       const marker1 = parseLedger(path).find((r) => r.id.startsWith('integrity_'));
       expect(marker1).toBeDefined();
-      compactLedger(path, { erasedIds: new Set(), keepValidVerify });
+      compactLedger(path, { erasedIds: new Set(), keepValidVerify, provesKey: () => true });
       const marker2 = parseLedger(path).find((r) => r.id.startsWith('integrity_'));
       expect(marker2).toEqual(marker1);               // byte-identical survival, not mere presence
       expect(JSON.stringify(marker2)).toBe(JSON.stringify(marker1));
@@ -66,7 +68,7 @@ describe('D2: the integrity marker is a coalesced canonical fixpoint', () => {
   });
 
   it('reports droppedForgedVerifies from the keep-set', () => {
-    const { droppedForgedVerifies } = planCompaction(forgedLedger(), { erasedIds: new Set(), keepValidVerify });
+    const { droppedForgedVerifies } = planCompaction(forgedLedger(), { erasedIds: new Set(), keepValidVerify, provesKey: () => true });
     expect(droppedForgedVerifies).toBe(1);
   });
 });
@@ -97,10 +99,10 @@ describe('F5: a planted marker is clearable via an explicit permanent erase of i
     try {
       const path = join(dir, 'm.jsonl');
       for (const r of forgedLedger()) writeFileSync(path, JSON.stringify(r) + '\n', { flag: 'a' });
-      compactLedger(path, { erasedIds: new Set(), keepValidVerify });
+      compactLedger(path, { erasedIds: new Set(), keepValidVerify, provesKey: () => true });
       const marker1 = parseLedger(path).find((r) => r.id.startsWith('integrity_'));
       expect(marker1).toBeDefined();
-      compactLedger(path, { erasedIds: new Set(), keepValidVerify });
+      compactLedger(path, { erasedIds: new Set(), keepValidVerify, provesKey: () => true });
       const marker2 = parseLedger(path).find((r) => r.id.startsWith('integrity_'));
       expect(marker2).toEqual(marker1);   // fixpoint unaffected by the hatch when erasedIds is empty
     } finally { rmSync(dir, { recursive: true, force: true }); }

@@ -1,8 +1,8 @@
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
-import { openSync, writeSync, fsyncSync, closeSync, readFileSync, linkSync, unlinkSync, statSync, chmodSync, mkdirSync } from 'node:fs';
+import { openSync, fsyncSync, closeSync, readFileSync, linkSync, unlinkSync, statSync, chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { withFileLock } from './lock.js';
-import { fsyncDir } from './fs-ops.js';
+import { fsyncDir, writeAll, realFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import type { MemoryRecord } from '../types.js';
 
@@ -38,7 +38,7 @@ export function ensureMaster(home: string): Buffer {
     const fd = openSync(tmp, 'wx', 0o600);
     let published = false;
     try {
-      try { writeSync(fd, key); fsyncSync(fd); } finally { closeSync(fd); }
+      try { writeAll(realFsOps, fd, key); fsyncSync(fd); } finally { closeSync(fd); } // writeAll: loop short writes + guard zero-progress on the 32-byte key
       try {
         linkSync(tmp, path);
         published = true;
