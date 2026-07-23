@@ -70,3 +70,53 @@ describe('ownership macNonce (project-binding salt)', () => {
     expect(globalScopeNonce(home)).toBe(a);
   });
 });
+
+describe('globalScopeNonce fail-closed on corrupt registry (PR-1)', () => {
+  it('does not re-mint (overwrite) the nonce when the registry is present but unparseable', () => {
+    const { home } = dirs();
+    const n1 = globalScopeNonce(home); // mints and persists a real nonce
+    expect(n1).toMatch(/^[0-9a-f]+$/);
+    // Simulate a torn read: the registry exists on disk but a concurrent in-place writeFileSync
+    // left it mid-truncation. Today readRegistry swallows the parse error as {} -> globalScopeNonce
+    // mints a NEW nonce and OVERWRITES the file, silently invalidating every global verify.
+    writeFileSync(join(home, 'projects.json'), '{ "@global": { "macNonce": "');
+    const n2 = globalScopeNonce(home);
+    expect(n2).toBeNull(); // fail-closed: unresolvable -> key-absent (clamp to Fresh), never overwrite
+    // and the corrupt file must NOT have been replaced by a fresh valid registry
+    expect(readFileSync(join(home, 'projects.json'), 'utf8')).toBe('{ "@global": { "macNonce": "');
+  });
+
+  it('still mints on first use when the registry is simply absent', () => {
+    const { home } = dirs();
+    expect(globalScopeNonce(home)).toMatch(/^[0-9a-f]+$/);
+  });
+});
+
+describe('stampOwnership fail-closed on corrupt registry (PR-1)', () => {
+  it('refuses to clobber a present-but-corrupt registry (no silent loss of other adoptions)', () => {
+    const { home, proj } = dirs();
+    const other = mkdtempSync(join(tmpdir(), 'helix-proj-'));
+    stampOwnership(other, home, { genStamp: () => 'OTHER' }); // a prior adoption exists on disk
+    writeFileSync(join(home, 'projects.json'), '{ corrupt not json'); // torn/corrupt registry
+    // Today readRegistry swallows the parse error as {} and stampOwnership writes a registry
+    // containing ONLY the new project — 'other' silently vanishes. Fail closed instead.
+    expect(() => stampOwnership(proj, home)).toThrow(/registry/i);
+    expect(readFileSync(join(home, 'projects.json'), 'utf8')).toBe('{ corrupt not json');
+  });
+});
+
+describe('ownership re-adoption idempotency (PR-1)', () => {
+  it('re-adopting an already-registered project preserves the macNonce and stamp (existing signed verifies stay valid)', () => {
+    const { home, proj } = dirs();
+    stampOwnership(proj, home);
+    const nonce1 = scopeNonce(proj, home);
+    const stamp1 = readFileSync(join(proj, '.helix', '.owner'), 'utf8');
+    // Re-adopting the SAME already-registered project must NOT mint fresh crypto material:
+    // a new macNonce would silently invalidate (and, on the next compaction, delete) every
+    // verify signed under the old subkey. Adoption of a FOREIGN ledger still mints fresh.
+    stampOwnership(proj, home);
+    expect(scopeNonce(proj, home)).toBe(nonce1);
+    expect(readFileSync(join(proj, '.helix', '.owner'), 'utf8')).toBe(stamp1);
+    expect(isOwned(proj, home)).toBe(true);
+  });
+});

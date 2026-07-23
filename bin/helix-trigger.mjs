@@ -43,7 +43,7 @@ function writeAll(fs, fd, text) {
 }
 
 // src/memory/ownership.ts
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync as renameSync2, unlinkSync as unlinkSync2 } from "node:fs";
 import { join, resolve } from "node:path";
 function projectLedgerPath(projectRoot) {
   return join(projectRoot, ".helix", "memory.jsonl");
@@ -54,12 +54,22 @@ function registryPath(home) {
 function ownerFile(projectRoot) {
   return join(projectRoot, ".helix", ".owner");
 }
-function readRegistry(home) {
+function loadRegistry(home) {
+  let text;
   try {
-    return JSON.parse(readFileSync(registryPath(home), "utf8"));
+    text = readFileSync(registryPath(home), "utf8");
   } catch {
-    return {};
+    return { kind: "absent" };
   }
+  try {
+    return { kind: "ok", reg: JSON.parse(text) };
+  } catch {
+    return { kind: "corrupt" };
+  }
+}
+function readRegistry(home) {
+  const r = loadRegistry(home);
+  return r.kind === "ok" ? r.reg : {};
 }
 function readOwner(projectRoot) {
   try {

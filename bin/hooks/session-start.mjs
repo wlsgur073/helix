@@ -157,29 +157,331 @@ function formatSessionStartContext(records, nonce, opts = {}) {
 }
 
 // src/memory/ownership.ts
+import { randomBytes as randomBytes3 } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync as readFileSync3, writeFileSync as writeFileSync2, renameSync, unlinkSync as unlinkSync2 } from "node:fs";
+import { join as join2, resolve } from "node:path";
+
+// src/memory/lock.ts
+import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from "node:fs";
 import { randomBytes as randomBytes2 } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, basename, join } from "node:path";
+
+// src/memory/lock-liveness.ts
+import { readFileSync, readlinkSync } from "node:fs";
+import { threadId } from "node:worker_threads";
+function parseAfterLastParen(stat) {
+  const i = stat.lastIndexOf(")");
+  if (i < 0) return null;
+  return stat.slice(i + 2).split(" ");
+}
+var realProbe = {
+  kill0(pid) {
+    try {
+      process.kill(pid, 0);
+      return "alive";
+    } catch (e) {
+      const c = e.code;
+      return c === "ESRCH" ? "dead" : c === "EPERM" ? "eperm" : "unknown";
+    }
+  },
+  startTicksOf(pid) {
+    try {
+      return parseAfterLastParen(readFileSync(`/proc/${pid}/stat`, "utf8"))?.[19] ?? null;
+    } catch {
+      return null;
+    }
+  },
+  stateOf(pid) {
+    try {
+      return parseAfterLastParen(readFileSync(`/proc/${pid}/stat`, "utf8"))?.[0] ?? null;
+    } catch {
+      return null;
+    }
+  },
+  bootId() {
+    try {
+      return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    } catch {
+      return null;
+    }
+  },
+  pidNs() {
+    try {
+      return readlinkSync("/proc/self/ns/pid");
+    } catch {
+      return null;
+    }
+  },
+  bootInstantMs() {
+    try {
+      return Date.now() - Number(readFileSync("/proc/uptime", "utf8").split(" ")[0]) * 1e3;
+    } catch {
+      return null;
+    }
+  }
+};
+function selfIdentity(token, probe = realProbe) {
+  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform };
+}
+var isStringOrNull = (x) => x === null || typeof x === "string";
+function tryParsePayload(raw) {
+  try {
+    const p = JSON.parse(raw);
+    if (p === null || typeof p !== "object" || p.v !== 1) return null;
+    if (typeof p.token !== "string" || typeof p.pid !== "number" || typeof p.threadId !== "number" || typeof p.platform !== "string") return null;
+    if (!isStringOrNull(p.startTicks) || !isStringOrNull(p.bootId) || !isStringOrNull(p.pidNs)) return null;
+    return p;
+  } catch {
+    return null;
+  }
+}
+function classifyHolder(recorded, self, probe) {
+  if (recorded.platform !== self.platform) return "alive-unknown";
+  if (recorded.bootId !== null && self.bootId !== null && recorded.bootId !== self.bootId) return "dead";
+  if (recorded.bootId === null !== (self.bootId === null)) return "alive-unknown";
+  if (recorded.pidNs !== self.pidNs) return "alive-unknown";
+  if (!Number.isSafeInteger(recorded.pid) || recorded.pid <= 0) return "alive-unknown";
+  if (recorded.pid === self.pid && recorded.startTicks === self.startTicks) {
+    return recorded.threadId === self.threadId ? "reentrant-self" : "alive";
+  }
+  const k = probe.kill0(recorded.pid);
+  if (k === "dead") return "dead";
+  if (k === "unknown") return "alive-unknown";
+  if (recorded.startTicks !== null) {
+    const cur = probe.startTicksOf(recorded.pid);
+    if (cur !== null && cur !== recorded.startTicks) return "dead";
+    if (cur === null && k === "alive") return "alive-unknown";
+  }
+  const st = probe.stateOf(recorded.pid);
+  if (st === "Z" || st === "X") return "dead";
+  return "alive";
+}
+
+// src/memory/lock.ts
+var RETRY_MS = 25;
+var DEFAULT_MAX_WAIT_MS = 5e3;
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function canonical(target) {
+  try {
+    return realpathSync(target);
+  } catch {
+    return join(realpathSync(dirname(target)), basename(target));
+  }
+}
+function timeoutMessage(lockPath, holder, waitedMs) {
+  const who = holder ? `held by pid ${holder.pid} (started ticks ${holder.startTicks ?? "unknown"})` : "holder unreadable (never auto-reclaimed)";
+  return `withFileLock: timed out after ${waitedMs}ms acquiring ${lockPath} \u2014 ${who}. Verify liveness with: kill -0 <pid>. If (and only if) the holder is truly gone, remove the lock file manually.`;
+}
+function acquireFileLock(target, opts = {}) {
+  const probe = opts.probe ?? realProbe;
+  const canon = canonical(target);
+  const lockPath = canon + ".lock";
+  const token = randomBytes2(16).toString("hex");
+  const self = selfIdentity(token, probe);
+  const payloadText = JSON.stringify(self);
+  if (tryParsePayload(payloadText) === null) throw new Error("withFileLock: internal \u2014 payload failed its own well-formedness check");
+  const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
+  let waited = 0;
+  let lastHolder = null;
+  for (; ; ) {
+    const srcTmp = `${canon}.lk-${randomBytes2(16).toString("hex")}.tmp`;
+    try {
+      writeFileSync(srcTmp, payloadText, { flag: "wx" });
+      try {
+        linkSync(srcTmp, lockPath);
+        break;
+      } finally {
+        try {
+          unlinkSync(srcTmp);
+        } catch {
+        }
+      }
+    } catch (e) {
+      const code = e.code;
+      if (code === "EPERM" || code === "EOPNOTSUPP" || code === "ENOTSUP")
+        throw new Error(`withFileLock: filesystem refuses hard links for ${lockPath}; ledger locking is unsupported on this filesystem`);
+      if (code === "ENOENT") {
+        if (waited >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, waited));
+        sleepSync(RETRY_MS);
+        waited += RETRY_MS;
+        continue;
+      }
+      if (code !== "EEXIST") throw e;
+    }
+    let holder;
+    lastHolder = null;
+    try {
+      const st = lstatSync(lockPath);
+      if (st.isDirectory()) {
+        holder = classifyLegacyDir(lockPath, probe);
+      } else {
+        const raw = readFileSync2(lockPath, "utf8");
+        const parsed = tryParsePayload(raw);
+        if (parsed === null) {
+          const boot = probe.bootInstantMs();
+          holder = boot !== null && st.mtimeMs < boot ? "dead" : "alive-unknown";
+        } else {
+          lastHolder = parsed;
+          holder = classifyHolder(parsed, self, probe);
+        }
+      }
+    } catch {
+      continue;
+    }
+    if (holder === "reentrant-self")
+      throw new Error(`withFileLock: re-entrant acquisition of ${lockPath} from the same thread (pid ${process.pid}) \u2014 withFileLock is not re-entrant`);
+    if (holder === "dead") stealUnderGate(lockPath, probe);
+    if (waited >= maxWaitMs) throw new Error(timeoutMessage(lockPath, lastHolder, waited));
+    sleepSync(RETRY_MS);
+    waited += RETRY_MS;
+  }
+  const ctx = {
+    stillOwned() {
+      try {
+        return tryParsePayload(readFileSync2(lockPath, "utf8"))?.token === token;
+      } catch {
+        return false;
+      }
+    }
+  };
+  const release = () => {
+    try {
+      if (!lstatSync(lockPath).isDirectory() && tryParsePayload(readFileSync2(lockPath, "utf8"))?.token === token) unlinkSync(lockPath);
+    } catch {
+    }
+  };
+  return { ctx, release };
+}
+function withFileLock(target, fn, opts = {}) {
+  const { ctx, release } = acquireFileLock(target, opts);
+  try {
+    return fn(ctx);
+  } finally {
+    release();
+  }
+}
+function classifyLegacyDir(lockPath, probe) {
+  let raw;
+  try {
+    raw = readFileSync2(join(lockPath, "owner"), "utf8");
+  } catch {
+    return "alive-unknown";
+  }
+  const pid = Number(raw.split("-")[0]);
+  if (!Number.isSafeInteger(pid) || pid <= 0) return "alive-unknown";
+  const k = probe.kill0(pid);
+  if (k === "dead") return "dead";
+  if (k === "unknown") return "alive-unknown";
+  const st = probe.stateOf(pid);
+  return st === "Z" || st === "X" ? "dead" : "alive";
+}
+function stealUnderGate(lockPath, probe) {
+  const bootId = probe.bootId() ?? "noboot";
+  const gatePath = `${lockPath}.reap.${bootId}`;
+  const dir = dirname(lockPath);
+  const prefix = `${basename(lockPath)}.reap.`;
+  for (const name of readdirSyncSafe(dir)) {
+    if (name.startsWith(prefix) && name !== basename(gatePath)) {
+      try {
+        unlinkSync(join(dir, name));
+      } catch {
+      }
+    }
+  }
+  const gateToken = randomBytes2(16).toString("hex");
+  const gateSrc = `${gatePath}.src-${gateToken}.tmp`;
+  try {
+    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: "wx" });
+    try {
+      linkSync(gateSrc, gatePath);
+    } finally {
+      try {
+        unlinkSync(gateSrc);
+      } catch {
+      }
+    }
+  } catch {
+    return;
+  }
+  try {
+    const st = lstatSync(lockPath);
+    if (st.isDirectory()) {
+      if (classifyLegacyDir(lockPath, probe) !== "dead") return;
+      rmSync(lockPath, { recursive: true, force: true });
+    } else {
+      const raw = readFileSync2(lockPath, "utf8");
+      const parsed = tryParsePayload(raw);
+      if (parsed !== null) {
+        if (classifyHolder(parsed, selfIdentity(gateToken, probe), probe) !== "dead") return;
+      } else {
+        const boot = probe.bootInstantMs();
+        if (boot === null || st.mtimeMs >= boot) return;
+      }
+      unlinkSync(lockPath);
+    }
+  } catch {
+  } finally {
+    try {
+      if (tryParsePayload(readFileSync2(gatePath, "utf8"))?.token === gateToken) unlinkSync(gatePath);
+    } catch {
+    }
+  }
+}
+function readdirSyncSafe(dir) {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+// src/memory/ownership.ts
 function projectLedgerPath(projectRoot) {
-  return join(projectRoot, ".helix", "memory.jsonl");
+  return join2(projectRoot, ".helix", "memory.jsonl");
 }
 var GLOBAL_KEY = "@global";
 function registryPath(home) {
-  return join(home, "projects.json");
+  return join2(home, "projects.json");
 }
 function ownerFile(projectRoot) {
-  return join(projectRoot, ".helix", ".owner");
+  return join2(projectRoot, ".helix", ".owner");
+}
+function loadRegistry(home) {
+  let text;
+  try {
+    text = readFileSync3(registryPath(home), "utf8");
+  } catch {
+    return { kind: "absent" };
+  }
+  try {
+    return { kind: "ok", reg: JSON.parse(text) };
+  } catch {
+    return { kind: "corrupt" };
+  }
 }
 function readRegistry(home) {
+  const r = loadRegistry(home);
+  return r.kind === "ok" ? r.reg : {};
+}
+function atomicWriteRegistry(home, reg) {
+  const path = registryPath(home);
+  const tmp = `${path}.${randomBytes3(8).toString("hex")}.tmp`;
+  writeFileSync2(tmp, JSON.stringify(reg, null, 2));
   try {
-    return JSON.parse(readFileSync(registryPath(home), "utf8"));
-  } catch {
-    return {};
+    renameSync(tmp, path);
+  } catch (e) {
+    try {
+      unlinkSync2(tmp);
+    } catch {
+    }
+    throw e;
   }
 }
 function readOwner(projectRoot) {
   try {
-    return readFileSync(ownerFile(projectRoot), "utf8").trim();
+    return readFileSync3(ownerFile(projectRoot), "utf8").trim();
   } catch {
     return null;
   }
@@ -200,18 +502,30 @@ function scopeNonce(projectRoot, home) {
   return entry?.macNonce ?? null;
 }
 function globalScopeNonce(home) {
-  const reg = readRegistry(home);
-  const existing = reg[GLOBAL_KEY]?.macNonce;
-  if (existing) return existing;
-  const macNonce = randomBytes2(16).toString("hex");
-  reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
+  const r = loadRegistry(home);
+  if (r.kind === "corrupt") return null;
+  const fast = r.kind === "ok" ? r.reg[GLOBAL_KEY]?.macNonce : void 0;
+  if (fast) return fast;
   mkdirSync(home, { recursive: true });
-  writeFileSync(registryPath(home), JSON.stringify(reg, null, 2));
-  return macNonce;
+  try {
+    return withFileLock(registryPath(home), () => {
+      const r2 = loadRegistry(home);
+      if (r2.kind === "corrupt") return null;
+      const reg = r2.kind === "ok" ? r2.reg : {};
+      const existing = reg[GLOBAL_KEY]?.macNonce;
+      if (existing) return existing;
+      const macNonce = randomBytes3(16).toString("hex");
+      reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
+      atomicWriteRegistry(home, reg);
+      return macNonce;
+    });
+  } catch {
+    return null;
+  }
 }
 
 // src/memory/ledger.ts
-import { readFileSync as readFileSync5, mkdirSync as mkdirSync4, statSync as statSync2 } from "node:fs";
+import { readFileSync as readFileSync6, mkdirSync as mkdirSync4, statSync as statSync2 } from "node:fs";
 
 // src/memory/projection.ts
 function buildProjection(records) {
@@ -237,17 +551,6 @@ function buildProjection(records) {
   return live;
 }
 
-// src/memory/lock.ts
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from "node:fs";
-import { dirname, basename, join as join2 } from "node:path";
-function canonical(target) {
-  try {
-    return realpathSync(target);
-  } catch {
-    return join2(realpathSync(dirname(target)), basename(target));
-  }
-}
-
 // src/memory/witness-core.ts
 import { createHash } from "node:crypto";
 function sha256Hex(bytes) {
@@ -268,13 +571,13 @@ function classifyWitness(bytes, entry, journal) {
 }
 
 // src/memory/witness-store.ts
-import { randomBytes as randomBytes4, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { mkdirSync as mkdirSync3, readFileSync as readFileSync4 } from "node:fs";
+import { randomBytes as randomBytes5, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync5 } from "node:fs";
 import { dirname as dirname3, join as join4, resolve as resolve2 } from "node:path";
 
 // src/memory/ledger-mac.ts
-import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
-import { openSync, writeSync, fsyncSync, closeSync, readFileSync as readFileSync3, linkSync as linkSync2, unlinkSync as unlinkSync2, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
+import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
+import { openSync, writeSync, fsyncSync, closeSync, readFileSync as readFileSync4, linkSync as linkSync2, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
 import { dirname as dirname2, join as join3 } from "node:path";
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 function digestContent(content) {
@@ -289,7 +592,7 @@ function masterPath(home) {
 function tryReadMasterStrict(path) {
   let buf;
   try {
-    buf = readFileSync3(path);
+    buf = readFileSync4(path);
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -388,7 +691,7 @@ function verifyMac(scopeKey, master, record) {
 }
 function readStoreFileAt(path) {
   try {
-    const parsed = JSON.parse(readFileSync4(path, "utf8"));
+    const parsed = JSON.parse(readFileSync5(path, "utf8"));
     return { v: 1, scopes: parsed.scopes ?? {} };
   } catch {
     return { v: 1, scopes: {} };
@@ -458,7 +761,7 @@ function parseLedgerHealth(text) {
 function readLedgerRaw(path) {
   let bytes;
   try {
-    bytes = readFileSync5(path);
+    bytes = readFileSync6(path);
   } catch (err) {
     if (err.code === "ENOENT") return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
     throw err;
@@ -755,11 +1058,11 @@ function createMetricsSink(path, enabled, deps = {}) {
 }
 
 // src/config.ts
-import { readFileSync as readFileSync6 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 import { join as join5 } from "node:path";
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync6(path, "utf8"));
+    return JSON.parse(readFileSync7(path, "utf8"));
   } catch {
     return null;
   }

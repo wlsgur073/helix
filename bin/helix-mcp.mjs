@@ -14797,7 +14797,7 @@ function frameAsData(scoped, nonce) {
 
 // src/memory/ownership.ts
 import { randomBytes as randomBytes6 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync as mkdirSync5, readFileSync as readFileSync8, writeFileSync as writeFileSync2 } from "node:fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync5, readFileSync as readFileSync8, writeFileSync as writeFileSync2, renameSync as renameSync2, unlinkSync as unlinkSync4 } from "node:fs";
 import { join as join5, resolve as resolve2 } from "node:path";
 var GLOBAL_KEY = "@global";
 function registryPath(home2) {
@@ -14806,11 +14806,35 @@ function registryPath(home2) {
 function ownerFile(projectRoot2) {
   return join5(projectRoot2, ".helix", ".owner");
 }
-function readRegistry(home2) {
+function loadRegistry(home2) {
+  let text;
   try {
-    return JSON.parse(readFileSync8(registryPath(home2), "utf8"));
+    text = readFileSync8(registryPath(home2), "utf8");
   } catch {
-    return {};
+    return { kind: "absent" };
+  }
+  try {
+    return { kind: "ok", reg: JSON.parse(text) };
+  } catch {
+    return { kind: "corrupt" };
+  }
+}
+function readRegistry(home2) {
+  const r = loadRegistry(home2);
+  return r.kind === "ok" ? r.reg : {};
+}
+function atomicWriteRegistry(home2, reg) {
+  const path = registryPath(home2);
+  const tmp = `${path}.${randomBytes6(8).toString("hex")}.tmp`;
+  writeFileSync2(tmp, JSON.stringify(reg, null, 2));
+  try {
+    renameSync2(tmp, path);
+  } catch (e) {
+    try {
+      unlinkSync4(tmp);
+    } catch {
+    }
+    throw e;
   }
 }
 function readOwner(projectRoot2) {
@@ -14833,29 +14857,48 @@ function projectDispositionOf(project2) {
 }
 function stampOwnership(projectRoot2, home2, opts = {}) {
   const gen = opts.genStamp ?? (() => randomBytes6(16).toString("hex"));
-  const stamp = gen();
-  const macNonce = gen();
-  const adoptedAt = (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
-  mkdirSync5(join5(projectRoot2, ".helix"), { recursive: true });
-  writeFileSync2(ownerFile(projectRoot2), stamp);
-  const reg = readRegistry(home2);
-  reg[resolve2(projectRoot2)] = { stamp, adoptedAt, macNonce };
+  const key = resolve2(projectRoot2);
   mkdirSync5(home2, { recursive: true });
-  writeFileSync2(registryPath(home2), JSON.stringify(reg, null, 2));
+  withFileLock(registryPath(home2), () => {
+    const loaded = loadRegistry(home2);
+    if (loaded.kind === "corrupt")
+      throw new Error(`stampOwnership: registry at ${registryPath(home2)} is present but unparseable \u2014 restore it before adopting (refusing to overwrite and lose other projects)`);
+    const reg = loaded.kind === "ok" ? loaded.reg : {};
+    const existing = reg[key];
+    const stamp = existing?.stamp ?? gen();
+    const macNonce = existing?.macNonce ?? gen();
+    const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
+    mkdirSync5(join5(projectRoot2, ".helix"), { recursive: true });
+    writeFileSync2(ownerFile(projectRoot2), stamp);
+    reg[key] = { stamp, adoptedAt, macNonce };
+    atomicWriteRegistry(home2, reg);
+  });
 }
 function scopeNonce(projectRoot2, home2) {
   const entry = readRegistry(home2)[resolve2(projectRoot2)];
   return entry?.macNonce ?? null;
 }
 function globalScopeNonce(home2) {
-  const reg = readRegistry(home2);
-  const existing = reg[GLOBAL_KEY]?.macNonce;
-  if (existing) return existing;
-  const macNonce = randomBytes6(16).toString("hex");
-  reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
+  const r = loadRegistry(home2);
+  if (r.kind === "corrupt") return null;
+  const fast = r.kind === "ok" ? r.reg[GLOBAL_KEY]?.macNonce : void 0;
+  if (fast) return fast;
   mkdirSync5(home2, { recursive: true });
-  writeFileSync2(registryPath(home2), JSON.stringify(reg, null, 2));
-  return macNonce;
+  try {
+    return withFileLock(registryPath(home2), () => {
+      const r2 = loadRegistry(home2);
+      if (r2.kind === "corrupt") return null;
+      const reg = r2.kind === "ok" ? r2.reg : {};
+      const existing = reg[GLOBAL_KEY]?.macNonce;
+      if (existing) return existing;
+      const macNonce = randomBytes6(16).toString("hex");
+      reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
+      atomicWriteRegistry(home2, reg);
+      return macNonce;
+    });
+  } catch {
+    return null;
+  }
 }
 
 // src/memory/witness-read.ts
