@@ -26,9 +26,11 @@ acknowledgement within a few days.
   for your explicit approval.
 - **Trust states:** `Fresh / Corroborated / Verified / Suspect`, with re-verify-before-use on
   high-blast-radius paths.
-- **Secret handling:** memory is secret-scanned and redacted before it is persisted;
-  the dual-verify egress guard hard-blocks credential tokens (override-proof — a
-  config policy of `allow` cannot release them).
+- **Secret handling:** memory is secret-scanned and redacted before it is persisted.
+  The dual-verify egress guard hard-blocks **named provider credential tokens**
+  (override-proof — a config policy of `allow` cannot release them); generic
+  heuristic-detected (`password=`-style) and high-entropy secrets are blocked by
+  default but are per-leg policy-overridable (`dualVerify.egressPolicy`).
 - **Untrusted content** (recalled memory, external-model output) is treated as DATA,
   never instructions: NFKC/control/bidi normalization + per-line datamarking + a
   per-call nonce frame.
@@ -105,9 +107,14 @@ still confirm which ledger it physically lives in (read the ledger JSONL directl
   and can mint valid MACs; no locally-held key is safe from it. A readable home key (broad
   permissions, a shared host) is a **security downgrade equivalent to that out-of-model adversary**:
   the file-surface guarantee is then void and all grades become forgeable.
+- **Unconfined-agent deployments void the model by construction.** Granting an agent an
+  allow-listed runtime (e.g. `node`) plus filesystem read of `~/.helix` IS the arbitrary-home-read
+  adversary above: in such a deployment (the maintainer's own dogfood box included)
+  `Corroborated`/`Verified` are forgeable and the file-surface guarantee does not apply. Accepted
+  and documented; confine the agent or isolate the key to restore the boundary.
 - **Rollback-by-suppression is not detected by the per-record MAC alone.** Deleting or truncating
   a later legitimate `verify` to preserve a stale elevated grade is invisible to a per-record MAC
-  in isolation. A home-side per-target high-water counter that closes this for a boundary-writable,
+  in isolation. A home-side per-scope high-water witness that closes this for a boundary-writable,
   git-tracked ledger has shipped — see *Rollback witness* below for what it catches and its own
   residual bounds (a whole-home coordinated rollback is still undetectable locally).
 - **Trust is machine-local.** The signing key never leaves `~/.helix`, so a `Verified` grade does

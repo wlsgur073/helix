@@ -62,9 +62,9 @@ Dual-verify is disabled by default. To enable it, create `~/.helix/config.json` 
 - `model` / `effort` — omit (or `null`) to inherit your `~/.codex/config.toml`; set to override for
   dual-verify only. Valid efforts are `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. Support varies
   by model — `codex debug models` lists what yours accepts.
-- `timeoutMs` — Codex run timeout (default `300000`, clamped to 1 hour). `max` and `ultra` runs can
-  outlast the default; a timeout kills the run *after* the quota is spent, so raise this before using
-  them. `helix_codex_status` always shows the timeout and resolves the model even when inherited (a free
+- `timeoutMs` — Codex run timeout (default `1500000` = 25 min, clamped to 1 hour). The default covers
+  routine `max`/`ultra` runs; a timeout kills the run *after* the quota is spent, so keep headroom if
+  you lower it. `helix_codex_status` always shows the timeout and resolves the model even when inherited (a free
   `codex doctor --json` probe) — there is no such probe for effort, so an inherited effort prints only
   the literal `inherited from codex config` with no value, and the `max`/`ultra` advisory note fires only
   when `effort` is a Helix override, never on the inherited path.
@@ -212,7 +212,7 @@ Helix is local-first. Installing it lets Claude Code run code on your machine �
 `helix_dual_verify` spawns the external **Codex CLI** to cross-check an answer. It is **off by default** (`dualVerify.enabled`).
 
 - **Sent:** exactly the `question` + `helixAnswer` you pass to the tool — nothing else (no memory, no files).
-- **Blocked before sending:** an egress guard refuses the call if the payload contains a credential (override-proof), high-severity or bulk PII, or a verbatim copy of a stored memory.
+- **Blocked before sending:** an egress guard refuses the call if the payload contains a named provider credential (override-proof), a heuristic- or entropy-detected secret (blocked by default, per-leg overridable), high-severity or bulk PII, or a verbatim copy of a stored memory.
 - **Logging:** off by default. The exact prompt/response are written to `~/.helix/codex-log.jsonl` (`0o600`) only if you set `dualVerify.logContent: true`; the audit log stays content-free regardless.
 - **Disable:** set `dualVerify.enabled: false` (the default) — or never create the config.
 
