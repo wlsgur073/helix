@@ -13193,26 +13193,32 @@ function concatRescue(t, docTokens) {
   }
   return false;
 }
+function hasDirectEvidence(tok, docTokens, docSet = new Set(docTokens)) {
+  return docSet.has(tok) || tok.length >= 3 && docTokens.some((d) => d.startsWith(tok));
+}
+function lexicalEvidence(qTerms, docTokens, docSet = new Set(docTokens)) {
+  const direct = /* @__PURE__ */ new Set();
+  for (const t of qTerms) if (hasDirectEvidence(t, docTokens, docSet)) direct.add(t);
+  const support = direct.size > 0;
+  const rescued = /* @__PURE__ */ new Set();
+  for (const t of qTerms) {
+    if (direct.has(t)) continue;
+    if (support && (concatRescue(t, docTokens) || inflectionRescue(t, docTokens))) rescued.add(t);
+  }
+  return { direct, rescued, matched: /* @__PURE__ */ new Set([...direct, ...rescued]) };
+}
 function semanticCoverage(qTerms, docTokens, expansion, discount = 1, weights) {
   if (qTerms.length === 0) return { score: 0, lexicalMatched: 0, semanticWeight: 0 };
   const docSet = new Set(docTokens);
-  const present = (tok) => docSet.has(tok) || tok.length >= 3 && docTokens.some((d) => d.startsWith(tok));
-  const direct = qTerms.map((t) => present(t));
-  const support = direct.some(Boolean);
+  const ev = lexicalEvidence(qTerms, docTokens, docSet);
   let lexicalMatched = 0;
   let semanticWeight = 0;
   let num = 0;
   let den = 0;
-  for (let i = 0; i < qTerms.length; i += 1) {
-    const t = qTerms[i];
+  for (const t of qTerms) {
     const w = weights ? weights(t) : 1;
     den += w;
-    if (direct[i]) {
-      lexicalMatched += 1;
-      num += w;
-      continue;
-    }
-    if (support && (concatRescue(t, docTokens) || inflectionRescue(t, docTokens))) {
+    if (ev.matched.has(t)) {
       lexicalMatched += 1;
       num += w;
       continue;
@@ -13220,7 +13226,7 @@ function semanticCoverage(qTerms, docTokens, expansion, discount = 1, weights) {
     const neigh = expansion?.get(t);
     if (neigh) {
       let best = 0;
-      for (const n of neigh) if (n.w > best && present(n.token)) best = n.w;
+      for (const n of neigh) if (n.w > best && hasDirectEvidence(n.token, docTokens, docSet)) best = n.w;
       if (best > 0) {
         semanticWeight += best * discount;
         num += w * best * discount;

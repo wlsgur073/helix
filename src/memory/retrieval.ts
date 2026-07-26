@@ -142,6 +142,38 @@ export interface ExpansionEntry { token: string; w: number }
 export type Expansion = ReadonlyMap<string, ReadonlyArray<ExpansionEntry>>;
 export interface SemCoverage { score: number; lexicalMatched: number; semanticWeight: number }
 
+export interface LexicalEvidence {
+  direct: Set<string>;
+  rescued: Set<string>;
+  matched: Set<string>;
+}
+
+/** Direct lexical evidence for one query term: exact token membership, or (length >= 3) a
+ *  record token that starts with it. Shared by semanticCoverage and the offline O_67-class
+ *  classifier (docs/release/o67-class-rule-2026-07.md). */
+export function hasDirectEvidence(tok: string, docTokens: string[], docSet: Set<string> = new Set(docTokens)): boolean {
+  return docSet.has(tok) || (tok.length >= 3 && docTokens.some((d) => d.startsWith(tok)));
+}
+
+/** Per-term lexical evidence: direct (exact/forward-prefix) plus support-gated rescues, exactly
+ *  the composition semanticCoverage counts as lexicalMatched. Synonym-neighbor expansion is
+ *  deliberately NOT part of this primitive — it contributes score, never lexical membership.
+ *  This is the O_67-class rule's membership primitive; keep classifier and scorer on this one
+ *  source of truth. */
+export function lexicalEvidence(qTerms: string[], docTokens: string[], docSet: Set<string> = new Set(docTokens)): LexicalEvidence {
+  const direct = new Set<string>();
+  for (const t of qTerms) if (hasDirectEvidence(t, docTokens, docSet)) direct.add(t);
+  // Rescues fire only when at least one OTHER term matched directly; a term being rescued is by
+  // definition not direct, so direct.size > 0 is exactly "another term anchors this record".
+  const support = direct.size > 0;
+  const rescued = new Set<string>();
+  for (const t of qTerms) {
+    if (direct.has(t)) continue;
+    if (support && (concatRescue(t, docTokens) || inflectionRescue(t, docTokens))) rescued.add(t);
+  }
+  return { direct, rescued, matched: new Set([...direct, ...rescued]) };
+}
+
 /**
  * Generalized coverage: a query term is covered lexically (exact OR prefix, weight 1.0) or, failing
  * that, by its best PRESENT neighbor (weight w<1 from the precomputed expansion table, scaled by
@@ -177,29 +209,19 @@ export function semanticCoverage(
 ): SemCoverage {
   if (qTerms.length === 0) return { score: 0, lexicalMatched: 0, semanticWeight: 0 };
   const docSet = new Set(docTokens);
-  const present = (tok: string): boolean =>
-    docSet.has(tok) || (tok.length >= 3 && docTokens.some((d) => d.startsWith(tok)));
-  // Pass 1 — direct evidence only (exact/forward-prefix). Rescues below may fire only when at
-  // least one OTHER term matched directly; a term being rescued is by definition not direct,
-  // so `some(Boolean)` over all terms is exactly "another term anchors this record".
-  const direct = qTerms.map((t) => present(t));
-  const support = direct.some(Boolean);
+  const ev = lexicalEvidence(qTerms, docTokens, docSet);
   let lexicalMatched = 0;
   let semanticWeight = 0;
   let num = 0;
   let den = 0;
-  for (let i = 0; i < qTerms.length; i += 1) {
-    const t = qTerms[i]!;
+  for (const t of qTerms) {
     const w = weights ? weights(t) : 1;
     den += w;
-    if (direct[i]) { lexicalMatched += 1; num += w; continue; }
-    if (support && (concatRescue(t, docTokens) || inflectionRescue(t, docTokens))) {
-      lexicalMatched += 1; num += w; continue;
-    }
+    if (ev.matched.has(t)) { lexicalMatched += 1; num += w; continue; }
     const neigh = expansion?.get(t);
     if (neigh) {
       let best = 0;
-      for (const n of neigh) if (n.w > best && present(n.token)) best = n.w;
+      for (const n of neigh) if (n.w > best && hasDirectEvidence(n.token, docTokens, docSet)) best = n.w;
       if (best > 0) { semanticWeight += best * discount; num += w * best * discount; }
     }
   }

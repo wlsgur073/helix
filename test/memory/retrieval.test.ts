@@ -5,6 +5,8 @@ import { coverageScore } from '../../src/memory/retrieval.js';
 import { phraseScore } from '../../src/memory/retrieval.js';
 import { buildIndex, bm25Score } from '../../src/memory/retrieval.js';
 import { rankRecords } from '../../src/memory/retrieval.js';
+import { semanticCoverage } from '../../src/memory/retrieval.js';
+import { lexicalEvidence } from '../../src/memory/retrieval.js';
 import type { MemoryRecord, MemoryState } from '../../src/types.js';
 
 function mrec(id: string, content: string, state: MemoryState = 'Fresh', tx = '2026-06-09T00:00:00.000Z'): MemoryRecord {
@@ -213,5 +215,28 @@ describe('golden queries (spec 2026-06-13 §10)', () => {
       mrec('short', 'deploy steps'),
     ], 'deploy steps');
     expect(out[0]?.id).toBe('short');
+  });
+});
+
+describe('lexicalEvidence (shared scorer primitive)', () => {
+  it('splits direct vs support-gated rescued terms and matches semanticCoverage lexicalMatched', () => {
+    // 'store' is direct (exact); 'completetask' is rescued via adjacent concat complete+task,
+    // which may fire only because another term matched directly (support gate).
+    const q = ['store', 'completetask'];
+    const doc = tokenize('the store keeps completeTask contracts');
+    const ev = lexicalEvidence(q, doc);
+    expect([...ev.direct].sort()).toEqual(['store']);
+    expect([...ev.rescued].sort()).toEqual(['completetask']);
+    expect([...ev.matched].sort()).toEqual(['completetask', 'store']);
+    expect(semanticCoverage(q, doc).lexicalMatched).toBe(ev.matched.size);
+  });
+
+  it('without direct support no rescue fires (support gate preserved)', () => {
+    const q = ['completetask'];
+    const doc = tokenize('completeTask alone');
+    const ev = lexicalEvidence(q, doc);
+    expect(ev.direct.size).toBe(0);
+    expect(ev.rescued.size).toBe(0);
+    expect(semanticCoverage(q, doc).lexicalMatched).toBe(0);
   });
 });
