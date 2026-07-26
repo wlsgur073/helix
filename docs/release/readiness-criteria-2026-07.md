@@ -87,14 +87,20 @@ or prior-approved requirement; anything else is gold-plating and was deliberatel
 
 ## 3. Security honesty
 
-- **C3.1 SECURITY claim-accuracy audit** (accuracy, not length): every claim re-verified
-  against the release candidate; disclosure channel exercised at least once.
-- **C3.2 Threat-model disclosure** includes the unconfined-agent deployment class (an
-  allow-listed runtime plus a readable master key voids the ledger-MAC threat model in such
-  deployments — previously decided accept-and-document).
-- **C3.3 Defaults audit.** Fresh-install defaults reviewed against operational reality (known
-  instance: the dual-verify timeout default is unusable at effort=max; the maintainer config
-  carries a manual override today). Audit item, not an automatic blocker.
+- **C3.1 SECURITY claim-accuracy audit (DONE 2026-07-26)** (accuracy, not length): every claim
+  re-verified against the release candidate; disclosure channel exercised at least once.
+  Executed: 60 claims verified (56 accurate as written; 1 code fix, 2 doc fixes, 1 accepted
+  empirical statement); channel exercised end-to-end via test advisory `GHSA-m7p7-4mx7-jw96`.
+  Record: `c3-audit-2026-07.md` (this directory).
+- **C3.2 Threat-model disclosure (DONE 2026-07-26)** includes the unconfined-agent deployment
+  class (an allow-listed runtime plus a readable master key voids the ledger-MAC threat model in
+  such deployments — previously decided accept-and-document). The class is now stated verbatim
+  as a residual-bounds bullet in SECURITY.md.
+- **C3.3 Defaults audit (DONE 2026-07-26).** Fresh-install defaults reviewed against operational
+  reality (known instance: the dual-verify timeout default is unusable at effort=max; the
+  maintainer config carries a manual override today). Audit item, not an automatic blocker.
+  Executed: full defaults table in `c3-audit-2026-07.md`; the known instance FIXED — default
+  `dualVerify.timeoutMs` raised to 1,500,000 ms (owner decision 2026-07-26).
 
 ## 4. Operability (carry-forward of the 2026-07-20 readiness design §5 — each item kept)
 
