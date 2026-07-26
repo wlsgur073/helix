@@ -21,10 +21,14 @@ or prior-approved requirement; anything else is gold-plating and was deliberatel
   the stale "(exact back-compat)" comment referent fixed. Post-v1 (explicitly deferred):
   query-dependent firing counters (needs its own privacy adjudication); runtime canonicality
   metadata.
-- **C1.3 v2 offline O_67-class rule.** Deferring runtime canonicality metadata is fine, but
+- **C1.3 v2 offline O_67-class rule (DONE 2026-07-26).** Deferring runtime canonicality metadata is fine, but
   the v2 freeze MUST include a prospectively frozen OFFLINE rule for classifying new
   superset-competition (O_67-class) cases — without it the exercised/unexercised report
-  required by gate-decision D5 cannot be produced.
+  required by gate-decision D5 cannot be produced. Shipped @ c17e0ed:
+  `o67-class-rule-2026-07.md` (this directory) + `scripts/pilot/classify-o67.ts` + the shared
+  `lexicalEvidence` scorer primitive (behavior-neutral — archived pilot hashes reproduced at
+  HEAD). Retrodiction anchor met: the general rule classifies exactly {O_67} in-class on both
+  frozen manifests.
 - **C1.4 Registry-as-trust-store hardening + mixed-key deletion fix (SHIPPED local; round-4/5 Codex
   compare).** The ownership registry (`~/.helix/projects.json`) is a trust store — its per-scope MAC
   nonce selects the ledger verification subkey — but was not hardened like the ledger/master-key: a
@@ -139,7 +143,11 @@ The prior approved design's clean-room tier and drill set are carried forward IN
 
 - **C5.1 v2 freeze checklist** = the six §f elements (system/config identity, eligibility,
   derivation/mapping, K+metrics, cutoff, minimum sample or stopping rule) + C1.3's offline
-  O_67-class rule + the exposure policy from open decision Q3 below.
+  O_67-class rule + the exposure policy from open decision Q3 below. C1.3 pinning carries two
+  explicit confirmations at freeze (final-review findings, 2026-07-26): the classifier's
+  `finalHit1Eligible` field is named for the RECOMMENDED gate composition and must be
+  consciously confirmed-or-renamed with that decision; add a `targetScope` field to the output
+  schema before pinning it (exposure unit is scope-qualified).
 - **C5.2 Stopping rule (PROPOSED, to be preregistered verbatim at freeze):** stop only after
   **≥ 20 eligible new product-decision probes** AND **≥ 14 days**, hard cap 28 days; the cap
   does NOT waive the minimum — a starved window reports unexercised, never a trivial pass;
