@@ -266,8 +266,8 @@ export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResu
     // provenance we do not track would be a guess.
     `- timeout:        ${dv.timeoutMs} ms`,
   ];
-  // Advisory, gated on RISK not provenance — an explicit 300000 carries the same exposure as the
-  // default. A timeout tree-kills the run AFTER the quota is spent. Silent when effort is inherited:
+  // Advisory, gated on RISK not provenance — an explicit 300000 carries the same exposure whether
+  // typed or inherited. A timeout tree-kills the run AFTER the quota is spent. Silent when effort is inherited:
   // codex's config may well say `ultra`, but Helix does not know that and will not pretend.
   if (dv.effort !== null && SLOW_EFFORTS.includes(dv.effort) && dv.timeoutMs <= SLOW_EFFORT_TIMEOUT_HINT_MS) {
     lines.push(

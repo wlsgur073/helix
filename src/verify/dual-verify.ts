@@ -50,15 +50,18 @@ export interface DualVerifyResult {
  * Content-free reason for the PERSISTED sinks (audit.jsonl + the opt-in content log). The live
  * ToolResult still uses the full `result.reason`; only the persisted ledgers are constrained.
  *
- * The 'error' outcome's reason embeds up to 500 chars of Codex stderr (codex.ts) — the only
- * unbounded free-text that reaches `reason` — so it is reduced to a static label here to honour the
- * "audit = enum/label only" invariant. Every other outcome's reason is already enum/count-derived
- * (disabled / below-floor / classifyEgress's content-free verdict / interpretPreflight's static
- * strings) and passes through unchanged. The host-visible stderr lives on in the ToolResult, where
- * free-text is legitimate (it is the host's own tool-call result, not a durable store).
+ * TWO outcomes carry unbounded free-text and are reduced to static labels here: the 'error'
+ * outcome's reason embeds up to 500 chars of Codex stderr (codex.ts), and the 'unavailable'
+ * outcome's preflight-failure reason embeds a raw exception message (checkCodexAvailable's catch —
+ * e.g. a spawn ENOENT path). Every other reason is already enum/count-derived (disabled /
+ * below-floor / classifyEgress's content-free verdict / interpretPreflight's static strings) and
+ * passes through unchanged. The diagnostic detail lives on in the ToolResult, where free-text is
+ * legitimate (it is the host's own tool-call result, not a durable store).
  */
 export function persistedReason(result: Pick<DualVerifyResult, 'outcome' | 'reason'>): string | undefined {
-  return result.outcome === 'error' ? 'codex run failed' : result.reason;
+  if (result.outcome === 'error') return 'codex run failed';
+  if (result.outcome === 'unavailable' && result.reason?.startsWith('codex preflight failed:')) return 'codex preflight failed';
+  return result.reason;
 }
 
 /** Critique-mode prompt: the answer under review is framed as data, not instructions.

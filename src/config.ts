@@ -94,9 +94,11 @@ export const DEFAULT_CONFIG: HelixConfig = {
     // model/effort for dual-verify specifically.
     model: null,
     effort: null,
-    // Codex run timeout (ms). 5 min gives heavy prompts headroom (the old 120s cap timed them out);
-    // the process is tree-killed on timeout so a higher ceiling does not leak a hung run.
-    timeoutMs: 300_000,
+    // Codex run timeout (ms). 25 min covers slow-effort runs (max/ultra) end to end — at the old
+    // 5-min default a slow-effort run was routinely tree-killed AFTER the metered quota was spent
+    // (SLOW_EFFORT_TIMEOUT_HINT_MS advises exactly that band). Tree-kill on timeout still bounds a
+    // genuinely hung run; the hard ceiling stays MAX_TIMEOUT_MS.
+    timeoutMs: 1_500_000,
     // Block every non-named egress leg to the external Codex model by default. User opts into risk
     // per-leg (a human edit, outside model control). Invalid/unknown => 'block'. Named secrets are
     // override-proof regardless of this map.
@@ -161,7 +163,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
       }
       // Valid integer >= 1s is accepted, clamped to MAX_TIMEOUT_MS (1h). Above 1h was an artifact of
       // Node's setTimeout 32-bit ceiling, not a real use case; clamping (vs reject->default) keeps a
-      // "run long" intent at the max we allow instead of silently dropping to the 5-min default.
+      // "run long" intent at the max we allow instead of silently dropping to the default.
       const t = dv.timeoutMs;
       if (typeof t === 'number' && Number.isInteger(t) && t >= 1_000) {
         merged.dualVerify.timeoutMs = Math.min(t, MAX_TIMEOUT_MS);

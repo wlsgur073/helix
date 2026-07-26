@@ -91,6 +91,15 @@ describe('handleDualVerify', () => {
     expect(audit.verdict).toBe('indeterminate');
   });
 
+  it('a throwing preflight audits a static content-free reason (raw exception text never lands in audit.jsonl)', async () => {
+    const d = deps({ checkAvailable: async () => ({ available: false, reason: 'codex preflight failed: spawn codex ENOENT secret-path' }) });
+    const res = await handleDualVerify({ question: 'q', helixAnswer: 'a' }, d);
+    expect(text(res)).toContain('did not run');
+    const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
+    expect(audit.reason).toBe('codex preflight failed');
+    expect(JSON.stringify(audit)).not.toContain('ENOENT');
+  });
+
   it('both-empty compare renders the no-unmatched-claims text (degenerate indeterminate)', async () => {
     const d = deps({ runner: async () => ({ ok: true, answer: '' }) });
     const res = await handleDualVerify({ question: 'q', helixAnswer: '' }, d);

@@ -23998,9 +23998,11 @@ var DEFAULT_CONFIG = {
     // model/effort for dual-verify specifically.
     model: null,
     effort: null,
-    // Codex run timeout (ms). 5 min gives heavy prompts headroom (the old 120s cap timed them out);
-    // the process is tree-killed on timeout so a higher ceiling does not leak a hung run.
-    timeoutMs: 3e5,
+    // Codex run timeout (ms). 25 min covers slow-effort runs (max/ultra) end to end — at the old
+    // 5-min default a slow-effort run was routinely tree-killed AFTER the metered quota was spent
+    // (SLOW_EFFORT_TIMEOUT_HINT_MS advises exactly that band). Tree-kill on timeout still bounds a
+    // genuinely hung run; the hard ceiling stays MAX_TIMEOUT_MS.
+    timeoutMs: 15e5,
     // Block every non-named egress leg to the external Codex model by default. User opts into risk
     // per-leg (a human edit, outside model control). Invalid/unknown => 'block'. Named secrets are
     // override-proof regardless of this map.
@@ -24359,7 +24361,9 @@ function classifyEmission(content) {
 // src/verify/dual-verify.ts
 var STAKES_RANK = { low: 0, medium: 1, high: 2, xhigh: 3 };
 function persistedReason(result) {
-  return result.outcome === "error" ? "codex run failed" : result.reason;
+  if (result.outcome === "error") return "codex run failed";
+  if (result.outcome === "unavailable" && result.reason?.startsWith("codex preflight failed:")) return "codex preflight failed";
+  return result.reason;
 }
 function buildCritiquePrompt(question, helixAnswer) {
   return [
