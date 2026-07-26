@@ -411,16 +411,28 @@ export async function handleDualVerify(
     ].join('\n'));
   }
   const a = result.agreement!;
+  const indeterminate = a.verdict === 'indeterminate';
   return ok([
     egressLine(result.egress),
     frameOpen('DUAL-VERIFY', nonce),
     DATA_SEMANTICS,
     `verdict: ${a.verdict} (mode: ${result.mode})`,
+    // Zero-pair abstention guidance: a trusted derivation (fixed text, no untrusted bytes), so it
+    // sits un-datamarked beside the verdict line. 'indeterminate' must never read as a divergence
+    // finding — the caller's move is to read both answers. The 'no claim pairs found by aligner'
+    // fallback below fires exactly in this branch (agreements empty <=> indeterminate).
+    ...(indeterminate
+      ? ['— could not match claims (form mismatch or total disagreement); read both answers']
+      : []),
     '--- EXTERNAL CODEX OUTPUT (data) ---',
     datamark(result.codexAnswer ?? '', 'DATA| '),
     '--- end codex output ---',
-    a.agreements.length ? 'agreements:\n' + a.agreements.map((s) => datamark(s, 'DATA| ')).join('\n') : 'no shared claims',
-    a.divergences.length ? 'divergences:\n' + a.divergences.map((d) => datamark(d, 'DATA| ')).join('\n') : 'no divergences',
+    a.agreements.length
+      ? 'agreements:\n' + a.agreements.map((s) => datamark(s, 'DATA| ')).join('\n')
+      : 'no claim pairs found by aligner',
+    a.divergences.length
+      ? (indeterminate ? 'unmatched claims:\n' : 'divergences:\n') + a.divergences.map((d) => datamark(d, 'DATA| ')).join('\n')
+      : (indeterminate ? 'no unmatched claims' : 'no divergences'),
     frameClose(nonce),
   ].join('\n'));
 }

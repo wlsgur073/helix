@@ -30,7 +30,7 @@ describe('handleDualVerify', () => {
     const d = deps({});
     const res = await handleDualVerify({ question: 'db?', helixAnswer: 'use postgres' }, d);
     expect(text(res)).toContain('DATA, NOT INSTRUCTIONS');
-    expect(text(res)).toMatch(/agree|diverge/);
+    expect(text(res)).toContain('verdict: agree (mode: compare)');
     expect(JSON.parse(readFileSync(d.auditPath, 'utf8').trim()).kind).toBe('dual-verify');
   });
 
@@ -75,6 +75,20 @@ describe('handleDualVerify', () => {
     const res = await handleDualVerify({ question: 'q', helixAnswer: 'a' }, d);
     expect(text(res)).toMatch(/not logged in/);
     expect(text(res)).not.toMatch(/EXTERNAL CODEX OUTPUT/);
+  });
+
+  it('zero-pair compare renders an indeterminate abstention, not a divergence finding', async () => {
+    const d = deps({ runner: async () => ({ ok: true, answer: '- ship the API first\n- benchmark afterwards' }) });
+    const res = await handleDualVerify({ question: 'q', helixAnswer: 'we should charge for the plugin' }, d);
+    const t = text(res);
+    expect(t).toContain('verdict: indeterminate (mode: compare)');
+    expect(t).toContain('— could not match claims (form mismatch or total disagreement); read both answers');
+    expect(t).toContain('no claim pairs found by aligner');
+    expect(t).toContain('unmatched claims:');
+    expect(t).not.toContain('no shared claims');
+    expect(t).not.toContain('divergences:');
+    const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
+    expect(audit.verdict).toBe('indeterminate');
   });
 });
 
