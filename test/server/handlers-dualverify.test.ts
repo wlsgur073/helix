@@ -90,6 +90,16 @@ describe('handleDualVerify', () => {
     const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
     expect(audit.verdict).toBe('indeterminate');
   });
+
+  it('both-empty compare renders the no-unmatched-claims text (degenerate indeterminate)', async () => {
+    const d = deps({ runner: async () => ({ ok: true, answer: '' }) });
+    const res = await handleDualVerify({ question: 'q', helixAnswer: '' }, d);
+    const t = text(res);
+    expect(t).toContain('verdict: indeterminate (mode: compare)');
+    expect(t).toContain('no claim pairs found by aligner');
+    expect(t).toContain('no unmatched claims');
+    expect(t).not.toContain('no divergences');
+  });
 });
 
 describe('handleDualVerify egress audit', () => {

@@ -229,6 +229,11 @@ All notable changes to Helix are documented here. This project follows
   score). The parse-boundary guard now also validates `tx`, alongside the already-guarded
   `id`/`content`/`provenance`/`mac`, and skips a structurally invalid row exactly like an existing
   torn-line, instead of letting a downstream predicate dereference it.
+- dual-verify compare mode: a zero-pair claim alignment now reports `verdict: indeterminate`
+  (with a fixed guidance line, a `no claim pairs found by aligner` fallback, and an `unmatched
+  claims:` list) instead of mislabeling the comparison failure as `diverge`. Audit rows may now
+  carry `verdict: "indeterminate"`; consumers must treat it as non-coverage — never fold it into
+  divergence.
 
 ### Security
 - Secret-scan redaction on the memory write path; the dual-verify egress guard
