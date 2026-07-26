@@ -14,7 +14,7 @@ export interface DualVerifyAudit {
   /** True when a real (metered) Codex call was attempted. */
   spawned: boolean;
   mode?: 'compare' | 'critique';
-  verdict?: 'agree' | 'diverge';
+  verdict?: 'agree' | 'diverge' | 'indeterminate';
   reason?: string;
   // --- egress guard fields (2b): enum / ID / policy-key only — NEVER a matched span, secret, PII value,
   // or memory snippet. Both blocked AND allowed-override events are logged. ---

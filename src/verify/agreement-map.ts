@@ -1,5 +1,5 @@
 export interface AgreementMap {
-  verdict: 'agree' | 'diverge';
+  verdict: 'agree' | 'diverge' | 'indeterminate';
   agreements: string[];
   divergences: string[];
 }
@@ -35,6 +35,9 @@ const SENTENCE_SIM = 0.5;
  * >= SENTENCE_SIM of its content tokens; a claim with no counterpart is a divergence. Original
  * casing is preserved in the lists so the user sees exactly what each side said. v1 used a richer
  * claim extractor's place-holder (verbatim-sentence overlap); this is still a heuristic.
+ * Zero pairs — jaccard is symmetric, so zero matches one way implies zero the other — yields
+ * 'indeterminate': no comparability was established and no semantic relationship is asserted
+ * (empty inputs included; they must not read as vacuous agreement).
  */
 export function buildAgreementMap(helixAnswer: string, codexAnswer: string): AgreementMap {
   const helix = sentences(helixAnswer);
@@ -50,6 +53,11 @@ export function buildAgreementMap(helixAnswer: string, codexAnswer: string): Agr
     ...codex.filter((_, i) => !matched(codexTok[i]!, helixTok)),
   ];
 
-  const verdict: AgreementMap['verdict'] = divergences.length === 0 ? 'agree' : 'diverge';
+  // Zero pairs is a failure to COMPARE, not a finding of disagreement (2026-07-26 dogfood
+  // specimen: a prose paragraph vs a bulleted list reaching the same conclusion paired nothing
+  // and rendered 'diverge'). With no anchor the heuristic has no evidence for agree OR diverge;
+  // the zero-match check comes first so two empty answers do not become vacuously 'agree'.
+  const verdict: AgreementMap['verdict'] =
+    agreements.length === 0 ? 'indeterminate' : divergences.length === 0 ? 'agree' : 'diverge';
   return { verdict, agreements, divergences };
 }

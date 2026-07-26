@@ -64,9 +64,16 @@ describe('dualVerify', () => {
     expect(r.mode).toBe('compare');
   });
 
-  it('flags divergence when the answers differ', async () => {
+  it('zero-pair answers surface as indeterminate through the pipeline', async () => {
     const r = await dualVerify({ question: 'q', helixAnswer: 'use postgres' },
       deps({ config: enabled(), runner: async () => ({ ok: true, answer: 'use mysql instead' }) }));
+    expect(r.ran).toBe(true);
+    expect(r.agreement?.verdict).toBe('indeterminate');
+  });
+
+  it('flags divergence when an anchored pair leaves differing remainders', async () => {
+    const r = await dualVerify({ question: 'q', helixAnswer: 'Use postgres for the store. Add an index today.' },
+      deps({ config: enabled(), runner: async () => ({ ok: true, answer: 'Use postgres for the store. Skip the index for now.' }) }));
     expect(r.ran).toBe(true);
     expect(r.agreement?.verdict).toBe('diverge');
   });

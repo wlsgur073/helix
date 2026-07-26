@@ -15,8 +15,15 @@ describe('J4 audit — agreement-map now matches paraphrases (J4-1 FIXED)', () =
     const m = buildAgreementMap('We deploy on Friday', 'We deploy on Friday afternoon');
     expect(m.verdict).toBe('agree');
   });
-  it('genuinely different claims still diverge', () => {
+  it('zero-pair different claims are indeterminate (the aligner abstains without an anchor)', () => {
     const m = buildAgreementMap('Use Postgres for storage', 'Use Redis as the cache');
+    expect(m.verdict).toBe('indeterminate');
+  });
+  it('an anchored pair with unrelated remainders still diverges', () => {
+    const m = buildAgreementMap(
+      'Use Postgres for storage. Cache reads in memory.',
+      'Use Postgres for storage. Evict with an LRU policy.',
+    );
     expect(m.verdict).toBe('diverge');
   });
 });

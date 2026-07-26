@@ -18,6 +18,12 @@ describe('appendAudit', () => {
     expect(JSON.parse(lines[1]!).verdict).toBe('diverge');
   });
 
+  it('round-trips an indeterminate verdict row', () => {
+    const p = tmpAudit();
+    appendAudit(p, { kind: 'dual-verify', ts: '2026-07-26T00:00:00.000Z', enabled: true, spawned: true, verdict: 'indeterminate' });
+    expect(JSON.parse(readFileSync(p, 'utf8').trim()).verdict).toBe('indeterminate');
+  });
+
   it('round-trips the enum/ID-only egress fields', () => {
     const p = tmpAudit();
     const e: AuditEvent = {

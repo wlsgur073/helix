@@ -24113,7 +24113,7 @@ function buildAgreementMap(helixAnswer, codexAnswer) {
     ...helix.filter((_, i) => !matched(helixTok[i], codexTok)),
     ...codex.filter((_, i) => !matched(codexTok[i], helixTok))
   ];
-  const verdict = divergences.length === 0 ? "agree" : "diverge";
+  const verdict = agreements.length === 0 ? "indeterminate" : divergences.length === 0 ? "agree" : "diverge";
   return { verdict, agreements, divergences };
 }
 
