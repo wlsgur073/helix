@@ -273,9 +273,25 @@ Newly surfaced by the interview, recorded as ACCEPTED v0.1 limitations (tracked,
 - **L1 Trust-tier decision-efficacy is unevaluated.** The two-tier ladder (Corroborated/Verified) is
   SHIPPED (@ 6833ff6), but whether the tiers measurably improve the user's decisions is not evaluated —
   that needs usage data and folds into the pilot's remit. Accepted for v0.1.
-- **L2 No one-step undo for permanent lifecycle operations.** A soft erase is a recoverable tombstone,
-  but a permanent erase or a wrong supersede has no one-step undo; recovery is by re-commit. Accepted;
-  a short recovery playbook is owed in docs (tracked, not a blocker).
+- **L2 No one-step undo for permanent lifecycle operations (limitation ACCEPTED; playbook DELIVERED
+  2026-07-27).** A soft erase is a recoverable tombstone, but a permanent erase or a wrong supersede
+  has no one-step undo; recovery is by re-commit. The owed playbook shipped as
+  `recovery-playbook.md` (this directory) — every recipe executed against the shipped bundle, not
+  inferred: the window-open checks, the `asOf`-not-`history` retrieval route, what a re-commit does
+  NOT restore (id, grade, verifications, bitemporal interval), the re-confirm eligibility rule, and
+  the C4.6-Q4 backup command. Two by-products, both fixed in the same change: README described the
+  `helix_memory_erase` TOOL as physical erasure in three places (tool table, "How it works",
+  intro) — false for the shipped soft-only tool, contradicted by SECURITY.md, and doubly harmful
+  (it tells a user their data is gone, so they never look for the undo window, while overstating
+  the destruction guarantee); and README's compaction-observability paragraph claimed that with
+  `metrics.enabled: false` a compaction leaves "no trace at all" — disproven by executing one
+  (`witness-log.jsonl` records every rewrite ungated by metrics), so the corrected text now names
+  that file as the reliable rewrite record. Also newly documented, because it appeared nowhere:
+  the history-vs-`asOf` redaction asymmetry (erase-closed rows render content-blank,
+  supersede-closed rows keep their content). One reviewer pass on the playbook produced a further
+  eight corrections, all verified by execution before folding in — including a headline `tar`
+  command that failed as printed (missing `mkdir -p`) and the cross-scope supersede refusal that
+  strands a user mid-recovery without an explicit `scope`.
 - **L3 Provenance boundary clarity.** The provenance WIRING is audited closed (C1.1), but the
   user-relayed vs agent-inference boundary can read as ambiguous in use — a docs/UX limitation,
   accepted for v0.1.

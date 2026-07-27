@@ -2,7 +2,7 @@
 
 > Better with Every Turn.
 
-Helix is a [Claude Code](https://docs.claude.com/en/docs/claude-code) plugin that gives Claude a **verifiable, trust-indexed memory** across sessions, plus **optional cross-validation** of its answers against [Codex](https://github.com/openai/codex). Memory is treated as data to be checked, not gospel: every fact carries provenance and a trust state, recalled content is quarantined from instructions, secrets are redacted before they touch disk, and erasure is physical.
+Helix is a [Claude Code](https://docs.claude.com/en/docs/claude-code) plugin that gives Claude a **verifiable, trust-indexed memory** across sessions, plus **optional cross-validation** of its answers against [Codex](https://github.com/openai/codex). Memory is treated as data to be checked, not gospel: every fact carries provenance and a trust state, recalled content is quarantined from instructions, secrets are redacted before they touch disk, and erasure is auditable and reversible by default, with physical destruction as a deliberate, operator-run step.
 
 It ships the **engine** — memory and dual-verify, exposed as MCP tools and session hooks. Your assistant's voice and behavior stay yours to configure (your own `CLAUDE.md` or output style).
 
@@ -36,7 +36,7 @@ Nine MCP tools:
 | `helix_memory_inspect` | List current memory items with their trust state |
 | `helix_memory_recheck` | Re-check a fact against reality (content-bound file check) → `Corroborated` (machine-checked, never `Verified`) |
 | `helix_memory_confirm` | Promote a fact to `Verified` because you explicitly vouched for it (requires your approval; never self-confirm) |
-| `helix_memory_erase` | Physically erase an item (right-to-erasure) |
+| `helix_memory_erase` | Erase an item from the live view (soft: tombstoned, recoverable until a compaction) |
 | `helix_memory_adopt` | Trust the current project's pre-existing memory file (for a recognized/team-shared ledger; default-deny) |
 | `helix_dual_verify` | Cross-check an answer with Codex (off by default) |
 | `helix_codex_status` | Show Codex connection state (CLI/version, login, auth mode), dual-verify config, and content-log state — free, no metered call |
@@ -129,8 +129,11 @@ config typo).
 content-free `compaction` record to `~/.helix/metrics.jsonl`, failed attempts included (`"ok": false`).
 Its `reclaimed_bytes` can legitimately be **negative** when a compaction drops little but adds a
 content-free audit tombstone, so the file net-grew. If you set `metrics.enabled: false`, the metrics sink
-is a no-op and compactions — successful *or* failed — leave **no trace at all**. Enabling a destructive
-operation with metrics turned off means you cannot tell whether it ever ran.
+is a no-op, so you lose the operational detail — how much a compaction reclaimed, and whether it failed.
+You do not lose the *fact* that the ledger was rewritten: every rewrite appends a content-free line to
+`~/.helix/witness-log.jsonl` (`{"v":1,"scope":…,"epoch":…,"kind":"compaction","tx":…}`) regardless of the
+metrics setting, so that file — not metrics — is the reliable answer to "did something rewrite my ledger,
+and when?".
 
 **Known v1 limitations.** This is not a size cap. Preserved audit data — erase tombstones and genuine
 signed verifies on live facts — is never reclaimed, so it does not bound total ledger size. A ledger you
@@ -169,6 +172,7 @@ Helix's memory lives in plain files under your control. Back them up like any ot
 - **Key loss.** Without `ledger-mac-master.key`, no signed `verify` record can validate, so any grade a `verify` record conferred — `Corroborated`, `Verified`, or `Suspect` — reverts to `Fresh` until a new key signs fresh verifications; for `Suspect` that reversion is a trust *increase*, not fail-low: the item's displayed state quietly reads `Fresh` again and the session hint loses its Suspect-specific wording, though such items (always non-authoritative) remain flagged for confirmation on source grounds. A new key is minted automatically on the next write; re-elevate a fact with `helix_memory_confirm`, or re-run `helix_memory_recheck` to restore a lapsed `Suspect` label. Losing the key never loses content — only a verify-conferred grade is affected.
 - **Corruption.** A torn tail line (e.g. power loss mid-append) is repaired by the next writer, which prefixes a separator so its own record lands cleanly while the torn fragment is isolated as its own skipped line. A more structurally damaged line elsewhere in the ledger is simply excluded from the live view rather than guessed at or fabricated. Restore from backup for anything worse than a torn tail, and never hand-edit a ledger file while a session is running — Helix's own file lock coordinates only its own processes, not an external editor.
 - **Migration & downgrade honesty.** The ledger is append-only JSONL with no schema migrations to date, and Helix does not yet guarantee forward or backward compatibility across versions before 1.0. Keep your backups across upgrades.
+- **Undoing an erase or a wrong supersede.** There is no undo command, but a soft-erased or superseded fact is recoverable until a compaction — the recipes (and the trap that `inspect history` blanks erased content while `inspect asOf` returns it) are in [the recovery playbook](./docs/release/recovery-playbook.md), which also carries the verified backup command.
 
 ## Uninstall & data removal
 
@@ -190,7 +194,7 @@ Partial-removal note: deleting only the signing key (`ledger-mac-master.key`) is
 - **Re-verify before use.** A `Suspect` item on a high-blast-radius path must be re-checked before it is acted on.
 - **Content quarantine.** Recalled memory and external-model output are framed as labeled DATA; forged frame markers are neutralized so stored text can never act as an instruction.
 - **Secret hygiene.** Common credential formats and high-entropy tokens are redacted before anything is written, and dual-verify refuses to send a payload containing a secret to the external model.
-- **Right-to-erasure.** `erase` physically rewrites the ledger to remove the content, leaving only a content-free tombstone. The ledger is locked across processes, so concurrent sessions can't corrupt it or resurrect erased data.
+- **Right-to-erasure.** The `helix_memory_erase` tool is a **soft** erase: it appends a content-free tombstone and the fact leaves the live view, but the original line stays in the ledger file until a compaction rewrites it — which is also what makes an accidental erase recoverable (see [the recovery playbook](./docs/release/recovery-playbook.md)). Physical destruction — rewriting the ledger without the record — is the operator-run `permanent` path, deliberately kept off the agent tool surface so a prompt-injected agent cannot reach it. Either way the ledger is locked across processes, so concurrent sessions can't corrupt it or resurrect erased data.
 
 ## Trust & data flow (what runs on your machine)
 
