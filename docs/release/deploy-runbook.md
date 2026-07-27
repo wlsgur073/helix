@@ -53,8 +53,11 @@ grep -rl "<marker>" ~/.claude/plugins/marketplaces/helix ~/.claude/plugins/cache
 If the sha is stale (auto-update race): repeat uninstall → marketplace update → install.
 
 Then honor the **launch barrier**: start a NEW Claude Code process (do not rely on `/clear`)
-and live-verify one helix tool call from the new session. Long-lived sessions elsewhere keep
-serving old bytes until they restart — that is expected, not a failed deploy.
+and live-verify one helix tool call from the new session. A headless verify (`claude -p '…'
+--permission-mode acceptEdits --disable-slash-commands`) must additionally allow-list the tool —
+`--allowedTools "mcp__plugin_helix_helix__helix_memory_inspect"` — or the call is blocked in
+non-interactive mode (C4 drill note O5). Long-lived sessions elsewhere keep serving old bytes
+until they restart — that is expected, not a failed deploy.
 
 ## Ledger-format changes (mixed-window rule)
 
@@ -78,7 +81,10 @@ survives anywhere.
 
 ## Version-bumped releases (the end-user case)
 
-A normal version bump does not hit the cache trap — `claude plugin update helix` installs into
-a fresh version-keyed dir. The launch barrier still applies: users must restart Claude Code to
+A normal version bump does not hit the cache trap — `claude plugin update helix@helix` installs
+into a fresh version-keyed dir. The `update` subcommand requires the full `plugin@marketplace`
+id: bare `claude plugin update helix` fails with "Plugin not found" on claude CLI 2.1.220,
+while `uninstall`/`disable`/`enable` accept the bare name (C4 drill finding F1). The launch
+barrier still applies: users must restart Claude Code to
 get the new server. README's install section carries the user-facing caveat; this runbook is
 the maintainer-facing procedure.
