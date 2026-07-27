@@ -107,15 +107,39 @@ or prior-approved requirement; anything else is gold-plating and was deliberatel
 The prior approved design's clean-room tier and drill set are carried forward IN FULL
 (pristine AND upgrade profiles; destructive drills on corpus copies):
 
-- **C4.1** Upgrade-with-cache-proof drill (installed artifact must report version AND exact
-  candidate commit — the version-keyed cache trap is the known failure mode).
-- **C4.2** Backup → restore into empty data dir (integrity, counts, spot oracle probe).
-- **C4.3** Interrupted update/migration on a disposable ledger copy (fails visibly, source
-  intact, restorable).
-- **C4.4** Truncated/corrupt ledger copy (detection, safe failure, recovery from backup).
-- **C4.5** Uninstall/reinstall + disable/enable (documented data-preservation behavior holds).
-- **C4.6** Maintainer tabletop: hosting-account/token recovery + ledger master-key-loss drill.
-  Tag signing stays out of scope until tags are actually signed.
+- **C4.1 (DONE 2026-07-27).** Upgrade-with-cache-proof drill: the version-keyed cache trap
+  live-reproduced (same-version `plugin update` reported "already at the latest version" with
+  stale bytes serving) and defeated by the runbook procedure; 3-sha identity + marker verified
+  in both load paths; pristine-profile public-path install landed the candidate commit-exactly
+  (sha + marker) with the documented empty-home first-run behavior (TOFU note; key minted on
+  first write).
+  Also closed the deferred afc29c4 redeploy and yielded the F1 docs fix — `plugin update`
+  needs the `plugin@marketplace` id on current CLIs (fixed @ d481893). Record:
+  `c4-drills-2026-07.md` (this directory, all six drills; findings and observations F1 +
+  O2–O5 dispositioned there).
+- **C4.2 (DONE 2026-07-27).** Backup → restore into an empty data dir: a consistent whole-home
+  restore serves with no witness alarm; counts match; foreign→adopt→spot-oracle probe hit on
+  the corpus copy with the ledger byte-identical across adoption (grade clamp on re-adopt is
+  the documented machine-local-trust consequence).
+- **C4.3 (DONE 2026-07-27).** Interrupted rewrite on copies: crash window A fails VISIBLY
+  (exact interrupted note + write-block error), source byte-intact, ceremony-restorable
+  (pty); window B self-heals at startup; the orphan-tmp sweep works but is completely silent
+  (tracked observation O2 in the record).
+- **C4.4 (DONE 2026-07-27).** Truncated/corrupt ledger copies: witnessed-range damage is
+  visibly alarmed (mismatch note) and safely excluded with appends still landing and the torn
+  fragment isolated; the unwitnessed-suffix blind spot confirmed exactly as SECURITY.md
+  documents; backup recovery returns to alarm-free service.
+- **C4.5 (DONE 2026-07-27).** Uninstall/reinstall + disable/enable: README's
+  data-preservation sentences hold at byte level (eight stable files hash-identical across
+  the full cycle); reinstall over surviving data serves with no alarm from a fresh process.
+- **C4.6 (DONE 2026-07-27).** Maintainer tabletop + key-loss drill: key-loss semantics proven
+  live on a copy (README's key-loss paragraph holds as documented: grades revert, content
+  survives, new key auto-mints, re-confirm restores); the six-question tabletop transcribed
+  (answers = the owner's adoption of a Codex-compare-reconciled recommendation, disclosed in
+  the record) with dispositions (Q1/Q2/Q4 findings with owner-owed [REAL-OP] actions — recovery-code
+  verification, account-side credential inventory, first real backup; Q3 sound; Q5
+  procedure-sound / unconfined-class-accepted; Q6 accepted-limitation). Tag signing stays out
+  of scope until tags are actually signed.
 - **C4.7 Uninstall/data-removal statement (DONE 2026-07-22).** README previously documented
   the uninstall command only; it now has an "Uninstall & data removal" section: plugin
   uninstall never touches data; what remains (`~/.helix/` global ledger, key, witness state,
