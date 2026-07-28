@@ -28,9 +28,23 @@ or prior-approved requirement; anything else is gold-plating and was deliberatel
   `o67-class-rule-2026-07.md` (this directory) + `scripts/pilot/classify-o67.ts` + the shared
   `lexicalEvidence` scorer primitive (behavior-neutral — archived pilot hashes reproduced at
   HEAD). Retrodiction anchor met: the general rule classifies exactly {O_67} in-class on both
-  frozen manifests.
-- **C1.4 Registry-as-trust-store hardening + mixed-key deletion fix (SHIPPED local; round-4/5 Codex
-  compare).** The ownership registry (`~/.helix/projects.json`) is a trust store — its per-scope MAC
+  frozen manifests. **DONE = rule, classifier, scorer primitive and retrodiction anchor
+  DELIVERED; prospective v2 use remains gated by C5.1 closure items 1–6, 9 and 10** —
+  scope-qualified identities, the candidate-universe EMISSION capability, the cutoff (without
+  which the rule's "distinct post-cutoff target identity" exposure unit is unproducible), the
+  unambiguity denominator (whose optimistic bias inflates the base-eligible set the exposure
+  count rests on), the gate-composition confirmation (`finalHit1Eligible` is named for a
+  composition the freeze must confirm or rename), the exposure minima, the preregistration,
+  and the freeze-commit retrodiction rerun.
+  Those are downstream freeze-INTEGRATION prerequisites for a completed artifact, not evidence
+  that the artifact is unshipped. Reopen this criterion only if that work changes the normative
+  membership rule, or if the freeze-commit retrodiction fails — never merely because the
+  identity is not yet pinned.
+- **C1.4 Registry-as-trust-store hardening + mixed-key deletion fix (SHIPPED and DEPLOYED; round-4/5
+  Codex compare).** Deployment status corrected 2026-07-27: the "SHIPPED local" wording below predates
+  the C4.1 drill, which redeployed the plugin and verified fresh processes serve the hardened bytes —
+  the cold-process dependency noted at the end of this entry is CLOSED, not outstanding.
+  The ownership registry (`~/.helix/projects.json`) is a trust store — its per-scope MAC
   nonce selects the ledger verification subkey — but was not hardened like the ledger/master-key: a
   wrong/lost/aliased/corrupt nonce let compaction physically DELETE genuine signed verifies (plus a
   false integrity marker), unrecoverably. Hardened over PR-1..F/G/H (commits 8f46462..86fd151),
@@ -61,6 +75,9 @@ or prior-approved requirement; anything else is gold-plating and was deliberatel
   Deploy dependency: the fix protects only sessions served by the redeployed plugin — the cold-process
   barrier (SECURITY.md) must hold so no pre-fix MCP process compacts with the old bytes. (The running
   plugin was still pre-fix 74f3621 at ratification time; redeploy is a release precondition, not hygiene.)
+  CLOSED 2026-07-27 by the C4.1 drill: `installed_plugins.json` records `gitCommitSha`
+  afc29c4 (installed 12:42Z), and every helix-mcp process alive since started after it, so no
+  74f3621 writer survives. Commits after afc29c4 are docs-only — no runtime bytes differ.
 
 ## 2. Quality gates
 
@@ -137,9 +154,12 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   survives, new key auto-mints, re-confirm restores); the six-question tabletop transcribed
   (answers = the owner's adoption of a Codex-compare-reconciled recommendation, disclosed in
   the record) with dispositions (Q1/Q2/Q4 findings with owner-owed [REAL-OP] actions — recovery-code
-  verification, account-side credential inventory, first real backup; Q3 sound; Q5
-  procedure-sound / unconfined-class-accepted; Q6 accepted-limitation). Tag signing stays out
-  of scope until tags are actually signed.
+  verification, account-side credential inventory, first real backup; Q3 sound, but carrying one
+  FREEZE-COUPLED action the earlier summary omitted: mint and verify a fresh source bundle holding
+  the frozen candidate and the historical tag, stored off this physical machine — it belongs on the
+  C5.1 checklist, and it is independent of the non-blocking Q4 backup, which must not become a
+  blocker by association; Q5 procedure-sound / unconfined-class-accepted; Q6 accepted-limitation).
+  Tag signing stays out of scope until tags are actually signed.
 - **C4.7 Uninstall/data-removal statement (DONE 2026-07-22).** README previously documented
   the uninstall command only; it now has an "Uninstall & data removal" section: plugin
   uninstall never touches data; what remains (`~/.helix/` global ledger, key, witness state,
@@ -176,17 +196,117 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   O_67-class rule + the exposure policy from open decision Q3 below. C1.3 pinning carries two
   explicit confirmations at freeze (final-review findings, 2026-07-26): the classifier's
   `finalHit1Eligible` field is named for the RECOMMENDED gate composition and must be
-  consciously confirmed-or-renamed with that decision; add a `targetScope` field to the output
-  schema before pinning it (exposure unit is scope-qualified).
+  consciously confirmed-or-renamed with that decision; and the exposure unit must become
+  scope-qualified — see closure item 1, which is a candidate-POOL change, not the schema-field
+  addition an earlier draft of this entry described. Reciprocally: these are downstream
+  freeze-INTEGRATION prerequisites for C1.3's already-completed artifact — C5.1 owns
+  integration, policy confirmation, output completion, pinning and freeze-time reproduction;
+  C1.3 owns the shipped rule itself.
+- **C5.1 pre-freeze closure list (merged 2026-07-27/28 from an owner draft + two Codex compare
+  rounds; reconciled in §8).** Execution order is load-bearing — each block consumes the
+  previous block's output. Nothing here changes the pilot's measured question: items 1–4 make
+  the frozen method *executable*, 5–8 decide what gets frozen, 9 writes it down, 10–12 verify
+  and preserve. Only items 1–9 land before or in the freeze commit in C5.3's sense; items
+  10–11 RUN ON that commit, and item 12 is an off-machine copy taken after it, landing in no
+  commit at all — which is why C5.3 is not violated by placing it last (C5.3 forbids a CHANGE
+  after the cutoff, and a backup is not a change).
+  1. **Thread scope through the classifier candidate pool, then scope-qualify every identity
+     it emits.** `classify-o67.ts:95` builds the pool as `{ id, content }` and discards
+     `it.scope`, so `targetScope` cannot be derived downstream — the pool shape changes first.
+     `targetId` is not the only identity affected: the rule's exposure unit is the pair
+     `(scope, record-id)` (`o67-class-rule-2026-07.md:59`), so `witnesses[].id` and
+     `equalCoverage[]` must carry scope too, or a cross-scope id collision reads as one entity.
+  2. **Build the capability to emit the candidate-universe artifact the binding procedure
+     already requires.** `o67-class-rule-2026-07.md:102-104` mandates that at window close,
+     BEFORE scoring, the candidate-universe artifact be generated and hashed — but the pool at
+     `classify-o67.ts:95` is transient and only verdicts are written (line 106), so nothing
+     hashable survives. What lands pre-freeze is the EMISSION capability (a deterministic,
+     sorted, scope-qualified per-probe universe); the artifact ITSELF is still generated and
+     hashed at window close, unchanged. This is an executability blocker of the same class as
+     items 3–4, not a nicety: hashing what the system COULD have returned, before looking at
+     what it DID rank, is the procedure's anti-peeking device.
+  3. **Give the manifest generator a transaction-time cutoff** (`generate-manifest.ts:9` takes
+     four positional args, none of them a cutoff), or specify the post-cutoff enumeration
+     procedure in the preregistration completely enough to execute without ambiguity. Until
+     one of the two exists, the temporal holdout is not producible with current tooling.
+  4. **Resolve the unambiguity denominator.** `generate-manifest.ts:16-20` flags a probe
+     `unambiguous` when no OTHER live row shares ≥3 topic terms with the query — but its `live`
+     set (line 14) comes from the PROJECT ledger alone (line 11), so a global-scope competitor
+     is invisible to the test, while `run-pilot.ts` ranks against the merged global+project
+     universe production recall actually serves. The bias runs OPTIMISTIC (probes look
+     unambiguous that are not). Choose the denominator deliberately and make generator and
+     runner agree. — *Acceptance for 1–4 is ordinary implementation work, not a governance
+     item: focused tests for scope propagation, cutoff boundaries, and the merged denominator
+     ship with the change.*
+  5. **Confirm or replace the O_67 gate composition**, renaming `finalHit1Eligible` if the
+     composition changes.
+  6. **Set separate positive-exposure minima for Hit@1 and for the O_67 class, and define the
+     sample unit** (probe rows vs distinct decision identities — the protocol can emit several
+     probes per decision).
+  7. **State the shortfall consequence in the shipped rule's own labels.** Reaching the 28-day
+     cap without the minimum blocks release under Q3 — the cap is never a waiver — and the
+     report distinguishes `UNEXERCISED — 0/E` from `PARTIALLY EXERCISED — n/E (minimum not
+     met)`; **both block** (`o67-class-rule-2026-07.md:61-64`). D3's own prose says only
+     "unexercised" because it predates that refinement; the two-label form is the shipped one,
+     so a nonzero shortfall must not be reported as `UNEXERCISED`.
+  8. **Adopt for v2 — or explicitly carry forward — the D2 elements the other items do not
+     already settle.** D2 requires ALL six fixed in advance
+     (`gate-decision-2026-07-22.md:30-33`); items 3 and 9 own the cutoff and the identity
+     pinning, items 5–7 own eligibility composition and the sample side, so what remains here
+     is query-derivation/mapping and K + every metric definition. These are NOT bare tooling
+     defaults: `pilot-protocol.md:106-121` fixes derivation rule v1 normatively (six ordered
+     steps over `derive.ts`'s `topicTerms`, with "changing any behavior of this function after
+     the method freeze is a deviation"), `:170-171` fixes K = 20 and the metric definitions,
+     oracle segmentation is frozen in `segment-oracle.ts`, and the mapping is a manual JSON
+     frozen with the manifest. The step is therefore mostly TRANSCRIPTION of already-normative
+     v1 text into the v2 preregistration — but it must be a conscious re-adoption, so that item
+     9 pins rather than decides: a choice first made while drafting the preregistration could
+     demand new tooling and invalidate the hashes that document just pinned.
+  9. **Write the v2 preregistration as a tracked release doc:** the six §f elements, the D5
+     disclosure duties, frozen hashes and output schema, the window-close ordering, and the
+     identities pinned SEPARATELY — the runtime bytes and config actually serving recall, the
+     protocol/classifier commit, and the exact transaction-time cutoff. It must also state the
+     **D3 window lifecycle** that no existing document fixes: what may be inspected while the
+     window is open (C5.2 forbids stopping on observed scores, but counting qualifying
+     exposures needs a preregistered BLINDED census procedure or a fixed close date — the
+     classifier can count in-class exposures without reading ranks, and that must be written
+     down rather than left discretionary), and the abort/reset rule if items 10–11 uncover a
+     defect. Window open/close ordering itself is already fixed by D3 and rule §6.
+  10. **Re-run the C1.3 retrodiction reproduction AT the freeze commit** rather than relying on
+      the 2026-07-26 run.
+  11. **On the freeze commit itself:** the committed provenance-audit suite as the C1.1
+      acceptance drill, and full suite + typecheck as C2.3. The two opt-in metered
+      external-model end-to-end tests (the only skips in an otherwise green tree) are
+      explicitly **NON-GATING** — no criterion requires them; running them once is optional
+      supporting evidence, never a closure obligation.
+  12. **LAST — mint and verify the off-machine source bundle** holding the frozen candidate and
+      the historical tag (C4.6 Q3's freeze-coupled action; independent of the Q4 backup). It
+      goes after items 10–11, not before: a bundle minted earlier is stale the moment a failed
+      check forces a new commit. The bundle is an operational copy, not a measured surface, so
+      minting it last does not touch the D3 window.
+  Provenance, not steps (all four already applied 2026-07-27/28): D3's qualifier restored and
+  the ordering clause reworded (C5.3); C1.3 cross-referenced to its open prerequisites, both
+  directions; C1.4's stale "SHIPPED local" corrected and its cold-process dependency closed
+  with evidence; the freeze-time source bundle added to the C4.6 summary and decoupled from
+  the non-blocking Q4 backup.
 - **C5.2 Stopping rule (PROPOSED, to be preregistered verbatim at freeze):** stop only after
   **≥ 20 eligible new product-decision probes** AND **≥ 14 days**, hard cap 28 days; the cap
-  does NOT waive the minimum — a starved window reports unexercised, never a trivial pass;
+  does NOT waive the minimum, and a starved window is never a trivial pass — it reports in the
+  shipped rule's two labels, `UNEXERCISED — 0/E` when nothing qualified and `PARTIALLY
+  EXERCISED — n/E (minimum not met)` when something did, and **both block release**
+  (`o67-class-rule-2026-07.md:61-64`; see C5.1 closure item 7 — this text is preregistered
+  VERBATIM, so the coarser single-label wording must not survive into the freeze);
   stopping never depends on observed scores; Hit@1 and O_67-class get separately frozen
   exposure/reporting rules. (At the observed ~1.65 ledger rows/day, 20 raw rows ≈ 12 days —
   but eligible product-decision probes accrue SLOWER than raw rows; hence the 14-day floor
   and the honest starvation clause.)
-- **C5.3 Ordering.** Every criterion in this document lands BEFORE the v2 freeze (D3: any
-  intervening change resets the untouched window).
+- **C5.3 Ordering.** Every criterion in this document lands **before or in** the freeze commit —
+  not strictly before it, since C2.3 (green suite) and C5.1 (the freeze checklist itself) execute
+  AT that commit by construction. What must not happen is a change AFTER the cutoff: D3's reset
+  rule is scoped to "any intervening **system, config, rule, or metric** change"
+  (`gate-decision-2026-07-22.md` D3, quoting `pilot-amendment-1.md` §f) — an earlier restatement
+  here dropped that qualifier and so appeared to make a documentation commit reset the holdout
+  window. It does not; the measured surface is code, config, and the frozen rules, not prose.
 - **C5.4 Historical marker (DONE 2026-07-22, landed with this document's first commit).**
   `audit-2026-07.md` narrated the stood-down 0.2.0 flip in future tense; it now carries a
   HISTORICAL status header so tracked release docs make no stale forward-looking claims.
@@ -222,7 +342,11 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   content-free advisory (C4.10).
 - **Q3 — DECIDED 2026-07-22: minimum exposure required.** The v2 pilot may NOT release with
   Hit@1 or O_67-class evidence unexercised; each carries a preregistered minimum exposure
-  count, fixed verbatim at the v2 freeze (C5.2 encodes this position).
+  count, fixed verbatim at the v2 freeze (C5.2 encodes this position). *Clarification
+  2026-07-28 (not a re-decision): the decisive word is "minimum" — the later O_67 rule splits
+  a shortfall into `UNEXERCISED — 0/E` and `PARTIALLY EXERCISED — n/E`, and reads Q3 as
+  blocking BOTH (`o67-class-rule-2026-07.md:63`). Q3's single-label phrasing above predates
+  that split and must not be read as licensing release on a nonzero shortfall.*
 
 ## 8. Why-log (provenance of this draft)
 
@@ -255,6 +379,90 @@ lineage continuity — the fix keys on the per-record `keyId` lineage, not on an
 (b) the SYMMETRIC compare (not critique) surfaced the miss precisely because Codex reasoned to the
 neutral question independently rather than attacking the draft — one question, two minds, facts
 deciding; (c) "negligible" is not "absent" — a 2^-64 residual is recorded, not waved away.
+
+Post-ratification follow-up round (Codex compare, 2026-07-27/28) — the round budgeted at the end of
+the first paragraph above, run against the RATIFIED text, producing the C5.1 closure list in §5.
+Round one diverged on six points. Three were code-level and verified before adoption: the O_67
+classifier discards item scope when building its candidate pool (`classify-o67.ts:95`), so
+scope-qualification is a POOL change, not the schema-field addition C5.1 then described; the manifest
+generator takes no transaction-time cutoff (`generate-manifest.ts:9`), so the temporal holdout is not
+producible with current tooling; and `unambiguous` is computed over the project ledger alone (`:14`,
+`:16-20`) while `run-pilot.ts` ranks the merged global+project universe, biasing eligibility
+OPTIMISTICALLY. Two of the draft's own points survived on evidence: C5.3's restatement had dropped
+D3's qualifier ("any intervening **system, config, rule, or metric** change"), which made a mere
+documentation commit appear to reset the holdout window; and the C1.3 retrodiction must be re-run AT
+the freeze commit rather than inherited from 2026-07-26.
+
+Round two cost two failed calls first, and both are recorded because both are informative. The first
+returned `AbortError` with no result — nothing is attributed to it. The second was MALFORMED BY THE
+ASKER: the question said "the merged list is in my answer below", but `compare` mode by construction
+sends Codex the neutral question ALONE, so the list was structurally invisible. Codex reported the
+absence instead of inventing a list to grade — and, reading the workspace, found the real defect
+underneath: the merged list existed only in conversation while C5.1 still carried pre-round-one text.
+The list was therefore written INTO C5.1 and round two re-asked by file pointer.
+
+Round two then diverged on five substantive points, each verified at its cited source before
+adoption. (i) The binding procedure requires the candidate-universe artifact to be generated and
+hashed at window close BEFORE scoring (`o67-class-rule-2026-07.md:102-104`), but the pool is
+transient and only verdicts are written (`classify-o67.ts:95,106`) — an executability blocker the
+draft had missed entirely; now item 2. (ii) The exposure unit is the PAIR `(scope, record-id)` (rule
+`:59`), so `witnesses[].id` and `equalCoverage[]` need scope too, not just the target — folded into
+item 1. (iii) **The draft's starved-window wording was WRONG**: it reported any shortfall as
+"unexercised", but the shipped rule distinguishes `UNEXERCISED — 0/E` from `PARTIALLY EXERCISED —
+n/E` and BOTH block (rule `:61-64`); D3 says only "unexercised" because it predates that refinement.
+Item 7 now carries both labels and the reason for the discrepancy. (iv) D2 requires all six §f
+elements fixed in advance (`gate-decision-2026-07-22.md:30-33`), but the draft settled only
+eligibility composition and the sample side, leaving derivation/mapping, K and metric definitions and
+system/config identity to be decided while DRAFTING the preregistration — where a new choice could
+demand new tooling and invalidate the hashes just pinned; new item 8 settles or records their
+carry-forward first. (v) The off-machine bundle was ordered before the freeze checks, so a failed
+check would leave it stale; it moved to last (item 12), which does not touch the D3 window because an
+operational copy is not a measured surface. One finding was MERGED, not adopted: Codex called the
+metered external-model E2E sentence gold-plating and would delete it; it is kept but marked
+explicitly NON-GATING, which removes the obligation objected to without losing the fact that the two
+skips are deliberate rather than failures.
+
+The open divergence resolved AGAINST the position that raised it: Codex WITHDREW its round-one "C1.3
+prematurely marked DONE" recommendation, agreeing that DONE records a shipped deliverable while
+freeze-readiness is a separate predicate C5.1 owns, and that reverting the marker would misreport a
+shipped artifact as unshipped. Its proposed status line was adopted almost verbatim; the
+cross-reference is now explicit in BOTH directions, with the reopen condition stated — reopen C1.3
+only if the normative membership rule changes or the freeze-commit retrodiction fails, never merely
+because identity is not yet pinned.
+
+Round three was the convergence test, asked against the revised twelve-item list in the workspace.
+It returned agreement on substance — every round-two finding closed, the bundle correctly last,
+nothing newly missing or gold-plated — plus a ratification of the one MERGED disposition: the
+non-gating external-model sentence stays, because it "documents deliberate skips without creating an
+obligation". It added one precision, adopted: what lands pre-freeze for item 2 is the EMISSION
+CAPABILITY; the artifact itself is still generated and hashed at window close, unchanged. And it
+caught one INCOMPLETE PROPAGATION of the round-two label correction — C5.2, whose own header says it
+is "to be preregistered **verbatim** at freeze", still reported every starved window as
+"unexercised", so the coarse single-label rule would have been frozen into the binding
+preregistration. Fixed. A sweep for the same wording elsewhere found three more sites that are
+CORRECT as written (`pilot-protocol.md:177` and `:265`, and `gate-decision-2026-07-22.md:64`, all
+describing the genuinely EMPTY case, which IS the zero label) and two carrying the coarse label over
+a span that includes a
+nonzero shortfall: §7 Q3 here, given an additive clarification that does not re-decide it, and D3 in
+the ratified gate decision, deliberately NOT edited — amending a ratified decision record is an owner
+call, and C5.1 item 7 already tells a later reader which form is the shipped one.
+
+**CONVERGENCE DECLARED (2026-07-28, round three).** Round three surfaced no new substantive
+divergence: it returned agreement plus one adopted precision (item 2's pre-freeze scope) and one
+propagation fix that it characterised itself as "not a new substantive finding; it is incomplete
+propagation of the already-resolved round-two label correction" — which is the protocol's stated
+stopping condition. Three rounds, within budget; the exchange ends here.
+
+Lessons: (a) in `compare` mode the ARTIFACT is the channel — whatever is under review must be IN the
+workspace, because the answer field never reaches the other reasoner; the malformed call's one
+benefit was forcing the plan out of conversation and into the tracked doc where it belonged; (b) a
+failed call is not a finding and is attributed nothing; (c) the sharpest correction of the round was
+a LABEL — the draft had inherited D3's coarser vocabulary for a case the shipped rule splits in two,
+the kind of drift only a reader holding both documents at once will catch; (d) a correction is not
+applied until it is PROPAGATED — fixing the plan while leaving the stale wording in text marked
+"preregistered verbatim" would have frozen the error into the binding artifact, so the last act of
+resolving a wording defect is a repository-wide sweep for the old wording, judging each hit in
+context rather than replacing it mechanically.
 
 ## 9. Q1 felt-gaps enumeration & disposition (ratification record, 2026-07-24)
 
