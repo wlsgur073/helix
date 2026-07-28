@@ -32,8 +32,9 @@ or prior-approved requirement; anything else is gold-plating and was deliberatel
   DELIVERED; prospective v2 use remains gated by C5.1 closure items 1–6, 9 and 10** —
   scope-qualified identities, the candidate-universe EMISSION capability, the cutoff (without
   which the rule's "distinct post-cutoff target identity" exposure unit is unproducible), the
-  unambiguity denominator (whose optimistic bias inflates the base-eligible set the exposure
-  count rests on), the gate-composition confirmation (`finalHit1Eligible` is named for a
+  unambiguity denominator (whose bias inflates the base-eligible set the exposure count rests
+  on — optimistic for exposure specifically; see closure item 4 for the metric-dependent
+  direction), the gate-composition confirmation (`finalHit1Eligible` is named for a
   composition the freeze must confirm or rename), the exposure minima, the preregistration,
   and the freeze-commit retrodiction rerun.
   Those are downstream freeze-INTEGRATION prerequisites for a completed artifact, not evidence
@@ -197,34 +198,103 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   explicit confirmations at freeze (final-review findings, 2026-07-26): the classifier's
   `finalHit1Eligible` field is named for the RECOMMENDED gate composition and must be
   consciously confirmed-or-renamed with that decision; and the exposure unit must become
-  scope-qualified — see closure item 1, which is a candidate-POOL change, not the schema-field
-  addition an earlier draft of this entry described. Reciprocally: these are downstream
+  scope-qualified — see closure item 1. An earlier draft called that a schema-field addition;
+  the round-one correction called it a candidate-POOL change. Both halves are needed and the
+  either/or was wrong: the pool change is the PREREQUISITE, and scope-qualifying every emitted
+  identity is a real `ProbeVerdict` schema change, which rule §6 (`o67-class-rule:102`) pins
+  at the freeze. Reciprocally: these are downstream
   freeze-INTEGRATION prerequisites for C1.3's already-completed artifact — C5.1 owns
   integration, policy confirmation, output completion, pinning and freeze-time reproduction;
   C1.3 owns the shipped rule itself.
 - **C5.1 pre-freeze closure list (merged 2026-07-27/28 from an owner draft + two Codex compare
-  rounds; reconciled in §8).** Execution order is load-bearing — each block consumes the
-  previous block's output. Nothing here changes the pilot's measured question: items 1–4 make
-  the frozen method *executable*, 5–8 decide what gets frozen, 9 writes it down, 10–12 verify
-  and preserve. Only items 1–9 land before or in the freeze commit in C5.3's sense; items
-  10–11 RUN ON that commit, and item 12 is an off-machine copy taken after it, landing in no
-  commit at all — which is why C5.3 is not violated by placing it last (C5.3 forbids a CHANGE
-  after the cutoff, and a backup is not a change).
+  rounds; reconciled in §8).** Nothing here changes the pilot's measured question: items 1–4
+  make the frozen method *executable*, 5–8 decide what gets frozen, 9 writes it down, 10–12
+  verify and preserve. Only items 1–9 land before or in the freeze commit in C5.3's sense;
+  items 10–11 RUN ON that commit, and item 12 is an off-machine copy taken after it, landing
+  in no commit at all — which is why C5.3 is not violated by placing it last (C5.3 forbids a
+  CHANGE after the cutoff, and a backup is not a change). Evidence paths cited below under
+  `docs/superpowers/` are LOCAL operating records (that tree is gitignored), not shipped
+  artifacts; the claims they support are restated here so this document stands alone.
+
+  **The numbers are stable IDENTIFIERS, not the execution order** — C1.3 above and
+  `c4-drills-2026-07.md` both cite items by number, so renumbering as the plan refines would
+  silently break those references. Blocks 5–8, 9, 10–12 do run in the order written, and each
+  of those consumes the previous block's output. **Within block 1–4 that is FALSE and an
+  earlier draft of this paragraph wrongly asserted it** (analysis 2026-07-28, evidence in
+  `docs/superpowers/evidence/2026-07-28-c51-items-1-4-sequencing/`): items 3–4 live in
+  `generate-manifest.ts`, items 1–2 in `classify-o67.ts`, and the data flow runs
+  generator → manifest → classifier, i.e. 3–4 → 1–2. The classifier never feeds the generator.
+  Execution order nonetheless runs the OTHER way, and deliberately: the block's sequencing is
+  decided by regression-lock economics and by where the open decisions sit, not by the data
+  flow — nothing in items 1–2 changes what the generator produces, so running them first
+  cannot invalidate items 3–4. The verified execution order inside the block is:
+
+  **item 2 → item 1 → items 3+4 as ONE change.** Item 2 first because it is NOT blocked by
+  item 1 (scope already rides on `RecalledItem`, `store.ts:64-72`, one step upstream of the
+  pool that discards it), because it touches no already-pinned blob hash
+  (`pilot-protocol.md:300-303` pins derive/segment-oracle/run-pilot/generate-manifest;
+  `classify-o67.ts` postdates the v1 freeze and is absent), and because as a SEPARATE artifact
+  it leaves the classifier's output bytes untouched — which keeps the C1.3 retrodiction usable
+  as a live regression lock while the rest of the block lands (verified 2026-07-28 at HEAD: the
+  outputs reproduce BYTE-IDENTICALLY, sha256 `a3374ad3…` / `ed5dc97e…`, equal to the hashes
+  recorded for the 2026-07-26 run made at c17e0ed — that commit ships the rule document only,
+  so the hashes themselves live in the local evidence tree, not in git). Item 1 second because
+  it is the only item that changes the classifier's output schema, so it re-baselines that lock
+  once rather than repeatedly, and because it carries the block's one governance risk (below)
+  and settles the scope-qualified identity that item 4 then needs. Items 3 and 4 together
+  because each names the other as a prerequisite decision, both rewrite overlapping parts of
+  the same file (item 3 the arg list and probe-source loop, `generate-manifest.ts:9-10,22`;
+  item 4 the competitor set and flag, `:11,13-15,16-20`; `live` at `:14` serves BOTH roles, so
+  enlarging it naively would silently add global-scope PROBES as well as competitors), and both
+  need the same refactor neither mentions: the file exports nothing (it executes on import) and
+  is OUTSIDE the typecheck program, so C2.3's typecheck gate is currently VACUOUS for it.
   1. **Thread scope through the classifier candidate pool, then scope-qualify every identity
      it emits.** `classify-o67.ts:95` builds the pool as `{ id, content }` and discards
      `it.scope`, so `targetScope` cannot be derived downstream — the pool shape changes first.
      `targetId` is not the only identity affected: the rule's exposure unit is the pair
      `(scope, record-id)` (`o67-class-rule-2026-07.md:59`), so `witnesses[].id` and
-     `equalCoverage[]` must carry scope too, or a cross-scope id collision reads as one entity.
+     `equalCoverage[]` must carry scope too. **CORRECTION 2026-07-28 — this item does not, by
+     itself, fix the cross-scope collision an earlier draft cited as its motivation.** The
+     scope tag it would thread is ALREADY collapsed upstream: `store.ts:523` keys `byId` by
+     bare record id (`new Map(enforcedScoped.map((s) => [s.record.id, s]))`) and `:529` reads
+     `scope` back through it, while `recallInput` pushes global before project (`:322-326`) —
+     so under a colliding id BOTH rows are tagged `project`. (The `?? 'global'` fallback on the
+     same line is a silent default rather than a fail-closed error, but it is unreachable —
+     `byId` and `hits` derive from the same array, so the lookup never misses. A posture smell,
+     not this hazard's mechanism.) `retrieval.ts:353-357` fixed exactly
+     this last-wins hazard for the SCORING path with positional pairing and says so in
+     comment; the scope-tagging path never got the same treatment. Hence a DECISION rides on
+     this item: repair `store.recall`'s scope pairing (a production runtime-byte change — a
+     "system change" under rule §6/§f, requiring a redeploy) or accept it as a documented
+     limitation. Accepting is defensible at this scale: honest ids are random UUIDs so a
+     collision is adversarial-only, and the frozen snapshot has ZERO cross-scope collisions
+     (25 project ids vs 1 global id, intersection empty, measured 2026-07-28). If accepted,
+     the classifier must assert-and-fail-closed on a collision rather than emit a tag it
+     cannot justify. Note also that scope-qualifying identities can change the meaning of the
+     `duplicate-target-identity` hard error (`classify-o67.ts:53-55`, `o67-class-rule` §2) —
+     that is a normative membership change and WOULD trip C1.3's reopen condition, so it must
+     be settled deliberately, not as a side effect.
   2. **Build the capability to emit the candidate-universe artifact the binding procedure
      already requires.** `o67-class-rule-2026-07.md:102-104` mandates that at window close,
      BEFORE scoring, the candidate-universe artifact be generated and hashed — but the pool at
-     `classify-o67.ts:95` is transient and only verdicts are written (line 106), so nothing
-     hashable survives. What lands pre-freeze is the EMISSION capability (a deterministic,
-     sorted, scope-qualified per-probe universe); the artifact ITSELF is still generated and
-     hashed at window close, unchanged. This is an executability blocker of the same class as
-     items 3–4, not a nicety: hashing what the system COULD have returned, before looking at
-     what it DID rank, is the procedure's anti-peeking device.
+     `classify-o67.ts:95` is transient and only verdicts are written (line 106), so the FULL
+     universe does not survive. (Precisely: a filtered PROJECTION of it does survive, as
+     `witnesses[]` and `equalCoverage[]` at `classify-o67.ts:67-68` — which is exactly why the
+     artifact and the verdicts must be emitted from the SAME in-run pool, or the verdicts can
+     name identities absent from the hashed universe.) What lands pre-freeze is the EMISSION
+     capability (a deterministic, sorted, scope-qualified per-probe universe); the artifact
+     ITSELF is still generated and hashed at window close, unchanged. Emit it as a SEPARATE
+     file, not a section of the classifier's output, so the classifier stays byte-stable and
+     the C1.3 retrodiction remains a valid regression lock. This is an executability blocker of
+     the same class as items 3–4, not a nicety: hashing what the system COULD have returned,
+     before looking at what it DID rank, is the procedure's anti-peeking device. Because this
+     item SHIPS FIRST and emits scope-qualified identities, the collision guard discussed under
+     item 1 lands HERE: assert that no two candidates share an id across scopes and fail closed
+     if they do, so the artifact never carries a scope tag the code cannot justify. One wording
+     defect for item 9 to tidy, not a blocker: rule §6 names the universe artifact BEFORE the
+     holdout manifest, but the universe is enumerated PER PROBE, so the manifest must exist
+     first — §6's phrasing is a comma list of deliverables, and item 9 should state the
+     executable order explicitly rather than let it read as a sequence.
   3. **Give the manifest generator a transaction-time cutoff** (`generate-manifest.ts:9` takes
      four positional args, none of them a cutoff), or specify the post-cutoff enumeration
      procedure in the preregistration completely enough to execute without ambiguity. Until
@@ -233,11 +303,32 @@ The prior approved design's clean-room tier and drill set are carried forward IN
      `unambiguous` when no OTHER live row shares ≥3 topic terms with the query — but its `live`
      set (line 14) comes from the PROJECT ledger alone (line 11), so a global-scope competitor
      is invisible to the test, while `run-pilot.ts` ranks against the merged global+project
-     universe production recall actually serves. The bias runs OPTIMISTIC (probes look
-     unambiguous that are not). Choose the denominator deliberately and make generator and
-     runner agree. — *Acceptance for 1–4 is ordinary implementation work, not a governance
-     item: focused tests for scope propagation, cutoff boundaries, and the merged denominator
-     ship with the change.*
+     universe production recall actually serves. Probes are therefore flagged unambiguous that
+     are not. **CORRECTION 2026-07-28 — the resulting bias is METRIC-DEPENDENT, not uniformly
+     optimistic as an earlier draft said.** Enlarging the competitor set is monotone — it can
+     only move probes OUT of the unambiguous subset — **provided identities do not collide**.
+     Given monotonicity, the project-only denominator makes the Hit@1 gate HARDER (every
+     unambiguous probe must rank 1, `pilot-protocol.md:178`) — the current state is
+     self-penalizing there — while it INFLATES the O_67 qualifying-exposure count, since
+     exposure is "in-class AND base-Hit@1-eligible" (`o67-class-rule:57-60`). The fix therefore
+     RELAXES the gate and TIGHTENS exposure accrual; say so when disclosing it. The proviso is
+     load-bearing and is THIS item's link to item 1: `generate-manifest.ts:15` builds `termsOf`
+     id-keyed and last-wins (`new Map(live.map((r) => [r.id, …]))`) — the same collapse as
+     `store.ts:523` — and `:18` compares `r.id !== relevant[0]` on a bare id. Merging scopes
+     into `live` therefore CREATES a cross-scope collision surface that does not exist today:
+     a colliding id overwrites one competitor's term set, `:18` tests the wrong content, and a
+     probe can move INTO the unambiguous subset, breaking monotonicity in the flattering
+     direction. So item 4 must consume the scope-qualified identity item 1 settles, or assert
+     collision-freedom and fail closed.
+     Choose the denominator deliberately and make generator and runner agree. Note the fix is
+     UNFALSIFIABLE on the frozen corpus — that snapshot holds 25 project rows against 1 global
+     row, so no probe flips either way (measured 2026-07-28); it can only be demonstrated on a
+     corpus with real global content, i.e. item 3's holdout. — *Acceptance for items 1–3 is
+     ordinary implementation work: focused tests for scope propagation and cutoff boundaries
+     ship with the change. Item 4 is NOT: `gate-decision-2026-07-22.md:57-58` (D5) rules that
+     "any revised unambiguity/subset rule validates on new temporal cases only" and must be
+     disclosed wherever v2 is described. The coding is ordinary; the disclosure and
+     new-cases-only validation are duties, and they align with the unfalsifiability above.*
   5. **Confirm or replace the O_67 gate composition**, renaming `finalHit1Eligible` if the
      composition changes.
   6. **Set separate positive-exposure minima for Hit@1 and for the O_67 class, and define the
@@ -388,7 +479,11 @@ scope-qualification is a POOL change, not the schema-field addition C5.1 then de
 generator takes no transaction-time cutoff (`generate-manifest.ts:9`), so the temporal holdout is not
 producible with current tooling; and `unambiguous` is computed over the project ledger alone (`:14`,
 `:16-20`) while `run-pilot.ts` ranks the merged global+project universe, biasing eligibility
-OPTIMISTICALLY. Two of the draft's own points survived on evidence: C5.3's restatement had dropped
+OPTIMISTICALLY. **Two of those three were later REFINED, and the round-one phrasing is kept here as
+the record of what was concluded THEN, not as current doctrine** — see the sequencing paragraph
+below: "POOL change, not schema addition" was a false either/or (both are needed), and the bias is
+optimistic only for exposure accrual, conservative for the Hit@1 gate. Two of the draft's own points
+survived on evidence: C5.3's restatement had dropped
 D3's qualifier ("any intervening **system, config, rule, or metric** change"), which made a mere
 documentation commit appear to reset the holdout window; and the C1.3 retrodiction must be re-run AT
 the freeze commit rather than inherited from 2026-07-26.
@@ -452,6 +547,41 @@ divergence: it returned agreement plus one adopted precision (item 2's pre-freez
 propagation fix that it characterised itself as "not a new substantive finding; it is incomplete
 propagation of the already-resolved round-two label correction" — which is the protocol's stated
 stopping condition. Three rounds, within budget; the exchange ends here.
+
+Implementation-sequencing analysis of block 1–4 (2026-07-28, parallel code audit + adversarial
+refutation of the sequencing claims; evidence in
+`docs/superpowers/evidence/2026-07-28-c51-items-1-4-sequencing/`). The owner's draft answer — "start
+with item 1, because item 2 depends on it and because items 1 and 4 share a scope-qualified identity
+primitive" — fell apart on its first leg and half of its second, and is recorded here because the
+correction took three passes to settle. Leg one, REFUTED: scope never had to come through the pool.
+It rides on `RecalledItem` (`store.ts:64-72`) and `classify-o67.ts:95` narrows it away only AFTER
+`recall()` returns, so a universe emitter placed before that `.map()` has scope for free — item 2 is
+independent. Leg two, HALF refuted: the "reuse" framing is impossible, since the data flow runs
+generator → manifest → classifier and an upstream generator cannot reuse a representation established
+downstream — the only ARTIFACT coupling is the `unambiguous` boolean, pointing 4 → 1. But the
+underlying observation survived a further pass: item 4 merges scopes into a `live` set whose
+competitor map is id-keyed and last-wins (`generate-manifest.ts:15`, the same collapse as
+`store.ts:523`) and whose competitor test compares bare ids (`:18`), so item 4 CREATES a cross-scope
+collision surface and does need the scope-qualified identity item 1 settles. Three readings each held
+a piece: the draft saw a shared primitive but mis-derived it from data flow, the audit refuted the
+data-flow claim but declared the whole leg dead, and the verification pass found the primitive is
+shared for a different reason than either had given. Six defects in the block's own text fell out and
+are corrected above: item 1 does not fix the cross-scope collision it cited (the scope tag is already
+collapsed at `store.ts:523/529`, the very last-wins hazard `retrieval.ts:353-357` fixed for the
+scoring path and only that path); item 2's "nothing hashable survives" ignored the filtered
+projection that DOES survive as `witnesses[]`/`equalCoverage[]`, which forces the artifact and the
+verdicts to come from one in-run pool; item 4's bias is metric-dependent, self-penalizing for the
+Hit@1 gate and inflationary for exposure, not uniformly optimistic; the blanket "ordinary
+implementation work, not a governance item" clause is false for item 4, which D5 binds to
+new-temporal-case validation and disclosure; the "each block consumes the previous block's output"
+rationale is false inside 1–4; and C5.1's "a POOL change, NOT the schema-field addition" framing was
+a false either/or — the pool change is the prerequisite FOR the schema change, and rule §6 pins that
+schema at the freeze. Two measurements
+decided as much as the reading did: the C1.3 retrodiction still reproduces BYTE-IDENTICALLY at HEAD
+(so it is a live regression lock, and item 2 is sequenced first partly to keep it one), and the
+frozen snapshot is 25 project rows to 1 global row with an empty id intersection — which makes item
+4's fix unfalsifiable there and its collision hazard vacuous there, converting two blocking questions
+into a guard and a documented limitation.
 
 Lessons: (a) in `compare` mode the ARTIFACT is the channel — whatever is under review must be IN the
 workspace, because the answer field never reaches the other reasoner; the malformed call's one
