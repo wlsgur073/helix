@@ -307,6 +307,15 @@ All values are of the artifacts exactly as committed / pinned at the method free
 sha256 values are produced by `sha256sum`; generator-identity values are Git blob object ids
 (`git hash-object`), which equal the committed blob ids for those four files at this commit.
 
+**Pin drift note (2026-07-28).** `scripts/pilot/generate-manifest.ts` no longer matches
+`400e9d97…` at HEAD: C5.1 block 1–4 lifted its enumeration out of module top level into an
+exported `buildProbes` behind a `main()` guard, so it could be imported by a test at all (it ran
+its argv parsing on import) and so it would enter the typecheck program. The pin above stays a
+true statement about the v1 freeze commit and reproduces there; it is not a claim about HEAD. The
+v1 RESULTS are unaffected — the refactor is behaviour-invariant, verified by regenerating both
+frozen manifests byte-for-byte. The v2 freeze pins its own identities (C5.1 item 9), which is
+where the current blob id belongs.
+
 **[Amended pre-execution — see pilot-amendment-1.md]** LOCAL, PATH-DEPENDENT audit value (not a
 reproducible artifact hash): the rewritten snapshot `projects.json` (§9b) has sha256
 `f74ba0bd97b354799cddecbe5dacaf90cfce405b04a2e11fe29a9204587fe582`. This value is specific to

@@ -1,35 +1,71 @@
 /** Manifest generator (protocol §enumeration). Ledger-side probes are fully mechanical; oracle-side
  *  probes take a MANUAL entry→record mapping supplied as a JSON file (adjudicated once, frozen with
- *  the manifest). Usage: npx tsx scripts/pilot/generate-manifest.ts <snapshotDir> <oracleMd> <mappingJson> <out> */
+ *  the manifest). Usage: npx tsx scripts/pilot/generate-manifest.ts <snapshotDir> <oracleMd> <mappingJson> <out>
+ *
+ *  Structure note (C5.1 block 1-4, 2026-07-28): the enumeration was lifted out of module top level
+ *  into `buildProbes` behind a `main()` guard. It previously ran on import, so it could not be
+ *  imported — no test could reach it, and it stayed outside the typecheck program (tsconfig covers
+ *  src + test, and files enter only by being imported from there), which made C2.3's typecheck gate
+ *  vacuous for exactly the file C5.1 items 3 and 4 rewrite. Behaviour is unchanged and locked by
+ *  test/pilot/generate-manifest.test.ts plus byte reproduction of both frozen manifests. */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { topicTerms, deriveQuery } from './derive.js';
+import { topicTerms } from './derive.js';
 import { segmentOracle } from './segment-oracle.js';
 
-const [snapshotDir, oraclePath, mappingPath, outPath] = process.argv.slice(2);
-if (!snapshotDir || !oraclePath || !mappingPath || !outPath) { console.error('usage: generate-manifest <snapshotDir> <oracleMd> <mappingJson> <out>'); process.exit(2); }
-const rows = readFileSync(join(snapshotDir, 'proj', '.helix', 'memory.jsonl'), 'utf8')
-  .split('\n').filter(Boolean).map((l) => JSON.parse(l) as { id: string; type: string; content: string; supersedes: string | null });
-const superseded = new Set(rows.filter((r) => r.type === 'supersede' || r.type === 'erase').map((r) => r.supersedes).filter(Boolean) as string[]);
-const live = rows.filter((r) => (r.type === 'assert' || r.type === 'supersede') && !superseded.has(r.id));
-const termsOf = new Map(live.map((r) => [r.id, new Set(topicTerms(r.content))]));
-const unambiguous = (relevant: string[], q: string[]): boolean => {
-  if (relevant.length !== 1) return false;
-  const overlapping = live.filter((r) => r.id !== relevant[0] && q.filter((t) => termsOf.get(r.id)!.has(t)).length >= 3);
-  return overlapping.length === 0;
+/** Production recall bound, pinned by the protocol (§9a, K = 20). */
+export const K = 20;
+
+export interface LedgerRow { id: string; type: string; content: string; supersedes: string | null }
+export interface Probe { id: string; query: string; relevant: string[]; unambiguous: boolean; side: string }
+
+/** Rows still open: an assert or supersede that nothing later closes. */
+export const liveRows = (rows: LedgerRow[]): LedgerRow[] => {
+  const superseded = new Set(rows.filter((r) => r.type === 'supersede' || r.type === 'erase').map((r) => r.supersedes).filter(Boolean) as string[]);
+  return rows.filter((r) => (r.type === 'assert' || r.type === 'supersede') && !superseded.has(r.id));
 };
-const probes: { id: string; query: string; relevant: string[]; unambiguous: boolean; side: string }[] = [];
-for (const r of live) {
-  const q = topicTerms(r.content);
-  probes.push({ id: `L_${r.id}`, query: q.join(' '), relevant: [r.id], unambiguous: unambiguous([r.id], q), side: 'ledger' });
-}
-const mapping = JSON.parse(readFileSync(mappingPath, 'utf8')) as Record<string, string[]>; // entryIndex -> record ids
-const { entries } = segmentOracle(readFileSync(oraclePath, 'utf8'));
-entries.forEach((e, i) => {
-  if (e.excluded) return;
-  const relevant = mapping[String(i)] ?? [];
-  const q = topicTerms(e.text);
-  probes.push({ id: `O_${i}`, query: q.join(' '), relevant, unambiguous: unambiguous(relevant, q), side: 'oracle' });
-});
-writeFileSync(outPath, JSON.stringify({ k: 20, probes }, null, 1) + '\n');
-console.log(`probes: ${probes.length} (ledger ${live.length}, oracle ${probes.length - live.length}); unambiguous: ${probes.filter((p) => p.unambiguous).length}`);
+
+/** The frozen enumeration: ledger-side probes, then the mapped oracle entries.
+ *
+ *  Pure over its inputs — no filesystem — so items 3 (transaction-time cutoff) and 4 (the
+ *  unambiguity denominator) can be driven from tests instead of from a CLI. */
+export const buildProbes = (rows: LedgerRow[], oracleMd: string, mapping: Record<string, string[]>): Probe[] => {
+  const live = liveRows(rows);
+  const termsOf = new Map(live.map((r) => [r.id, new Set(topicTerms(r.content))]));
+  const unambiguous = (relevant: string[], q: string[]): boolean => {
+    if (relevant.length !== 1) return false;
+    const overlapping = live.filter((r) => r.id !== relevant[0] && q.filter((t) => termsOf.get(r.id)!.has(t)).length >= 3);
+    return overlapping.length === 0;
+  };
+  const probes: Probe[] = [];
+  for (const r of live) {
+    const q = topicTerms(r.content);
+    probes.push({ id: `L_${r.id}`, query: q.join(' '), relevant: [r.id], unambiguous: unambiguous([r.id], q), side: 'ledger' });
+  }
+  const { entries } = segmentOracle(oracleMd);
+  entries.forEach((e, i) => {
+    if (e.excluded) return;
+    // Keyed on the FULL entry index, excluded entries included — an exclusion must not renumber
+    // the entries after it, or the frozen mapping file stops addressing the same entries.
+    const relevant = mapping[String(i)] ?? [];
+    const q = topicTerms(e.text);
+    probes.push({ id: `O_${i}`, query: q.join(' '), relevant, unambiguous: unambiguous(relevant, q), side: 'oracle' });
+  });
+  return probes;
+};
+
+export const readLedger = (snapshotDir: string): LedgerRow[] =>
+  readFileSync(join(snapshotDir, 'proj', '.helix', 'memory.jsonl'), 'utf8')
+    .split('\n').filter(Boolean).map((l) => JSON.parse(l) as LedgerRow);
+
+const main = (): void => {
+  const [snapshotDir, oraclePath, mappingPath, outPath] = process.argv.slice(2);
+  if (!snapshotDir || !oraclePath || !mappingPath || !outPath) { console.error('usage: generate-manifest <snapshotDir> <oracleMd> <mappingJson> <out>'); process.exit(2); }
+  const rows = readLedger(snapshotDir);
+  const mapping = JSON.parse(readFileSync(mappingPath, 'utf8')) as Record<string, string[]>; // entryIndex -> record ids
+  const probes = buildProbes(rows, readFileSync(oraclePath, 'utf8'), mapping);
+  writeFileSync(outPath, JSON.stringify({ k: K, probes }, null, 1) + '\n');
+  const ledgerCount = probes.filter((p) => p.side === 'ledger').length;
+  console.log(`probes: ${probes.length} (ledger ${ledgerCount}, oracle ${probes.length - ledgerCount}); unambiguous: ${probes.filter((p) => p.unambiguous).length}`);
+};
+if (process.argv[1] && process.argv[1].endsWith('generate-manifest.ts')) main();
