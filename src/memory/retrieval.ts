@@ -342,6 +342,12 @@ export function rankWithArtifacts(records: MemoryRecord[], artifacts: RankArtifa
   if (qMeaning.length === 0 || records.length === 0) return [];
   const { idx, docs } = artifacts;
 
+  // RESIDUE, deliberately left: this leg still resolves by id, so a cross-scope id collision makes
+  // both copies share one bm25 contribution (last write wins here, and the index behind
+  // `bm25Score` is id-keyed too). The dominant coverage leg below is positionally paired and the
+  // store's scope/integrity tagging is object-paired, so the collision no longer mislabels anything
+  // — it only skews this 0.1-weight leg. Recorded so "the collision class is closed" is never
+  // claimed on the strength of those two fixes.
   const rawBm = new Map<string, number>();
   for (const r of records) rawBm.set(r.id, bm25Score(r.id, qMeaning, idx));
   const vals = [...rawBm.values()];

@@ -520,15 +520,20 @@ export class MemoryStore {
           return acc;
         }, []);
     const effectiveArtifacts = enforcedScoped.length === scoped.length ? artifacts : buildRankArtifacts(enforcedScoped.map((s) => s.record));
-    const byId = new Map(enforcedScoped.map((s) => [s.record.id, s]));
+    // Keyed by the record OBJECT, not its id: ranking returns the very references it was handed
+    // (retrieval.ts rankWithArtifacts maps records -> scored -> back to `s.rec`), so this pairing is
+    // exact. An id-keyed map collapses last-wins under a cross-scope id collision and would report
+    // ONE scope and ONE integrity verdict for both copies — the same hazard retrieval.ts:353-357
+    // already fixed for the scoring path, on the tagging path it had been left on.
+    const byRecord = new Map(enforcedScoped.map((s) => [s.record, s]));
     const expansion = this.opts.expansion ?? defaultExpansion();
     const hits = rankWithArtifacts(enforcedScoped.map((s) => s.record), effectiveArtifacts, query,
       { ...opts, expansion, semDiscount: SEM_DISCOUNT, semGate: SEM_GATE });
     const items: RecalledItem[] = hits.map((record) => ({
       record,
-      scope: byId.get(record.id)?.scope ?? 'global',
+      scope: byRecord.get(record)?.scope ?? 'global',
       needsReverify: requiresReverifyBeforeUse({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source }),  // I7: recomputed per call
-      integrity: byId.get(record.id)?.integrity ?? 'ok',
+      integrity: byRecord.get(record)?.integrity ?? 'ok',
     }));
     return {
       items,

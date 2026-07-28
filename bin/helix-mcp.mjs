@@ -15484,7 +15484,7 @@ var MemoryStore = class {
       return acc;
     }, []);
     const effectiveArtifacts = enforcedScoped.length === scoped.length ? artifacts : buildRankArtifacts(enforcedScoped.map((s) => s.record));
-    const byId = new Map(enforcedScoped.map((s) => [s.record.id, s]));
+    const byRecord = new Map(enforcedScoped.map((s) => [s.record, s]));
     const expansion = this.opts.expansion ?? defaultExpansion();
     const hits = rankWithArtifacts(
       enforcedScoped.map((s) => s.record),
@@ -15494,10 +15494,10 @@ var MemoryStore = class {
     );
     const items = hits.map((record2) => ({
       record: record2,
-      scope: byId.get(record2.id)?.scope ?? "global",
+      scope: byRecord.get(record2)?.scope ?? "global",
       needsReverify: requiresReverifyBeforeUse({ state: record2.state, blastRadius: record2.blastRadius, source: record2.provenance.source }),
       // I7: recomputed per call
-      integrity: byId.get(record2.id)?.integrity ?? "ok"
+      integrity: byRecord.get(record2)?.integrity ?? "ok"
     }));
     return {
       items,
