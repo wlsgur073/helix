@@ -13,21 +13,23 @@ import { MemoryStore } from '../../src/memory/store.js';
 import { projectLedgerPath } from '../../src/memory/ownership.js';
 import { lexicalEvidence, meaningfulTokens, tokenize } from '../../src/memory/retrieval.js';
 import { defaultExpansion } from '../../src/memory/expansion.js';
-import { probeUniverse, corpusPrecondition, assertScopeParticipated } from './candidate-universe.js';
+import { probeUniverse, qualifiedId, corpusPrecondition, assertScopeParticipated } from './candidate-universe.js';
+import type { MemoryScope } from '../../src/types.js';
 
 export interface ProbeInput { id: string; query: string; relevant: string[]; unambiguous: boolean }
-export interface CandidateDoc { id: string; content: string }
+export interface CandidateDoc { id: string; scope: MemoryScope; content: string }
 export interface ProbeVerdict {
   id: string;
   status: 'in-class' | 'not-in-class' | 'target-zero-evidence' | 'out-of-domain' | 'unscorable';
   reason?: string;                      // for out-of-domain / unscorable
-  targetId?: string;
+  targetId?: string;                    // BARE: echoes the manifest's `relevant` entry verbatim
+  targetScope?: MemoryScope;            // the resolved scope, so (scope, id) is recoverable
   qTerms?: string[];                    // sorted
   targetDirect?: string[];              // sorted
   targetRescued?: string[];             // sorted
   targetMatched?: string[];             // sorted
-  witnesses?: { id: string; extraTerms: string[] }[]; // sorted by id; extraTerms sorted
-  equalCoverage?: string[];             // ids of equal-set competitors (informational), sorted
+  witnesses?: { id: string; extraTerms: string[] }[]; // id is scope-qualified; sorted by id; extraTerms sorted
+  equalCoverage?: string[];             // scope-qualified ids of equal-set competitors, sorted
   baseHit1Eligible: boolean;            // the manifest's unambiguous flag, echoed as data
   finalHit1Eligible: boolean;           // base && !in-class (recommended-gate field; C5.1 confirms)
 }
@@ -57,7 +59,7 @@ export function classifyProbe(p: ProbeInput, pool: CandidateDoc[]): ProbeVerdict
   }
   const evOf = (c: CandidateDoc) => lexicalEvidence(qTerms, tokenize(c.content));
   const t = evOf(targetDocs[0]!);
-  const common = { targetId, qTerms, targetDirect: [...t.direct].sort(), targetRescued: [...t.rescued].sort(), targetMatched: [...t.matched].sort(), baseHit1Eligible: base };
+  const common = { targetId, targetScope: targetDocs[0]!.scope, qTerms, targetDirect: [...t.direct].sort(), targetRescued: [...t.rescued].sort(), targetMatched: [...t.matched].sort(), baseHit1Eligible: base };
   if (t.matched.size === 0) {
     return { id: p.id, status: 'target-zero-evidence', ...common, finalHit1Eligible: base };
   }
@@ -66,8 +68,8 @@ export function classifyProbe(p: ProbeInput, pool: CandidateDoc[]): ProbeVerdict
   for (const c of pool) {
     if (c.id === targetId) continue;
     const m = evOf(c).matched;
-    if (strictSuperset(m, t.matched)) witnesses.push({ id: c.id, extraTerms: [...m].filter((x) => !t.matched.has(x)).sort() });
-    else if (m.size === t.matched.size && [...t.matched].every((x) => m.has(x))) equalCoverage.push(c.id);
+    if (strictSuperset(m, t.matched)) witnesses.push({ id: qualifiedId(c.scope, c.id), extraTerms: [...m].filter((x) => !t.matched.has(x)).sort() });
+    else if (m.size === t.matched.size && [...t.matched].every((x) => m.has(x))) equalCoverage.push(qualifiedId(c.scope, c.id));
   }
   witnesses.sort((a, b) => a.id.localeCompare(b.id));
   equalCoverage.sort();
@@ -113,7 +115,7 @@ const main = (): void => {
     // The hashed universe and the verdicts come from the SAME in-run recall, so a verdict can never
     // name an identity that is absent from the universe it is supposed to have competed in.
     universe.push({ id: p.id, candidates: probeUniverse(res.items.map((it) => ({ id: it.record.id, scope: it.scope }))) });
-    const pool: CandidateDoc[] = res.items.map((it) => ({ id: it.record.id, content: it.record.content }));
+    const pool: CandidateDoc[] = res.items.map((it) => ({ id: it.record.id, scope: it.scope, content: it.record.content }));
     return classifyProbe(p, pool);
   });
   // The larger loss channel, and it hides on the path rule §6 prescribes: a snapshot copied for

@@ -78,11 +78,14 @@ Label: RETROSPECTIVE, OUTCOME-INFORMED METHOD DEVELOPMENT — not prospective va
 contributes zero Q3 exposure (authorized by gate-decision D4, non-gating reuse). Anchor
 REQUIRED and MET: the general rule, with no O_67 special-case, classifies O_67 in-class.
 
-Classifier runs, 2026-07-26, snapshot-frozen, both manifests (identical results):
+Classifier runs, 2026-07-26, snapshot-frozen, both manifests (identical results); re-baselined
+2026-07-28 when C5.1 closure item 1 made every emitted identity scope-qualified. The membership
+OUTCOME is unchanged — the anchor below is what C1.3 asserts, and it is invariant across that
+change; only the serialization moved, so the run's byte hashes were re-recorded.
 
 | probe | status | target matched (direct + rescued) | witnesses (extra terms) |
 |---|---|---|---|
-| O_67 (unambiguous) | IN-CLASS | cli, id, store, throw, unknown + completetask, mutators | m_02fd751a… (+add), m_e7787d10… (+add) |
+| O_67 (unambiguous, target scope `project`) | IN-CLASS | cli, id, store, throw, unknown + completetask, mutators | project:m_02fd751a… (+add), project:m_e7787d10… (+add) |
 | all other single-target probes (46) | not-in-class / labeled statuses | — | — |
 
 ```
