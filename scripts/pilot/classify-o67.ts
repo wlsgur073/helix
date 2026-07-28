@@ -12,6 +12,8 @@ import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { projectLedgerPath } from '../../src/memory/ownership.js';
 import { lexicalEvidence, meaningfulTokens, tokenize } from '../../src/memory/retrieval.js';
+import { defaultExpansion } from '../../src/memory/expansion.js';
+import { probeUniverse, corpusPrecondition, assertScopeParticipated } from './candidate-universe.js';
 
 export interface ProbeInput { id: string; query: string; relevant: string[]; unambiguous: boolean }
 export interface CandidateDoc { id: string; content: string }
@@ -80,6 +82,10 @@ export function classifyProbe(p: ProbeInput, pool: CandidateDoc[]): ProbeVerdict
 const main = (): void => {
   const [manifestPath, snapshotDir, outPath] = process.argv.slice(2);
   if (!manifestPath || !snapshotDir || !outPath) { console.error('usage: classify-o67 <manifest> <snapshotDir> <out>'); process.exit(2); }
+  // The universe artifact is written to a sibling path derived from <out>. If <out> itself ended in
+  // .universe.json, a later run could derive that same name and silently overwrite THIS run's
+  // verdicts — the artifact rule §6 hashes before scoring. Reserve the suffix instead.
+  if (outPath.endsWith('.universe.json')) { throw new Error(`reserved-output-suffix: <out> must not end in .universe.json (${outPath}); that name is derived for the candidate-universe artifact`); }
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { k: number; probes: ProbeInput[] };
   const home = join(snapshotDir, 'home');
   const projectRoot = join(snapshotDir, 'proj');
@@ -87,14 +93,34 @@ const main = (): void => {
     home, sessionId: 'classify-o67', now: () => '2026-01-01T00:00:00.000Z',
     project: { ledger: projectLedgerPath(projectRoot), root: projectRoot, home },
   });
-  // Upper bound on servable records: total physical rows across both ledgers.
-  const rowsOf = (p: string): number => { try { return readFileSync(p, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
-  const maxItems = Math.max(1, rowsOf(join(home, 'memory.jsonl')) + rowsOf(projectLedgerPath(projectRoot)));
+  // Snapshot preconditions, once, before any probe: identity uniqueness is a corpus property (a
+  // per-probe check sits behind recall's relevance filter and would miss it), an unreadable ledger
+  // must not be counted as zero rows, and an empty corpus is not a corpus. Rule §4 makes any
+  // snapshot error a gate failure, so these refuse the run rather than classify a degraded one.
+  const { bound: maxItems, rowsByScope } = corpusPrecondition([
+    { scope: 'global', path: join(home, 'memory.jsonl') },
+    { scope: 'project', path: projectLedgerPath(projectRoot) },
+  ]);
+  const universe: { id: string; candidates: string[] }[] = [];
+  let disclosure: { projectDisposition: string; integrityAvailable: boolean; witnessNotes: string[] } | undefined;
   const verdicts = manifest.probes.map((p) => {
     // Candidate pool: identities the production recall would serve for this query (order discarded).
-    const pool: CandidateDoc[] = store.recall(p.query, { maxItems }).items.map((it) => ({ id: it.record.id, content: it.record.content }));
+    const res = store.recall(p.query, { maxItems });
+    // Recall discloses whether a whole scope was excluded by ownership/witness enforcement. Rule §3
+    // defines candidates as what production SERVES with that enforcement included, so the artifact
+    // records it — otherwise a degraded run and a small corpus hash to indistinguishable files.
+    disclosure ??= { projectDisposition: res.projectDisposition, integrityAvailable: res.integrityAvailable, witnessNotes: res.witnessNotes };
+    // The hashed universe and the verdicts come from the SAME in-run recall, so a verdict can never
+    // name an identity that is absent from the universe it is supposed to have competed in.
+    universe.push({ id: p.id, candidates: probeUniverse(res.items.map((it) => ({ id: it.record.id, scope: it.scope }))) });
+    const pool: CandidateDoc[] = res.items.map((it) => ({ id: it.record.id, content: it.record.content }));
     return classifyProbe(p, pool);
   });
+  // The larger loss channel, and it hides on the path rule §6 prescribes: a snapshot copied for
+  // window close is un-adopted by canonical-path ownership, so its project rows count toward the
+  // bound while serving nothing.
+  assertScopeParticipated(rowsByScope, disclosure?.projectDisposition ?? 'inactive');
+  universe.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   verdicts.sort((a, b) => a.id.localeCompare(b.id));
   const summary = {
     census: verdicts.filter((v) => v.status !== 'out-of-domain').length,
@@ -104,5 +130,23 @@ const main = (): void => {
     outOfDomain: verdicts.filter((v) => v.status === 'out-of-domain').map((v) => v.id),
   };
   writeFileSync(outPath, JSON.stringify({ rule: 'o67-class-rule-2026-07', manifest: manifestPath.split('/').pop(), summary, probes: verdicts }, null, 1) + '\n');
+  // SEPARATE artifact by design: the verdict file's bytes stay reproducible (the C1.3 retrodiction
+  // anchor is pinned against them), while rule §6's window-close procedure gets the universe it
+  // requires to be hashed BEFORE scoring.
+  writeFileSync(outPath.replace(/\.json$/, '') + '.universe.json', JSON.stringify({
+    rule: 'o67-class-rule-2026-07',
+    artifact: 'candidate-universe',
+    manifest: manifestPath.split('/').pop(),
+    identity: '<scope>:<record-id> — split at the FIRST colon; scope is global|project',
+    order: 'sorted by identity; recall order is discarded and never recorded (rule §3)',
+    recallBound: maxItems,
+    // expansion.ts resolves data/semantic-neighbors.json module-relative and falls back to
+    // undefined on ANY read/parse failure, silently. Semantically-rescued records carry zero
+    // lexical evidence, so they can never be witnesses or equal-coverage competitors: they change
+    // the UNIVERSE without changing a single verdict. The pinned verdict hashes therefore cannot
+    // detect the asset's absence — this field is the only signal.
+    disclosure: { rowsByScope, ...disclosure, expansionAvailable: defaultExpansion() !== undefined },
+    probes: universe,
+  }, null, 1) + '\n');
 };
 if (process.argv[1] && process.argv[1].endsWith('classify-o67.ts')) main();
