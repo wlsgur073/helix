@@ -208,7 +208,9 @@ anti-goldplating guard. One collaborative cross-review round produced 8 findings
 dropped from the skeleton, now carried forward in full in §4; "weeks-scale" replaced by the
 §5.2 stopping rule; the recall-index no-pain claim rejected as unconditional and the
 observability gap recorded) — and one **rejected with evidence**: the claimed Node-version
-inconsistency (README line 229 documents the runtime ≥20 / dev ≥24 split deliberately;
+inconsistency (README documents the runtime ≥20 / dev ≥24 split deliberately — at this
+draft's commit `fb31d6c` the sentence sat at README line 229; later README additions
+(`0cad1a6`, the C4.7/C4.9 sections) shifted it to line 243 as of `afc29c4`;
 residual adopted into C4.9). Several suspected-missing items were found already covered
 (privacy/data-flow, migration no-guarantee, SemVer declaration, provenance wiring) and were
 downgraded from "create" to "verify". Convergence not yet declared: this draft is one round
