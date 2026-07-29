@@ -350,7 +350,12 @@ function sweepOrphanTmps(artifactPath, opts = {}) {
   let removed = 0;
   for (const name of fs.readdirSync(dir)) {
     if (!pat.test(name) || name === keepName) continue;
-    fs.unlinkSync(join2(dir, name));
+    try {
+      fs.unlinkSync(join2(dir, name));
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+      continue;
+    }
     removed++;
   }
   if (removed > 0) fs.fsyncDir(dir);

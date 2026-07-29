@@ -6,6 +6,19 @@ import { orphanTmpPattern, sweepOrphanTmps } from '../../src/memory/ledger-sweep
 import { realFsOps } from '../../src/memory/fs-ops.js';
 
 const HEX = 'a'.repeat(32);
+const HEX_B = 'b'.repeat(32);
+
+/** Schedules a real deletion between readdir and unlink, reproducing the observed production race
+ *  exactly: `readdir` reports the name, the other process's own cleanup removes it, our unlink then
+ *  hits a path that no longer exists. The victim is destroyed with the REAL fs, so the production
+ *  `unlinkSync` raises a genuine ENOENT carrying `.code` — nothing about the error is synthetic. */
+const vanishAfterReaddir = (victim: string, extra: Partial<typeof realFsOps> = {}) => ({
+  ...realFsOps,
+  readdirSync: (dir: string) => { const names = realFsOps.readdirSync(dir); realFsOps.unlinkSync(victim); return names; },
+  ...extra,
+});
+
+const errno = (code: string) => () => { throw Object.assign(new Error(`fake ${code}`), { code }); };
 
 describe('orphanTmpPattern', () => {
   const pat = orphanTmpPattern('memory.jsonl');
@@ -45,6 +58,64 @@ describe('sweepOrphanTmps', () => {
     const failingReaddir = { ...realFsOps, readdirSync: () => { throw new Error('EIO fake'); } };
     expect(() => sweepOrphanTmps(ledger, { fsOps: failingReaddir })).toThrow(/EIO fake/);
   });
+  it('an orphan that VANISHES between readdir and unlink does not abort the sweep', () => {
+    // Production race, root-caused 2026-07-29 from a 1-in-30 suite flake: a lock CONTENDER writes
+    // `<artifact>.lk-<hex>.tmp` while it does NOT yet hold the lock (src/memory/lock.ts:75) and
+    // removes it again in a finally that already tolerates a holder sweeping it first
+    // (lock.ts:79, "swept by a holder mid-flight — harmless"). The holder's sweep had no such
+    // tolerance, so whoever lost the unlink race threw ENOENT and killed the process. Reachable
+    // from every commit/erase append via ledger.ts:80, not only from the observed key mint.
+    const d = mkdtempSync(join(tmpdir(), 'sweep-race-'));
+    const ledger = join(d, 'memory.jsonl'); writeFileSync(ledger, '');
+    const victim = join(d, `memory.jsonl.lk-${HEX}.tmp`); writeFileSync(victim, 'a contender lock payload');
+    const survivor = join(d, `memory.jsonl.c-${HEX_B}.tmp`); writeFileSync(survivor, 'a genuinely dead writer');
+    const user = join(d, 'memory.jsonl.backup.tmp'); writeFileSync(user, 'user file');
+    const calls: string[] = [];
+    const fsOps = vanishAfterReaddir(victim, { fsyncDir: (p: string) => { calls.push(p); realFsOps.fsyncDir(p); } });
+
+    expect(sweepOrphanTmps(ledger, { fsOps })).toBe(1);   // the vanished one is NOT counted: we removed nothing
+    expect(existsSync(survivor)).toBe(false);             // and the sweep CONTINUED past the ENOENT
+    expect(existsSync(victim)).toBe(false);               // Layer-4 postcondition holds whoever's hand removed it
+    expect(existsSync(user)).toBe(true);
+    expect(calls).toEqual([d]);                           // one real removal still earns exactly one dir fsync
+  });
+
+  it('a sweep whose ONLY match vanished removes nothing and does not fsync the directory', () => {
+    const d = mkdtempSync(join(tmpdir(), 'sweep-race2-'));
+    const ledger = join(d, 'memory.jsonl'); writeFileSync(ledger, '');
+    const victim = join(d, `memory.jsonl.lk-${HEX}.tmp`); writeFileSync(victim, 'x');
+    const calls: string[] = [];
+    const fsOps = vanishAfterReaddir(victim, { fsyncDir: (p: string) => { calls.push(p); realFsOps.fsyncDir(p); } });
+
+    expect(sweepOrphanTmps(ledger, { fsOps })).toBe(0);
+    expect(calls).toHaveLength(0);   // no directory entry changed by US, so nothing of ours needs persisting
+  });
+
+  it('STILL throws on a coded failure that leaves the orphan present (ENOENT tolerance is not a blanket catch)', () => {
+    // The class boundary, stated in both directions. Deliberately code-CARRYING, because the
+    // code-less fakes above cannot distinguish an errno check from a message match.
+    for (const code of ['EACCES', 'EPERM', 'EIO', 'EBUSY']) {
+      const d = mkdtempSync(join(tmpdir(), 'sweep-errno-'));
+      const ledger = join(d, 'memory.jsonl'); writeFileSync(ledger, '');
+      const orphan = join(d, `memory.jsonl.c-${HEX}.tmp`); writeFileSync(orphan, 'x');
+      expect(() => sweepOrphanTmps(ledger, { fsOps: { ...realFsOps, unlinkSync: errno(code) } })).toThrow(new RegExp(`fake ${code}`));
+      expect(existsSync(orphan)).toBe(true);   // an unfenceable predecessor must still block the successor
+    }
+  });
+
+  it('discriminates on errno and NOT on the message: an ENOENT-mentioning EACCES still throws', () => {
+    // The only input that separates `e.code === 'ENOENT'` from a `/ENOENT/` message match, and
+    // therefore the only test that backs the claim in the source comment. Composed and wrapped
+    // errors really do carry another process's errno text in their message; the code is the
+    // authoritative signal. Mutation-verified: a message-matched implementation fails only here.
+    const d = mkdtempSync(join(tmpdir(), 'sweep-errno2-'));
+    const ledger = join(d, 'memory.jsonl'); writeFileSync(ledger, '');
+    const orphan = join(d, `memory.jsonl.c-${HEX}.tmp`); writeFileSync(orphan, 'x');
+    const misleading = () => { throw Object.assign(new Error('EACCES: permission denied while clearing an ENOENT leftover'), { code: 'EACCES' }); };
+    expect(() => sweepOrphanTmps(ledger, { fsOps: { ...realFsOps, unlinkSync: misleading } })).toThrow(/permission denied/);
+    expect(existsSync(orphan)).toBe(true);
+  });
+
   it('fsyncs the directory exactly when something was removed', () => {
     const d = mkdtempSync(join(tmpdir(), 'sweep3-'));
     const ledger = join(d, 'memory.jsonl'); writeFileSync(ledger, '');
