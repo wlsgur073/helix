@@ -14,9 +14,19 @@ describe('manifest generator (frozen enumeration behaviour)', () => {
     id, tx: '2026-07-20T00:00:00.000Z', type: 'assert', content, supersedes: null,
   }) + '\n';
 
+  /** The generator requires every scope recall serves to be present (items 3-4). These tests lock
+   *  PROJECT-side enumeration, so the global ledger here is deliberately EMPTY — that keeps their
+   *  inputs equivalent to the pre-merge ones, so what they characterize is unchanged. Merged-scope
+   *  behaviour has its own lock in generate-manifest-scope-cutoff.test.ts. */
+  const snapshotDirs = (dir: string) => {
+    mkdirSync(join(dir, 'proj', '.helix'), { recursive: true });
+    mkdirSync(join(dir, 'home'), { recursive: true });
+    writeFileSync(join(dir, 'home', 'memory.jsonl'), '');
+  };
+
   const fixture = () => {
     const dir = mkdtempSync(join(tmpdir(), 'genman-'));
-    mkdirSync(join(dir, 'proj', '.helix'), { recursive: true });
+    snapshotDirs(dir);
     writeFileSync(join(dir, 'proj', '.helix', 'memory.jsonl'),
       row('m_1', 'store mutators throw on unknown identifier and the interface maps it') +
       row('m_2', 'retry backoff policy governs transient upload failures'));
@@ -84,7 +94,7 @@ describe('manifest generator (frozen enumeration behaviour)', () => {
   it('a competitor sharing three or more query terms makes the probe ambiguous', () => {
     const dir = mkdtempSync(join(tmpdir(), 'genman-amb-'));
     try {
-      mkdirSync(join(dir, 'proj', '.helix'), { recursive: true });
+      snapshotDirs(dir);
       // Second record restates the first: their topic terms overlap well past the threshold.
       writeFileSync(join(dir, 'proj', '.helix', 'memory.jsonl'),
         row('m_1', 'store mutators throw on unknown identifier and the interface maps it') +
@@ -101,7 +111,7 @@ describe('manifest generator (frozen enumeration behaviour)', () => {
   it('closes a record that a later row supersedes, so it is never enumerated', () => {
     const dir = mkdtempSync(join(tmpdir(), 'genman-sup-'));
     try {
-      mkdirSync(join(dir, 'proj', '.helix'), { recursive: true });
+      snapshotDirs(dir);
       writeFileSync(join(dir, 'proj', '.helix', 'memory.jsonl'),
         row('m_old', 'deployment timeout is thirty seconds by default') +
         JSON.stringify({ id: 'm_new', tx: '2026-07-21T00:00:00.000Z', type: 'supersede',
@@ -129,7 +139,10 @@ describe('manifest generator is importable', () => {
       { id: 'm_b', type: 'supersede', content: 'deployment timeout is sixty seconds by default', supersedes: 'm_a' },
     ];
     expect(liveRows(rows).map((r) => r.id)).toEqual(['m_b']);
-    const probes = buildProbes(rows, '# N\n- unrelated bullet text here\n', {});
+    const probes = buildProbes(
+      [{ scope: 'global', rows: [] }, { scope: 'project', rows }],
+      { md: '# N\n- unrelated bullet text here\n', mapping: {} },
+    );
     expect(probes.map((p) => p.id)).toEqual(['L_m_b', 'O_0']);
   });
 });

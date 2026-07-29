@@ -250,6 +250,21 @@ make rank aggregation unambiguous and are fixed for this release:
 A **bestRank histogram over all 51 probes** is reported. Ambiguous probes appear in the
 histogram but are never aggregated into the rank-1 (Hit@1) threshold.
 
+**Unambiguity-denominator note (2026-07-29; D5 disclosure).** The Hit@1 bullet says "no other
+live record". At the v1 freeze the generator implemented that over the PROJECT ledger alone,
+while `run-pilot` ranked against the merged global + project universe production recall actually
+serves — so a global-scope near-duplicate was a real competitor the unambiguity test could not
+see. C5.1 closure item 4 widened the generator's competitor set to every scope, which makes the
+sentence above literally true rather than approximately so. **The v1 results are unaffected**,
+and that is verified rather than asserted: the frozen snapshot holds 25 project rows against 1
+global row, no probe flips either way, and both frozen manifests still regenerate
+BYTE-IDENTICALLY (sha256 `452e3cee…` and `d5a2178f…`, reproduced 2026-07-29). Direction of the
+correction, for the record: enlarging the competitor set can only move probes OUT of the
+unambiguous subset, so it RELAXES the Hit@1 gate — fewer probes must rank 1 — and TIGHTENS O_67
+qualifying-exposure accrual, which is scored over probes that are in-class AND base-Hit@1
+eligible. Per `gate-decision-2026-07-22.md` D5 the revised rule validates on **new temporal cases
+only**: the frozen corpus cannot demonstrate it, by construction.
+
 ---
 
 ## 7. Temporal holdout
@@ -265,6 +280,39 @@ decisions across the release-preparation window), its unambiguous subset may be 
 **Hit@1 is labeled unexercised** on the holdout rather than reported as a trivial pass. The
 holdout is the only part of this exercise that is forward-looking rather than correlated with
 development.
+
+**Holdout tooling (2026-07-29; C5.1 closure item 3).** The population above is ledger-only by
+definition — oracle entries are not ledger records and carry no `tx`, so no cutoff can date them
+— and the generator now enforces that structurally: the holdout invocation takes no oracle
+arguments, and a cutoff supplied together with an oracle side is refused.
+
+```
+npx tsx scripts/pilot/generate-manifest.ts --after <tx> <snapshotDir> <out>
+```
+
+`<tx>` must be canonical UTC (`YYYY-MM-DDTHH:MM:SS.sssZ`) and the comparison is a strict string
+`>`, so the cutoff instant itself is **not** in the holdout. Any other form — a shorter stamp, an
+offset-bearing one, or a well-formed impossible date like `2026-02-30T…` — is refused rather than
+coerced, because only the canonical form orders correctly under string comparison. A cutoff
+narrows the probe SOURCE and never the competitor set: a record minted before the cutoff still
+competes for rank at scoring time, so dropping it would flatter the holdout exactly where the
+holdout is meant to be hardest.
+
+A holdout manifest self-identifies by carrying `txAfter`. Probe ids and `side` keep their
+ordinary ledger form (`L_<id>`, `side: "ledger"`) because holdout-ness is a property of the
+manifest, not of a probe; the v1 holdout manifest was hand-made and used `H_<id>` / `side:
+"holdout"`. The current tooling reproduces that manifest's SELECTION and its derived query
+exactly — verified 2026-07-29 against the holdout-1 snapshot at cutoff
+`2026-07-20T12:31:43.000Z`, yielding the same single record and the same eight query terms — but
+not those two labels.
+
+Deriving the cutoff has one trap worth recording, since the v2 preregistration must pin an exact
+value: `git log --format=%ad --date=format:'…Z'` renders in the **commit's own** timezone, so
+stamping a literal `Z` on it yields a time wrong by the author's UTC offset — here `+09:00`, a
+nine-hour error that silently moves the holdout boundary. Use
+`TZ=UTC git log -1 --format=%ad --date=format-local:'%Y-%m-%dT%H:%M:%S.000Z' <commit>`, or convert
+`%aI` explicitly. The v1 method-freeze commit `0eae7dc` authored `2026-07-20T21:31:43+09:00` is
+therefore `2026-07-20T12:31:43.000Z`.
 
 ---
 
@@ -315,6 +363,16 @@ true statement about the v1 freeze commit and reproduces there; it is not a clai
 v1 RESULTS are unaffected — the refactor is behaviour-invariant, verified by regenerating both
 frozen manifests byte-for-byte. The v2 freeze pins its own identities (C5.1 item 9), which is
 where the current blob id belongs.
+
+**Extended 2026-07-29.** The same file has since taken C5.1 closure items 3 and 4 — the
+transaction-time cutoff (§7) and the merged unambiguity denominator (§4) — so its blob has moved
+again. Two behaviour changes ride along and are recorded here rather than left to a diff: `live`
+now also treats an `invalidate` row as a closer, matching `src/memory/projection.ts:26` (the
+frozen corpus contains no such row, so no v1 probe is affected), and a snapshot missing a scope's
+ledger is now refused instead of read as empty, since a partially copied snapshot would otherwise
+produce a well-formed manifest whose probes look unambiguous only because their competitors were
+never read. Both frozen manifests were regenerated after these changes and remain byte-identical
+to the pinned sha256 values above, which is the acceptance condition these items were held to.
 
 **[Amended pre-execution — see pilot-amendment-1.md]** LOCAL, PATH-DEPENDENT audit value (not a
 reproducible artifact hash): the rewritten snapshot `projects.json` (§9b) has sha256
