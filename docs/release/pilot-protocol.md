@@ -217,6 +217,21 @@ registered 51-probe verdict is preserved and reported NOT MET regardless. See
 The full rank distribution is reported for **all** probes (§6). Ambiguous probes contribute to
 Recall@20 and to the rank distribution but are never aggregated into a rank-1 threshold.
 
+**Unambiguity-denominator note (2026-07-29; D5 disclosure).** The Hit@1 bullet above says "no
+other live record". At the v1 freeze the generator implemented that over the PROJECT ledger
+alone, while `run-pilot` ranked against the merged global + project universe production recall
+actually serves — so a global-scope near-duplicate was a real competitor the unambiguity test
+could not see. C5.1 closure item 4 widened the generator's competitor set to every scope, which
+makes the sentence above literally true rather than approximately so. **The v1 results are
+unaffected**, and that is verified rather than asserted: the frozen snapshot holds 25 project
+rows against 1 global row, no probe flips either way, and both frozen manifests still regenerate
+BYTE-IDENTICALLY (sha256 `452e3cee…` and `d5a2178f…`, reproduced 2026-07-29). Direction of the
+correction, for the record: enlarging the competitor set can only move probes OUT of the
+unambiguous subset, so it RELAXES the Hit@1 gate — fewer probes must rank 1 — and TIGHTENS O_67
+qualifying-exposure accrual, which is scored over probes that are in-class AND base-Hit@1
+eligible. Per `gate-decision-2026-07-22.md` D5 the revised rule validates on **new temporal cases
+only**: the frozen corpus cannot demonstrate it, by construction.
+
 ---
 
 ## 5. Adjudication rubrics
@@ -260,21 +275,6 @@ make rank aggregation unambiguous and are fixed for this release:
 
 A **bestRank histogram over all 51 probes** is reported. Ambiguous probes appear in the
 histogram but are never aggregated into the rank-1 (Hit@1) threshold.
-
-**Unambiguity-denominator note (2026-07-29; D5 disclosure).** The Hit@1 bullet says "no other
-live record". At the v1 freeze the generator implemented that over the PROJECT ledger alone,
-while `run-pilot` ranked against the merged global + project universe production recall actually
-serves — so a global-scope near-duplicate was a real competitor the unambiguity test could not
-see. C5.1 closure item 4 widened the generator's competitor set to every scope, which makes the
-sentence above literally true rather than approximately so. **The v1 results are unaffected**,
-and that is verified rather than asserted: the frozen snapshot holds 25 project rows against 1
-global row, no probe flips either way, and both frozen manifests still regenerate
-BYTE-IDENTICALLY (sha256 `452e3cee…` and `d5a2178f…`, reproduced 2026-07-29). Direction of the
-correction, for the record: enlarging the competitor set can only move probes OUT of the
-unambiguous subset, so it RELAXES the Hit@1 gate — fewer probes must rank 1 — and TIGHTENS O_67
-qualifying-exposure accrual, which is scored over probes that are in-class AND base-Hit@1
-eligible. Per `gate-decision-2026-07-22.md` D5 the revised rule validates on **new temporal cases
-only**: the frozen corpus cannot demonstrate it, by construction.
 
 ---
 
