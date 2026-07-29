@@ -63,6 +63,14 @@ superset match below. This is a documented limitation **class** of the scoring f
 instance bug. If no new case of the class appears inside the v2 window, that component is
 reported unexercised — not silently validated.
 
+> **Cross-reference (added 2026-07-29; the decision text above is unchanged).** Owner decision
+> **Q3** (ratified 2026-07-24, `readiness-criteria-2026-07.md` §7) has since tightened the
+> consequence side of D3/D5: the v2 pilot may **not release** with Hit@1 or O_67-class evidence
+> unexercised — each carries a preregistered minimum exposure count, and per
+> `o67-class-rule-2026-07.md` §4, UNEXERCISED and PARTIALLY EXERCISED **block release**. D3/D5's
+> honest-reporting semantics (a starved window is reported unexercised, never as a trivial pass)
+> stand; Q3 layers a blocking consequence on top.
+
 ## Why-log (decision provenance)
 
 - **Pre-registered position** (assistant, before external review): choose (b); no third

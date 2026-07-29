@@ -1,5 +1,16 @@
 # Helix v0.2.0 — preregistered recall pilot protocol
 
+> **STATUS: HISTORICAL (marked 2026-07-29).** This protocol was executed on 2026-07-21/22: the
+> registered 51-probe verdict is **NOT MET, permanently**, and the conditional frozen-method
+> Hit@1 gate **FAILED at 27/28** (O_67 at rank 3 on both manifests, outside the pre-execution
+> waiver). The v0.2.0 candidate was stood down on 2026-07-22 (`package.json` reverted to 0.1.0),
+> and [`gate-decision-2026-07-22.md`](./gate-decision-2026-07-22.md) (**BINDING**) governs any
+> release redo: a future release requires a prospectively preregistered **protocol v2**, so this
+> document is no longer the acceptance test for any upcoming release. It remains the frozen v1
+> method record referenced by `pilot-amendment-1.md`, the gate decision, and
+> `o67-class-rule-2026-07.md`. Nothing below has been altered; post-execution notes are marked
+> in place, matching the existing **[Amended pre-execution]** convention.
+
 This document is the public, in-tag acceptance test for the v0.2.0 release of Helix's memory
 recall. It is committed to the repository *before* the release candidate is frozen, so the tag
 carries its own acceptance criteria. The commit that introduces this document is the **method
@@ -330,6 +341,11 @@ therefore `2026-07-20T12:31:43.000Z`.
   frozen corpus.
 - After the release, the frozen probes become a **regression suite**: the same manifest is
   re-run against later candidates to detect recall regressions.
+  **[Updated 2026-07-29 — see `gate-decision-2026-07-22.md` §D4.]** Non-gating **early reuse
+  during development** has since been authorized: BOTH `pilot-manifest.json` AND
+  `pilot-manifest-amended-1.json` are re-run against later candidates, and neither may be
+  dropped (the amended overlay carries O_66's bound targets). Formal §8 conversion still
+  occurs at release.
 
 ---
 
@@ -409,6 +425,13 @@ adoption time, and per-project signing nonce preserved byte-for-byte, only the k
 the same smoke
 returned the target project record at **rank 1** among 20 project records. Any re-run of the
 pilot must satisfy this registry-key match before generating or scoring the manifest.
+
+**[Updated 2026-07-29.]** Post-freeze commit `e576ee4` (2026-07-23) changed ownership keying
+from the absolute path to the **canonical realpath** of the project root
+(`ownership.canonicalRoot`, `src/memory/ownership.ts`). The procedure above is unchanged, but a
+re-run against current bytes must key `projects.json` by the snapshot directory's *realpath*; a
+snapshot reached via a symlinked path degrades exactly as described here until the key matches
+the realpath.
 
 ### 9c. Reproduction
 
