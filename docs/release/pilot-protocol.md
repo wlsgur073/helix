@@ -419,6 +419,23 @@ produce a well-formed manifest whose probes look unambiguous only because their 
 never read. Both frozen manifests were regenerated after these changes and remain byte-identical
 to the pinned sha256 values above, which is the acceptance condition these items were held to.
 
+**Extended 2026-07-30.** The blob has moved twice more, both times with the manifests still
+regenerating byte-for-byte. First the holdout window gained its close-time upper bound (see the
+amendment in §7). Then the ledger readers and their row types moved out to a new file,
+`scripts/pilot/snapshot.ts`, which is shared with the gate-prepare phase; the generator re-exports
+them, so nothing that imported them changed.
+
+That move is worth recording as a rule rather than a tidy-up, because it fixes a real defect
+found while building the prepare phase. **A module guarded by `isEntryPoint(import.meta.url)` must
+never be imported by another module.** The guard asks whether `import.meta.url` resolves to the
+same real path as `process.argv[1]`, and bundling erases exactly that distinction: esbuild inlines
+a dependency into the entry bundle, so the dependency's `import.meta.url` becomes the bundle's own
+url. The guard then answers yes for a module that is not the entry point and runs its `main()`.
+Observed, not theorised — the bundled `prepare-gate` CLI printed the *generator's* usage and
+exited 2 before doing any work of its own. `isEntryPoint` cannot be repaired to cover it, since
+inside a bundle the two modules genuinely are one file, so the rule is structural: shared code
+lives in files that have nothing to guard. `test/pilot/entry-point-isolation.test.ts` holds it.
+
 **[Amended pre-execution — see pilot-amendment-1.md]** LOCAL, PATH-DEPENDENT audit value (not a
 reproducible artifact hash): the rewritten snapshot `projects.json` (§9b) has sha256
 `f74ba0bd97b354799cddecbe5dacaf90cfce405b04a2e11fe29a9204587fe582`. This value is specific to

@@ -39,11 +39,17 @@
  *  test/pilot/generate-manifest-scope-cutoff.test.ts, and byte reproduction of both frozen
  *  manifests. */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { MemoryScope } from '../../src/types.js';
 import { topicTerms } from './derive.js';
 import { segmentOracle } from './segment-oracle.js';
+import { readSnapshot, type LedgerRow, type ScopedLedger } from './snapshot.js';
 import { isEntryPoint } from '../../src/entry-point.js';
+
+// Re-exported so this file's public surface is unchanged by the move. The readers and their row
+// types now live in `snapshot.ts`, which has no `main()` — a guarded module cannot be imported by
+// another one, because the guard does not survive bundling. See the header there.
+export { readLedger, readSnapshot } from './snapshot.js';
+export type { LedgerRow, ScopedLedger } from './snapshot.js';
 
 /** Production recall bound, pinned by the protocol (§9a, K = 20). */
 export const K = 20;
@@ -52,8 +58,6 @@ export const K = 20;
  *  the pilot measures whether the project's own decisions are retrievable. */
 export const ENUMERATED_SCOPE: MemoryScope = 'project';
 
-export interface LedgerRow { id: string; type: string; content: string; supersedes: string | null; tx?: string }
-export interface ScopedLedger { scope: MemoryScope; rows: LedgerRow[] }
 export interface OracleInput { md: string; mapping: Record<string, string[]> }
 export interface Probe { id: string; query: string; relevant: string[]; unambiguous: boolean; side: string }
 
@@ -180,26 +184,6 @@ export const buildProbes = (ledgers: ScopedLedger[], oracle: OracleInput | null,
   }
   return probes;
 };
-
-/** One scope's ledger. ABSENT is fatal, not empty: a snapshot copied without its global ledger
- *  produces a well-formed manifest whose probes are unambiguous only because their competitors
- *  were never read — indistinguishable, afterwards, from a corpus that genuinely has none. */
-export const readLedger = (path: string): LedgerRow[] => {
-  let text: string;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch (e) {
-    throw new Error(`ledger-unreadable: ${path} (${(e as Error).message}). Every scope recall serves must be ` +
-      'present, or the unambiguity denominator is narrower than the universe the runner ranks against');
-  }
-  return text.split('\n').filter(Boolean).map((l) => JSON.parse(l) as LedgerRow);
-};
-
-/** The snapshot layout run-pilot.ts also reads: home/ is the global scope, proj/ the project. */
-export const readSnapshot = (snapshotDir: string): ScopedLedger[] => [
-  { scope: 'global', rows: readLedger(join(snapshotDir, 'home', 'memory.jsonl')) },
-  { scope: 'project', rows: readLedger(join(snapshotDir, 'proj', '.helix', 'memory.jsonl')) },
-];
 
 const USAGE = 'usage: generate-manifest <snapshotDir> <oracleMd> <mappingJson> <out>\n' +
   '       generate-manifest --after <tx> --close <tx> <snapshotDir> <out>';
