@@ -35,6 +35,28 @@ describe('withFileLock (link-published)', () => {
     expect(existsSync(lockPathOf(t))).toBe(true);                          // still held
     expect(readFileSync(lockPathOf(t), 'utf8')).toContain('c'.repeat(32)); // untouched, byte-identical holder
   });
+  it('maxWaitMs is a MEASURED deadline and the timeout message reports real elapsed time', () => {
+    const t = target();
+    const foreign = { ...selfIdentity('d'.repeat(32)), threadId: 98 };   // alive => the contender waits, then gives up
+    writeLockFileForTest(lockPathOf(t), foreign);
+    const t0 = performance.now();
+    let message = '';
+    try { withFileLock(t, () => 1, { maxWaitMs: 200 }); } catch (e) { message = (e as Error).message; }
+    const measured = performance.now() - t0;
+    const m = /timed out after (\d+)ms/.exec(message);
+    expect(m, `expected a duration in: ${message}`).not.toBeNull();
+    // The budget BINDS in wall-clock terms. It used to be a retry tally (`waited += RETRY_MS`), which
+    // advances 25 per pass no matter how long a pass really took — so a 200ms budget could block for
+    // seconds under scheduling pressure and still report "200ms".
+    expect(measured).toBeLessThan(2_000);
+    // ...and the number in the message is that same measured time, never a fabricated tally. This is
+    // the honesty half: an operator is told to go check a pid, so the duration must be real.
+    expect(Number(m![1])).toBeLessThanOrEqual(Math.ceil(measured) + 2);
+    expect(existsSync(lockPathOf(t))).toBe(true);                        // never stolen — giving up stays fail-safe
+    // Honest bound on this test: the SHARP discriminator between a deadline and a tally only appears
+    // under scheduling pressure (where a pass costs far more than RETRY_MS), which cannot be forced
+    // deterministically here. These two assertions pin the contract, not the pathological case.
+  });
   it('re-entrant acquisition fails FAST with a diagnostic (not a 5 s block)', () => {
     const t = target();
     const t0 = Date.now();

@@ -7,6 +7,7 @@ import { mkdirSync as mkdirSync4 } from "node:fs";
 // src/memory/lock.ts
 import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { dirname, basename, join } from "node:path";
 
 // src/memory/lock-liveness.ts
@@ -126,7 +127,9 @@ function acquireFileLock(target, opts = {}) {
   const payloadText = JSON.stringify(self);
   if (tryParsePayload(payloadText) === null) throw new Error("withFileLock: internal \u2014 payload failed its own well-formedness check");
   const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
-  let waited = 0;
+  const startedAt = performance.now();
+  const elapsedMs = () => Math.round(performance.now() - startedAt);
+  const sleepWithinBudget = () => sleepSync(Math.max(1, Math.min(RETRY_MS, maxWaitMs - elapsedMs())));
   let lastHolder = null;
   for (; ; ) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString("hex")}.tmp`;
@@ -146,9 +149,8 @@ function acquireFileLock(target, opts = {}) {
       if (code === "EPERM" || code === "EOPNOTSUPP" || code === "ENOTSUP")
         throw new Error(`withFileLock: filesystem refuses hard links for ${lockPath}; ledger locking is unsupported on this filesystem`);
       if (code === "ENOENT") {
-        if (waited >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, waited));
-        sleepSync(RETRY_MS);
-        waited += RETRY_MS;
+        if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, elapsedMs()));
+        sleepWithinBudget();
         continue;
       }
       if (code !== "EEXIST") throw e;
@@ -176,9 +178,8 @@ function acquireFileLock(target, opts = {}) {
     if (holder === "reentrant-self")
       throw new Error(`withFileLock: re-entrant acquisition of ${lockPath} from the same thread (pid ${process.pid}) \u2014 withFileLock is not re-entrant`);
     if (holder === "dead") stealUnderGate(lockPath, probe);
-    if (waited >= maxWaitMs) throw new Error(timeoutMessage(lockPath, lastHolder, waited));
-    sleepSync(RETRY_MS);
-    waited += RETRY_MS;
+    if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, lastHolder, elapsedMs()));
+    sleepWithinBudget();
   }
   const ctx = {
     stillOwned() {

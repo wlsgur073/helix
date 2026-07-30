@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { dirname, basename, join } from 'node:path';
 import { classifyHolder, selfIdentity, tryParsePayload, realProbe, type HolderClass, type LivenessProbe, type LockPayload } from './lock-liveness.js';
 
@@ -68,7 +69,21 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
   const payloadText = JSON.stringify(self);
   if (tryParsePayload(payloadText) === null) throw new Error('withFileLock: internal — payload failed its own well-formedness check'); // completeness invariant, testable
   const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
-  let waited = 0;
+  // MEASURED elapsed, not a retry tally. This used to be `waited += RETRY_MS` per pass, i.e. a count
+  // of retries reported in milliseconds — so under scheduling pressure a `maxWaitMs: 500` call could
+  // block for SECONDS and then report "timed out after 500ms". Two defects in one: a budget that did
+  // not bind, and a false number in the one message that tells an operator to go check a pid.
+  // performance.now() is monotonic — unlike Date.now() it cannot step backward and silently stretch
+  // (or collapse) the budget, which matters on this project's primary platform.
+  // NOTE this is a real deadline now: under heavy contention acquisition gives up sooner than the
+  // old tally did. That is the intended meaning of the parameter, and it stays fail-safe — a waiter
+  // that gives up never steals a live holder's lock.
+  const startedAt = performance.now();
+  const elapsedMs = (): number => Math.round(performance.now() - startedAt);
+  // Sleep the retry cadence, but never past the deadline: the next pass should throw rather than
+  // overshoot the caller's budget by up to one RETRY_MS. Floor of 1ms so a nearly-exhausted budget
+  // still yields the CPU instead of spinning.
+  const sleepWithinBudget = (): void => sleepSync(Math.max(1, Math.min(RETRY_MS, maxWaitMs - elapsedMs())));
   let lastHolder: LockPayload | null = null;
 
   for (;;) {
@@ -82,9 +97,8 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
       if (code === 'EPERM' || code === 'EOPNOTSUPP' || code === 'ENOTSUP')
         throw new Error(`withFileLock: filesystem refuses hard links for ${lockPath}; ledger locking is unsupported on this filesystem`);
       if (code === 'ENOENT') {                              // srcTmp swept mid-flight, OR the ledger's dir vanished mid-acquire — retry ON THE BUDGET
-        if (waited >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, waited)); // a vanished dir throws ENOENT every pass; a bare non-yielding `continue` would spin at 100% CPU forever (the stealUnderGate fall-through class), so route it through the normal cadence
-        sleepSync(RETRY_MS);
-        waited += RETRY_MS;
+        if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, elapsedMs())); // a vanished dir throws ENOENT every pass; a bare non-yielding `continue` would spin at 100% CPU forever (the stealUnderGate fall-through class), so route it through the normal cadence
+        sleepWithinBudget();
         continue;
       }
       if (code !== 'EEXIST') throw e;                       // real error (perms/disk) — bubble up untouched
@@ -119,9 +133,8 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
     // (automatic reclaim disabled until repair, the documented fail-closed residue). The steal
     // grants nothing: the loop still re-publishes from scratch on the next pass.
     if (holder === 'dead') stealUnderGate(lockPath, probe);
-    if (waited >= maxWaitMs) throw new Error(timeoutMessage(lockPath, lastHolder, waited));
-    sleepSync(RETRY_MS);
-    waited += RETRY_MS;
+    if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, lastHolder, elapsedMs()));
+    sleepWithinBudget();
   }
 
   const ctx: LockContext = {
