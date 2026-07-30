@@ -29,7 +29,7 @@ function recallOver(lines: string[]): { items: unknown[]; threw: string | null }
   try {
     const path = join(dir, 'memory.jsonl');
     writeFileSync(path, lines.join('\n') + '\n');
-    const store = new MemoryStore(path);
+    const store = new MemoryStore(path, { home: dir });
     try {
       const r = store.recall('deploy target');
       return { items: r.items, threw: null };

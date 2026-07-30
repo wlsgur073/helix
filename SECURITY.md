@@ -42,6 +42,10 @@ acknowledgement within a few days.
 `Corroborated` and `Verified` are conferred **only** by a `verify` record, and every `verify`
 record is HMAC-SHA256-authenticated with a key held **only** in `~/.helix` (a 32-byte master,
 mode `0600`, never written into the repo ledger; each project signs with its own HKDF subkey).
+That location is the home directory itself — `HELIX_HOME` when set — and it is **not** derived from
+where the ledger happens to be: pointing `HELIX_LEDGER` into a repository moves the data file and
+nothing else. The server refuses to start if it finds trust-store files beside a relocated ledger,
+which is the layout an older build produced, rather than minting a second key over the top of them.
 On replay an elevated grade is honored only if its `verify` record's MAC validates under the
 locally-held key, so:
 

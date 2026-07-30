@@ -11,6 +11,7 @@ import { writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { isEntryPoint } from '../entry-point.js';
+import { strayTrustFiles } from '../memory/trust-store-layout.js';
 import { formatSessionStartContext } from './format-context.js';
 import { newNonce, collectWitnessNotes } from '../memory/content-frame.js';
 import { projectDispositionOf, projectLedgerPath, canonicalRoot, type ProjectDisposition } from '../memory/ownership.js';
@@ -116,6 +117,15 @@ async function main(): Promise<void> {
   try {
     const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
     const globalLedger = process.env.HELIX_LEDGER ?? join(home, 'memory.jsonl');
+
+    // Same split-trust-store condition the server REFUSES to start on, reported here as a note
+    // rather than a refusal. This hook is the only surface that can still speak into a session whose
+    // MCP server died at launch, so without it the user sees tools that are simply absent and no
+    // reason anywhere. Read-only and advisory by construction: a hook must never break session start.
+    const stray = strayTrustFiles(home, globalLedger);
+    if (stray.length > 0) {
+      writeSync(1, `helix: memory is unavailable - trust-store files (${stray.join(', ')}) sit next to the ledger instead of under HELIX_HOME (${home}); the server refuses to start until they are moved. Run the MCP server directly to see the full instructions.\n`); // ASCII only
+    }
 
     let cwd: string | undefined;
     try {

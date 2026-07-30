@@ -7,7 +7,8 @@ import { buildServer } from '../../src/server/helix-server.js';
 
 describe('buildServer', () => {
   it('constructs an McpServer with the helix tools registered (no throw)', () => {
-    const store = new MemoryStore(join(mkdtempSync(join(tmpdir(), 'helix-srv-')), 'm.jsonl'), { sessionId: 's1' });
+    const home = mkdtempSync(join(tmpdir(), 'helix-srv-'));
+    const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1' });
     const server = buildServer(store);
     expect(server).toBeDefined();
     expect(typeof server.connect).toBe('function');

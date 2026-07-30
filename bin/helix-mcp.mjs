@@ -6887,8 +6887,8 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join10 } from "node:path";
-import { existsSync as existsSync7 } from "node:fs";
+import { join as join11, dirname as dirname14 } from "node:path";
+import { existsSync as existsSync8 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -15163,9 +15163,10 @@ function keyVectorEqual(a, b) {
 
 // src/memory/store.ts
 var MemoryStore = class {
-  constructor(global, opts = {}) {
+  constructor(global, opts) {
     this.global = global;
     this.opts = opts;
+    if (!this.opts?.home) throw new Error("MemoryStore: `home` is required \u2014 the trust store location must be stated, never derived from the ledger path");
   }
   global;
   opts;
@@ -15187,9 +15188,9 @@ var MemoryStore = class {
   session() {
     return this.opts.sessionId ?? "unknown";
   }
-  /** Where the ledger-MAC master key + scope-nonce registry live (defaults next to the global ledger). */
+  /** Where the ledger-MAC master key, the scope-nonce registry and the rollback witness live. */
   homeDir() {
-    return this.opts.home ?? dirname8(this.global);
+    return this.opts.home;
   }
   /** Which scope (project root, or undefined for global) a ledger path belongs to. */
   scopeRootOf(ledger) {
@@ -15201,12 +15202,12 @@ var MemoryStore = class {
    *  the write path mints the master first via ensureMaster. Delegates to the shared verified-read
    *  helper so the hook and the store resolve subkeys identically (one source of truth).
    *
-   *  INVARIANT: the helper uses a SINGLE home for both the master read AND the project scope nonce,
-   *  whereas the pre-refactor code read the project nonce from project.home. These are the same dir —
-   *  the server wiring always sets opts.home === project.home (and the default homeDir() is
-   *  dirname(global), with project.home === that). They differ only under a hand-built store that
-   *  relocates HELIX_LEDGER outside HELIX_HOME with an active project — where reads still clamp Fresh
-   *  (fail-safe) and a project writeVerify would throw rather than mis-sign. */
+   *  INVARIANT: the helper uses a SINGLE home for both the master read AND the project scope nonce.
+   *  `opts.home` is required, so that home is whatever the caller declared — it is no longer derived
+   *  from the ledger's directory, and there is no second candidate to disagree with it. (The comment
+   *  that used to sit here asserted "the server wiring always sets opts.home === project.home"; the
+   *  wiring set no top-level `home` at all, so the invariant it claimed was false exactly when it
+   *  mattered.) */
   subkeyForLedger(ledger) {
     return subkeyForScope(this.homeDir(), this.scopeRootOf(ledger));
   }
@@ -15911,8 +15912,36 @@ function scanLegacyElevated(records, verify) {
   return { ok: offenders.length === 0, offenders };
 }
 
+// src/memory/trust-store-layout.ts
+import { existsSync as existsSync4, readFileSync as readFileSync9, statSync as statSync4 } from "node:fs";
+import { dirname as dirname9, join as join6 } from "node:path";
+var TRUST_FILE_NAMES = ["ledger-mac-master.key", "projects.json", "witness.json", "witness-log.jsonl"];
+function looksLikeOurs(name, path) {
+  try {
+    if (name === "ledger-mac-master.key") return statSync4(path).isFile() && statSync4(path).size > 0;
+    if (name === "witness-log.jsonl") return statSync4(path).isFile();
+    const parsed = JSON.parse(readFileSync9(path, "utf8"));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    const values = Object.values(parsed);
+    if (name === "projects.json") {
+      return values.length > 0 && values.every((v) => typeof v === "object" && v !== null && "stamp" in v && "macNonce" in v);
+    }
+    return "scopes" in parsed || values.length > 0;
+  } catch {
+    return false;
+  }
+}
+function strayTrustFiles(home2, globalLedger2) {
+  const ledgerDir = dirname9(globalLedger2);
+  if (canonicalRoot(ledgerDir) === canonicalRoot(home2)) return [];
+  return TRUST_FILE_NAMES.filter((name) => {
+    const p = join6(ledgerDir, name);
+    return existsSync4(p) && looksLikeOurs(name, p);
+  });
+}
+
 // src/server/helix-server.ts
-import { join as join9 } from "node:path";
+import { join as join10 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // node_modules/zod/v3/external.js
@@ -24007,9 +24036,9 @@ var EMPTY_COMPLETION_RESULT = {
 };
 
 // src/config.ts
-import { readFileSync as readFileSync9 } from "node:fs";
+import { readFileSync as readFileSync10 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join6 } from "node:path";
+import { join as join7 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
 var DEFAULT_COMPACTION = {
   auto: false,
@@ -24060,14 +24089,14 @@ var DEFAULT_CONFIG = {
 };
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync9(path, "utf8"));
+    return JSON.parse(readFileSync10(path, "utf8"));
   } catch {
     return null;
   }
 }
 function loadConfig(opts = {}) {
-  const projectPath = opts.projectPath ?? join6(process.cwd(), ".helix", "config.json");
-  const globalPath = opts.globalPath ?? join6(homedir(), ".helix", "config.json");
+  const projectPath = opts.projectPath ?? join7(process.cwd(), ".helix", "config.json");
+  const globalPath = opts.globalPath ?? join7(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
   const seen = /* @__PURE__ */ new Set();
   const warn = (msg) => {
@@ -24138,7 +24167,7 @@ function mergeCompaction(raw) {
   return c;
 }
 function compactionConfigFromGlobal(home2) {
-  return mergeCompaction(readJson(join6(home2, "config.json"))?.compaction);
+  return mergeCompaction(readJson(join7(home2, "config.json"))?.compaction);
 }
 
 // src/verify/agreement-map.ts
@@ -24472,11 +24501,11 @@ async function dualVerify(params, deps) {
 }
 
 // src/audit.ts
-import { mkdirSync as mkdirSync6, openSync as openSync5, existsSync as existsSync4, fsyncSync as fsyncSync4, closeSync as closeSync5 } from "node:fs";
-import { dirname as dirname9 } from "node:path";
+import { mkdirSync as mkdirSync6, openSync as openSync5, existsSync as existsSync5, fsyncSync as fsyncSync4, closeSync as closeSync5 } from "node:fs";
+import { dirname as dirname10 } from "node:path";
 function appendAudit(path, event) {
-  mkdirSync6(dirname9(path), { recursive: true });
-  const isNew = !existsSync4(path);
+  mkdirSync6(dirname10(path), { recursive: true });
+  const isNew = !existsSync5(path);
   const fd = openSync5(path, "a");
   try {
     writeAll(realFsOps, fd, JSON.stringify(event) + "\n");
@@ -24484,26 +24513,26 @@ function appendAudit(path, event) {
   } finally {
     closeSync5(fd);
   }
-  if (isNew) fsyncDir(dirname9(path));
+  if (isNew) fsyncDir(dirname10(path));
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync11 } from "node:fs";
+import { readFileSync as readFileSync12 } from "node:fs";
 
 // src/codex-log.ts
-import { mkdirSync as mkdirSync7, readFileSync as readFileSync10, writeFileSync as writeFileSync2, openSync as openSync6, writeSync as writeSync3, closeSync as closeSync6 } from "node:fs";
-import { dirname as dirname10 } from "node:path";
+import { mkdirSync as mkdirSync7, readFileSync as readFileSync11, writeFileSync as writeFileSync2, openSync as openSync6, writeSync as writeSync3, closeSync as closeSync6 } from "node:fs";
+import { dirname as dirname11 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
   try {
-    mkdirSync7(dirname10(path), { recursive: true });
+    mkdirSync7(dirname11(path), { recursive: true });
     const fd = openSync6(path, "a", 384);
     try {
       writeSync3(fd, JSON.stringify(entry) + "\n");
     } finally {
       closeSync6(fd);
     }
-    const lines = readFileSync10(path, "utf8").split("\n").filter((l) => l !== "");
+    const lines = readFileSync11(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
       writeFileSync2(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
@@ -24647,7 +24676,7 @@ function handleConfirm(store2, args, deps) {
 }
 function codexLogCount(path) {
   try {
-    return readFileSync11(path, "utf8").split("\n").filter((l) => l !== "").length;
+    return readFileSync12(path, "utf8").split("\n").filter((l) => l !== "").length;
   } catch {
     return 0;
   }
@@ -24805,15 +24834,15 @@ async function handleDualVerify(args, deps) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync6, mkdtempSync, readFileSync as readFileSync12, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync7, mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join8, win32 as winPath } from "node:path";
+import { join as join9, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync5, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync4, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync2 } from "node:fs";
+import { existsSync as existsSync6, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync2 } from "node:fs";
 import { randomBytes as randomBytes7 } from "node:crypto";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
 var SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
@@ -24855,11 +24884,11 @@ function publishStamp(stampPath) {
 }
 function sweepScratchRoot(root, nowMs = Date.now()) {
   try {
-    if (!existsSync5(root)) return;
-    const stampPath = join7(root, STAMP_NAME);
+    if (!existsSync6(root)) return;
+    const stampPath = join8(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
-      stampMtimeMs = statSync4(stampPath).mtimeMs;
+      stampMtimeMs = statSync5(stampPath).mtimeMs;
     } catch {
       stampMtimeMs = null;
     }
@@ -24868,14 +24897,14 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     for (const d of readdirSync3(root, { withFileTypes: true })) {
       if (!d.name.startsWith(SCRATCH_PREFIX)) continue;
       try {
-        const st = lstatSync3(join7(root, d.name));
+        const st = lstatSync3(join8(root, d.name));
         entries.push({ name: d.name, isDir: st.isDirectory(), mtimeMs: st.mtimeMs });
       } catch {
       }
     }
     for (const name of selectStaleScratch(entries, nowMs, FLOOR_MS)) {
       try {
-        rmSync2(join7(root, name), { recursive: true, force: true });
+        rmSync2(join8(root, name), { recursive: true, force: true });
       } catch {
       }
     }
@@ -24926,7 +24955,7 @@ async function resolveCodexInvocation() {
   let inv = null;
   try {
     const { stdout } = await execFileAsync("where", ["codex"], { timeout: 1e4 });
-    inv = interpretWhereOutput("win32", stdout ?? "", existsSync6);
+    inv = interpretWhereOutput("win32", stdout ?? "", existsSync7);
   } catch {
     inv = null;
   }
@@ -25063,10 +25092,10 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
-    const scratchRoot = ensureScratchRoot(join8(tmpdir(), "helix"));
+    const scratchRoot = ensureScratchRoot(join9(tmpdir(), "helix"));
     if (scratchRoot !== null) sweepScratchRoot(scratchRoot);
-    const dir = mkdtempSync(scratchRoot !== null ? join8(scratchRoot, "codex-") : join8(tmpdir(), "helix-codex-"));
-    const outFile = join8(dir, "out.txt");
+    const dir = mkdtempSync(scratchRoot !== null ? join9(scratchRoot, "codex-") : join9(tmpdir(), "helix-codex-"));
+    const outFile = join9(dir, "out.txt");
     try {
       const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
       const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, timeoutMs);
@@ -25075,7 +25104,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
       }
       let answer = "";
       try {
-        answer = readFileSync12(outFile, "utf8").trim();
+        answer = readFileSync13(outFile, "utf8").trim();
       } catch {
       }
       return answer ? { ok: true, answer } : { ok: false, error: "codex produced no output" };
@@ -25093,7 +25122,7 @@ var realCodexRunner = createCodexRunner();
 
 // src/metrics.ts
 import { appendFileSync, mkdirSync as mkdirSync9 } from "node:fs";
-import { dirname as dirname12 } from "node:path";
+import { dirname as dirname13 } from "node:path";
 import { randomUUID as randomUUID2 } from "node:crypto";
 var noopMetricsSink = {
   emitReplay: () => {
@@ -25105,7 +25134,7 @@ var noopMetricsSink = {
 function createMetricsSink(path, enabled, deps = {}) {
   if (!enabled) return noopMetricsSink;
   const append = deps.append ?? ((p, line) => {
-    mkdirSync9(dirname12(p), { recursive: true });
+    mkdirSync9(dirname13(p), { recursive: true });
     appendFileSync(p, line, { mode: 384 });
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
@@ -25203,14 +25232,14 @@ function createMetricsSink(path, enabled, deps = {}) {
 function buildServer(store2, dualDeps, metrics2) {
   const m = metrics2 ?? noopMetricsSink;
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
-  const home2 = process.env.HELIX_HOME ?? join9(homedir2(), ".helix");
+  const home2 = process.env.HELIX_HOME ?? join10(homedir2(), ".helix");
   const dv = dualDeps ?? {
-    config: loadConfig({ globalPath: join9(home2, "config.json") }),
+    config: loadConfig({ globalPath: join10(home2, "config.json") }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
     echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-    auditPath: join9(home2, "audit.jsonl"),
-    codexLogPath: join9(home2, "codex-log.jsonl")
+    auditPath: join10(home2, "audit.jsonl"),
+    codexLogPath: join10(home2, "codex-log.jsonl")
   };
   const codexStatusDeps = {
     inspect: () => checkCodexStatus(),
@@ -25317,15 +25346,33 @@ function installSelfTermination(deps) {
 }
 
 // src/server/index.ts
-var home = process.env.HELIX_HOME ?? join10(homedir3(), ".helix");
-var globalLedger = process.env.HELIX_LEDGER ?? join10(home, "memory.jsonl");
+var home = process.env.HELIX_HOME ?? join11(homedir3(), ".helix");
+var globalLedger = process.env.HELIX_LEDGER ?? join11(home, "memory.jsonl");
 var projectRoot = process.cwd();
-var projectLedger = join10(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync7(join10(projectRoot, ".helix")) && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
+var projectLedger = join11(projectRoot, ".helix", "memory.jsonl");
+var projectActive = existsSync8(join11(projectRoot, ".helix")) && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
-var config2 = loadConfig({ globalPath: join10(home, "config.json") });
-var metrics = createMetricsSink(join10(home, "metrics.jsonl"), config2.metrics.enabled);
-var store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
+var config2 = loadConfig({ globalPath: join11(home, "config.json") });
+var metrics = createMetricsSink(join11(home, "metrics.jsonl"), config2.metrics.enabled);
+var stray = strayTrustFiles(home, globalLedger);
+if (stray.length > 0) {
+  process.stderr.write(
+    // ASCII only
+    `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME.
+  found next to the ledger: ${stray.join(", ")}
+  ledger directory        : ${dirname14(globalLedger)}
+  HELIX_HOME              : ${home}
+These were created by an older version, which derived the trust store's location from HELIX_LEDGER.
+The signing key now always lives under HELIX_HOME, so starting would mint a NEW key and silently
+drop every trust grade the old one conferred. Two ways out, both deliberate:
+  1. Move ${stray.join(", ")} from the ledger directory into HELIX_HOME, keeping the ledger where it is.
+  2. Discard the old trust state (delete those files) and re-establish it with the re-baseline
+     ceremony: node bin/helix-rebaseline.mjs --scope global
+`
+  );
+  process.exit(78);
+}
+var store = new MemoryStore(globalLedger, { home, sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
 store.healWitness();
 var scanScopes = [
   { ledger: globalLedger },
@@ -25345,8 +25392,8 @@ var server = buildServer(store, {
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
   echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-  auditPath: join10(home, "audit.jsonl"),
-  codexLogPath: join10(home, "codex-log.jsonl")
+  auditPath: join11(home, "audit.jsonl"),
+  codexLogPath: join11(home, "codex-log.jsonl")
 }, metrics);
 var transport = new StdioServerTransport();
 await server.connect(transport);

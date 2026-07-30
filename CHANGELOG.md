@@ -236,6 +236,14 @@ All notable changes to Helix are documented here. This project follows
   divergence.
 
 ### Security
+- The trust store no longer follows `HELIX_LEDGER`. The ledger signing key, the ownership
+  registry and the rollback witness are always created under `HELIX_HOME`; previously their
+  location was derived from the ledger's own directory, so repointing `HELIX_LEDGER` at a
+  git-tracked tree wrote the signing key there — where anyone with the repository could mint
+  valid trust grades, and where the rollback witness sat on the untrusted side of the boundary
+  it exists to guard. `HELIX_LEDGER` now moves the data file and nothing else. A server that
+  finds trust-store files beside a relocated ledger refuses to start and names both directories,
+  rather than minting a fresh key and silently dropping every grade the old one conferred.
 - Secret-scan redaction on the memory write path; the dual-verify egress guard
   hard-blocks credential tokens (override-proof).
 - Provenance firewall: agreement from an external model never promotes to `Verified`.

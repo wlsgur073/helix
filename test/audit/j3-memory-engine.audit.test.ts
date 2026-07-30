@@ -16,7 +16,7 @@ function tmpStore() {
   const ledger = join(dir, 'memory.jsonl');
   let n = 0;
   const store = new MemoryStore(ledger, {
-    sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
+    home: dir, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
   });
   return { store, ledger };
 }

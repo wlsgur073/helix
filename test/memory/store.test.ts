@@ -12,6 +12,7 @@ function tmpStore() {
   const ledger = join(dir, 'memory.jsonl');
   let n = 0;
   const store = new MemoryStore(ledger, {
+    home: dir,
     sessionId: 's1',
     now: () => '2026-06-09T00:00:00.000Z',
     genId: () => `m_${++n}`,
@@ -60,6 +61,7 @@ describe('MemoryStore recall / verify / inspect / erase', () => {
     let n = 0;
     const N = 'n'.repeat(32); // fixed test nonce
     const store = new MemoryStore(ledger, {
+      home: dir,
       sessionId: 's1',
       now: () => '2026-06-09T00:00:00.000Z',
       genId: () => `m_${++n}`,
@@ -239,7 +241,7 @@ function tmpLayered() {
   const globalLedger = join(home, 'memory.jsonl');
   let n = 0;
   const store = new MemoryStore(globalLedger, {
-    sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
+    home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
     genStamp: () => 'STAMP', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj, home },
   });
   return { store, home, proj, globalLedger };

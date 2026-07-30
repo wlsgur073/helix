@@ -79,7 +79,19 @@ Dual-verify is disabled by default. To enable it, create `~/.helix/config.json` 
 A `mode`, `stakesFloor`, `model` or `effort` value that is present but invalid is ignored with a warning
 on stderr, not silently.
 
-`HELIX_HOME` relocates all state; `HELIX_LEDGER` points the memory ledger elsewhere.
+`HELIX_HOME` relocates all state; `HELIX_LEDGER` points the memory ledger **file** elsewhere. The
+split is deliberate: `HELIX_LEDGER` moves your data, never your trust store. The ledger signing key,
+the ownership registry and the rollback witness always live under `HELIX_HOME`, because a signing key
+that followed the ledger into a git-tracked tree would let anyone with the repo mint valid trust
+grades. Two consequences worth knowing before you set it: if you back up your memory, back up that
+file too — it is no longer inside `HELIX_HOME` — and repointing `HELIX_LEDGER` at a *different*
+ledger later presents the rollback witness with a file it has never seen, which reads as tamper until
+you re-bless the scope with the [re-baseline ceremony](./SECURITY.md).
+
+If you used `HELIX_LEDGER` before v0.1.0, an older build wrote the trust store beside the ledger
+instead. The server now refuses to start on that layout rather than silently minting a new key (which
+would drop every `Corroborated`/`Verified` grade you have) — it prints both directories and the two
+ways to resolve it.
 
 ### Automatic compaction (opt-in, off by default)
 
@@ -174,7 +186,7 @@ Helix keeps two ledgers that it always reads together:
 
 Helix's memory lives in plain files under your control. Back them up like any other data — here is what to expect on restore.
 
-- **What to back up.** `~/.helix/` holds the global ledger (`memory.jsonl`), the signing key (`ledger-mac-master.key`), the rollback-witness state (`witness.json`) and its diagnostic log (`witness-log.jsonl`), config (`config.json`), and the project-ownership registry (`projects.json`). Each project's own `<project-root>/.helix/` is a second, independent unit. Back up both while no Claude Code session is running against them — an external backup tool isn't covered by Helix's own file lock, so copying mid-rewrite can catch an inconsistent instant.
+- **What to back up.** `~/.helix/` holds the global ledger (`memory.jsonl`), the signing key (`ledger-mac-master.key`), the rollback-witness state (`witness.json`) and its diagnostic log (`witness-log.jsonl`), config (`config.json`), and the project-ownership registry (`projects.json`). Each project's own `<project-root>/.helix/` is a second, independent unit. Back up both while no Claude Code session is running against them — an external backup tool isn't covered by Helix's own file lock, so copying mid-rewrite can catch an inconsistent instant. If you set `HELIX_LEDGER`, the global ledger is **not** inside `~/.helix/` — back up that file separately; everything else in the list stays under `HELIX_HOME` regardless.
 - **Restoring.** Copy the directories back into place. **An intentionally restored older ledger will trip the rollback witness by design**: the witness lives in `~/.helix/` independently of whichever ledger bytes are on disk, so a restored file that no longer matches the head it last saw gets that scope's elevated grades clamped to `Fresh` plus a disclosure note. This is not a failure to route around — the legitimate way to adopt an old backup on purpose is the operator re-baseline ceremony: `node bin/helix-rebaseline.mjs --scope global` (or `--scope <absoluteProjectRoot>` for a project), an interactive, TTY-only command that is never run automatically. See [SECURITY.md's rollback witness section](./SECURITY.md#rollback-witness-cross-boundary-ledger-rollback) for the full mechanics.
 - **Key loss.** Without `ledger-mac-master.key`, no signed `verify` record can validate, so any grade a `verify` record conferred — `Corroborated`, `Verified`, or `Suspect` — reverts to `Fresh` until a new key signs fresh verifications; for `Suspect` that reversion is a trust *increase*, not fail-low: the item's displayed state quietly reads `Fresh` again and the session hint loses its Suspect-specific wording, though such items (always non-authoritative) remain flagged for confirmation on source grounds. A new key is minted automatically on the next write; re-elevate a fact with `helix_memory_confirm`, or re-run `helix_memory_recheck` to restore a lapsed `Suspect` label. Losing the key never loses content — only a verify-conferred grade is affected.
 - **Corruption.** A torn tail line (e.g. power loss mid-append) is repaired by the next writer, which prefixes a separator so its own record lands cleanly while the torn fragment is isolated as its own skipped line. A more structurally damaged line elsewhere in the ledger is simply excluded from the live view rather than guessed at or fabricated. Restore from backup for anything worse than a torn tail, and never hand-edit a ledger file while a session is running — Helix's own file lock coordinates only its own processes, not an external editor.

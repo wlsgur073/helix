@@ -36,8 +36,13 @@ export interface MemoryStoreOptions {
   project?: { ledger: string; root: string; home: string };
   /** Injectable ownership stamp source (default crypto). */
   genStamp?: () => string;
-  /** Where the ledger-MAC master key + scope-nonce registry live. Defaults to dirname(global). */
-  home?: string;
+  /** Where the ledger-MAC master key, the scope-nonce registry and the rollback witness live.
+   *  REQUIRED, and deliberately so: this used to default to `dirname(global)`, which made the
+   *  location of the entire trust store a function of wherever the LEDGER happened to be. Repointing
+   *  the ledger then moved the signing key with it — including into a git-tracked tree — while
+   *  SECURITY.md promised the key never leaves the user's home. The trust store's address is not a
+   *  derivable convenience; a caller that cannot say where it lives has no business opening one. */
+  home: string;
   /** EH-3: precomputed synonym expansion. Defaults to the committed asset; tests may inject/disable. */
   expansion?: Expansion;
   /** Metrics sink (spec 2026-07-05). Absent => zero emission (tests/bench/library use stay clean). */
@@ -96,7 +101,12 @@ export interface RecheckResult {
 
 /** Orchestrates the deterministic core modules over a real JSONL ledger file. */
 export class MemoryStore {
-  constructor(private readonly global: LedgerPath, private readonly opts: MemoryStoreOptions = {}) {}
+  constructor(private readonly global: LedgerPath, private readonly opts: MemoryStoreOptions) {
+    // Belt and braces for callers that reach this from JavaScript, where the required-ness of
+    // `home` is only a compile-time claim: without it every trust-store path would silently become
+    // `join(undefined, …)` and throw somewhere far from the mistake.
+    if (!this.opts?.home) throw new Error('MemoryStore: `home` is required — the trust store location must be stated, never derived from the ledger path');
+  }
 
   /** A4 single-slot recall cache (I5). Reused only on an exact content-identity key match; replaced on
    *  any miss; cleared on self-erase (I8). Per-instance — dies with the store (I6). */
@@ -111,8 +121,8 @@ export class MemoryStore {
   private nonce(): string { return (this.opts.genNonce ?? newNonce)(); }
   private session(): string { return this.opts.sessionId ?? 'unknown'; }
 
-  /** Where the ledger-MAC master key + scope-nonce registry live (defaults next to the global ledger). */
-  private homeDir(): string { return this.opts.home ?? dirname(this.global); }
+  /** Where the ledger-MAC master key, the scope-nonce registry and the rollback witness live. */
+  private homeDir(): string { return this.opts.home; }
 
   /** Which scope (project root, or undefined for global) a ledger path belongs to. */
   private scopeRootOf(ledger: LedgerPath): string | undefined {
@@ -125,12 +135,12 @@ export class MemoryStore {
    *  the write path mints the master first via ensureMaster. Delegates to the shared verified-read
    *  helper so the hook and the store resolve subkeys identically (one source of truth).
    *
-   *  INVARIANT: the helper uses a SINGLE home for both the master read AND the project scope nonce,
-   *  whereas the pre-refactor code read the project nonce from project.home. These are the same dir —
-   *  the server wiring always sets opts.home === project.home (and the default homeDir() is
-   *  dirname(global), with project.home === that). They differ only under a hand-built store that
-   *  relocates HELIX_LEDGER outside HELIX_HOME with an active project — where reads still clamp Fresh
-   *  (fail-safe) and a project writeVerify would throw rather than mis-sign. */
+   *  INVARIANT: the helper uses a SINGLE home for both the master read AND the project scope nonce.
+   *  `opts.home` is required, so that home is whatever the caller declared — it is no longer derived
+   *  from the ledger's directory, and there is no second candidate to disagree with it. (The comment
+   *  that used to sit here asserted "the server wiring always sets opts.home === project.home"; the
+   *  wiring set no top-level `home` at all, so the invariant it claimed was false exactly when it
+   *  mattered.) */
   private subkeyForLedger(ledger: LedgerPath): Buffer | null {
     return subkeyForScope(this.homeDir(), this.scopeRootOf(ledger));
   }
