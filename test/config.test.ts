@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig, DEFAULT_CONFIG, metricsEnabledFromGlobalConfig, compactionConfigFromGlobal } from '../src/config.js';
@@ -314,5 +314,46 @@ describe('compactionConfigFromGlobal', () => {
     const one = tmpDir();
     writeFileSync(join(one, 'config.json'), JSON.stringify({ compaction: { minDirtyBytes: 1 } }));
     expect(compactionConfigFromGlobal(one).minDirtyBytes).toBe(1);        // inclusive lower bound accepted
+  });
+});
+
+// A checkout's `.helix/config.json` used to be read AUTOMATICALLY, because an omitted `projectPath`
+// defaulted to `<cwd>/.helix/config.json` and the merge put the project layer LAST. Opening an
+// untrusted repository therefore let its config re-enable the outbound Codex path, drop every egress
+// leg to `allow`, and switch on verbatim prompt/response logging into the user's home — silently,
+// since none of that emits a warning. The asymmetry proved the intent: compaction and hook-metrics
+// config were already read global-only for exactly this reason, and dual-verify was not.
+//
+// The project layer is now OPT-IN AT THE CALL SITE: omitted means there is no project layer at all.
+// The explicit option survives because the trigger CLI legitimately reads a specific root's config
+// (scripts/trigger-measure.ts), and every test above passes it explicitly.
+describe('loadConfig does not discover a project config from the working directory', () => {
+  const withCwd = <T>(dir: string, fn: () => T): T => {
+    const prev = process.cwd();
+    process.chdir(dir);
+    try { return fn(); } finally { process.chdir(prev); }
+  };
+
+  it('ignores <cwd>/.helix/config.json when no projectPath is given', () => {
+    const dir = tmpDir();
+    mkdirSync(join(dir, '.helix'));
+    writeFileSync(join(dir, '.helix', 'config.json'), JSON.stringify({
+      dualVerify: {
+        enabled: true, logContent: true,
+        egressPolicy: { memoryEcho: 'allow', piiHigh: 'allow', piiBulk: 'allow', secretHeuristic: 'allow', secretEntropy: 'allow' },
+      },
+    }));
+    const cfg = withCwd(dir, () => loadConfig({ globalPath: join(dir, 'absent-global.json') }));
+    expect(cfg.dualVerify.enabled, 'a checkout must not be able to turn the outbound path on').toBe(false);
+    expect(cfg.dualVerify.logContent, 'a checkout must not be able to turn on verbatim logging').toBe(false);
+    expect(cfg.dualVerify.egressPolicy).toEqual(DEFAULT_CONFIG.dualVerify.egressPolicy);
+  });
+
+  it('still honours an EXPLICIT projectPath, which is how the trigger CLI reads a given root', () => {
+    const dir = tmpDir();
+    mkdirSync(join(dir, '.helix'));
+    const p = join(dir, '.helix', 'config.json');
+    writeFileSync(p, JSON.stringify({ dualVerify: { enabled: true } }));
+    expect(loadConfig({ projectPath: p, globalPath: join(dir, 'absent-global.json') }).dualVerify.enabled).toBe(true);
   });
 });

@@ -1,7 +1,9 @@
-// Measurement module for the T1 trigger daily snapshot (Phase 2 Track 2a, Task A2 — see
-// docs/superpowers/plans/2026-07-17-phase2-trigger-governance-and-disclosure.md). Resolves the SAME
-// participants/config the production server resolves (src/server/index.ts:17-27, src/config.ts:123-125),
-// feeds them to the pure evaluator (trigger-eval.ts), composes ONE self-validated JSON record, and
+// Measurement module for the T1 trigger daily snapshot. Resolves the same PARTICIPANTS the
+// production server resolves (src/server/index.ts). Config resolution deliberately DIFFERS: this
+// tool is asked to measure one named root, so it passes that root's config explicitly, whereas the
+// server passes none — a checkout must not be able to configure the process that opened it. The
+// measurement is therefore of the root, not a reproduction of what the server would read there.
+// Feeds the result to the pure evaluator (trigger-eval.ts), composes ONE self-validated JSON record, and
 // owns the fsynced append to the trigger sink. scripts/trigger-cli.ts is the thin argv-parsing entry;
 // this module holds every measurement/compose/validate/append step behind an injectable reader seam
 // (deps.readFile) and an injectable env seam (deps.env) so tests run fully hermetically — no real

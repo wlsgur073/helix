@@ -24095,7 +24095,6 @@ function readJson(path) {
   }
 }
 function loadConfig(opts = {}) {
-  const projectPath = opts.projectPath ?? join7(process.cwd(), ".helix", "config.json");
   const globalPath = opts.globalPath ?? join7(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
   const seen = /* @__PURE__ */ new Set();
@@ -24105,7 +24104,7 @@ function loadConfig(opts = {}) {
       (opts.warn ?? ((m) => process.stderr.write(m + "\n")))(msg);
     }
   };
-  for (const path of [globalPath, projectPath]) {
+  for (const path of opts.projectPath ? [globalPath, opts.projectPath] : [globalPath]) {
     const raw = readJson(path);
     const dv = raw?.dualVerify;
     if (dv) {
@@ -25353,6 +25352,10 @@ var projectLedger = join11(projectRoot, ".helix", "memory.jsonl");
 var projectActive = existsSync8(join11(projectRoot, ".helix")) && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
 var config2 = loadConfig({ globalPath: join11(home, "config.json") });
+if (existsSync8(join11(projectRoot, ".helix", "config.json"))) {
+  process.stderr.write(`helix: NOTE - ${join11(projectRoot, ".helix", "config.json")} is not read; dual-verify, egress and logging settings come only from ${join11(home, "config.json")}
+`);
+}
 var metrics = createMetricsSink(join11(home, "metrics.jsonl"), config2.metrics.enabled);
 var stray = strayTrustFiles(home, globalLedger);
 if (stray.length > 0) {

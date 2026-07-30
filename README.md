@@ -52,7 +52,12 @@ Two hooks run automatically: **SessionStart** injects current, trusted memory in
 
 ## Configuration
 
-Dual-verify is disabled by default. To enable it, create `~/.helix/config.json` (user-wide) or `.helix/config.json` (per-project):
+Dual-verify is disabled by default. To enable it, create `~/.helix/config.json`. This is the only
+file these settings are read from: a project's `.helix/config.json` is **not** consulted, because a
+repository you opened must not be able to configure the process that opened it — turning the outbound
+path on, releasing the egress legs, or enabling verbatim prompt logging are all decisions that belong
+to you, not to a checkout. (If you have such a file from an earlier version, the server prints a note
+at startup saying it is being ignored.)
 
 ```json
 {
@@ -119,7 +124,8 @@ off unless you turn it on:
 > point-in-time `asOf` / `history` rows**. What a recall returns is unaffected: the live projection is
 > preserved by construction.
 
-- **Global config only.** These keys are read from `~/.helix/config.json` and nowhere else. A project
+- **Global config only.** These keys are read from `~/.helix/config.json` and nowhere else — as are
+  every other setting on this page. A project
   `.helix/config.json` can neither enable nor tune compaction, so a repo you cloned cannot destroy your
   memory. That single global setting does still govern **both** your global ledger and an *owned* project
   ledger — each is gated independently.
@@ -227,9 +233,8 @@ Helix is local-first. Installing it lets Claude Code run code on your machine �
 - **Metrics (local only):** Helix appends content-free latency/size records (tool op durations,
   ledger row/byte counts — never memory content, queries, paths, or error messages) to
   `~/.helix/metrics.jsonl` to sense when the ledger needs the planned SQLite migration.
-  Disable with `metrics: { "enabled": false }` in `~/.helix/config.json` (the SessionStart
-  hook honors the global config only; a per-project `.helix/config.json` setting silences
-  just that project's server records).
+  Disable with `metrics: { "enabled": false }` in `~/.helix/config.json` — the only file this
+  setting is read from, for both the server and the SessionStart hook.
 
 ### What dual-verify sends (only when you enable it)
 

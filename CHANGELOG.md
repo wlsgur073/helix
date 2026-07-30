@@ -236,6 +236,14 @@ All notable changes to Helix are documented here. This project follows
   divergence.
 
 ### Security
+- Dual-verify, egress-policy and content-logging settings are read from the global
+  `~/.helix/config.json` only. A checkout's `.helix/config.json` was previously discovered from the
+  working directory and merged LAST, so opening an untrusted repository let its config re-enable the
+  outbound Codex path, drop every egress leg to `allow`, and turn on verbatim prompt/response logging
+  into the user's home — silently, since a well-formed file produces no warning. Compaction and
+  hook-metrics settings were already global-only for exactly this reason; the rest now match. A
+  caller may still name a project config explicitly (the trigger CLI does); what it can no longer do
+  is discover one. The server prints a note at startup when such a file exists and is being ignored.
 - The trust store no longer follows `HELIX_LEDGER`. The ledger signing key, the ownership
   registry and the rollback witness are always created under `HELIX_HOME`; previously their
   location was derived from the ledger's own directory, so repointing `HELIX_LEDGER` at a

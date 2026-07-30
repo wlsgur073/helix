@@ -181,7 +181,6 @@ function readJson(path) {
   }
 }
 function loadConfig(opts = {}) {
-  const projectPath = opts.projectPath ?? join3(process.cwd(), ".helix", "config.json");
   const globalPath = opts.globalPath ?? join3(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
   const seen = /* @__PURE__ */ new Set();
@@ -191,7 +190,7 @@ function loadConfig(opts = {}) {
       (opts.warn ?? ((m) => process.stderr.write(m + "\n")))(msg);
     }
   };
-  for (const path of [globalPath, projectPath]) {
+  for (const path of opts.projectPath ? [globalPath, opts.projectPath] : [globalPath]) {
     const raw = readJson(path);
     const dv = raw?.dualVerify;
     if (dv) {

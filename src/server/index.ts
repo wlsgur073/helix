@@ -23,9 +23,10 @@ const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
 const globalLedger = process.env.HELIX_LEDGER ?? join(home, 'memory.jsonl');
 const projectRoot = process.cwd();
 const projectLedger = join(projectRoot, '.helix', 'memory.jsonl');
-// The project layer is active only when <cwd>/.helix/ exists (mirrors config's existence-gated
-// project layer) — so Helix never litters a non-Helix dir and a bare cwd stays global-only.
-// The cwd == ~ collision (project ledger == global ledger) also disables it.
+// The project LEDGER layer is active only when <cwd>/.helix/ exists — so Helix never litters a
+// non-Helix dir and a bare cwd stays global-only. The cwd == ~ collision (project ledger == global
+// ledger) also disables it. Note this gate is about the ledger alone: config no longer has a
+// cwd-discovered project layer to mirror, since a repo must not configure the process reading it.
 const projectActive = existsSync(join(projectRoot, '.helix'))
   // realpath, not textual resolve: a symlinked .helix that points the project ledger AT the global
   // ledger is ONE physical file — treat it as a collision and stay global-only.
@@ -34,7 +35,16 @@ const project = projectActive ? { ledger: projectLedger, root: projectRoot, home
 
 // One config load drives both the store's metrics sink and the server deps. The real sink writes
 // content-free records to ~/.helix/metrics.jsonl, gated by config.metrics.enabled (noop when off).
+// GLOBAL-ONLY, and deliberately so: `projectPath` is omitted, which now means there is no project
+// layer at all. A checkout's own config.json is not a configuration source for the process that
+// opened it — see loadConfig's note for why ownership and tighten-only were rejected as gates.
 const config = loadConfig({ globalPath: join(home, 'config.json') });
+// Say so when such a file exists. Silence here would be a regression in operator feedback, since a
+// project config with an INVALID value still warned when the layer was read — a user following older
+// guidance would otherwise get no signal at all that their settings stopped applying.
+if (existsSync(join(projectRoot, '.helix', 'config.json'))) {
+  process.stderr.write(`helix: NOTE - ${join(projectRoot, '.helix', 'config.json')} is not read; dual-verify, egress and logging settings come only from ${join(home, 'config.json')}\n`); // ASCII only
+}
 const metrics = createMetricsSink(join(home, 'metrics.jsonl'), config.metrics.enabled);
 
 // REFUSE to start on a split trust store. Before the store's `home` was pinned, it was derived from
