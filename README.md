@@ -240,7 +240,17 @@ Helix is local-first. Installing it lets Claude Code run code on your machine �
 
 `helix_dual_verify` spawns the external **Codex CLI** to cross-check an answer. It is **off by default** (`dualVerify.enabled`).
 
-- **Sent:** exactly the `question` + `helixAnswer` you pass to the tool — nothing else (no memory, no files).
+- **Sent by Helix:** exactly the `question` + `helixAnswer` you pass to the tool. Helix composes the
+  payload and adds nothing to it — no memory, no file contents.
+- **What the CLI itself can still reach.** Codex is a separate program with its own model, and
+  `-s read-only` sandboxes its *writes*, not its *reads*. Helix therefore starts it in an empty
+  scratch directory, points its `--cd` there, and hands it a constructed environment rather than the
+  server's own — so it does not begin in your project and does not inherit your variables. What
+  remains, and is worth knowing before you enable this: a model that decides to read an absolute path
+  it can guess is not stopped by any of that, and anything it reads leaves over Codex's own API
+  connection, which Helix never sees. The egress guard governs the payload Helix builds; it is not a
+  sandbox around the CLI. If that residue matters for your data, run Codex under an OS-level sandbox
+  or leave dual-verify off.
 - **Blocked before sending:** an egress guard refuses the call if the payload contains a named provider credential (override-proof), a heuristic- or entropy-detected secret (blocked by default, per-leg overridable), high-severity or bulk PII, or a verbatim copy of a stored memory.
 - **Logging:** off by default. The exact prompt/response are written to `~/.helix/codex-log.jsonl` (`0o600`) only if you set `dualVerify.logContent: true`; the audit log stays content-free regardless.
 - **Disable:** set `dualVerify.enabled: false` (the default) — or never create the config.

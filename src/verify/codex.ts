@@ -32,8 +32,13 @@ export interface CodexInvocation { file: string; argsPrefix: string[] }
  * so the question never enters argv — there is no flag-smuggling surface left to guard.
  * model/effort come from user config but still become argv values — keep them argv-safe.
  */
-export function buildCodexExecArgs(outFile: string, opts: CodexRunOptions = {}): string[] {
+export function buildCodexExecArgs(outFile: string, opts: CodexRunOptions = {}, cwd?: string): string[] {
   const args = ['exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', outFile];
+  // `-C` tells the CLI which directory it is working IN, which is a different question from the
+  // process's cwd and is what it uses to decide there is a project here at all. Both are set: the
+  // spawn cwd keeps the OS-level starting point out of the user's tree, and `-C` keeps the CLI from
+  // treating that tree as its project. Verified present in codex-cli 0.146.0 (`-C, --cd <DIR>`).
+  if (cwd !== undefined && cwd !== '') args.push('-C', cwd);
   if (opts.model != null && opts.model !== '') {
     if (!/^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/.test(opts.model)) throw new Error(`invalid codex model "${opts.model}" (argv safety)`);
     args.push('-m', opts.model);
@@ -107,11 +112,63 @@ export async function resolveCodexInvocation(): Promise<CodexInvocation | null> 
 
 interface RunOutcome { code: number | null; stdout: string; stderr: string }
 
-/** Spawn the resolved codex (no shell), optionally writing `input` to stdin. */
-function runCodex(inv: CodexInvocation, args: string[], input: string | null, timeoutMs: number): Promise<RunOutcome> {
+/** Variables the child is allowed to keep. Everything else is dropped.
+ *
+ *  The child is an EXTERNAL MODEL's process. It used to inherit the server's whole environment,
+ *  which on a developer machine routinely carries credentials for unrelated services — and nothing
+ *  in Helix can observe what the model does with them, because the egress guard inspects the prompt
+ *  bytes, not the subprocess.
+ *
+ *  This is CONSTRUCTED rather than filtered, so the failure mode is a broken run, not a silent leak.
+ *  Getting it wrong in the other direction is the real risk: dropping the wrong variable breaks
+ *  dual-verify for everyone who has it enabled, and it breaks at the user's machine rather than in
+ *  CI. Each entry below is here for a stated reason:
+ *   - PATH: the launcher resolves through it, and on POSIX the npm shim's `#!/usr/bin/env node`
+ *     needs it even when the launcher itself is absolute.
+ *   - HOME / CODEX_HOME / XDG_*: the CLI's own state lives there — `~/.codex/auth.json` is how a
+ *     `codex login` session authenticates, so without it a logged-in user silently becomes logged
+ *     out.
+ *   - the API-key vars: the other supported auth route. `checkCodexStatus` reads OPENAI_API_KEY from
+ *     the PARENT env to report the auth mode, so dropping it here would make status and exec
+ *     disagree about how the call is authenticated.
+ *   - proxy / CA vars: a corporate network is not reachable without them, and their absence looks
+ *     like an unrelated network failure.
+ *   - the platform block: on win32 a process without SYSTEMROOT/COMSPEC/PATHEXT frequently cannot
+ *     start at all. That platform is not validated here, so the list is deliberately generous.
+ */
+const CHILD_ENV_ALLOWLIST: readonly string[] = [
+  'PATH', 'HOME', 'CODEX_HOME',
+  'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME',
+  'OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL',
+  'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'https_proxy', 'http_proxy', 'no_proxy',
+  'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE',
+  'TMPDIR', 'LANG', 'LC_ALL',
+  // win32
+  'SYSTEMROOT', 'SystemRoot', 'COMSPEC', 'ComSpec', 'PATHEXT', 'APPDATA', 'LOCALAPPDATA',
+  'USERPROFILE', 'TEMP', 'TMP', 'WINDIR', 'PROGRAMFILES', 'PROGRAMDATA',
+];
+
+/** The environment the external model's process gets: the allowlist, and nothing else. */
+export function childEnv(parent: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of CHILD_ENV_ALLOWLIST) {
+    const v = parent[k];
+    if (typeof v === 'string') out[k] = v;
+  }
+  return out;
+}
+
+/** Spawn the resolved codex (no shell), optionally writing `input` to stdin.
+ *
+ *  `cwd` is REQUIRED and is never the caller's directory. `-s read-only` stops the sandbox writing,
+ *  not reading, so whatever directory this process starts in is a directory the external model can
+ *  walk — and the egress guard, which sees only the prompt, would never know. */
+function runCodex(inv: CodexInvocation, args: string[], input: string | null, timeoutMs: number, cwd: string): Promise<RunOutcome> {
   return new Promise((resolve, reject) => {
     const child = spawn(inv.file, [...inv.argsPrefix, ...args], {
       stdio: [input === null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      cwd,
+      env: childEnv(),
     });
     let stdout = '';
     let stderr = '';
@@ -179,8 +236,8 @@ export async function checkCodexAvailable(invocation?: CodexInvocation | null): 
   try {
     const inv = invocation !== undefined ? invocation : await resolveCodexInvocation();
     if (!inv) return { available: false, reason: 'codex launcher not found on PATH' };
-    const v = await runCodex(inv, ['--version'], null, 10_000);
-    const l = await runCodex(inv, ['login', 'status'], null, 10_000);
+    const v = await runCodex(inv, ['--version'], null, 10_000, tmpdir());
+    const l = await runCodex(inv, ['login', 'status'], null, 10_000, tmpdir());
     // Some CLIs print status to stderr; feed both streams to the interpreter.
     return interpretPreflight(v.stdout + v.stderr, l.stdout + l.stderr);
   } catch (e) {
@@ -199,8 +256,8 @@ export async function checkCodexStatus(invocation?: CodexInvocation | null): Pro
     if (!inv) {
       return { cliFound: false, version: undefined, available: false, authMode: 'none', reason: 'codex launcher not found on PATH' };
     }
-    const v = await runCodex(inv, ['--version'], null, 10_000);
-    const l = await runCodex(inv, ['login', 'status'], null, 10_000);
+    const v = await runCodex(inv, ['--version'], null, 10_000, tmpdir());
+    const l = await runCodex(inv, ['login', 'status'], null, 10_000, tmpdir());
     // Some CLIs print to stderr; feed both streams to the interpreter.
     return interpretStatus(v.stdout + v.stderr, l.stdout + l.stderr);
   } catch (e) {
@@ -253,7 +310,7 @@ export async function checkCodexModel(invocation?: CodexInvocation | null): Prom
   try {
     const inv = invocation !== undefined ? invocation : await resolveCodexInvocation();
     if (!inv) return null;
-    const r = await runCodex(inv, ['doctor', '--json'], null, 10_000);
+    const r = await runCodex(inv, ['doctor', '--json'], null, 10_000, tmpdir());
     return interpretDoctorModel(r.stdout);
   } catch {
     return null;
@@ -263,7 +320,7 @@ export async function checkCodexModel(invocation?: CodexInvocation | null): Prom
 /** Build a runner that spawns `codex exec` with the prompt on stdin and reads -o's file. */
 export function createCodexRunner(
   resolveInv: () => Promise<CodexInvocation | null> = resolveCodexInvocation,
-  run: (inv: CodexInvocation, args: string[], input: string | null, timeoutMs: number) => Promise<RunOutcome> = runCodex,
+  run: (inv: CodexInvocation, args: string[], input: string | null, timeoutMs: number, cwd: string) => Promise<RunOutcome> = runCodex,
 ): CodexRunner {
   return async (question, opts = {}) => {
     const inv = await resolveInv();
@@ -283,7 +340,7 @@ export function createCodexRunner(
       // timeout is configurable (dualVerify.timeoutMs via opts), hard-clamped to MAX_TIMEOUT_MS so the
       // scratch-gc floor stays safe even for direct callers. 120s is the fallback default.
       const timeoutMs = Math.min(opts.timeoutMs ?? 120_000, MAX_TIMEOUT_MS);
-      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, timeoutMs);
+      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir);
       if (code !== 0) {
         return { ok: false, error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ''}` };
       }

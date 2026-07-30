@@ -236,6 +236,15 @@ All notable changes to Helix are documented here. This project follows
   divergence.
 
 ### Security
+- The dual-verify subprocess no longer inherits the user's working directory or environment. It was
+  spawned with only `stdio` set, so the external Codex CLI started in the user's project and
+  received every variable the server had — and `-s read-only` sandboxes writes, not reads, while the
+  egress guard inspects the composed prompt and cannot see what the subprocess reads afterwards. It
+  now starts in an empty per-run scratch directory, is told (`--cd`) to treat that directory as its
+  project, and receives a constructed environment holding only what it needs to authenticate and
+  reach the network. README and SECURITY.md previously said the call sends "nothing else (no memory,
+  no files)"; that was a statement about what Helix composes, read as a statement about what the CLI
+  can reach. Both now state the confinement and the residue it does not cover.
 - Dual-verify, egress-policy and content-logging settings are read from the global
   `~/.helix/config.json` only. A checkout's `.helix/config.json` was previously discovered from the
   working directory and merged LAST, so opening an untrusted repository let its config re-enable the

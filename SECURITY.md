@@ -233,6 +233,19 @@ guard** against a host model that transforms content before emitting it. The pri
 boundary is the provenance firewall + secret-scan + the DATA-quarantine; the egress
 guard and echo tripwire are defense-in-depth.
 
+**The egress guard governs the payload Helix composes — it is not a sandbox around the
+Codex CLI.** The CLI is a separate program with its own model and its own connection to
+its provider, and `-s read-only` sandboxes its *writes*, not its *reads*. Helix confines
+what it can: the subprocess is started in an empty scratch directory, told (`--cd`) to
+treat that directory as its working directory, and given a constructed environment
+containing only what the CLI needs to authenticate and reach the network — not the
+server's own. That removes the automatic exposure of your project directory and your
+environment variables. It does not remove the residue: a model that reads an absolute path
+it can guess is not stopped by a working directory, and whatever it reads leaves over its
+own API connection, where Helix has no visibility at all. Treat enabling dual-verify as
+granting a third-party CLI read access to the files your user account can read; if that is
+not acceptable, run it under an OS-level sandbox or leave the feature off.
+
 ## Handling of sensitive data at rest
 
 - `~/.helix/audit.jsonl` is content-free (enums / IDs / labels only).

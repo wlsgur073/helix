@@ -24914,8 +24914,9 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
 
 // src/verify/codex.ts
 var execFileAsync = promisify(execFile);
-function buildCodexExecArgs(outFile, opts = {}) {
+function buildCodexExecArgs(outFile, opts = {}, cwd) {
   const args = ["exec", "--skip-git-repo-check", "-s", "read-only", "--ephemeral", "-o", outFile];
+  if (cwd !== void 0 && cwd !== "") args.push("-C", cwd);
   if (opts.model != null && opts.model !== "") {
     if (!/^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/.test(opts.model)) throw new Error(`invalid codex model "${opts.model}" (argv safety)`);
     args.push("-m", opts.model);
@@ -24961,10 +24962,59 @@ async function resolveCodexInvocation() {
   if (inv) cachedInvocation = inv;
   return inv;
 }
-function runCodex(inv, args, input, timeoutMs) {
+var CHILD_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "CODEX_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_CACHE_HOME",
+  "XDG_DATA_HOME",
+  "XDG_STATE_HOME",
+  "OPENAI_API_KEY",
+  "CODEX_API_KEY",
+  "OPENAI_BASE_URL",
+  "HTTPS_PROXY",
+  "HTTP_PROXY",
+  "NO_PROXY",
+  "https_proxy",
+  "http_proxy",
+  "no_proxy",
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "REQUESTS_CA_BUNDLE",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  // win32
+  "SYSTEMROOT",
+  "SystemRoot",
+  "COMSPEC",
+  "ComSpec",
+  "PATHEXT",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "USERPROFILE",
+  "TEMP",
+  "TMP",
+  "WINDIR",
+  "PROGRAMFILES",
+  "PROGRAMDATA"
+];
+function childEnv(parent = process.env) {
+  const out = {};
+  for (const k of CHILD_ENV_ALLOWLIST) {
+    const v = parent[k];
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+function runCodex(inv, args, input, timeoutMs, cwd) {
   return new Promise((resolve2, reject) => {
     const child = spawn(inv.file, [...inv.argsPrefix, ...args], {
-      stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"]
+      stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"],
+      cwd,
+      env: childEnv()
     });
     let stdout = "";
     let stderr = "";
@@ -25039,8 +25089,8 @@ async function checkCodexAvailable(invocation) {
   try {
     const inv = invocation !== void 0 ? invocation : await resolveCodexInvocation();
     if (!inv) return { available: false, reason: "codex launcher not found on PATH" };
-    const v = await runCodex(inv, ["--version"], null, 1e4);
-    const l = await runCodex(inv, ["login", "status"], null, 1e4);
+    const v = await runCodex(inv, ["--version"], null, 1e4, tmpdir());
+    const l = await runCodex(inv, ["login", "status"], null, 1e4, tmpdir());
     return interpretPreflight(v.stdout + v.stderr, l.stdout + l.stderr);
   } catch (e) {
     return { available: false, reason: `codex preflight failed: ${e.message}` };
@@ -25052,8 +25102,8 @@ async function checkCodexStatus(invocation) {
     if (!inv) {
       return { cliFound: false, version: void 0, available: false, authMode: "none", reason: "codex launcher not found on PATH" };
     }
-    const v = await runCodex(inv, ["--version"], null, 1e4);
-    const l = await runCodex(inv, ["login", "status"], null, 1e4);
+    const v = await runCodex(inv, ["--version"], null, 1e4, tmpdir());
+    const l = await runCodex(inv, ["login", "status"], null, 1e4, tmpdir());
     return interpretStatus(v.stdout + v.stderr, l.stdout + l.stderr);
   } catch (e) {
     return { cliFound: false, version: void 0, available: false, authMode: "none", reason: `codex status check failed: ${e.message}` };
@@ -25081,7 +25131,7 @@ async function checkCodexModel(invocation) {
   try {
     const inv = invocation !== void 0 ? invocation : await resolveCodexInvocation();
     if (!inv) return null;
-    const r = await runCodex(inv, ["doctor", "--json"], null, 1e4);
+    const r = await runCodex(inv, ["doctor", "--json"], null, 1e4, tmpdir());
     return interpretDoctorModel(r.stdout);
   } catch {
     return null;
@@ -25097,7 +25147,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
     const outFile = join9(dir, "out.txt");
     try {
       const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
-      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, timeoutMs);
+      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir);
       if (code !== 0) {
         return { ok: false, error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ""}` };
       }

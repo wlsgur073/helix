@@ -17,6 +17,16 @@ describe('buildCodexExecArgs (prompt-via-stdin contract)', () => {
     ]);
   });
 
+  it('passes -C so the CLI treats the scratch directory as its working directory, not the user\'s', () => {
+    // Distinct from the spawn cwd, and both are needed: cwd is where the OS starts the process, -C
+    // is what the CLI itself uses to decide which project it is in — and `-s read-only` sandboxes
+    // writes, not reads, so a CLI that thinks the user's repository is its project can read it.
+    expect(buildCodexExecArgs('/tmp/o', {}, '/tmp/scratch-xyz')).toEqual([
+      'exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', '/tmp/o',
+      '-C', '/tmp/scratch-xyz', '-',
+    ]);
+  });
+
   it('omits -m and -c when model/effort are null (inherit ~/.codex/config.toml)', () => {
     expect(buildCodexExecArgs('/tmp/o', { model: null, effort: null })).toEqual([
       'exec', '--skip-git-repo-check', '-s', 'read-only', '--ephemeral', '-o', '/tmp/o', '-',
