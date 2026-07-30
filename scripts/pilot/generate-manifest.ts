@@ -38,6 +38,7 @@ import { join } from 'node:path';
 import type { MemoryScope } from '../../src/types.js';
 import { topicTerms } from './derive.js';
 import { segmentOracle } from './segment-oracle.js';
+import { isEntryPoint } from './entry-point.js';
 
 /** Production recall bound, pinned by the protocol (§9a, K = 20). */
 export const K = 20;
@@ -194,4 +195,4 @@ const main = (): void => {
   const mapping = JSON.parse(readFileSync(mappingPath, 'utf8')) as Record<string, string[]>; // entryIndex -> record ids
   write(outPath, buildProbes(readSnapshot(snapshotDir), { md: readFileSync(oraclePath, 'utf8'), mapping }));
 };
-if (process.argv[1] && process.argv[1].endsWith('generate-manifest.ts')) main();
+if (isEntryPoint(import.meta.url)) main();

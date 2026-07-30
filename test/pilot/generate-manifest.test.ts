@@ -1,8 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { bundleCli } from '../helpers/bundle-cli.js';
+
+// Bundled with the pinned esbuild and spawned under plain `node`, not `npx tsx` — see
+// test/helpers/bundle-cli.ts.
+let cli: string;
+beforeAll(async () => { cli = await bundleCli('scripts/pilot/generate-manifest.ts'); }, 30_000);
 
 /** Characterization lock for the manifest generator, written BEFORE it was made importable.
  *  Its job is to hold the frozen enumeration behaviour still while the file is restructured:
@@ -50,7 +56,7 @@ describe('manifest generator (frozen enumeration behaviour)', () => {
   const generate = () => {
     const { dir, oracle, mapping } = fixture();
     const out = join(dir, 'manifest.json');
-    execFileSync('npx', ['tsx', 'scripts/pilot/generate-manifest.ts', dir, oracle, mapping, out], { cwd: process.cwd() });
+    execFileSync(process.execPath, [cli,dir, oracle, mapping, out], { cwd: process.cwd() });
     return { dir, manifest: JSON.parse(readFileSync(out, 'utf8')) };
   };
 
@@ -102,7 +108,7 @@ describe('manifest generator (frozen enumeration behaviour)', () => {
       const oracle = join(dir, 'oracle.md'); writeFileSync(oracle, '# N\n- unrelated bullet text here\n');
       const mapping = join(dir, 'mapping.json'); writeFileSync(mapping, JSON.stringify({}));
       const out = join(dir, 'manifest.json');
-      execFileSync('npx', ['tsx', 'scripts/pilot/generate-manifest.ts', dir, oracle, mapping, out], { cwd: process.cwd() });
+      execFileSync(process.execPath, [cli,dir, oracle, mapping, out], { cwd: process.cwd() });
       const m = JSON.parse(readFileSync(out, 'utf8'));
       expect(m.probes.find((p: { id: string }) => p.id === 'L_m_1').unambiguous).toBe(false);
     } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -119,7 +125,7 @@ describe('manifest generator (frozen enumeration behaviour)', () => {
       const oracle = join(dir, 'oracle.md'); writeFileSync(oracle, '# N\n- unrelated bullet text here\n');
       const mapping = join(dir, 'mapping.json'); writeFileSync(mapping, JSON.stringify({}));
       const out = join(dir, 'manifest.json');
-      execFileSync('npx', ['tsx', 'scripts/pilot/generate-manifest.ts', dir, oracle, mapping, out], { cwd: process.cwd() });
+      execFileSync(process.execPath, [cli,dir, oracle, mapping, out], { cwd: process.cwd() });
       const ids = JSON.parse(readFileSync(out, 'utf8')).probes.map((p: { id: string }) => p.id);
       expect(ids).toContain('L_m_new');
       expect(ids).not.toContain('L_m_old');

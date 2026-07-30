@@ -1,9 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { buildProbes, type LedgerRow, type ScopedLedger } from '../../scripts/pilot/generate-manifest.js';
+import { bundleCli } from '../helpers/bundle-cli.js';
+
+// Bundled with the pinned esbuild and spawned under plain `node`, not `npx tsx` — see
+// test/helpers/bundle-cli.ts. Note this file ALSO imports the generator directly (above): the
+// entry-point guard is what keeps that import from executing main(), and it now decides by path
+// identity rather than by filename spelling.
+let cli: string;
+beforeAll(async () => { cli = await bundleCli('scripts/pilot/generate-manifest.ts'); }, 30_000);
 
 /** C5.1 closure items 3 (transaction-time cutoff) and 4 (unambiguity denominator).
  *
@@ -104,7 +112,7 @@ describe('generator CLI', () => {
     return dir;
   };
   const run = (args: string[]): void => {
-    execFileSync('npx', ['tsx', 'scripts/pilot/generate-manifest.ts', ...args], { cwd: process.cwd() });
+    execFileSync(process.execPath, [cli,...args], { cwd: process.cwd() });
   };
 
   it('writes txAfter and no oracle probes in the holdout form', () => {
