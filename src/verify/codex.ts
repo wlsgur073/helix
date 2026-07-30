@@ -1,10 +1,10 @@
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, win32 as winPath } from 'node:path';
 import { promisify } from 'node:util';
 import { isArgvSafeModel, MAX_TIMEOUT_MS } from '../config.js';
-import { sweepScratchRoot } from './scratch-gc.js';
+import { sweepScratchRoot, ensureScratchRoot } from './scratch-gc.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -271,10 +271,13 @@ export function createCodexRunner(
     // Corral all scratch under a single <temp>/helix/ folder (instead of scattering
     // helix-codex-* across the temp root). Leaked dirs — when the finally{} cleanup
     // below loses a race to a Windows file lock — then collect in one easily-purged place.
-    const scratchRoot = join(tmpdir(), 'helix');
-    mkdirSync(scratchRoot, { recursive: true });
-    sweepScratchRoot(scratchRoot); // best-effort GC of leaked sibling scratch dirs (never throws)
-    const dir = mkdtempSync(join(scratchRoot, 'codex-'));
+    // VET the shared root, do not merely create it: it is a fixed name directly under a
+    // world-writable temp dir, so a `helix` already sitting there may be somebody else's directory
+    // or a symlink aimed at a file of ours. When it cannot be trusted we still run — just from a
+    // private, unpredictable directory, losing only the single-corral tidiness this root buys.
+    const scratchRoot = ensureScratchRoot(join(tmpdir(), 'helix'));
+    if (scratchRoot !== null) sweepScratchRoot(scratchRoot); // best-effort GC of leaked siblings (never throws)
+    const dir = mkdtempSync(scratchRoot !== null ? join(scratchRoot, 'codex-') : join(tmpdir(), 'helix-codex-'));
     const outFile = join(dir, 'out.txt');
     try {
       // timeout is configurable (dualVerify.timeoutMs via opts), hard-clamped to MAX_TIMEOUT_MS so the

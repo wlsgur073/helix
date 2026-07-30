@@ -24793,13 +24793,14 @@ async function handleDualVerify(args, deps) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync6, mkdirSync as mkdirSync8, mkdtempSync, readFileSync as readFileSync12, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync6, mkdtempSync, readFileSync as readFileSync12, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join8, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync5, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync4, rmSync as rmSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { existsSync as existsSync5, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync4, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync2 } from "node:fs";
+import { randomBytes as randomBytes7 } from "node:crypto";
 import { join as join7 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
@@ -24812,6 +24813,33 @@ function shouldSweep(stampMtimeMs, nowMs, intervalMs) {
   if (stampMtimeMs === null) return true;
   if (stampMtimeMs > nowMs) return true;
   return nowMs - stampMtimeMs >= intervalMs;
+}
+function ensureScratchRoot(root) {
+  try {
+    mkdirSync8(root, { recursive: true, mode: 448 });
+  } catch {
+  }
+  try {
+    const st = lstatSync3(root);
+    if (!st.isDirectory()) return null;
+    if (typeof process.getuid === "function" && st.uid !== process.getuid()) return null;
+    if ((st.mode & 63) !== 0) chmodSync2(root, 448);
+    return root;
+  } catch {
+    return null;
+  }
+}
+function publishStamp(stampPath) {
+  const tmp = `${stampPath}.${process.pid}.${randomBytes7(8).toString("hex")}.tmp`;
+  try {
+    writeFileSync3(tmp, "", { flag: "wx", mode: 384 });
+    renameSync3(tmp, stampPath);
+  } catch {
+    try {
+      unlinkSync5(tmp);
+    } catch {
+    }
+  }
 }
 function sweepScratchRoot(root, nowMs = Date.now()) {
   try {
@@ -24839,10 +24867,7 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
       } catch {
       }
     }
-    try {
-      writeFileSync3(stampPath, "");
-    } catch {
-    }
+    publishStamp(stampPath);
   } catch {
   }
 }
@@ -25026,10 +25051,9 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
-    const scratchRoot = join8(tmpdir(), "helix");
-    mkdirSync8(scratchRoot, { recursive: true });
-    sweepScratchRoot(scratchRoot);
-    const dir = mkdtempSync(join8(scratchRoot, "codex-"));
+    const scratchRoot = ensureScratchRoot(join8(tmpdir(), "helix"));
+    if (scratchRoot !== null) sweepScratchRoot(scratchRoot);
+    const dir = mkdtempSync(scratchRoot !== null ? join8(scratchRoot, "codex-") : join8(tmpdir(), "helix-codex-"));
     const outFile = join8(dir, "out.txt");
     try {
       const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
