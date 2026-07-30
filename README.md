@@ -2,7 +2,7 @@
 
 > Better with Every Turn.
 
-Helix is a [Claude Code](https://docs.claude.com/en/docs/claude-code) plugin that gives Claude a **verifiable, trust-indexed memory** across sessions, plus **optional cross-validation** of its answers against [Codex](https://github.com/openai/codex). Memory is treated as data to be checked, not gospel: every fact carries provenance and a trust state, recalled content is quarantined from instructions, secrets are redacted before they touch disk, and erasure is auditable and reversible by default, with physical destruction as a deliberate, operator-run step.
+Helix is a [Claude Code](https://docs.claude.com/en/docs/claude-code) plugin that gives Claude a **verifiable, trust-indexed memory** across sessions, plus **optional cross-validation** of its answers against [Codex](https://github.com/openai/codex). Memory is treated as data to be checked, not gospel: every fact carries provenance and a trust state, recalled content is quarantined from instructions, secrets are redacted before they touch disk, and erasure drops a fact from every live view at once while staying auditable and reversible by default — physical destruction is a separate step you enable (compaction) or run yourself.
 
 It ships the **engine** — memory and dual-verify, exposed as MCP tools and session hooks. Your assistant's voice and behavior stay yours to configure (your own `CLAUDE.md` or output style).
 
@@ -23,7 +23,14 @@ claude plugin marketplace add wlsgur073/helix
 claude plugin install helix@helix
 ```
 
-Restart Claude Code, then confirm the server is live with `/mcp` (you should see **helix**). Update later with `claude plugin update helix@helix` (the `update` subcommand requires the full `plugin@marketplace` id; `uninstall` accepts the bare name); remove with `claude plugin uninstall helix`. Two update caveats: `plugin update` skips reinstalling when the version string is unchanged (the cache is keyed by version) — for a same-version refresh (e.g. tracking a development branch) run `claude plugin uninstall helix` then `claude plugin install helix@helix` instead. And new bytes serve **new** Claude Code sessions only: restart Claude Code after any update (`/clear` does not restart the MCP server). Maintainers: full procedure in `docs/release/deploy-runbook.md`.
+Restart Claude Code, then confirm the server is live with `/mcp` (you should see **helix**). Update later with `claude plugin update helix@helix` (the `update` subcommand requires the full `plugin@marketplace` id; `uninstall` accepts the bare name); remove with `claude plugin uninstall helix`. Release notes: [CHANGELOG.md](./CHANGELOG.md). Two update caveats: `plugin update` skips reinstalling when the version string is unchanged (the cache is keyed by version) — for a same-version refresh (e.g. tracking a development branch) run `claude plugin uninstall helix` then `claude plugin install helix@helix` instead. And new bytes serve **new** Claude Code sessions only: restart Claude Code after any update (`/clear` does not restart the MCP server). Maintainers: full procedure in `docs/release/deploy-runbook.md`.
+
+## Quick start
+
+1. Ask Claude to remember something — "remember that staging runs Postgres 16 on port 5433". It calls `helix_memory_commit` and the fact lands in the ledger: secret-scanned, provenance-stamped, trust state `Fresh`. Helix exposes the tool but never tells your assistant *when* to reach for it — if you want that reflex to be reliable, say so in your own `CLAUDE.md`.
+2. Open a new session — the **SessionStart** hook injects your current, trusted memory automatically as quarantined DATA. There is nothing to invoke.
+3. Audit what is stored with `helix_memory_inspect`; remove anything with `helix_memory_erase` (a soft erase — it leaves every live view immediately, and stays reversible by default).
+4. Per-project memory activates only when the project has a `.helix/` folder (see [Memory scope](#memory-scope)); Codex cross-checking stays off until you enable it (see [Configuration](#configuration)).
 
 ## What you get
 
@@ -36,12 +43,12 @@ Nine MCP tools:
 | `helix_memory_inspect` | List current memory items with their trust state |
 | `helix_memory_recheck` | Re-check a fact against reality (content-bound file check) → `Corroborated` (machine-checked, never `Verified`) |
 | `helix_memory_confirm` | Promote a fact to `Verified` because you explicitly vouched for it (requires your approval; never self-confirm) |
-| `helix_memory_erase` | Erase an item from the live view (soft: tombstoned, recoverable until a compaction) |
+| `helix_memory_erase` | Erase an item from every live view (soft: tombstoned and audited, recoverable until a compaction) |
 | `helix_memory_adopt` | Trust the current project's pre-existing memory file (for a recognized/team-shared ledger; default-deny) |
 | `helix_dual_verify` | Cross-check an answer with Codex (off by default) |
 | `helix_codex_status` | Show Codex connection state (CLI/version, login, auth mode), dual-verify config, and content-log state — free, no metered call |
 
-Two hooks run automatically: **SessionStart** injects current, trusted memory into the session; **SessionEnd** records the session. Global state lives under `~/.helix/` (`memory.jsonl`, `audit.jsonl`, `sessions.jsonl`, `config.json`, `projects.json`). Project memory lives at `<project-root>/.helix/memory.jsonl` (see [Memory scope](#memory-scope) below).
+Two hooks run automatically: **SessionStart** injects current, trusted memory into the session; **SessionEnd** records the session. Global state lives under `~/.helix/` (`memory.jsonl`, `audit.jsonl`, `sessions.jsonl`, `config.json`, `projects.json`, plus `metrics.jsonl`, the rollback-witness state, and the ledger signing key). Project memory lives at `<project-root>/.helix/memory.jsonl` (see [Memory scope](#memory-scope) below).
 
 ## Configuration
 
@@ -155,11 +162,11 @@ Helix keeps two ledgers that it always reads together:
 | **Global** | `~/.helix/memory.jsonl` | Always |
 | **Project** | `<project-root>/.helix/memory.jsonl` | Only when `<cwd>/.helix/` exists on server startup |
 
-**Activation.** The project layer switches on automatically when the server is launched from a directory that has a `.helix/` folder. In the absence of that folder the server operates in global-only mode — it will never create a `.helix/` directory on its own.
+**Activation.** The project layer switches on automatically when the server is launched from a directory that has a `.helix/` folder. In the absence of that folder the server operates in global-only mode — it will never create a `.helix/` directory on its own. To opt a project in, create the folder yourself (`mkdir .helix` at the project root) and start a new session there: the first commit claims the empty layer automatically (a home-registry entry plus the in-repo `.owner` stamp) and creates the ledger. Only a pre-existing ledger that Helix did not create needs the explicit `helix_memory_adopt` gate below.
 
 **Trust model (ownership gate).** A project ledger is read and written only if it is *owned*: a dual-key check matches a home-side registry entry (`~/.helix/projects.json`) against an in-repo stamp file (`.helix/.owner`). The registry lives in the user's home directory, so a freshly cloned repo cannot forge it. A foreign (cloned) ledger's content is excluded from reads — though a constant note discloses its presence — and writes to it are refused until you explicitly call `helix_memory_adopt`, after which the ledger's existing content becomes visible and future writes are accepted.
 
-**Privacy by default.** `.helix/` is gitignored, so project memory stays private to each developer. To share project memory across a team, un-ignore `.helix/` in your repo and have each team member run `helix_memory_adopt` after cloning. This is intentionally opt-in.
+**Privacy by default.** Add `.helix/` to your repo's `.gitignore` — Helix never edits your `.gitignore` for you, and an untracked ledger stays private to each developer (this repository ignores its own `.helix/` the same way). To share project memory across a team, track `.helix/` instead and have each team member run `helix_memory_adopt` after cloning. Sharing is intentionally opt-in.
 
 **Recall output.** Each recalled item is labeled with its scope: `DATA[Fresh:project]|` or `DATA[Fresh:global]|`. Items from both ledgers appear together in a single quarantined DATA block.
 
@@ -194,7 +201,7 @@ Partial-removal note: deleting only the signing key (`ledger-mac-master.key`) is
 - **Re-verify before use.** A `Suspect` item on a high-blast-radius path must be re-checked before it is acted on.
 - **Content quarantine.** Recalled memory and external-model output are framed as labeled DATA; forged frame markers are neutralized so stored text can never act as an instruction.
 - **Secret hygiene.** Common credential formats and high-entropy tokens are redacted before anything is written, and dual-verify refuses to send a payload containing a secret to the external model.
-- **Right-to-erasure.** The `helix_memory_erase` tool is a **soft** erase: it appends a content-free tombstone and the fact leaves the live view, but the original line stays in the ledger file until a compaction rewrites it — which is also what makes an accidental erase recoverable (see [the recovery playbook](./docs/release/recovery-playbook.md)). Physical destruction — rewriting the ledger without the record — is the operator-run `permanent` path, deliberately kept off the agent tool surface so a prompt-injected agent cannot reach it. Either way the ledger is locked across processes, so concurrent sessions can't corrupt it or resurrect erased data.
+- **Right-to-erasure (two-stage).** The `helix_memory_erase` tool is a **soft** erase: it appends a content-free tombstone to the ledger and records the erase in `audit.jsonl` (the id only, never the text), so the fact leaves every live surface — recall, inspect, SessionStart — immediately, while the original line stays in the ledger file until a compaction rewrites it. That surviving line is the undo window: it is what makes an erroneous or poisoned erase both detectable and recoverable (see [the recovery playbook](./docs/release/recovery-playbook.md)). Physical destruction — rewriting the ledger without the record — is the operator-run `permanent` path, deliberately kept off the agent tool surface so a prompt-injected agent cannot reach it; enabling [automatic compaction](#automatic-compaction-opt-in-off-by-default) destroys it too, which is exactly why compaction is opt-in and off by default. Either way, "physical" means durable namespace removal by Helix's own write paths, not media sanitization (see [SECURITY.md](./SECURITY.md)) — and the ledger is locked across processes, so concurrent sessions can't corrupt it or resurrect erased data.
 
 ## Trust & data flow (what runs on your machine)
 
@@ -202,6 +209,7 @@ Helix is local-first. Installing it lets Claude Code run code on your machine �
 
 - **MCP server** (`node bin/helix-mcp.mjs`, launched by Claude Code): reads and writes memory under `~/.helix/` (and an owned `<project>/.helix/` ledger when present). It makes **no network calls** except the optional dual-verify path below.
 - **Re-baseline ceremony** (`node bin/helix-rebaseline.mjs --scope global`, or `--scope <absoluteProjectRoot>` for a project; run by you): an interactive, TTY-only maintenance command that re-blesses a ledger scope after the rollback witness flags it as regressed (see [SECURITY.md](./SECURITY.md)). It is never launched automatically and is not exposed as an MCP tool.
+- **Scale-trigger snapshot** (`node bin/helix-trigger.mjs`; run by you or your own scheduler, never launched by the plugin or by Claude Code): appends one content-free evaluation of the indexed-storage migration trigger (ledger row / byte / latency legs) to `~/.helix/trigger.jsonl` — the measurement behind the Scale note in [Requirements](#requirements).
 - **Session hooks:** SessionStart reads your trusted memory and injects it into the session as quarantined DATA (never as instructions); SessionEnd appends a session record. Neither sends anything off-machine.
 - **No telemetry.** Helix never phones home.
 - **Metrics (local only):** Helix appends content-free latency/size records (tool op durations,
@@ -248,4 +256,4 @@ The runtime targets **Node ≥ 20**; development (the toolchain) expects **Node 
 
 ## License
 
-See [LICENSE](./LICENSE).
+MIT — see [LICENSE](./LICENSE).
