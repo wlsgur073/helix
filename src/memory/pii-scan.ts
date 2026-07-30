@@ -15,7 +15,19 @@ export interface PiiHit {
 // so they are handled separately below.
 const LOW_PATTERNS: ReadonlyArray<{ kind: 'email' | 'phone'; re: RegExp }> = [
   // RFC-pragmatic email: local@domain.tld (bounded, no nested comments).
-  { kind: 'email', re: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g },
+  // Every quantifier is BOUNDED, and the domain is spelled as labels. Both matter, for different
+  // reasons, and the second one is the one that actually cost 13 seconds:
+  //   - labels `(?:[A-Za-z0-9-]{1,63}\.)+` instead of one `[A-Za-z0-9.-]+` run followed by `\.`
+  //     stops the same dot from being claimable by either side;
+  //   - `{1,64}` on the local part stops each start position from scanning the whole rest of the
+  //     input. On a dot-rich string EVERY letter sits after a `.`, so every letter is a word
+  //     boundary and `\b` no longer prunes anything: O(n) starts each scanning O(n) forward for an
+  //     `@` that never comes. That is where the quadratic came from — measured 835ms at 50k chars
+  //     and 13.4s at 200k, and MAX_FORM_SCAN is exactly 200,000. A plain letter run stayed fast only
+  //     because `\b` matched at one position in it.
+  // The bounds are the RFC/IANA maxima (local part 64, label 63, TLD comfortably under 24), so
+  // nothing a real address can be is excluded.
+  { kind: 'email', re: /\b[A-Za-z0-9._%+-]{1,64}@(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,24}\b/g },
   // Phone: US (415-555-0132 / (415) 555-0132) and KR mobile (010-1234-5678) shapes.
   // Requires separators so a bare run of digits (an id / timestamp) does not match.
   { kind: 'phone', re: /(?<!\d)(?:\(\d{3}\)\s?\d{3}[-.\s]\d{4}|\d{2,3}[-.\s]\d{3,4}[-.\s]\d{4})(?!\d)/g },

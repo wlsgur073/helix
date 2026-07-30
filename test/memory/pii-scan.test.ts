@@ -79,3 +79,45 @@ describe('detectPII', () => {
     expect(detectPII('the deploy uses the blue cluster')).toEqual([]);
   });
 });
+
+// F12: the email pattern's domain class `[A-Za-z0-9.-]+` contains BOTH `.` and letters, so it
+// overlaps the `\.[A-Za-z]{2,}` that follows it. On a string that never completes a match the engine
+// has to try every split of the run — quadratic. Measured on the crafted non-match: 50K 0.9s,
+// 100K 3.8s, 200K 15.2s, and MAX_FORM_SCAN is exactly 200,000, so a single crafted payload could
+// hold the egress scan for a quarter of a minute.
+describe('email scanning is linear in the input', () => {
+  // A DOT-RICH run is what triggers it, and finding that mattered: `a@` + 200k plain letters is
+  // linear, because with no dot at all the `\.` can fail immediately. The blow-up needs many
+  // candidate split points between the domain run and the `\.` that follows it, and then no valid
+  // TLD to finish on. Measured on the current pattern: 50k 835ms, 200k 13.4s — a ratio of 16.1 for
+  // 4x the input, which is quadratic to two significant figures.
+  const crafted = (n: number): string => `a@${'a.'.repeat(Math.floor(n / 2))}`;
+
+  it('scans a max-size crafted non-match promptly', () => {
+    const t0 = performance.now();
+    expect(detectPII(crafted(200_000)).filter((h) => h.kind === 'email')).toHaveLength(0);
+    // Generous by two orders of magnitude against the 15s measurement: this is asserting the
+    // absence of catastrophic backtracking, not a performance budget.
+    expect(performance.now() - t0).toBeLessThan(2_000);
+  }, 30_000);
+
+  it('cost grows roughly linearly, not quadratically, with input size', () => {
+    const at = (n: number): number => { const t = performance.now(); detectPII(crafted(n)); return performance.now() - t; };
+    at(20_000);                                   // warm up, so JIT does not distort the ratio
+    const small = Math.max(at(50_000), 1);
+    const large = at(200_000);
+    // 4x the input: linear predicts ~4x the time, quadratic predicts ~16x. Anything under 8x rules
+    // out the quadratic blow-up while leaving room for measurement noise on a loaded machine.
+    expect(large / small).toBeLessThan(8);
+  }, 30_000);
+
+  it('still matches the addresses it matched before, and still rejects a bare local part', () => {
+    // Pins the match SET across the rewrite, not just the cost: a multi-label domain with a hyphen
+    // and a two-part TLD, a short one, and two shapes that must stay unmatched.
+    const text = 'write to First.Last+tag@sub-domain.example.co.uk or ops@x.io, but not a@b or plain-text';
+    const emails = detectPII(text).filter((h) => h.kind === 'email');
+    expect(emails.map((h) => text.slice(h.start, h.end)))
+      .toEqual(['First.Last+tag@sub-domain.example.co.uk', 'ops@x.io']);
+    expect(emails.every((h) => h.severity === 'low')).toBe(true);
+  });
+});
