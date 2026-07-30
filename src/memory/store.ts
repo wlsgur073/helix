@@ -32,8 +32,13 @@ export interface MemoryStoreOptions {
   now?: () => string;   // ISO timestamp source (injectable for tests)
   genId?: () => string; // id source (injectable for tests)
   genNonce?: () => string; // injectable per-frame nonce source (default crypto)
-  /** When set, enables the project scope layer (in-repo ledger + ownership gate). */
-  project?: { ledger: string; root: string; home: string };
+  /** When set, enables the project scope layer (in-repo ledger + ownership gate).
+   *
+   *  The project scope layer. It deliberately does NOT carry a `home`: the trust store's location is
+   *  `opts.home`, which is required, so a second field naming the same directory would be a second
+   *  place for it to be wrong. That is not hypothetical — the two used to be separate, and the
+   *  comment claiming they were always equal was false against the shipped wiring. */
+  project?: { ledger: string; root: string };
   /** Injectable ownership stamp source (default crypto). */
   genStamp?: () => string;
   /** Where the ledger-MAC master key, the scope-nonce registry and the rollback witness live.
@@ -251,7 +256,7 @@ export class MemoryStore {
   private targetLedger(scope: MemoryScope | undefined): LedgerPath {
     const p = this.opts.project;
     if (scope === 'global' || !p) return this.global;
-    if (!isOwned(p.root, p.home)) {
+    if (!isOwned(p.root, this.homeDir())) {
       if (existsSync(p.ledger)) {
         throw new Error(
           'commit: a project memory file exists here that Helix did not create — ' +
@@ -260,7 +265,7 @@ export class MemoryStore {
       }
       // autoAdoptLedger: re-check under the registry lock that no foreign ledger appeared between the
       // existsSync above and the stamp — closing the check-then-adopt TOCTOU on the auto-adopt path.
-      stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });
+      stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });
     }
     return p.ledger;
   }
@@ -275,7 +280,7 @@ export class MemoryStore {
    *  the next call still sees a fresh, current answer (I4) — only a single call's internal
    *  self-consistency is what this method buys.
    *
-   *  - 'owned': isOwned(p.root, p.home) — true regardless of whether the ledger FILE exists yet (an
+   *  - 'owned': isOwned(p.root, home) — true regardless of whether the ledger FILE exists yet (an
    *    owned project with no ledger file still participates, matching pre-existing behavior).
    *  - 'unadopted-present': project configured, NOT owned, and a ledger file exists at p.ledger — the
    *    exact condition targetLedger() (above) already throws on for commit. The write side keeps its
@@ -289,7 +294,8 @@ export class MemoryStore {
    *  public read call (recall/currentView/historyView/asOfView each do so, then thread the snapshot as
    *  a parameter into every private helper that needs it, never re-invoking this within that call). */
   private projectDisposition(): ProjectDisposition {
-    return projectDispositionOf(this.opts.project);
+    const p = this.opts.project;
+    return projectDispositionOf(p && { root: p.root, ledger: p.ledger, home: this.homeDir() });
   }
 
   /** Verified live records from global + (project iff `disposition === 'owned'`), each tagged with
@@ -564,7 +570,7 @@ export class MemoryStore {
   private ledgerOf(id: string): LedgerPath {
     const p = this.opts.project;
     const inGlobal = this.verifiedOf(this.global).live.has(id);
-    const inProject = !!p && isOwned(p.root, p.home) && this.verifiedOf(p.ledger).live.has(id);
+    const inProject = !!p && isOwned(p.root, this.homeDir()) && this.verifiedOf(p.ledger).live.has(id);
     if (inGlobal && inProject) throw new Error('ledgerOf: id live in more than one scope — ambiguous');
     if (inProject) return p!.ledger;
     return this.global; // global, or fall through for a non-live id (callers re-gate liveness and throw)
@@ -781,7 +787,7 @@ export class MemoryStore {
   adopt(): void {
     const p = this.opts.project;
     if (!p) throw new Error('adopt: no project scope is active');
-    stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
+    stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp });
     // Make signing possible going forward (future confirm/recheck can mint signed verifies), but
     // do NOT sign or bless any pre-existing record: adoption must never launder an unsigned,
     // pre-seeded elevated assert into a Verified one. R1's replay clamp already demotes such a
@@ -823,7 +829,7 @@ export class MemoryStore {
    *  line as §10 specifies), so an unrelated corrupt line must never brick it (finding 2). */
   private resolveEraseTarget(id: string, scope: MemoryScope | undefined, permanent: boolean): LedgerPath | null {
     const p = this.opts.project;
-    const projectActive = !!p && isOwned(p.root, p.home);
+    const projectActive = !!p && isOwned(p.root, this.homeDir());
     if (scope) {
       const ledger = scope === 'global' || !p ? this.global
         : (projectActive ? p.ledger : (() => { throw new Error('erase: project ledger not owned — adopt it (helix_memory_adopt) then erase, or remove it'); })());
@@ -914,7 +920,7 @@ export class MemoryStore {
   healWitness(): void {
     const p = this.opts.project;
     const scopes: Array<{ ledger: LedgerPath; root: string | undefined }> = [{ ledger: this.global, root: undefined }];
-    if (p && isOwned(p.root, p.home)) scopes.push({ ledger: p.ledger, root: p.root });
+    if (p && isOwned(p.root, this.homeDir())) scopes.push({ ledger: p.ledger, root: p.root });
     const home = this.homeDir();
     for (const s of scopes) {
       if (!existsSync(dirname(s.ledger))) continue;   // no scope dir => no witness state => nothing to heal

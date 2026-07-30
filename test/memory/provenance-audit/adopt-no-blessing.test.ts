@@ -23,7 +23,7 @@ describe('probe (a): adopt() blesses nothing pre-existing', () => {
 
     const store = new MemoryStore(global, {
       sessionId: 's', home, now: () => CLK, genId: () => 'm_1',
-      project: { ledger: projLedger, root, home },
+      project: { ledger: projLedger, root },
     });
     store.adopt(); // stamps ownership + ensures master; must NOT sign the planted row
     const live = store.inspect().find((s) => s.record.id === 'planted');
@@ -43,7 +43,7 @@ describe('probe (a): adopt() blesses nothing pre-existing', () => {
     let n = 0;
     const store = new MemoryStore(global, {
       sessionId: 's', home, now: () => CLK, genId: () => 'm_' + (++n),
-      project: { ledger: projLedger, root, home },
+      project: { ledger: projLedger, root },
     });
     store.adopt(); // same setup as probe (a): stamps ownership + ensures master
 

@@ -1,7 +1,7 @@
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, win32 as winPath } from 'node:path';
+import { join, win32 as winPath } from 'node:path';
 import { promisify } from 'node:util';
 import { isArgvSafeModel, MAX_TIMEOUT_MS } from '../config.js';
 import { sweepScratchRoot, ensureScratchRoot } from './scratch-gc.js';

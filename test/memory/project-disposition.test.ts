@@ -31,7 +31,7 @@ describe('project disposition snapshot (B1)', () => {
     try {
       const ledger = join(root, '.helix', 'memory.jsonl');
       const store = new MemoryStore(join(home, 'memory.jsonl'),
-        { home, sessionId: 't', project: { ledger, root, home } });
+        { home, sessionId: 't', project: { ledger, root } });
       store.adopt(); // stamps ownership explicitly (team-shared-ledger flow)
       store.commit({ content: 'bravo project fact', source: 'user', scope: 'project' });
       const items = store.recall('bravo project fact').items;
@@ -54,7 +54,7 @@ describe('project disposition snapshot (B1)', () => {
         reverifyTrigger: null, classification: 'normal',
       }) + '\n');
       const store = new MemoryStore(join(home, 'memory.jsonl'),
-        { home, sessionId: 't', project: { ledger, root, home } });
+        { home, sessionId: 't', project: { ledger, root } });
 
       // Read half: unadopted-present is excluded from recall, same as pre-B1 behavior.
       expect(store.recall('charlie foreign fact').items).toEqual([]);
@@ -73,7 +73,7 @@ describe('project disposition snapshot (B1)', () => {
       const ledger = join(root, '.helix', 'memory.jsonl');
       // Project layer configured but nothing on disk yet — no .helix dir, no ledger file.
       const store = new MemoryStore(join(home, 'memory.jsonl'),
-        { home, sessionId: 't', project: { ledger, root, home } });
+        { home, sessionId: 't', project: { ledger, root } });
       // Disjoint vocabulary from the project fact below — recall's synonym expansion must not bridge
       // unrelated concrete nouns, so each query stays a clean single-record match.
       store.commit({ content: 'umbrella pancake giraffe', source: 'user', scope: 'global' });

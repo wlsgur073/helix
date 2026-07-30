@@ -35,7 +35,7 @@ function layeredStore(root: string, home: string): MemoryStore {
   let n = 0;
   return new MemoryStore(join(home, 'memory.jsonl'), {
     home, sessionId: 't', genId: () => `m_${++n}`,
-    project: { ledger: foreignLedgerPath(root), root, home },
+    project: { ledger: foreignLedgerPath(root), root },
   });
 }
 
@@ -215,7 +215,7 @@ describe('unadopted-ledger disclosure note (B2)', () => {
         let n = 0;
         const store = new MemoryStore(join(home, 'memory.jsonl'), {
           home, sessionId: 't', genId: () => `m_${++n}`, metricsSink: sink,
-          project: { ledger: foreignLedgerPath(root), root, home }, // configured; nothing on disk yet
+          project: { ledger: foreignLedgerPath(root), root }, // configured; nothing on disk yet
         });
         // scope: 'global' is load-bearing: an unscoped commit here would auto-stamp project ownership
         // on first use (nothing is on disk yet, so targetLedger's claim-on-first-use path fires) and

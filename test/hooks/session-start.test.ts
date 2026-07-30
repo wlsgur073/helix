@@ -25,7 +25,7 @@ describe('session-start gatherScopedRecords (verifying auto-load)', () => {
     let n = 0;
     const store = new MemoryStore(globalLedger, {
       sessionId: 's', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
-      genStamp: () => 'STAMP', home, project: { ledger: projLedger, root: proj, home },
+      genStamp: () => 'STAMP', home, project: { ledger: projLedger, root: proj },
     });
     const genuine = store.commit({ content: 'this repo deploys on fly.io', scope: 'project', source: 'user' });
     store.confirm(genuine.id); // signed Verified (key now present)

@@ -89,7 +89,7 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
         let n = 0;
         const store = new MemoryStore(globalLedger, {
           home, sessionId: 't', now: () => FIXED, genId: () => `m_${++n}`,
-          project: { ledger: projLedger, root, home },
+          project: { ledger: projLedger, root },
         });
         store.commit({ content: 'global already witnessed fact', scope: 'global', source: 'user' });
         expect(readScopeWitness(home, '@global').entry).not.toBeNull(); // global: already past first-contact
@@ -162,7 +162,7 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
         let n = 0;
         const store = new MemoryStore(join(home, 'memory.jsonl'), {
           home, sessionId: 't', now: () => FIXED, genId: () => `m_${++n}`,
-          project: { ledger: projLedger, root, home },
+          project: { ledger: projLedger, root },
         });
         store.commit({ content: 'project fact one (older era)', scope: 'project', source: 'user' });
         const olderClone = readFileSync(projLedger); // snapshot: what a clone taken right now would see
@@ -184,7 +184,7 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
 
         const store2 = new MemoryStore(join(home2, 'memory.jsonl'), {
           home: home2, sessionId: 't', now: () => FIXED,
-          project: { ledger: projLedger, root, home: home2 },
+          project: { ledger: projLedger, root },
         });
         const res = store2.recall('project fact');
         expect(res.witnessNotes).toContain(WITNESS_MISMATCH_NOTE);
@@ -382,7 +382,7 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
         let n = 0;
         const store = new MemoryStore(join(home, 'memory.jsonl'), {
           home, sessionId: 't', now: () => FIXED, genId: () => `m_${++n}`,
-          project: { ledger: projLedger, root, home },
+          project: { ledger: projLedger, root },
         });
         const g = store.commit({ content: 'global keepme fact', scope: 'global', source: 'user' });
         store.commit({ content: 'project seed UNIQUEFORKZ', scope: 'project', source: 'user' });
@@ -420,7 +420,7 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
         let n = 0;
         const store = new MemoryStore(globalLedger, {
           home, sessionId: 't', now: () => FIXED, genId: () => `m_${++n}`,
-          project: { ledger: projLedger, root, home },
+          project: { ledger: projLedger, root },
         });
 
         // Global: a genuinely Verified row, then fork a DIFFERENT trailing fact (same length) so the

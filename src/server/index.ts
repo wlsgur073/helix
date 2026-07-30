@@ -31,7 +31,7 @@ const projectActive = existsSync(join(projectRoot, '.helix'))
   // realpath, not textual resolve: a symlinked .helix that points the project ledger AT the global
   // ledger is ONE physical file — treat it as a collision and stay global-only.
   && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
-const project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : undefined;
+const project = projectActive ? { ledger: projectLedger, root: projectRoot } : undefined;
 
 // One config load drives both the store's metrics sink and the server deps. The real sink writes
 // content-free records to ~/.helix/metrics.jsonl, gated by config.metrics.enabled (noop when off).

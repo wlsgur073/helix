@@ -242,7 +242,7 @@ function tmpLayered() {
   let n = 0;
   const store = new MemoryStore(globalLedger, {
     home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
-    genStamp: () => 'STAMP', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj, home },
+    genStamp: () => 'STAMP', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj },
   });
   return { store, home, proj, globalLedger };
 }

@@ -36,7 +36,7 @@ describe('recall scope tagging under a cross-scope id collision', () => {
       stampOwnership(projectRoot, home, { genStamp: () => 'collide-stamp' });
 
       const store = new MemoryStore(join(home, 'memory.jsonl'), {
-        home, sessionId: 't', project: { ledger: projectLedgerPath(projectRoot), root: projectRoot, home },
+        home, sessionId: 't', project: { ledger: projectLedgerPath(projectRoot), root: projectRoot },
       });
       const items = store.recall('zebra quintessential contract').items;
 

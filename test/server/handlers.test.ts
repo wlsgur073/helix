@@ -194,7 +194,7 @@ function layeredStore() {
   let n = 0;
   const s = new MemoryStore(join(home, 'memory.jsonl'), {
     home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
-    genStamp: () => 'S', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj, home },
+    genStamp: () => 'S', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj },
   });
   return { store: s, home, proj };
 }

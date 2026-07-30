@@ -94,7 +94,7 @@ const main = (): void => {
   const projectRoot = join(snapshotDir, 'proj');
   const store = new MemoryStore(join(home, 'memory.jsonl'), {
     home, sessionId: 'classify-o67', now: () => '2026-01-01T00:00:00.000Z',
-    project: { ledger: projectLedgerPath(projectRoot), root: projectRoot, home },
+    project: { ledger: projectLedgerPath(projectRoot), root: projectRoot },
   });
   // Snapshot preconditions, once, before any probe: identity uniqueness is a corpus property (a
   // per-probe check sits behind recall's relevance filter and would miss it), an unreadable ledger

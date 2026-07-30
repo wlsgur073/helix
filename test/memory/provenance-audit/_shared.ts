@@ -14,7 +14,7 @@ export function projectStore() {
   let n = 0;
   const store = new MemoryStore(global, {
     sessionId: 's', home, now: () => CLK, genId: () => `m_${++n}`,
-    project: { ledger: projLedger, root, home },
+    project: { ledger: projLedger, root },
   });
   store.adopt();
   return { store, global, projLedger, home, root };

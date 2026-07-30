@@ -75,7 +75,7 @@ describe('recall cache invalidation matrix', () => {
     const proj = mkdtempSync(join(tmpdir(), 'helix-inval-proj-'));
     try {
       const store = new MemoryStore(join(home, 'memory.jsonl'),
-        { home, sessionId: 't', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj, home } });
+        { home, sessionId: 't', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj } });
       store.commit({ content: 'deploy timeout config', scope: 'project', source: 'user' }); // claims ownership
       expect(ids(store, 'timeout').length).toBe(1);        // warm: project row present
       // Revoke ownership by dropping the home registry entry -> isOwned() flips to false.
@@ -96,7 +96,7 @@ describe('recall cache invalidation matrix', () => {
           provenance: { source: 'user', sessionId: 'x' }, supersedes: null, blastRadius: null,
           reverifyTrigger: null, classification: 'normal' }) + '\n');
       const store = new MemoryStore(join(home, 'memory.jsonl'),
-        { home, sessionId: 't', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj, home } });
+        { home, sessionId: 't', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj } });
       expect(ids(store, 'timeout')).toEqual([]);           // warm: unowned project ignored on read
       store.adopt();                                       // trust the project ledger's current contents
       expect(ids(store, 'timeout').length).toBe(1);        // key grows to include project -> MISS -> row included

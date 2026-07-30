@@ -10,7 +10,7 @@
  *
  *  Production-faithful dual-scope construction (task-2 review fix): mirrors src/server/index.ts's own
  *  store wiring exactly — globalLedger = <home>/memory.jsonl; project = { ledger:
- *  <projectRoot>/.helix/memory.jsonl, root: projectRoot, home }. Ranks are measured against the SAME
+ *  <projectRoot>/.helix/memory.jsonl, root: projectRoot }. Ranks are measured against the SAME
  *  candidate set production recall serves (global + an OWNED project, merged), not the project ledger
  *  alone. The project scope only participates when `isOwned(projectRoot, home)` is true
  *  (src/memory/ownership.ts) — an un-adopted ledger file reads as 'unadopted-present' and is excluded
@@ -35,7 +35,7 @@ const projectRoot = join(snapshotDir, 'proj');
 const projectLedger = projectLedgerPath(projectRoot);
 const store = new MemoryStore(globalLedger, {
   home, sessionId: 'pilot', now: () => '2026-01-01T00:00:00.000Z',
-  project: { ledger: projectLedger, root: projectRoot, home },
+  project: { ledger: projectLedger, root: projectRoot },
 });
 const results = manifest.probes.map((p) => {
   const items = store.recall(p.query, { maxItems: manifest.k }).items;
