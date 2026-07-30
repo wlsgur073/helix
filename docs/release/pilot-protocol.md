@@ -325,6 +325,35 @@ nine-hour error that silently moves the holdout boundary. Use
 `%aI` explicitly. The v1 method-freeze commit `0eae7dc` authored `2026-07-20T21:31:43+09:00` is
 therefore `2026-07-20T12:31:43.000Z`.
 
+> **Amended 2026-07-30 — the window gained an upper bound.** The invocation above is superseded;
+> it is left visible because it is what the 2026-07-29 verification in this section was run
+> against. `--close` is now **required alongside `--after`**, and the invocation is:
+>
+> ```
+> npx tsx scripts/pilot/generate-manifest.ts --after <tx> --close <tx> <snapshotDir> <out>
+> ```
+>
+> The window is `cutoff < tx ≤ close` — the lower bound strict because the cutoff is the freeze
+> instant and the freeze is not in the holdout, the upper bound inclusive because the close is the
+> window's last moment. Both endpoints must be canonical UTC, and a close at or before the cutoff
+> is refused rather than allowed to yield an empty manifest indistinguishable from a starved
+> window. A holdout manifest now carries **both** `txAfter` and `txClose`.
+>
+> The two bounds do not have the same reach, and the difference is the point. The cutoff narrows
+> the probe SOURCE only, as described above. The close bounds the **entire corpus** — every scope,
+> both the source and the competitor roles — because it stands in for an atomic snapshot taken at
+> the close instant. It is therefore applied to raw ledger rows **before** liveness resolution: a
+> record that did not exist at the close cannot have competed, and a post-close
+> `supersede`/`invalidate`/`erase` must not reach back and close a record that was live at the
+> close. Without that, a snapshot taken late silently admitted post-window records and let
+> post-window closers alter the population retroactively.
+>
+> This is a **v2 requirement**, not a correction to any v1 result: both frozen manifests still
+> regenerate byte-for-byte (51 probes, 28 unambiguous), since the frozen form takes no window at
+> all. Re-running the 2026-07-29 holdout verification under the new interface reproduces the same
+> single record and the same eight query terms, and it needs a **non-binding** close to do so —
+> which is itself the finding: v1's holdout window had no upper bound.
+
 ---
 
 ## 8. Failure semantics and reuse

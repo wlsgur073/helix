@@ -3,7 +3,7 @@
  *  the manifest). Two shapes:
  *
  *    frozen   generate-manifest <snapshotDir> <oracleMd> <mappingJson> <out>
- *    holdout  generate-manifest --after <tx> <snapshotDir> <out>
+ *    holdout  generate-manifest --after <tx> --close <tx> <snapshotDir> <out>
  *
  *  Structure note (C5.1 block 1-4, 2026-07-28): the enumeration was lifted out of module top level
  *  into `buildProbes` behind a `main()` guard. It previously ran on import, so it could not be
@@ -25,6 +25,11 @@
  *  Merging scopes creates a cross-scope id collision surface the project-only set never had, so
  *  identity is handled two ways at once: the term map is keyed by the ROW OBJECT (exact by
  *  construction, never last-wins) and a colliding corpus is refused outright.
+ *
+ *  The window gained its UPPER bound on 2026-07-30 (v2 gate composition §3c): the cutoff had no
+ *  close, so a snapshot taken late admitted post-window records, and post-window closer rows
+ *  retroactively altered liveness. `HoldoutWindow` below carries both endpoints and documents why
+ *  their reach differs.
  *
  *  The only import from `src/` is a TYPE, erased at compile time. That is deliberate: the manifest
  *  stays a pure function of the pilot scripts' own bytes, so the protocol's §9a blob-hash pins
@@ -81,21 +86,54 @@ const canonical = (label: string, value: string | undefined): string => {
   return value;
 };
 
+/** The measurement window, `cutoff < tx ≤ close`.
+ *
+ *  Both endpoints or neither, carried as ONE object rather than two optional strings of the same
+ *  type: adjacent same-typed optional parameters are silently swappable, and this file has already
+ *  shipped one argument-shape defect that overwrote a hash-pinned artifact.
+ *
+ *  The two bounds do not have the same reach, and that asymmetry is the design:
+ *
+ *  - `after` narrows the probe SOURCE only. A record minted before the cutoff still competes for
+ *    rank at scoring time, so dropping it from the denominator would flatter the holdout exactly
+ *    where the holdout is meant to be hardest. The comparison is STRICT: the cutoff is the freeze
+ *    commit's authored time and the freeze itself is not in the holdout.
+ *  - `close` bounds the ENTIRE corpus — every scope, both roles — and is INCLUSIVE, because it is
+ *    the window's last moment rather than the boundary before it. It stands in for an atomic
+ *    snapshot taken at the close instant, which is why it is applied to raw rows BEFORE liveness:
+ *    a row that did not exist yet cannot compete, and a post-close supersede/invalidate/erase must
+ *    not reach back and close a record that was live at the close. */
+export interface HoldoutWindow { after: string; close: string }
+
+const checkWindow = (w: HoldoutWindow): HoldoutWindow => {
+  const after = canonical('cutoff', w.after);
+  const close = canonical('close', w.close);
+  if (close <= after) {
+    throw new Error(`window-never-opens: close ${close} is not after cutoff ${after}. An empty or ` +
+      'inverted window still yields a well-formed manifest — one with zero probes, indistinguishable ' +
+      'afterwards from a window that genuinely accrued nothing');
+  }
+  return { after, close };
+};
+
 /** The frozen enumeration: ledger-side probes, then the mapped oracle entries.
  *
- *  Pure over its inputs — no filesystem — so the cutoff and the denominator can be driven from
- *  tests instead of from a CLI. `txAfter` selects the temporal holdout (`pilot-protocol.md` §7):
- *  ledger records whose `tx` is strictly later than the method-freeze commit's authored time. */
-export const buildProbes = (ledgers: ScopedLedger[], oracle: OracleInput | null, txAfter?: string): Probe[] => {
-  if (txAfter !== undefined && oracle !== null) {
-    throw new Error('holdout-with-oracle: a transaction-time cutoff selects a ledger-only population ' +
-      '(pilot-protocol.md §7). Oracle entries are not ledger records and carry no tx, so no cutoff can date them');
+ *  Pure over its inputs — no filesystem — so the window and the denominator can be driven from
+ *  tests instead of from a CLI. `holdout` selects the temporal holdout (`pilot-protocol.md` §7):
+ *  ledger records whose `tx` falls inside the preregistered window. */
+export const buildProbes = (ledgers: ScopedLedger[], oracle: OracleInput | null, holdout?: HoldoutWindow): Probe[] => {
+  if (holdout !== undefined && oracle !== null) {
+    throw new Error('holdout-with-oracle: a transaction-time window selects a ledger-only population ' +
+      '(pilot-protocol.md §7). Oracle entries are not ledger records and carry no tx, so no window can date them');
   }
+  const win = holdout === undefined ? undefined : checkWindow(holdout);
 
   // Liveness resolves WITHIN a scope: each scope is its own ledger file and a closer never reaches
-  // across them, so merging first would let one scope's supersede row close another's record.
+  // across them, so merging first would let one scope's supersede row close another's record. The
+  // close bound is applied INSIDE that per-scope step and ahead of liveRows — see HoldoutWindow.
   const competitors: ScopedRow[] = ledgers.flatMap(({ scope, rows }) =>
-    liveRows(rows).map((r) => ({ ...r, scope })));
+    liveRows(win === undefined ? rows : rows.filter((r) => canonical('tx', r.tx) <= win.close))
+      .map((r) => ({ ...r, scope })));
 
   const byId = new Map<string, ScopedRow>();
   for (const r of competitors) {
@@ -119,9 +157,10 @@ export const buildProbes = (ledgers: ScopedLedger[], oracle: OracleInput | null,
   };
 
   let source = competitors.filter((r) => r.scope === ENUMERATED_SCOPE);
-  if (txAfter !== undefined) {
-    const after = canonical('cutoff', txAfter);
-    source = source.filter((r) => canonical('tx', r.tx) > after);   // STRICT: the cutoff instant is not in the holdout
+  if (win !== undefined) {
+    // Every tx here is already validated by the close filter above; `canonical` is re-applied
+    // rather than assumed so the lower bound stays correct on its own terms.
+    source = source.filter((r) => canonical('tx', r.tx) > win.after);   // STRICT: the cutoff instant is not in the holdout
   }
 
   const probes: Probe[] = source.map((r) => {
@@ -163,31 +202,43 @@ export const readSnapshot = (snapshotDir: string): ScopedLedger[] => [
 ];
 
 const USAGE = 'usage: generate-manifest <snapshotDir> <oracleMd> <mappingJson> <out>\n' +
-  '       generate-manifest --after <tx> <snapshotDir> <out>';
+  '       generate-manifest --after <tx> --close <tx> <snapshotDir> <out>';
 
 /** Key order is part of the artifact's bytes. The frozen form is exactly `{ k, probes }` and must
- *  stay byte-reproducible, so `txAfter` appears only when a cutoff was actually given — which is
- *  also how a holdout manifest self-identifies. */
-const write = (outPath: string, probes: Probe[], txAfter?: string): void => {
-  writeFileSync(outPath, JSON.stringify(txAfter === undefined ? { k: K, probes } : { k: K, txAfter, probes }, null, 1) + '\n');
+ *  stay byte-reproducible, so the window keys appear only when a window was actually given — which
+ *  is also how a holdout manifest self-identifies. Both endpoints are recorded: the manifest is
+ *  hashed as evidence of the window it was generated for, and a window it cannot state is not
+ *  evidence of one. */
+const write = (outPath: string, probes: Probe[], win?: HoldoutWindow): void => {
+  writeFileSync(outPath, JSON.stringify(win === undefined
+    ? { k: K, probes }
+    : { k: K, txAfter: win.after, txClose: win.close, probes }, null, 1) + '\n');
   const ledgerCount = probes.filter((p) => p.side === 'ledger').length;
   console.log(`probes: ${probes.length} (ledger ${ledgerCount}, oracle ${probes.length - ledgerCount}); unambiguous: ${probes.filter((p) => p.unambiguous).length}`);
 };
 
+/** Pull `--<name> <value>` out of argv, leaving the positionals behind. Flag ORDER is deliberately
+ *  unconstrained; what is constrained is the positional COUNT, which the caller checks exactly. */
+const takeFlag = (argv: string[], name: string): { value?: string; rest: string[] } => {
+  const i = argv.indexOf(name);
+  return i === -1 ? { rest: argv } : { value: argv[i + 1], rest: [...argv.slice(0, i), ...argv.slice(i + 2)] };
+};
+
 const main = (): void => {
   const argv = process.argv.slice(2);
-  const flag = argv.indexOf('--after');
-  if (flag !== -1) {
-    // The holdout form takes NO oracle arguments: "the holdout has no oracle side" is then a
-    // property of the interface rather than a rule someone has to remember. Arity is checked
-    // EXACTLY, not as a minimum — the two shapes overlap such that passing the frozen form's
-    // arguments here would line the oracle path up with the output slot and overwrite a
-    // hash-pinned artifact.
-    const txAfter = argv[flag + 1];
-    const rest = [...argv.slice(0, flag), ...argv.slice(flag + 2)];
-    const [snapshotDir, outPath] = rest;
-    if (rest.length !== 2 || !txAfter || !snapshotDir || !outPath) { console.error(USAGE); process.exit(2); }
-    write(outPath, buildProbes(readSnapshot(snapshotDir), null, txAfter), txAfter);
+  const after = takeFlag(argv, '--after');
+  const close = takeFlag(after.rest, '--close');
+  if (after.value !== undefined || close.value !== undefined) {
+    // The holdout form takes NO oracle arguments and BOTH window endpoints, so "the holdout has no
+    // oracle side" and "the window is bounded at both ends" are properties of the interface rather
+    // than rules someone has to remember — an optional upper bound would leave the unbounded-window
+    // defect one omission away. Arity is checked EXACTLY, not as a minimum: the two shapes overlap
+    // such that passing the frozen form's arguments here would line the oracle path up with the
+    // output slot and overwrite a hash-pinned artifact.
+    const [snapshotDir, outPath] = close.rest;
+    if (!after.value || !close.value || close.rest.length !== 2 || !snapshotDir || !outPath) { console.error(USAGE); process.exit(2); }
+    const win: HoldoutWindow = { after: after.value, close: close.value };
+    write(outPath, buildProbes(readSnapshot(snapshotDir), null, win), win);
     return;
   }
   const [snapshotDir, oraclePath, mappingPath, outPath] = argv;
