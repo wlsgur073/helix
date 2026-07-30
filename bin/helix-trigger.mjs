@@ -1,7 +1,7 @@
 // scripts/trigger-measure.ts
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync4 } from "node:fs";
 import { dirname as dirname3, join as join4 } from "node:path";
-import { homedir as homedir2 } from "node:os";
+import { homedir } from "node:os";
 
 // src/memory/fs-ops.ts
 import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, renameSync, unlinkSync, linkSync, fchmodSync, readdirSync } from "node:fs";
@@ -133,46 +133,7 @@ function isOwned(projectRoot, home) {
 
 // src/config.ts
 import { readFileSync as readFileSync3 } from "node:fs";
-import { homedir } from "node:os";
 import { join as join3 } from "node:path";
-var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
-var EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"];
-var MODES = ["compare", "critique"];
-var STAKES = ["low", "medium", "high", "xhigh"];
-var MODEL_RE = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
-var MODEL_MAX_LEN = 64;
-function isArgvSafeModel(s) {
-  return s.length <= MODEL_MAX_LEN && MODEL_RE.test(s);
-}
-function q(v) {
-  return JSON.stringify(String(v).slice(0, 60));
-}
-var MAX_TIMEOUT_MS = 36e5;
-var DEFAULT_CONFIG = {
-  dualVerify: {
-    enabled: false,
-    mode: "compare",
-    stakesFloor: "high",
-    // Default: inherit the user's ~/.codex/config.toml (no hardcoding, tracks whatever they set
-    // there). Pass -m / -c only when these are set here, to deliberately override codex's own
-    // model/effort for dual-verify specifically.
-    model: null,
-    effort: null,
-    // Codex run timeout (ms). 25 min covers slow-effort runs (max/ultra) end to end — at the old
-    // 5-min default a slow-effort run was routinely tree-killed AFTER the metered quota was spent
-    // (SLOW_EFFORT_TIMEOUT_HINT_MS advises exactly that band). Tree-kill on timeout still bounds a
-    // genuinely hung run; the hard ceiling stays MAX_TIMEOUT_MS.
-    timeoutMs: 15e5,
-    // Block every non-named egress leg to the external Codex model by default. User opts into risk
-    // per-leg (a human edit, outside model control). Invalid/unknown => 'block'. Named secrets are
-    // override-proof regardless of this map.
-    egressPolicy: { memoryEcho: "block", piiHigh: "block", piiBulk: "block", secretHeuristic: "block", secretEntropy: "block" },
-    // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
-    logContent: false
-  },
-  // Local metrics sensor ON by default ("local logs always, export opt-in"); content-free records.
-  metrics: { enabled: true }
-};
 function readJson(path) {
   try {
     return JSON.parse(readFileSync3(path, "utf8"));
@@ -180,64 +141,10 @@ function readJson(path) {
     return null;
   }
 }
-function loadConfig(opts = {}) {
-  const globalPath = opts.globalPath ?? join3(homedir(), ".helix", "config.json");
-  const merged = structuredClone(DEFAULT_CONFIG);
-  const seen = /* @__PURE__ */ new Set();
-  const warn = (msg) => {
-    if (!seen.has(msg)) {
-      seen.add(msg);
-      (opts.warn ?? ((m) => process.stderr.write(m + "\n")))(msg);
-    }
-  };
-  for (const path of opts.projectPath ? [globalPath, opts.projectPath] : [globalPath]) {
-    const raw = readJson(path);
-    const dv = raw?.dualVerify;
-    if (dv) {
-      if (typeof dv.enabled === "boolean") merged.dualVerify.enabled = dv.enabled;
-      if (dv.mode === "compare" || dv.mode === "critique") merged.dualVerify.mode = dv.mode;
-      else if (dv.mode !== void 0) warn(`helix: invalid dualVerify.mode ${q(dv.mode)} (valid: ${MODES.join(", ")}) -> ignored`);
-      if (dv.stakesFloor === "low" || dv.stakesFloor === "medium" || dv.stakesFloor === "high" || dv.stakesFloor === "xhigh") {
-        merged.dualVerify.stakesFloor = dv.stakesFloor;
-      } else if (dv.stakesFloor !== void 0) {
-        warn(`helix: invalid dualVerify.stakesFloor ${q(dv.stakesFloor)} (valid: ${STAKES.join(", ")}) -> ignored`);
-      }
-      if (dv.model === null || typeof dv.model === "string" && isArgvSafeModel(dv.model)) {
-        merged.dualVerify.model = dv.model;
-      } else if (dv.model !== void 0) {
-        warn(`helix: invalid dualVerify.model ${q(dv.model)} (argv-safe token, <= ${MODEL_MAX_LEN} chars) -> ignored`);
-      }
-      if (dv.effort === null || typeof dv.effort === "string" && EFFORTS.includes(dv.effort)) {
-        merged.dualVerify.effort = dv.effort;
-      } else if (dv.effort !== void 0) {
-        warn(`helix: invalid dualVerify.effort ${q(dv.effort)} (valid: ${EFFORTS.join(", ")}) -> ignored`);
-      }
-      const t = dv.timeoutMs;
-      if (typeof t === "number" && Number.isInteger(t) && t >= 1e3) {
-        merged.dualVerify.timeoutMs = Math.min(t, MAX_TIMEOUT_MS);
-      }
-      const ep = dv.egressPolicy;
-      if (ep && typeof ep === "object") {
-        for (const [key, val] of Object.entries(ep)) {
-          if (!EGRESS_LEGS.includes(key)) {
-            warn(`helix: ignoring unknown dualVerify.egressPolicy key ${q(key)}`);
-            continue;
-          }
-          if (val === "allow") merged.dualVerify.egressPolicy[key] = "allow";
-          else if (val !== "block") warn(`helix: invalid dualVerify.egressPolicy.${key} ${q(val)} -> block`);
-        }
-      }
-      if (dv.memoryEgress !== void 0) {
-        warn("helix: dualVerify.memoryEgress was removed; use dualVerify.egressPolicy { memoryEcho, piiHigh, piiBulk, secretHeuristic, secretEntropy }");
-      }
-      if (typeof dv.logContent === "boolean") merged.dualVerify.logContent = dv.logContent;
-    }
-    const m = raw?.metrics;
-    if (m && typeof m === "object" && typeof m.enabled === "boolean") {
-      merged.metrics.enabled = m.enabled;
-    }
-  }
-  return merged;
+function metricsEnabledFromGlobalConfig(home) {
+  const raw = readJson(join3(home, "config.json"));
+  const m = raw?.metrics;
+  return m && typeof m === "object" && typeof m.enabled === "boolean" ? m.enabled : true;
 }
 
 // scripts/trigger-eval.ts
@@ -311,10 +218,9 @@ function evaluateTrigger(input) {
 var POLICY = "T1-2026-07-11";
 var SINK_FILE = "trigger.jsonl";
 var METRICS_FILE = "metrics.jsonl";
-var CONFIG_FILE = "config.json";
 var GLOBAL_LEDGER_FILE = "memory.jsonl";
 function resolveHome(env) {
-  return env.HELIX_HOME ?? join4(homedir2(), ".helix");
+  return env.HELIX_HOME ?? join4(homedir(), ".helix");
 }
 function resolveGlobalLedger(env, home) {
   return env.HELIX_LEDGER ?? join4(home, GLOBAL_LEDGER_FILE);
@@ -376,8 +282,8 @@ function parseMetricsBuffer(buf) {
   }
   return events;
 }
-function resolveMetrics(home, config, readFile) {
-  if (config.metrics.enabled === false) return { state: "disabled", events: null };
+function resolveMetrics(home, readFile) {
+  if (!metricsEnabledFromGlobalConfig(home)) return { state: "disabled", events: null };
   let buf;
   try {
     buf = readFile(join4(home, METRICS_FILE));
@@ -452,8 +358,7 @@ function measureAndRecord(input, deps = {}) {
   const globalLedger = resolveGlobalLedger(env, home);
   const disposition = resolveProjectDisposition(input.root, home, globalLedger);
   const participants = readTwoParticipants(globalLedger, input.root, home, disposition, readFile);
-  const config = loadConfig({ projectPath: join4(input.root, ".helix", CONFIG_FILE), globalPath: join4(home, CONFIG_FILE) });
-  const { state: metricsState, events } = resolveMetrics(home, config, readFile);
+  const { state: metricsState, events } = resolveMetrics(home, readFile);
   const { unknownLines, unknownMaxOps } = summarizeUnknowns(events ?? []);
   const verdict = evaluateTrigger({ participants, metricsState, events });
   const record = {

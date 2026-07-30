@@ -6887,7 +6887,7 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join11, dirname as dirname14 } from "node:path";
+import { join as join11, dirname as dirname13 } from "node:path";
 import { existsSync as existsSync8 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
@@ -15315,13 +15315,13 @@ var MemoryStore = class {
   targetLedger(scope) {
     const p = this.opts.project;
     if (scope === "global" || !p) return this.global;
-    if (!isOwned(p.root, p.home)) {
+    if (!isOwned(p.root, this.homeDir())) {
       if (existsSync3(p.ledger)) {
         throw new Error(
           "commit: a project memory file exists here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it"
         );
       }
-      stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });
+      stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });
     }
     return p.ledger;
   }
@@ -15335,7 +15335,7 @@ var MemoryStore = class {
    *  the next call still sees a fresh, current answer (I4) — only a single call's internal
    *  self-consistency is what this method buys.
    *
-   *  - 'owned': isOwned(p.root, p.home) — true regardless of whether the ledger FILE exists yet (an
+   *  - 'owned': isOwned(p.root, home) — true regardless of whether the ledger FILE exists yet (an
    *    owned project with no ledger file still participates, matching pre-existing behavior).
    *  - 'unadopted-present': project configured, NOT owned, and a ledger file exists at p.ledger — the
    *    exact condition targetLedger() (above) already throws on for commit. The write side keeps its
@@ -15349,7 +15349,8 @@ var MemoryStore = class {
    *  public read call (recall/currentView/historyView/asOfView each do so, then thread the snapshot as
    *  a parameter into every private helper that needs it, never re-invoking this within that call). */
   projectDisposition() {
-    return projectDispositionOf(this.opts.project);
+    const p = this.opts.project;
+    return projectDispositionOf(p && { root: p.root, ledger: p.ledger, home: this.homeDir() });
   }
   /** Verified live records from global + (project iff `disposition === 'owned'`), each tagged with
    *  scope + integrity, plus whether a master key was available for EVERY scope read
@@ -15560,7 +15561,7 @@ var MemoryStore = class {
   ledgerOf(id) {
     const p = this.opts.project;
     const inGlobal = this.verifiedOf(this.global).live.has(id);
-    const inProject = !!p && isOwned(p.root, p.home) && this.verifiedOf(p.ledger).live.has(id);
+    const inProject = !!p && isOwned(p.root, this.homeDir()) && this.verifiedOf(p.ledger).live.has(id);
     if (inGlobal && inProject) throw new Error("ledgerOf: id live in more than one scope \u2014 ambiguous");
     if (inProject) return p.ledger;
     return this.global;
@@ -15761,7 +15762,7 @@ var MemoryStore = class {
   adopt() {
     const p = this.opts.project;
     if (!p) throw new Error("adopt: no project scope is active");
-    stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
+    stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp });
     ensureMaster(this.homeDir());
   }
   /** Which marker family an id belongs to, or null for a normal id. `integrity_marker`/
@@ -15791,7 +15792,7 @@ var MemoryStore = class {
    *  line as §10 specifies), so an unrelated corrupt line must never brick it (finding 2). */
   resolveEraseTarget(id, scope, permanent) {
     const p = this.opts.project;
-    const projectActive2 = !!p && isOwned(p.root, p.home);
+    const projectActive2 = !!p && isOwned(p.root, this.homeDir());
     if (scope) {
       const ledger = scope === "global" || !p ? this.global : projectActive2 ? p.ledger : (() => {
         throw new Error("erase: project ledger not owned \u2014 adopt it (helix_memory_adopt) then erase, or remove it");
@@ -15879,7 +15880,7 @@ var MemoryStore = class {
   healWitness() {
     const p = this.opts.project;
     const scopes = [{ ledger: this.global, root: void 0 }];
-    if (p && isOwned(p.root, p.home)) scopes.push({ ledger: p.ledger, root: p.root });
+    if (p && isOwned(p.root, this.homeDir())) scopes.push({ ledger: p.ledger, root: p.root });
     const home2 = this.homeDir();
     for (const s of scopes) {
       if (!existsSync3(dirname8(s.ledger))) continue;
@@ -25171,7 +25172,7 @@ var realCodexRunner = createCodexRunner();
 
 // src/metrics.ts
 import { appendFileSync, mkdirSync as mkdirSync9 } from "node:fs";
-import { dirname as dirname13 } from "node:path";
+import { dirname as dirname12 } from "node:path";
 import { randomUUID as randomUUID2 } from "node:crypto";
 var noopMetricsSink = {
   emitReplay: () => {
@@ -25183,7 +25184,7 @@ var noopMetricsSink = {
 function createMetricsSink(path, enabled, deps = {}) {
   if (!enabled) return noopMetricsSink;
   const append = deps.append ?? ((p, line) => {
-    mkdirSync9(dirname13(p), { recursive: true });
+    mkdirSync9(dirname12(p), { recursive: true });
     appendFileSync(p, line, { mode: 384 });
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
@@ -25400,7 +25401,7 @@ var globalLedger = process.env.HELIX_LEDGER ?? join11(home, "memory.jsonl");
 var projectRoot = process.cwd();
 var projectLedger = join11(projectRoot, ".helix", "memory.jsonl");
 var projectActive = existsSync8(join11(projectRoot, ".helix")) && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
-var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
+var project = projectActive ? { ledger: projectLedger, root: projectRoot } : void 0;
 var config2 = loadConfig({ globalPath: join11(home, "config.json") });
 if (existsSync8(join11(projectRoot, ".helix", "config.json"))) {
   process.stderr.write(`helix: NOTE - ${join11(projectRoot, ".helix", "config.json")} is not read; dual-verify, egress and logging settings come only from ${join11(home, "config.json")}
@@ -25413,7 +25414,7 @@ if (stray.length > 0) {
     // ASCII only
     `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME.
   found next to the ledger: ${stray.join(", ")}
-  ledger directory        : ${dirname14(globalLedger)}
+  ledger directory        : ${dirname13(globalLedger)}
   HELIX_HOME              : ${home}
 These were created by an older version, which derived the trust store's location from HELIX_LEDGER.
 The signing key now always lives under HELIX_HOME, so starting would mint a NEW key and silently

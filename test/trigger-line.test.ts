@@ -361,12 +361,28 @@ describe('measureAndRecord (end-to-end)', () => {
     expect(record.legs.rows.min).toBe(1 + 3);
   });
 
-  it('cwd-independence: config loads from the explicit --root path, not process.cwd() (the loader pin)', () => {
+  // The metrics leg measures ~/.helix/metrics.jsonl — a GLOBAL file — so whether it is enabled is a
+  // global question. Reading that switch from the measured repository let a checkout suppress the
+  // measurement that backs the storage-migration decision, and it disagreed with both other readers:
+  // the server and the SessionStart hook already resolve it global-only.
+  it('a measured repo cannot switch off the global metrics leg', () => {
     const home = tmpHome();
     const root = tmpProj();
-    stampOwnership(root, home, { genStamp: () => 'stamp-cwd' });
+    stampOwnership(root, home, { genStamp: () => 'stamp-repo-off' });
     mkdirSync(join(root, '.helix'), { recursive: true });
     writeFileSync(join(root, '.helix', 'config.json'), JSON.stringify({ metrics: { enabled: false } }));
+    const line = captureStdout(() =>
+      measureAndRecord({ root, run: 'r', serviceResult: null, exitCode: null, exitStatus: null }, { env: { HELIX_HOME: home } }),
+    );
+    expect(JSON.parse(line).metricsState).not.toBe('disabled');
+  });
+
+  it('the GLOBAL config still switches the metrics leg off, from any working directory', () => {
+    const home = tmpHome();
+    const root = tmpProj();
+    stampOwnership(root, home, { genStamp: () => 'stamp-global-off' });
+    writeFileSync(join(home, 'config.json'), JSON.stringify({ metrics: { enabled: false } }));
+    // Run from an unrelated directory: the switch is resolved from HELIX_HOME, never from cwd.
     const elsewhere = mkdtempSync(join(tmpdir(), 'helix-trigger-elsewhere-'));
     const prevCwd = process.cwd();
     process.chdir(elsewhere);
@@ -374,8 +390,7 @@ describe('measureAndRecord (end-to-end)', () => {
       const line = captureStdout(() =>
         measureAndRecord({ root, run: 'r', serviceResult: null, exitCode: null, exitStatus: null }, { env: { HELIX_HOME: home } }),
       );
-      const record = JSON.parse(line);
-      expect(record.metricsState).toBe('disabled');
+      expect(JSON.parse(line).metricsState).toBe('disabled');
     } finally {
       process.chdir(prevCwd);
     }
