@@ -406,11 +406,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants);
+          this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -427,10 +427,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants);
+        this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -491,8 +491,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants) {
-        this.code = optimizeExpr(this.code, names, constants);
+      optimizeNames(names, constants2) {
+        this.code = optimizeExpr(this.code, names, constants2);
         return this;
       }
       get names() {
@@ -521,12 +521,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants))
+          if (n.optimizeNames(names, constants2))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -579,12 +579,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants);
-        if (!(super.optimizeNames(names, constants) || this.else))
+        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants2);
+        if (!(super.optimizeNames(names, constants2) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants);
+        this.condition = optimizeExpr(this.condition, names, constants2);
         return this;
       }
       get names() {
@@ -607,10 +607,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants);
+        this.iteration = optimizeExpr(this.iteration, names, constants2);
         return this;
       }
       get names() {
@@ -646,10 +646,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants);
+        this.iterable = optimizeExpr(this.iterable, names, constants2);
         return this;
       }
       get names() {
@@ -691,11 +691,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a, _b;
-        super.optimizeNames(names, constants);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants);
+        super.optimizeNames(names, constants2);
+        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants2);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants2);
         return this;
       }
       get names() {
@@ -996,7 +996,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants) {
+    function optimizeExpr(expr, names, constants2) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -1011,14 +1011,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants[n.str];
+        const c = constants2[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants2[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -13013,7 +13013,7 @@ var StdioServerTransport = class {
 
 // src/memory/store.ts
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync3, readFileSync as readFileSync9, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync3, readFileSync as readFileSync8, statSync as statSync3 } from "node:fs";
 import { dirname as dirname8 } from "node:path";
 
 // src/memory/ledger.ts
@@ -13168,6 +13168,17 @@ function isStopword(w) {
 function meaningfulTokens(tokens) {
   return tokens.filter((t) => !isStopword(t));
 }
+var MAX_QUERY_CHARS = 2048;
+var MAX_QUERY_TERMS = 128;
+function assertQueryWithinBounds(query) {
+  if (query.length > MAX_QUERY_CHARS) {
+    throw new Error(`recall: query is too long (${query.length} characters; the limit is ${MAX_QUERY_CHARS})`);
+  }
+  const distinct = new Set(meaningfulTokens(tokenize(query))).size;
+  if (distinct > MAX_QUERY_TERMS) {
+    throw new Error(`recall: query has too many distinct terms (${distinct}; the limit is ${MAX_QUERY_TERMS})`);
+  }
+}
 var INFLECTION_SUFFIXES = /* @__PURE__ */ new Set(["s", "es", "d", "ed", "ing"]);
 var ASCII_TERM = /^[a-z0-9]+$/;
 function inflectionRescue(t, docTokens) {
@@ -13300,9 +13311,12 @@ function rankWithArtifacts(records, artifacts, query, opts = {}) {
   const { idx, docs } = artifacts;
   const rawBm = /* @__PURE__ */ new Map();
   for (const r of records) rawBm.set(r.id, bm25Score(r.id, qMeaning, idx));
-  const vals = [...rawBm.values()];
-  const max = Math.max(...vals);
-  const min = Math.min(...vals);
+  let max = -Infinity;
+  let min = Infinity;
+  for (const v of rawBm.values()) {
+    if (v > max) max = v;
+    if (v < min) min = v;
+  }
   const bm25norm = (id) => max === min ? 0 : (rawBm.get(id) - min) / (max - min);
   const semGate = opts.semGate ?? 0;
   const scored = records.map((r, i) => {
@@ -14830,9 +14844,35 @@ function redactSecrets(content, spans) {
 }
 
 // src/memory/reality-check.ts
-import { existsSync as existsSync2, readFileSync as readFileSync7, statSync as statSync3 } from "node:fs";
+import { existsSync as existsSync2, openSync as openSync4, fstatSync as fstatSync2, readSync as readSync2, closeSync as closeSync4, constants } from "node:fs";
 var INDETERMINATE = { ran: false, indeterminate: true, passed: false };
 var MAX_FILE_BYTES = 5e6;
+function containsBounded(path, pattern) {
+  let fd = null;
+  try {
+    fd = openSync4(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    const st = fstatSync2(fd);
+    if (!st.isFile()) return INDETERMINATE;
+    if (st.size > MAX_FILE_BYTES) return INDETERMINATE;
+    const cap = Math.min(st.size, MAX_FILE_BYTES) + 1;
+    const buf = Buffer.alloc(cap);
+    let len = 0;
+    for (; ; ) {
+      const n = readSync2(fd, buf, len, cap - len, null);
+      if (n === 0) break;
+      len += n;
+      if (len === cap) return INDETERMINATE;
+    }
+    return { ran: true, indeterminate: false, passed: buf.subarray(0, len).toString("utf8").includes(pattern) };
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync4(fd);
+      } catch {
+      }
+    }
+  }
+}
 function runRealityCheck(check2) {
   try {
     switch (check2.kind) {
@@ -14843,9 +14883,7 @@ function runRealityCheck(check2) {
       case "file-contains": {
         if (typeof check2.path !== "string" || typeof check2.pattern !== "string") return INDETERMINATE;
         if (!existsSync2(check2.path)) return INDETERMINATE;
-        if (statSync3(check2.path).size > MAX_FILE_BYTES) return INDETERMINATE;
-        const text = readFileSync7(check2.path, "utf8");
-        return { ran: true, indeterminate: false, passed: text.includes(check2.pattern) };
+        return containsBounded(check2.path, check2.pattern);
       }
       default:
         return INDETERMINATE;
@@ -14864,7 +14902,7 @@ function checkBinding(content, check2) {
 }
 
 // src/memory/expansion.ts
-import { readFileSync as readFileSync8 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 import { fileURLToPath } from "node:url";
 var EXP_THETA = 0.5;
 var EXP_K = 8;
@@ -14896,7 +14934,7 @@ function defaultExpansion() {
   let txt;
   for (const u of candidates) {
     try {
-      txt = readFileSync8(fileURLToPath(u), "utf8");
+      txt = readFileSync7(fileURLToPath(u), "utf8");
       break;
     } catch {
     }
@@ -15433,7 +15471,7 @@ var MemoryStore = class {
       let mtimeMs = 0;
       let totalBytes = 0;
       try {
-        const st = statSync4(r.ledger);
+        const st = statSync3(r.ledger);
         mtimeMs = st.mtimeMs;
         totalBytes = st.size;
       } catch {
@@ -15476,6 +15514,7 @@ var MemoryStore = class {
     }
   }
   recall(query, opts = {}) {
+    assertQueryWithinBounds(query);
     const disposition = this.projectDisposition();
     const { scoped, available, artifacts, verdicts } = this.recallInput(disposition);
     const excluded = /* @__PURE__ */ new Set();
@@ -15764,7 +15803,7 @@ var MemoryStore = class {
       for (const c of candidates) {
         let text;
         try {
-          text = readFileSync9(c, "utf8");
+          text = readFileSync8(c, "utf8");
         } catch (err) {
           if (err.code === "ENOENT") continue;
           throw err;
@@ -23968,7 +24007,7 @@ var EMPTY_COMPLETION_RESULT = {
 };
 
 // src/config.ts
-import { readFileSync as readFileSync10 } from "node:fs";
+import { readFileSync as readFileSync9 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join6 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
@@ -24021,7 +24060,7 @@ var DEFAULT_CONFIG = {
 };
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync10(path, "utf8"));
+    return JSON.parse(readFileSync9(path, "utf8"));
   } catch {
     return null;
   }
@@ -24421,38 +24460,38 @@ async function dualVerify(params, deps) {
 }
 
 // src/audit.ts
-import { mkdirSync as mkdirSync6, openSync as openSync4, existsSync as existsSync4, fsyncSync as fsyncSync4, closeSync as closeSync4 } from "node:fs";
+import { mkdirSync as mkdirSync6, openSync as openSync5, existsSync as existsSync4, fsyncSync as fsyncSync4, closeSync as closeSync5 } from "node:fs";
 import { dirname as dirname9 } from "node:path";
 function appendAudit(path, event) {
   mkdirSync6(dirname9(path), { recursive: true });
   const isNew = !existsSync4(path);
-  const fd = openSync4(path, "a");
+  const fd = openSync5(path, "a");
   try {
     writeAll(realFsOps, fd, JSON.stringify(event) + "\n");
     fsyncSync4(fd);
   } finally {
-    closeSync4(fd);
+    closeSync5(fd);
   }
   if (isNew) fsyncDir(dirname9(path));
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync12 } from "node:fs";
+import { readFileSync as readFileSync11 } from "node:fs";
 
 // src/codex-log.ts
-import { mkdirSync as mkdirSync7, readFileSync as readFileSync11, writeFileSync as writeFileSync2, openSync as openSync5, writeSync as writeSync3, closeSync as closeSync5 } from "node:fs";
+import { mkdirSync as mkdirSync7, readFileSync as readFileSync10, writeFileSync as writeFileSync2, openSync as openSync6, writeSync as writeSync3, closeSync as closeSync6 } from "node:fs";
 import { dirname as dirname10 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
   try {
     mkdirSync7(dirname10(path), { recursive: true });
-    const fd = openSync5(path, "a", 384);
+    const fd = openSync6(path, "a", 384);
     try {
       writeSync3(fd, JSON.stringify(entry) + "\n");
     } finally {
-      closeSync5(fd);
+      closeSync6(fd);
     }
-    const lines = readFileSync11(path, "utf8").split("\n").filter((l) => l !== "");
+    const lines = readFileSync10(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
       writeFileSync2(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
@@ -24596,7 +24635,7 @@ function handleConfirm(store2, args, deps) {
 }
 function codexLogCount(path) {
   try {
-    return readFileSync12(path, "utf8").split("\n").filter((l) => l !== "").length;
+    return readFileSync11(path, "utf8").split("\n").filter((l) => l !== "").length;
   } catch {
     return 0;
   }
@@ -24754,13 +24793,13 @@ async function handleDualVerify(args, deps) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync6, mkdirSync as mkdirSync8, mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync6, mkdirSync as mkdirSync8, mkdtempSync, readFileSync as readFileSync12, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join8, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync5, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { existsSync as existsSync5, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync4, rmSync as rmSync2, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join7 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
@@ -24780,7 +24819,7 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     const stampPath = join7(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
-      stampMtimeMs = statSync5(stampPath).mtimeMs;
+      stampMtimeMs = statSync4(stampPath).mtimeMs;
     } catch {
       stampMtimeMs = null;
     }
@@ -25000,7 +25039,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
       }
       let answer = "";
       try {
-        answer = readFileSync13(outFile, "utf8").trim();
+        answer = readFileSync12(outFile, "utf8").trim();
       } catch {
       }
       return answer ? { ok: true, answer } : { ok: false, error: "codex produced no output" };
@@ -25160,7 +25199,11 @@ function buildServer(store2, dualDeps, metrics2) {
   server2.registerTool("helix_memory_recall", {
     title: "Recall memory",
     description: "Recall relevant memory as a DATA-only block; flags items needing re-verification.",
-    inputSchema: { query: external_exports.string(), maxItems: external_exports.number().int().positive().optional() }
+    // The character bound is declared here as well as enforced in the store, so an oversized query
+    // is refused by schema validation before it reaches a handler at all — the same bounded-input
+    // discipline `maxItems` and `asOf` already get. The store keeps the authoritative check (it also
+    // bounds distinct TERMS, which needs the tokenizer) for callers that do not come through MCP.
+    inputSchema: { query: external_exports.string().max(MAX_QUERY_CHARS), maxItems: external_exports.number().int().positive().optional() }
   }, async (args) => m.runOp("helix_memory_recall", () => handleRecall(store2, args)));
   server2.registerTool("helix_memory_inspect", {
     title: "Inspect memory",

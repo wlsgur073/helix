@@ -13,7 +13,7 @@ import { findSecrets, redactSecrets } from './secret-scan.js';
 import { canCommit, isVerifyingSource, resolveTransition, type TransitionResult, type VerifyOutcome } from './firewall.js';
 import { runRealityCheck, checkBinding, type RealityCheck } from './reality-check.js';
 import { type RecallOptions } from './projection.js';
-import { rankWithArtifacts, buildRankArtifacts, type Expansion } from './retrieval.js';
+import { rankWithArtifacts, buildRankArtifacts, assertQueryWithinBounds, type Expansion } from './retrieval.js';
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce, collectWitnessNotes } from './content-frame.js';
@@ -496,6 +496,10 @@ export class MemoryStore {
   }
 
   recall(query: string, opts: RecallOptions = {}): RecallResult {
+    // Bound the query BEFORE any ledger read: this is the one always-available tool surface, so the
+    // cheap check has to come before the expensive work it is protecting (parse + projection +
+    // rank), not beside it.
+    assertQueryWithinBounds(query);
     // B2: ONE disposition snapshot for this whole call, computed BEFORE consulting the rank cache and
     // never memoized in it — recallInput's key vector covers only PARTICIPATING scopes, so a foreign
     // unadopted ledger appearing/disappearing never changes the key and can serve a cache HIT; this

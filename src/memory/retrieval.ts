@@ -71,6 +71,32 @@ export function meaningfulTokens(tokens: string[]): string[] {
   return tokens.filter((t) => !isStopword(t));
 }
 
+/** Bounds on a caller-supplied recall query. Ranking costs O(distinct query terms x live records),
+ *  and `helix_memory_recall` is always on the agent tool surface with no configuration in front of
+ *  it — so an uncapped query is the most directly injection-reachable way to block the
+ *  single-threaded server. They live here, beside the tokenizer, because "term" is defined here.
+ *
+ *  BOTH bind, and neither alone is enough: a character cap still admits a query made of very many
+ *  short (or CJK) tokens, while a term cap alone would pay for tokenizing an arbitrarily large
+ *  string before it could count anything. The character cap is checked first for that reason.
+ *
+ *  These are deliberately far above any legitimate query — a recall query is a phrase, not a
+ *  document — and the far side of them is measured in tens of seconds of total unavailability. */
+export const MAX_QUERY_CHARS = 2_048;
+export const MAX_QUERY_TERMS = 128;
+
+/** Throw unless `query` is within both bounds. REJECTS rather than truncating: a silently shortened
+ *  query returns answers to a question the caller did not ask, and the caller cannot tell. */
+export function assertQueryWithinBounds(query: string): void {
+  if (query.length > MAX_QUERY_CHARS) {
+    throw new Error(`recall: query is too long (${query.length} characters; the limit is ${MAX_QUERY_CHARS})`);
+  }
+  const distinct = new Set(meaningfulTokens(tokenize(query))).size;
+  if (distinct > MAX_QUERY_TERMS) {
+    throw new Error(`recall: query has too many distinct terms (${distinct}; the limit is ${MAX_QUERY_TERMS})`);
+  }
+}
+
 // 2026-07 matcher-asymmetry repair (spec 2026-07-21). Two support-gated rescue matchers for
 // query terms the exact/forward-prefix matcher misses. Both are ASCII-only (R3-3: the tokenizer
 // routes ALL non-CJK scripts into the latin run, and the stopword guard only knows
@@ -350,9 +376,13 @@ export function rankWithArtifacts(records: MemoryRecord[], artifacts: RankArtifa
   // claimed on the strength of those two fixes.
   const rawBm = new Map<string, number>();
   for (const r of records) rawBm.set(r.id, bm25Score(r.id, qMeaning, idx));
-  const vals = [...rawBm.values()];
-  const max = Math.max(...vals);
-  const min = Math.min(...vals);
+  // FOLD, never `Math.max(...vals)`: a spread passes one ARGUMENT per element, so past roughly
+  // 125k rows the engine throws RangeError and recall dies instead of degrading. Folding also has
+  // to happen AFTER the map is complete — folding while populating it would keep the extrema of
+  // values a duplicate id later overwrote.
+  let max = -Infinity;
+  let min = Infinity;
+  for (const v of rawBm.values()) { if (v > max) max = v; if (v < min) min = v; }
   const bm25norm = (id: string): number => (max === min ? 0 : (rawBm.get(id)! - min) / (max - min));
 
   const semGate = opts.semGate ?? 0;

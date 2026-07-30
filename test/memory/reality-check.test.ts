@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runRealityCheck, checkBinding } from '../../src/memory/reality-check.js';
@@ -64,5 +65,40 @@ describe('runRealityCheck FAIL narrowing', () => {
   it('a MISSING file is indeterminate (not a determinate FAIL) — denies delete->demote', () => {
     const r = runRealityCheck({ kind: 'file-contains', path: '/no/such/file/here.xyz', pattern: 'anything' });
     expect(r).toEqual({ ran: false, indeterminate: true, passed: false });
+  });
+});
+
+// N-RECHECK: the file-contains guard used to check `statSync(path).size` only — reported SIZE, never
+// TYPE. A FIFO, a character device and most of /proc all report size 0, so the guard passed them
+// straight into a synchronous readFileSync on the single-threaded MCP server's thread: a FIFO with
+// no writer blocks open(2) FOREVER, and /dev/zero reads until the process dies. Neither is an I/O
+// *error*, so runRealityCheck's catch never sees them. Reachable because checkBinding only requires
+// the path and pattern to be raw substrings of the item's own content, and an agent can commit that
+// content first.
+const posixOnly = describe.skipIf(process.platform === 'win32');
+posixOnly('file-contains refuses non-regular files', () => {
+  it('returns INDETERMINATE for a FIFO with no writer instead of blocking forever', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'helix-fifo-'));
+    const fifo = join(dir, 'pipe');
+    execFileSync('mkfifo', [fifo]);
+    // The load-bearing assertion is that this CALL RETURNS AT ALL. Before the fix it never did, and
+    // the failure surfaced as the whole test file timing out rather than as a wrong value.
+    expect(runRealityCheck({ kind: 'file-contains', path: fifo, pattern: 'needle' }))
+      .toEqual({ ran: false, indeterminate: true, passed: false });
+  }, 10_000);
+
+  it('returns INDETERMINATE for a character device instead of reading it unboundedly', () => {
+    expect(runRealityCheck({ kind: 'file-contains', path: '/dev/zero', pattern: 'needle' }))
+      .toEqual({ ran: false, indeterminate: true, passed: false });
+  }, 10_000);
+
+  it('still reads an ordinary regular file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'helix-regular-'));
+    const f = join(dir, 'notes.txt');
+    writeFileSync(f, 'the needle is in here\n');
+    expect(runRealityCheck({ kind: 'file-contains', path: f, pattern: 'needle' }))
+      .toEqual({ ran: true, indeterminate: false, passed: true });
+    expect(runRealityCheck({ kind: 'file-contains', path: f, pattern: 'haystack' }))
+      .toEqual({ ran: true, indeterminate: false, passed: false });
   });
 });
