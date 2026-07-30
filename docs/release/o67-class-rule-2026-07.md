@@ -72,6 +72,43 @@ and fail-closed — the distinction is diagnostic labeling only.
   keeping members in the binding denominator makes exposure and gate-passing mutually
   exclusive — reproducing the v1 O_67 deadlock that the path-(b) policy exists to escape.
 
+> **Amendment 2026-07-30 (owner decisions D-a and D-b; §4's text above is unchanged and remains
+> the record of what this rule said from 2026-07-26).** Two of the four bullets above are
+> superseded. §1–§3 — purpose, normative membership, candidate universe and outcome-blindness —
+> are untouched, as are the CENSUS bullet and the `UNSCORABLE — GATE FAILURE` rule.
+>
+> **D-a. The O_67 component no longer blocks release.** The third bullet's `E` denominator, its
+> `PARTIALLY EXERCISED` state and its blocking consequence all fall with it: they are defined only
+> relative to a blocking minimum, and there is none. The component reports, threshold-free:
+> the single-target census, the number of distinct in-class target identities, how many of those
+> are Hit@1 eligible, and per case the witnesses, best rank, Hit@1 and Recall@K — labelled
+> `UNEXERCISED — 0 distinct cases observed (reporting only, non-blocking)` or
+> `EXERCISED — n distinct cases observed (reporting only, non-blocking)`. It also does not
+> participate in the window-close rule; if it did, a window with zero in-class cases could never
+> close. D5's duty is unaffected: an absent class is still reported unexercised, never silently
+> validated.
+>
+> **D-b. The gate-interaction default is REPLACED, not confirmed** — which the fourth bullet
+> anticipated in its own parenthetical. In-class members REMAIN in the binding Hit@1 denominator;
+> there is no exclusion and therefore no shadow Hit@1. The in-class subgroup is still reported
+> descriptively, which under D-a is now the sole mechanism by which the class stays visible.
+> In-class membership grants no exemption from any other gate condition. The bullet's deadlock
+> rationale lapsed rather than being refuted: it held only while exposure was mandatory, and D-a
+> removed that half.
+>
+> **Consequences for the second bullet.** "base-Hit@1-eligible … BEFORE any O_67-class exclusion"
+> loses its subject: with no exclusion there is one eligibility tier, not two. Read it as plain
+> Hit@1 eligibility. The exposure UNIT is unchanged — distinct post-cutoff target identity
+> `(scope, record-id)`, paraphrase probes of one target counting once.
+>
+> Why this is recorded here rather than only in the v2 preregistration: this document is BINDING
+> for the v2 evidence window and is cited as the normative source by
+> `readiness-criteria-2026-07.md` and `gate-decision-2026-07-22.md`, so a reader arriving at §4
+> must not leave with the repealed rule. The full reasoning, the three-round peer reconciliation
+> behind it and the measurements that forced it are in the working design record
+> `docs/superpowers/specs/2026-07-29-v2-gate-composition-design.md` (a local operating doc);
+> C5.1 closure item 9 carries the decisions into the tracked v2 preregistration.
+
 ## 5. Retrodiction evidence (frozen corpus)
 
 Label: RETROSPECTIVE, OUTCOME-INFORMED METHOD DEVELOPMENT — not prospective validation;
@@ -116,3 +153,9 @@ substantive decisions: full-credit membership decided by dual-variant retrodicti
 survives full credit; a direct-only variant misclassifies the repaired O_10); candidate
 universe = MemoryStore's servable view; census vs qualifying exposure split; fail-closed
 unscorable statuses; exclusion-plus-shadow gate recommendation with the deadlock rationale.
+
+The last of those — the exclusion-plus-shadow recommendation — was REPLACED on 2026-07-30, and the
+blocking consequence of qualifying exposure was withdrawn the same day; see the §4 amendment above.
+Its own provenance (three symmetric peer rounds, then a fourth on the gate composition, plus the
+measurements that showed a ledger-only window cannot produce the class) is in
+`docs/superpowers/specs/2026-07-29-v2-gate-composition-design.md` §9.

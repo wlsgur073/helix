@@ -275,7 +275,7 @@ The prior approved design's clean-room tier and drill set are carried forward IN
      that is a normative membership change and WOULD trip C1.3's reopen condition, so it must
      be settled deliberately, not as a side effect.
   2. **Build the capability to emit the candidate-universe artifact the binding procedure
-     already requires.** `o67-class-rule-2026-07.md:102-104` mandates that at window close,
+     already requires.** `o67-class-rule-2026-07.md:140-142` mandates that at window close,
      BEFORE scoring, the candidate-universe artifact be generated and hashed — but the pool at
      `classify-o67.ts:95` is transient and only verdicts are written (line 106), so the FULL
      universe does not survive. (Precisely: a filtered PROJECTION of it does survive, as
@@ -391,6 +391,33 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   exposure/reporting rules. (At the observed ~1.65 ledger rows/day, 20 raw rows ≈ 12 days —
   but eligible product-decision probes accrue SLOWER than raw rows; hence the 14-day floor
   and the honest starvation clause.)
+- **C5.2 SUPERSEDED 2026-07-30 — the bullet above is a PROPOSAL and is replaced by the one below.**
+  It is left visible because it is the record of what was proposed on 2026-07-22, and because the
+  reason it failed is itself evidence. It was calibrated on ~1.65 ledger rows/day; the measured
+  rate is **0.78** — one row per active day, on about 78 % of days, stable over both the corpus's
+  whole 41-day history and the 9 days since the v1 cutoff. A 28-day cap therefore yields about 22
+  raw rows, and at the measured **14 %** marginal eligibility about **3** eligible probes. Reaching
+  20 would take roughly `20 ÷ (0.78 × 0.14) ≈ 183 days`. The proposal above asked for a minimum its
+  own cap could not deliver, and the same bullet made the shortfall block release — freezing it
+  verbatim would have preregistered a gate that could not be passed.
+- **C5.2 v2 window close (PROPOSED 2026-07-30, to be preregistered verbatim at freeze).** Scoring
+  happens at a **fixed 28-day close**, not when a threshold is reached: closing as soon as the
+  minimum accrues would let a healthy window be truncated the moment it became passable, so a fixed
+  date is the strongest available form of score-blindness. "Stopping rule" is therefore a misnomer
+  for v2 and is not used. The **14-day floor is removed** — under a fixed close it can never bind,
+  and its derivation went with the 20. At the close: **Hit@1 requires ≥ 2 distinct eligible target
+  identities** and every corresponding probe at rank 1; `UNEXERCISED — 0/2` and
+  `PARTIALLY EXERCISED — 1/2 (minimum not met)` **both block release**. The **O_67 class does not
+  participate in the close and does not block**; it reports `UNEXERCISED — 0` or `EXERCISED — n`
+  (see the Q3 amendment in §7). The minimum of 2 is a **starvation floor, not a power
+  calculation**, and must be labelled as such wherever it is reported: it is the smallest value at
+  which no single event decides the verdict. Modelling one Bernoulli trial per day at
+  `p = (7 rows/9 days) × (1 eligible/7 rows) = 1/9`, a 28-day window reaches 2 with probability
+  **83 %** — so roughly one window in six is expected to starve and block, and that is a
+  preregistered outcome rather than a surprise. Every Hit@1 verdict is reported with the nominal
+  one-sided 95 % exact-binomial lower bound for the realized `x/n` under a common
+  independent-success model, so a small realized `n` cannot be read as strong evidence: `2/2` bounds
+  the true rank-1 rate only at **22.4 %**.
 - **C5.3 Ordering.** Every criterion in this document lands **before or in** the freeze commit —
   not strictly before it, since C2.3 (green suite) and C5.1 (the freeze checklist itself) execute
   AT that commit by construction. What must not happen is a change AFTER the cutoff: D3's reset
@@ -438,6 +465,16 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   a shortfall into `UNEXERCISED — 0/E` and `PARTIALLY EXERCISED — n/E`, and reads Q3 as
   blocking BOTH (`o67-class-rule-2026-07.md:63`). Q3's single-label phrasing above predates
   that split and must not be read as licensing release on a nonzero shortfall.*
+  **AMENDED 2026-07-30 — the O_67 half is withdrawn; the Hit@1 half stands.** The decision text
+  and its 07-28 clarification above are left intact as the record of what Q3 required from
+  2026-07-22 to 2026-07-30. From 2026-07-30 the v2 pilot may not release with **Hit@1** evidence
+  short of its preregistered minimum (now **2** distinct eligible target identities), but
+  **O_67-class evidence is reporting-only and does not block** — it carries no minimum, no `E`
+  denominator and no `PARTIALLY EXERCISED` state, so the 07-28 clarification's "blocking BOTH"
+  reading survives for Hit@1 alone. D5's duty to report an absent class as unexercised rather
+  than silently validated is untouched. Reason, in one line: the v2 holdout is ledger-only and a
+  ledger probe cannot structurally produce the class, so a blocking minimum would have been
+  unreachable rather than demanding. Full record in §10.
 
 ## 8. Why-log (provenance of this draft)
 
@@ -500,7 +537,7 @@ The list was therefore written INTO C5.1 and round two re-asked by file pointer.
 
 Round two then diverged on five substantive points, each verified at its cited source before
 adoption. (i) The binding procedure requires the candidate-universe artifact to be generated and
-hashed at window close BEFORE scoring (`o67-class-rule-2026-07.md:102-104`), but the pool is
+hashed at window close BEFORE scoring (`o67-class-rule-2026-07.md:140-142`), but the pool is
 transient and only verdicts are written (`classify-o67.ts:95,106`) — an executability blocker the
 draft had missed entirely; now item 2. (ii) The exposure unit is the PAIR `(scope, record-id)` (rule
 `:59`), so `witnesses[].id` and `equalCoverage[]` need scope too, not just the target — folded into
@@ -635,3 +672,46 @@ Newly surfaced by the interview, recorded as ACCEPTED v0.1 limitations (tracked,
 - **L3 Provenance boundary clarity.** The provenance WIRING is audited closed (C1.1), but the
   user-relayed vs agent-inference boundary can read as ambiguous in use — a docs/UX limitation,
   accepted for v0.1.
+
+## 10. Amendment record — 2026-07-30 (owner decisions D-a and D-b)
+
+This section exists so that the sections above can be left as they were written. Nothing earlier in
+this document has been rewritten; two sites carry inline amendment markers because their own text
+says they are transcribed VERBATIM at the freeze and would otherwise be frozen stale — the Q3 bullet
+in §7 and C5.2 in §5. Everything else that the two decisions touch is listed here instead, which
+also keeps every existing `file:line` citation into §1–§9 valid.
+
+**The two decisions.** *D-a*: O_67-class exposure is removed from the release-blocking set and
+becomes reporting-only; the Hit@1 half of Q3 stands, with a minimum of 2. *D-b*: in-class members
+REMAIN in the binding Hit@1 denominator — the exclusion-plus-shadow default in
+`o67-class-rule-2026-07.md` §4 is replaced, not confirmed. Both are recorded normatively in that
+rule's §4 amendment, and in `gate-decision-2026-07-22.md` after D5.
+
+**Why.** Measured 2026-07-29: the v2 holdout population is ledger-only, and a ledger probe derives
+its query from its own target, so the target matches essentially every query term and no competitor
+can strictly superset it. The record that produced v1's only in-class case is NOT in class when
+probed from the ledger side, and 0 of 25 ledger probes are in class — a v2 window could not have
+caught v1's own O_67 case. A blocking minimum would have been unreachable rather than demanding.
+Separately, the corpus grows at 0.78 rows/day, not the 1.65 C5.2 assumed.
+
+**What each affected passage should now be read as saying.** None of these are rewritten in place.
+
+| passage | read as |
+|---|---|
+| §1 C1.3 integration paragraph, "the gate-composition confirmation (`finalHit1Eligible` is named for a composition the freeze must confirm or rename)" | Resolved: the composition was REPLACED (D-b), so the field is **deleted**, not renamed. `baseHit1Eligible` becomes `hit1Eligible`. The prerequisite is now an implementation task, not an open decision. |
+| §1 C1.3, "the base-eligible set" and "the exposure minima" (plural) | There is one eligibility tier, not a base and a final; and one minimum, Hit@1's. |
+| §5 C5.1 header, "the exposure policy from open decision Q3" and the `finalHit1Eligible` confirm-or-rename obligation | Q3 is no longer symmetric across the two components; the field obligation is discharged by deletion. |
+| §5 closure item 5, "Confirm or replace the O_67 gate composition" | **Done** — replaced (D-b). |
+| §5 closure item 6, "separate positive-exposure minima for Hit@1 and for the O_67 class" | **Done, asymmetrically** — Hit@1 gets a minimum of 2; the O_67 class gets none. Sample unit: distinct target identity `(scope, record-id)` for both, with the metric denominator being the corresponding eligible probe rows. |
+| §5 closure item 7, the two blocking labels applied to both components | Hit@1 keeps `UNEXERCISED — 0/2` and `PARTIALLY EXERCISED — 1/2`, both blocking. O_67 has `UNEXERCISED — 0` and `EXERCISED — n`, neither blocking. The instruction "a nonzero shortfall must not be reported as `UNEXERCISED`" holds for Hit@1 only; O_67 has no shortfall state. |
+| §5 closure item 8, "what remains here is query-derivation/mapping and K + every metric definition" | **Done.** Derivation rule v1 and K = 20 carry forward unchanged. The mapping rule is fixed POSITIVELY as mechanical identity mapping, `relevant = [record.id]` — not waived as "not applicable", which would leave a required D2 element unfilled. Oracle segmentation and the manual oracle mapping do not execute in v2 and receive no validation claim. All seven gate conditions are settled, including one added: protocol and population integrity. |
+| §5 closure item 9 | Still open, and now larger: it must also carry the amendments recorded here, the full seven-condition gate, the deterministic-payload/audit-receipt split, and the provenance chain from freeze receipt to release record. |
+| §5 closure item 10 | Unchanged in substance, but now certain rather than conditional: the classifier's output schema changes, so the retrodiction MUST be re-run and re-baselined at the freeze commit. |
+| §8 why-log, and §5's block 1–4 narrative | **Deliberately not amended.** A why-log records what was concluded on a date, not current doctrine; the same reasoning left D3's coarser wording standing when it was noticed on 2026-07-28. Read those passages as history. |
+
+**Where the reasoning lives.** The decisions were taken after three symmetric peer-synthesis rounds
+plus a fourth on the gate conditions, and the reconciliation — including four points on which this
+session's first answer was wrong and had to be withdrawn — is in the working design record
+`docs/superpowers/specs/2026-07-29-v2-gate-composition-design.md` §9. That tree is gitignored, so
+this section and the two normative amendments are the tracked account; C5.1 closure item 9 folds
+them into the v2 preregistration.

@@ -26,10 +26,15 @@ export const qualifiedId = (scope: MemoryScope, id: string): string => `${scope}
  *  it. Sorting by code unit (never `localeCompare`, which is locale-dependent and would make the
  *  hash environment-dependent) gives a stable total order that carries no retrieval information.
  *
- *  Fails closed on a repeated record id: `store.recall` resolves an item's scope through an
- *  id-keyed, last-wins map (`src/memory/store.ts:523,529`), so when one id appears twice BOTH
- *  copies carry a single scope tag. Emitting either would assert something the code cannot
- *  justify, and this artifact's whole purpose is to be relied on later.
+ *  Fails closed on a repeated record id. The original reason no longer holds and is recorded here
+ *  because the guard outlived it: `store.recall` used to resolve scope through an id-keyed,
+ *  last-wins map, so a colliding id tagged both copies with one scope. That was fixed at c40c411 —
+ *  `src/memory/store.ts:528` now keys on the record OBJECT, so each copy carries its own scope and
+ *  the tag is trustworthy. The guard stays for a DIFFERENT hazard the fix does not touch: the
+ *  manifest's `relevant` array holds BARE ids and `scripts/pilot/run-pilot.ts:42` resolves them
+ *  with `findIndex(it => it.record.id === rid)`, which stops at the first match — so a colliding id
+ *  silently scores whichever copy ranks higher, and the probe reports a rank for a record it was
+ *  not measuring.
  */
 export const probeUniverse = (candidates: Candidate[]): string[] => {
   const seen = new Set<string>();
@@ -69,12 +74,15 @@ export const countLedgerRows = (path: string): number => readLedgerLines(path).l
 
 /** Snapshot preconditions, checked ONCE before any probe runs.
  *
- *  Identity uniqueness is a property of the CORPUS, not of one recall result. Checking it per probe
- *  is unsound: the scope tag is decided by an id-keyed, last-wins map built BEFORE recall's
- *  relevance filter (`store.ts:523` then `retrieval.ts:373`), so when a colliding id has only one
- *  copy survive that filter, no duplicate is ever visible downstream and the emitted identity
- *  carries the scope of the copy that did NOT survive. Rule §4 makes any snapshot error a gate
- *  failure, so a colliding corpus is refused outright rather than classified.
+ *  Identity uniqueness is a property of the CORPUS, not of one recall result, and checking it per
+ *  probe is unsound for a reason the c40c411 store fix did not remove: the relevance filter at
+ *  `retrieval.ts:376,379` drops zero-scoring records, so a colliding id can have exactly one copy survive
+ *  into any given probe's result. No duplicate is then visible downstream, and the collision passes
+ *  unnoticed until it corrupts scoring — `run-pilot.ts:42` matches `relevant` ids with `findIndex`,
+ *  which cannot tell the two apart. (The original wording here blamed an id-keyed, last-wins scope
+ *  map in `store.ts`; that map is gone as of c40c411, but the per-probe check was never sound
+ *  regardless of it.) Rule §4 makes any snapshot error a gate failure, so a colliding corpus is
+ *  refused outright rather than classified.
  */
 export const corpusPrecondition = (
   ledgers: Array<{ scope: MemoryScope; path: string }>,

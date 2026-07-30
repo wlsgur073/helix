@@ -71,7 +71,26 @@ reported unexercised — not silently validated.
 > honest-reporting semantics (a starved window is reported unexercised, never as a trivial pass)
 > stand; Q3 layers a blocking consequence on top.
 
-## Why-log (decision provenance)
+> **Superseded in part (added 2026-07-30; D1–D5 above are unchanged, and so is the 2026-07-29
+> cross-reference, which is left standing as the record of what Q3 meant between 07-24 and 07-30).**
+> The owner has since narrowed Q3: the **Hit@1** half still blocks, now with a minimum of **2**
+> distinct eligible target identities, but the **O_67-class** half is **reporting-only and no longer
+> blocks release**. Consequently the sentence above no longer holds for O_67: there is no
+> preregistered minimum exposure count for it, no `E` denominator, and no `PARTIALLY EXERCISED`
+> state. See the §4 amendment in `o67-class-rule-2026-07.md`.
+>
+> **D5 is untouched and remains load-bearing.** An absent class is still reported unexercised
+> rather than silently validated — that duty is what makes the non-blocking treatment honest
+> instead of quiet. What changed is only the consequence, not the disclosure.
+>
+> The decision rests on measurement, not preference: the v2 holdout population is ledger-only, and
+> a ledger probe derives its query from its own target, so the target matches essentially every
+> query term and no competitor can strictly superset it. The same record that produced v1's only
+> in-class case is NOT in class when probed from the ledger side — so a v2 window could not have
+> caught v1's own O_67 case, and a blocking minimum would have been unreachable rather than
+> demanding. D1's rejection of a signed O_67 deviation is untouched and was checked against this
+> decision: a prospectively frozen v2 subset rule is what D5 expressly permits, not the silent
+> waiver of v1's failed result that D1 refused.
 
 - **Pre-registered position** (assistant, before external review): choose (b); no third
   waiver; drift, waiver-credibility, and class-not-instance arguments; a self-registered
