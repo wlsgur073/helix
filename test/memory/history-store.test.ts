@@ -28,7 +28,7 @@ function tmpLayered() {
     sessionId: 's', home, genStamp: () => 'STAMP',
     now: () => `2026-06-09T00:00:00.${String(++t).padStart(3, '0')}Z`,
     genId: () => `m_${++n}`,
-    project: { ledger: projLedger, root: proj, home },
+    project: { ledger: projLedger, root: proj },
   });
   return { store, globalLedger, projLedger };
 }

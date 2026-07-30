@@ -1,9 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { stampOwnership } from '../../src/memory/ownership.js';
+import { bundleCli } from '../helpers/bundle-cli.js';
+
+// Bundled with the pinned esbuild and spawned under plain `node`, NOT `npx tsx`: tsx is not a
+// dependency of this repo, so the old spelling fetched a floating version off the registry on every
+// `npm test`. See test/helpers/bundle-cli.ts.
+let cli: string;
+beforeAll(async () => { cli = await bundleCli('scripts/pilot/run-pilot.ts'); }, 30_000);
 
 describe('pilot runner', () => {
   it('scores ranks at K=20 deterministically from a manifest against a production-faithful dual-scope (global + owned project) snapshot', () => {
@@ -38,7 +45,7 @@ describe('pilot runner', () => {
       };
       const mPath = join(dir, 'manifest.json'); writeFileSync(mPath, JSON.stringify(manifest));
       const out = join(dir, 'out.json');
-      execFileSync('npx', ['tsx', 'scripts/pilot/run-pilot.ts', mPath, dir, out], { cwd: process.cwd() });
+      execFileSync(process.execPath, [cli,mPath, dir, out], { cwd: process.cwd() });
       const res = JSON.parse(readFileSync(out, 'utf8'));
       // p1: the project scope still contributes and still ranks its OWN targeted query's record first.
       expect(res.results[0]).toMatchObject({ id: 'p1', bestRank: 1, hitAtK: true, hitAt1: true });

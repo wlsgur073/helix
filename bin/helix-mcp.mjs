@@ -406,11 +406,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants);
+          this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -427,10 +427,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants);
+        this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -491,8 +491,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants) {
-        this.code = optimizeExpr(this.code, names, constants);
+      optimizeNames(names, constants2) {
+        this.code = optimizeExpr(this.code, names, constants2);
         return this;
       }
       get names() {
@@ -521,12 +521,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants))
+          if (n.optimizeNames(names, constants2))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -579,12 +579,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants);
-        if (!(super.optimizeNames(names, constants) || this.else))
+        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants2);
+        if (!(super.optimizeNames(names, constants2) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants);
+        this.condition = optimizeExpr(this.condition, names, constants2);
         return this;
       }
       get names() {
@@ -607,10 +607,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants);
+        this.iteration = optimizeExpr(this.iteration, names, constants2);
         return this;
       }
       get names() {
@@ -646,10 +646,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants);
+        this.iterable = optimizeExpr(this.iterable, names, constants2);
         return this;
       }
       get names() {
@@ -691,11 +691,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a, _b;
-        super.optimizeNames(names, constants);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants);
+        super.optimizeNames(names, constants2);
+        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants2);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants2);
         return this;
       }
       get names() {
@@ -996,7 +996,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants) {
+    function optimizeExpr(expr, names, constants2) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -1011,14 +1011,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants[n.str];
+        const c = constants2[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants2[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -6887,8 +6887,8 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join10 } from "node:path";
-import { existsSync as existsSync7 } from "node:fs";
+import { join as join11, dirname as dirname13 } from "node:path";
+import { existsSync as existsSync8 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -13013,7 +13013,7 @@ var StdioServerTransport = class {
 
 // src/memory/store.ts
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync3, readFileSync as readFileSync9, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync3, readFileSync as readFileSync8, statSync as statSync3 } from "node:fs";
 import { dirname as dirname8 } from "node:path";
 
 // src/memory/ledger.ts
@@ -13168,6 +13168,17 @@ function isStopword(w) {
 function meaningfulTokens(tokens) {
   return tokens.filter((t) => !isStopword(t));
 }
+var MAX_QUERY_CHARS = 2048;
+var MAX_QUERY_TERMS = 128;
+function assertQueryWithinBounds(query) {
+  if (query.length > MAX_QUERY_CHARS) {
+    throw new Error(`recall: query is too long (${query.length} characters; the limit is ${MAX_QUERY_CHARS})`);
+  }
+  const distinct = new Set(meaningfulTokens(tokenize(query))).size;
+  if (distinct > MAX_QUERY_TERMS) {
+    throw new Error(`recall: query has too many distinct terms (${distinct}; the limit is ${MAX_QUERY_TERMS})`);
+  }
+}
 var INFLECTION_SUFFIXES = /* @__PURE__ */ new Set(["s", "es", "d", "ed", "ing"]);
 var ASCII_TERM = /^[a-z0-9]+$/;
 function inflectionRescue(t, docTokens) {
@@ -13300,9 +13311,12 @@ function rankWithArtifacts(records, artifacts, query, opts = {}) {
   const { idx, docs } = artifacts;
   const rawBm = /* @__PURE__ */ new Map();
   for (const r of records) rawBm.set(r.id, bm25Score(r.id, qMeaning, idx));
-  const vals = [...rawBm.values()];
-  const max = Math.max(...vals);
-  const min = Math.min(...vals);
+  let max = -Infinity;
+  let min = Infinity;
+  for (const v of rawBm.values()) {
+    if (v > max) max = v;
+    if (v < min) min = v;
+  }
   const bm25norm = (id) => max === min ? 0 : (rawBm.get(id) - min) / (max - min);
   const semGate = opts.semGate ?? 0;
   const scored = records.map((r, i) => {
@@ -13347,6 +13361,7 @@ function buildProjection(records) {
 // src/memory/lock.ts
 import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { performance as performance2 } from "node:perf_hooks";
 import { dirname, basename, join } from "node:path";
 
 // src/memory/lock-liveness.ts
@@ -13466,7 +13481,9 @@ function acquireFileLock(target, opts = {}) {
   const payloadText = JSON.stringify(self);
   if (tryParsePayload(payloadText) === null) throw new Error("withFileLock: internal \u2014 payload failed its own well-formedness check");
   const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
-  let waited = 0;
+  const startedAt = performance2.now();
+  const elapsedMs = () => Math.round(performance2.now() - startedAt);
+  const sleepWithinBudget = () => sleepSync(Math.max(1, Math.min(RETRY_MS, maxWaitMs - elapsedMs())));
   let lastHolder = null;
   for (; ; ) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString("hex")}.tmp`;
@@ -13486,9 +13503,8 @@ function acquireFileLock(target, opts = {}) {
       if (code === "EPERM" || code === "EOPNOTSUPP" || code === "ENOTSUP")
         throw new Error(`withFileLock: filesystem refuses hard links for ${lockPath}; ledger locking is unsupported on this filesystem`);
       if (code === "ENOENT") {
-        if (waited >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, waited));
-        sleepSync(RETRY_MS);
-        waited += RETRY_MS;
+        if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, elapsedMs()));
+        sleepWithinBudget();
         continue;
       }
       if (code !== "EEXIST") throw e;
@@ -13516,9 +13532,8 @@ function acquireFileLock(target, opts = {}) {
     if (holder === "reentrant-self")
       throw new Error(`withFileLock: re-entrant acquisition of ${lockPath} from the same thread (pid ${process.pid}) \u2014 withFileLock is not re-entrant`);
     if (holder === "dead") stealUnderGate(lockPath, probe);
-    if (waited >= maxWaitMs) throw new Error(timeoutMessage(lockPath, lastHolder, waited));
-    sleepSync(RETRY_MS);
-    waited += RETRY_MS;
+    if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, lastHolder, elapsedMs()));
+    sleepWithinBudget();
   }
   const ctx = {
     stillOwned() {
@@ -14829,9 +14844,35 @@ function redactSecrets(content, spans) {
 }
 
 // src/memory/reality-check.ts
-import { existsSync as existsSync2, readFileSync as readFileSync7, statSync as statSync3 } from "node:fs";
+import { existsSync as existsSync2, openSync as openSync4, fstatSync as fstatSync2, readSync as readSync2, closeSync as closeSync4, constants } from "node:fs";
 var INDETERMINATE = { ran: false, indeterminate: true, passed: false };
 var MAX_FILE_BYTES = 5e6;
+function containsBounded(path, pattern) {
+  let fd = null;
+  try {
+    fd = openSync4(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    const st = fstatSync2(fd);
+    if (!st.isFile()) return INDETERMINATE;
+    if (st.size > MAX_FILE_BYTES) return INDETERMINATE;
+    const cap = Math.min(st.size, MAX_FILE_BYTES) + 1;
+    const buf = Buffer.alloc(cap);
+    let len = 0;
+    for (; ; ) {
+      const n = readSync2(fd, buf, len, cap - len, null);
+      if (n === 0) break;
+      len += n;
+      if (len === cap) return INDETERMINATE;
+    }
+    return { ran: true, indeterminate: false, passed: buf.subarray(0, len).toString("utf8").includes(pattern) };
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync4(fd);
+      } catch {
+      }
+    }
+  }
+}
 function runRealityCheck(check2) {
   try {
     switch (check2.kind) {
@@ -14842,9 +14883,7 @@ function runRealityCheck(check2) {
       case "file-contains": {
         if (typeof check2.path !== "string" || typeof check2.pattern !== "string") return INDETERMINATE;
         if (!existsSync2(check2.path)) return INDETERMINATE;
-        if (statSync3(check2.path).size > MAX_FILE_BYTES) return INDETERMINATE;
-        const text = readFileSync7(check2.path, "utf8");
-        return { ran: true, indeterminate: false, passed: text.includes(check2.pattern) };
+        return containsBounded(check2.path, check2.pattern);
       }
       default:
         return INDETERMINATE;
@@ -14863,7 +14902,7 @@ function checkBinding(content, check2) {
 }
 
 // src/memory/expansion.ts
-import { readFileSync as readFileSync8 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 import { fileURLToPath } from "node:url";
 var EXP_THETA = 0.5;
 var EXP_K = 8;
@@ -14895,7 +14934,7 @@ function defaultExpansion() {
   let txt;
   for (const u of candidates) {
     try {
-      txt = readFileSync8(fileURLToPath(u), "utf8");
+      txt = readFileSync7(fileURLToPath(u), "utf8");
       break;
     } catch {
     }
@@ -15124,9 +15163,10 @@ function keyVectorEqual(a, b) {
 
 // src/memory/store.ts
 var MemoryStore = class {
-  constructor(global, opts = {}) {
+  constructor(global, opts) {
     this.global = global;
     this.opts = opts;
+    if (!this.opts?.home) throw new Error("MemoryStore: `home` is required \u2014 the trust store location must be stated, never derived from the ledger path");
   }
   global;
   opts;
@@ -15148,9 +15188,9 @@ var MemoryStore = class {
   session() {
     return this.opts.sessionId ?? "unknown";
   }
-  /** Where the ledger-MAC master key + scope-nonce registry live (defaults next to the global ledger). */
+  /** Where the ledger-MAC master key, the scope-nonce registry and the rollback witness live. */
   homeDir() {
-    return this.opts.home ?? dirname8(this.global);
+    return this.opts.home;
   }
   /** Which scope (project root, or undefined for global) a ledger path belongs to. */
   scopeRootOf(ledger) {
@@ -15162,12 +15202,12 @@ var MemoryStore = class {
    *  the write path mints the master first via ensureMaster. Delegates to the shared verified-read
    *  helper so the hook and the store resolve subkeys identically (one source of truth).
    *
-   *  INVARIANT: the helper uses a SINGLE home for both the master read AND the project scope nonce,
-   *  whereas the pre-refactor code read the project nonce from project.home. These are the same dir —
-   *  the server wiring always sets opts.home === project.home (and the default homeDir() is
-   *  dirname(global), with project.home === that). They differ only under a hand-built store that
-   *  relocates HELIX_LEDGER outside HELIX_HOME with an active project — where reads still clamp Fresh
-   *  (fail-safe) and a project writeVerify would throw rather than mis-sign. */
+   *  INVARIANT: the helper uses a SINGLE home for both the master read AND the project scope nonce.
+   *  `opts.home` is required, so that home is whatever the caller declared — it is no longer derived
+   *  from the ledger's directory, and there is no second candidate to disagree with it. (The comment
+   *  that used to sit here asserted "the server wiring always sets opts.home === project.home"; the
+   *  wiring set no top-level `home` at all, so the invariant it claimed was false exactly when it
+   *  mattered.) */
   subkeyForLedger(ledger) {
     return subkeyForScope(this.homeDir(), this.scopeRootOf(ledger));
   }
@@ -15275,13 +15315,13 @@ var MemoryStore = class {
   targetLedger(scope) {
     const p = this.opts.project;
     if (scope === "global" || !p) return this.global;
-    if (!isOwned(p.root, p.home)) {
+    if (!isOwned(p.root, this.homeDir())) {
       if (existsSync3(p.ledger)) {
         throw new Error(
           "commit: a project memory file exists here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it"
         );
       }
-      stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });
+      stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });
     }
     return p.ledger;
   }
@@ -15295,7 +15335,7 @@ var MemoryStore = class {
    *  the next call still sees a fresh, current answer (I4) — only a single call's internal
    *  self-consistency is what this method buys.
    *
-   *  - 'owned': isOwned(p.root, p.home) — true regardless of whether the ledger FILE exists yet (an
+   *  - 'owned': isOwned(p.root, home) — true regardless of whether the ledger FILE exists yet (an
    *    owned project with no ledger file still participates, matching pre-existing behavior).
    *  - 'unadopted-present': project configured, NOT owned, and a ledger file exists at p.ledger — the
    *    exact condition targetLedger() (above) already throws on for commit. The write side keeps its
@@ -15309,7 +15349,8 @@ var MemoryStore = class {
    *  public read call (recall/currentView/historyView/asOfView each do so, then thread the snapshot as
    *  a parameter into every private helper that needs it, never re-invoking this within that call). */
   projectDisposition() {
-    return projectDispositionOf(this.opts.project);
+    const p = this.opts.project;
+    return projectDispositionOf(p && { root: p.root, ledger: p.ledger, home: this.homeDir() });
   }
   /** Verified live records from global + (project iff `disposition === 'owned'`), each tagged with
    *  scope + integrity, plus whether a master key was available for EVERY scope read
@@ -15432,7 +15473,7 @@ var MemoryStore = class {
       let mtimeMs = 0;
       let totalBytes = 0;
       try {
-        const st = statSync4(r.ledger);
+        const st = statSync3(r.ledger);
         mtimeMs = st.mtimeMs;
         totalBytes = st.size;
       } catch {
@@ -15475,6 +15516,7 @@ var MemoryStore = class {
     }
   }
   recall(query, opts = {}) {
+    assertQueryWithinBounds(query);
     const disposition = this.projectDisposition();
     const { scoped, available, artifacts, verdicts } = this.recallInput(disposition);
     const excluded = /* @__PURE__ */ new Set();
@@ -15519,7 +15561,7 @@ var MemoryStore = class {
   ledgerOf(id) {
     const p = this.opts.project;
     const inGlobal = this.verifiedOf(this.global).live.has(id);
-    const inProject = !!p && isOwned(p.root, p.home) && this.verifiedOf(p.ledger).live.has(id);
+    const inProject = !!p && isOwned(p.root, this.homeDir()) && this.verifiedOf(p.ledger).live.has(id);
     if (inGlobal && inProject) throw new Error("ledgerOf: id live in more than one scope \u2014 ambiguous");
     if (inProject) return p.ledger;
     return this.global;
@@ -15720,7 +15762,7 @@ var MemoryStore = class {
   adopt() {
     const p = this.opts.project;
     if (!p) throw new Error("adopt: no project scope is active");
-    stampOwnership(p.root, p.home, { now: this.opts.now, genStamp: this.opts.genStamp });
+    stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp });
     ensureMaster(this.homeDir());
   }
   /** Which marker family an id belongs to, or null for a normal id. `integrity_marker`/
@@ -15750,7 +15792,7 @@ var MemoryStore = class {
    *  line as §10 specifies), so an unrelated corrupt line must never brick it (finding 2). */
   resolveEraseTarget(id, scope, permanent) {
     const p = this.opts.project;
-    const projectActive2 = !!p && isOwned(p.root, p.home);
+    const projectActive2 = !!p && isOwned(p.root, this.homeDir());
     if (scope) {
       const ledger = scope === "global" || !p ? this.global : projectActive2 ? p.ledger : (() => {
         throw new Error("erase: project ledger not owned \u2014 adopt it (helix_memory_adopt) then erase, or remove it");
@@ -15763,7 +15805,7 @@ var MemoryStore = class {
       for (const c of candidates) {
         let text;
         try {
-          text = readFileSync9(c, "utf8");
+          text = readFileSync8(c, "utf8");
         } catch (err) {
           if (err.code === "ENOENT") continue;
           throw err;
@@ -15838,7 +15880,7 @@ var MemoryStore = class {
   healWitness() {
     const p = this.opts.project;
     const scopes = [{ ledger: this.global, root: void 0 }];
-    if (p && isOwned(p.root, p.home)) scopes.push({ ledger: p.ledger, root: p.root });
+    if (p && isOwned(p.root, this.homeDir())) scopes.push({ ledger: p.ledger, root: p.root });
     const home2 = this.homeDir();
     for (const s of scopes) {
       if (!existsSync3(dirname8(s.ledger))) continue;
@@ -15871,8 +15913,36 @@ function scanLegacyElevated(records, verify) {
   return { ok: offenders.length === 0, offenders };
 }
 
+// src/memory/trust-store-layout.ts
+import { existsSync as existsSync4, readFileSync as readFileSync9, statSync as statSync4 } from "node:fs";
+import { dirname as dirname9, join as join6 } from "node:path";
+var TRUST_FILE_NAMES = ["ledger-mac-master.key", "projects.json", "witness.json", "witness-log.jsonl"];
+function looksLikeOurs(name, path) {
+  try {
+    if (name === "ledger-mac-master.key") return statSync4(path).isFile() && statSync4(path).size > 0;
+    if (name === "witness-log.jsonl") return statSync4(path).isFile();
+    const parsed = JSON.parse(readFileSync9(path, "utf8"));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    const values = Object.values(parsed);
+    if (name === "projects.json") {
+      return values.length > 0 && values.every((v) => typeof v === "object" && v !== null && "stamp" in v && "macNonce" in v);
+    }
+    return "scopes" in parsed || values.length > 0;
+  } catch {
+    return false;
+  }
+}
+function strayTrustFiles(home2, globalLedger2) {
+  const ledgerDir = dirname9(globalLedger2);
+  if (canonicalRoot(ledgerDir) === canonicalRoot(home2)) return [];
+  return TRUST_FILE_NAMES.filter((name) => {
+    const p = join6(ledgerDir, name);
+    return existsSync4(p) && looksLikeOurs(name, p);
+  });
+}
+
 // src/server/helix-server.ts
-import { join as join9 } from "node:path";
+import { join as join10 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // node_modules/zod/v3/external.js
@@ -23969,7 +24039,7 @@ var EMPTY_COMPLETION_RESULT = {
 // src/config.ts
 import { readFileSync as readFileSync10 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join6 } from "node:path";
+import { join as join7 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
 var DEFAULT_COMPACTION = {
   auto: false,
@@ -24026,8 +24096,7 @@ function readJson(path) {
   }
 }
 function loadConfig(opts = {}) {
-  const projectPath = opts.projectPath ?? join6(process.cwd(), ".helix", "config.json");
-  const globalPath = opts.globalPath ?? join6(homedir(), ".helix", "config.json");
+  const globalPath = opts.globalPath ?? join7(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
   const seen = /* @__PURE__ */ new Set();
   const warn = (msg) => {
@@ -24036,7 +24105,7 @@ function loadConfig(opts = {}) {
       (opts.warn ?? ((m) => process.stderr.write(m + "\n")))(msg);
     }
   };
-  for (const path of [globalPath, projectPath]) {
+  for (const path of opts.projectPath ? [globalPath, opts.projectPath] : [globalPath]) {
     const raw = readJson(path);
     const dv = raw?.dualVerify;
     if (dv) {
@@ -24098,7 +24167,7 @@ function mergeCompaction(raw) {
   return c;
 }
 function compactionConfigFromGlobal(home2) {
-  return mergeCompaction(readJson(join6(home2, "config.json"))?.compaction);
+  return mergeCompaction(readJson(join7(home2, "config.json"))?.compaction);
 }
 
 // src/verify/agreement-map.ts
@@ -24133,7 +24202,19 @@ function buildAgreementMap(helixAnswer, codexAnswer) {
 // src/memory/pii-scan.ts
 var LOW_PATTERNS = [
   // RFC-pragmatic email: local@domain.tld (bounded, no nested comments).
-  { kind: "email", re: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g },
+  // Every quantifier is BOUNDED, and the domain is spelled as labels. Both matter, for different
+  // reasons, and the second one is the one that actually cost 13 seconds:
+  //   - labels `(?:[A-Za-z0-9-]{1,63}\.)+` instead of one `[A-Za-z0-9.-]+` run followed by `\.`
+  //     stops the same dot from being claimable by either side;
+  //   - `{1,64}` on the local part stops each start position from scanning the whole rest of the
+  //     input. On a dot-rich string EVERY letter sits after a `.`, so every letter is a word
+  //     boundary and `\b` no longer prunes anything: O(n) starts each scanning O(n) forward for an
+  //     `@` that never comes. That is where the quadratic came from — measured 835ms at 50k chars
+  //     and 13.4s at 200k, and MAX_FORM_SCAN is exactly 200,000. A plain letter run stayed fast only
+  //     because `\b` matched at one position in it.
+  // The bounds are the RFC/IANA maxima (local part 64, label 63, TLD comfortably under 24), so
+  // nothing a real address can be is excluded.
+  { kind: "email", re: /\b[A-Za-z0-9._%+-]{1,64}@(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,24}\b/g },
   // Phone: US (415-555-0132 / (415) 555-0132) and KR mobile (010-1234-5678) shapes.
   // Requires separators so a bare run of digits (an id / timestamp) does not match.
   { kind: "phone", re: /(?<!\d)(?:\(\d{3}\)\s?\d{3}[-.\s]\d{4}|\d{2,3}[-.\s]\d{3,4}[-.\s]\d{4})(?!\d)/g }
@@ -24420,36 +24501,36 @@ async function dualVerify(params, deps) {
 }
 
 // src/audit.ts
-import { mkdirSync as mkdirSync6, openSync as openSync4, existsSync as existsSync4, fsyncSync as fsyncSync4, closeSync as closeSync4 } from "node:fs";
-import { dirname as dirname9 } from "node:path";
+import { mkdirSync as mkdirSync6, openSync as openSync5, existsSync as existsSync5, fsyncSync as fsyncSync4, closeSync as closeSync5 } from "node:fs";
+import { dirname as dirname10 } from "node:path";
 function appendAudit(path, event) {
-  mkdirSync6(dirname9(path), { recursive: true });
-  const isNew = !existsSync4(path);
-  const fd = openSync4(path, "a");
+  mkdirSync6(dirname10(path), { recursive: true });
+  const isNew = !existsSync5(path);
+  const fd = openSync5(path, "a");
   try {
     writeAll(realFsOps, fd, JSON.stringify(event) + "\n");
     fsyncSync4(fd);
   } finally {
-    closeSync4(fd);
+    closeSync5(fd);
   }
-  if (isNew) fsyncDir(dirname9(path));
+  if (isNew) fsyncDir(dirname10(path));
 }
 
 // src/server/handlers.ts
 import { readFileSync as readFileSync12 } from "node:fs";
 
 // src/codex-log.ts
-import { mkdirSync as mkdirSync7, readFileSync as readFileSync11, writeFileSync as writeFileSync2, openSync as openSync5, writeSync as writeSync3, closeSync as closeSync5 } from "node:fs";
-import { dirname as dirname10 } from "node:path";
+import { mkdirSync as mkdirSync7, readFileSync as readFileSync11, writeFileSync as writeFileSync2, openSync as openSync6, writeSync as writeSync3, closeSync as closeSync6 } from "node:fs";
+import { dirname as dirname11 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
   try {
-    mkdirSync7(dirname10(path), { recursive: true });
-    const fd = openSync5(path, "a", 384);
+    mkdirSync7(dirname11(path), { recursive: true });
+    const fd = openSync6(path, "a", 384);
     try {
       writeSync3(fd, JSON.stringify(entry) + "\n");
     } finally {
-      closeSync5(fd);
+      closeSync6(fd);
     }
     const lines = readFileSync11(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
@@ -24753,14 +24834,15 @@ async function handleDualVerify(args, deps) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync6, mkdirSync as mkdirSync8, mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync7, mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join8, win32 as winPath } from "node:path";
+import { join as join9, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync5, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync3 } from "node:fs";
-import { join as join7 } from "node:path";
+import { existsSync as existsSync6, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync2 } from "node:fs";
+import { randomBytes as randomBytes7 } from "node:crypto";
+import { join as join8 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
 var SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
@@ -24773,10 +24855,37 @@ function shouldSweep(stampMtimeMs, nowMs, intervalMs) {
   if (stampMtimeMs > nowMs) return true;
   return nowMs - stampMtimeMs >= intervalMs;
 }
+function ensureScratchRoot(root) {
+  try {
+    mkdirSync8(root, { recursive: true, mode: 448 });
+  } catch {
+  }
+  try {
+    const st = lstatSync3(root);
+    if (!st.isDirectory()) return null;
+    if (typeof process.getuid === "function" && st.uid !== process.getuid()) return null;
+    if ((st.mode & 63) !== 0) chmodSync2(root, 448);
+    return root;
+  } catch {
+    return null;
+  }
+}
+function publishStamp(stampPath) {
+  const tmp = `${stampPath}.${process.pid}.${randomBytes7(8).toString("hex")}.tmp`;
+  try {
+    writeFileSync3(tmp, "", { flag: "wx", mode: 384 });
+    renameSync3(tmp, stampPath);
+  } catch {
+    try {
+      unlinkSync5(tmp);
+    } catch {
+    }
+  }
+}
 function sweepScratchRoot(root, nowMs = Date.now()) {
   try {
-    if (!existsSync5(root)) return;
-    const stampPath = join7(root, STAMP_NAME);
+    if (!existsSync6(root)) return;
+    const stampPath = join8(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
       stampMtimeMs = statSync5(stampPath).mtimeMs;
@@ -24788,29 +24897,27 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     for (const d of readdirSync3(root, { withFileTypes: true })) {
       if (!d.name.startsWith(SCRATCH_PREFIX)) continue;
       try {
-        const st = lstatSync3(join7(root, d.name));
+        const st = lstatSync3(join8(root, d.name));
         entries.push({ name: d.name, isDir: st.isDirectory(), mtimeMs: st.mtimeMs });
       } catch {
       }
     }
     for (const name of selectStaleScratch(entries, nowMs, FLOOR_MS)) {
       try {
-        rmSync2(join7(root, name), { recursive: true, force: true });
+        rmSync2(join8(root, name), { recursive: true, force: true });
       } catch {
       }
     }
-    try {
-      writeFileSync3(stampPath, "");
-    } catch {
-    }
+    publishStamp(stampPath);
   } catch {
   }
 }
 
 // src/verify/codex.ts
 var execFileAsync = promisify(execFile);
-function buildCodexExecArgs(outFile, opts = {}) {
+function buildCodexExecArgs(outFile, opts = {}, cwd) {
   const args = ["exec", "--skip-git-repo-check", "-s", "read-only", "--ephemeral", "-o", outFile];
+  if (cwd !== void 0 && cwd !== "") args.push("-C", cwd);
   if (opts.model != null && opts.model !== "") {
     if (!/^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/.test(opts.model)) throw new Error(`invalid codex model "${opts.model}" (argv safety)`);
     args.push("-m", opts.model);
@@ -24849,17 +24956,66 @@ async function resolveCodexInvocation() {
   let inv = null;
   try {
     const { stdout } = await execFileAsync("where", ["codex"], { timeout: 1e4 });
-    inv = interpretWhereOutput("win32", stdout ?? "", existsSync6);
+    inv = interpretWhereOutput("win32", stdout ?? "", existsSync7);
   } catch {
     inv = null;
   }
   if (inv) cachedInvocation = inv;
   return inv;
 }
-function runCodex(inv, args, input, timeoutMs) {
+var CHILD_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "CODEX_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_CACHE_HOME",
+  "XDG_DATA_HOME",
+  "XDG_STATE_HOME",
+  "OPENAI_API_KEY",
+  "CODEX_API_KEY",
+  "OPENAI_BASE_URL",
+  "HTTPS_PROXY",
+  "HTTP_PROXY",
+  "NO_PROXY",
+  "https_proxy",
+  "http_proxy",
+  "no_proxy",
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "REQUESTS_CA_BUNDLE",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  // win32
+  "SYSTEMROOT",
+  "SystemRoot",
+  "COMSPEC",
+  "ComSpec",
+  "PATHEXT",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "USERPROFILE",
+  "TEMP",
+  "TMP",
+  "WINDIR",
+  "PROGRAMFILES",
+  "PROGRAMDATA"
+];
+function childEnv(parent = process.env) {
+  const out = {};
+  for (const k of CHILD_ENV_ALLOWLIST) {
+    const v = parent[k];
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+function runCodex(inv, args, input, timeoutMs, cwd) {
   return new Promise((resolve2, reject) => {
     const child = spawn(inv.file, [...inv.argsPrefix, ...args], {
-      stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"]
+      stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"],
+      cwd,
+      env: childEnv()
     });
     let stdout = "";
     let stderr = "";
@@ -24934,8 +25090,8 @@ async function checkCodexAvailable(invocation) {
   try {
     const inv = invocation !== void 0 ? invocation : await resolveCodexInvocation();
     if (!inv) return { available: false, reason: "codex launcher not found on PATH" };
-    const v = await runCodex(inv, ["--version"], null, 1e4);
-    const l = await runCodex(inv, ["login", "status"], null, 1e4);
+    const v = await runCodex(inv, ["--version"], null, 1e4, tmpdir());
+    const l = await runCodex(inv, ["login", "status"], null, 1e4, tmpdir());
     return interpretPreflight(v.stdout + v.stderr, l.stdout + l.stderr);
   } catch (e) {
     return { available: false, reason: `codex preflight failed: ${e.message}` };
@@ -24947,8 +25103,8 @@ async function checkCodexStatus(invocation) {
     if (!inv) {
       return { cliFound: false, version: void 0, available: false, authMode: "none", reason: "codex launcher not found on PATH" };
     }
-    const v = await runCodex(inv, ["--version"], null, 1e4);
-    const l = await runCodex(inv, ["login", "status"], null, 1e4);
+    const v = await runCodex(inv, ["--version"], null, 1e4, tmpdir());
+    const l = await runCodex(inv, ["login", "status"], null, 1e4, tmpdir());
     return interpretStatus(v.stdout + v.stderr, l.stdout + l.stderr);
   } catch (e) {
     return { cliFound: false, version: void 0, available: false, authMode: "none", reason: `codex status check failed: ${e.message}` };
@@ -24976,7 +25132,7 @@ async function checkCodexModel(invocation) {
   try {
     const inv = invocation !== void 0 ? invocation : await resolveCodexInvocation();
     if (!inv) return null;
-    const r = await runCodex(inv, ["doctor", "--json"], null, 1e4);
+    const r = await runCodex(inv, ["doctor", "--json"], null, 1e4, tmpdir());
     return interpretDoctorModel(r.stdout);
   } catch {
     return null;
@@ -24986,14 +25142,13 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
-    const scratchRoot = join8(tmpdir(), "helix");
-    mkdirSync8(scratchRoot, { recursive: true });
-    sweepScratchRoot(scratchRoot);
-    const dir = mkdtempSync(join8(scratchRoot, "codex-"));
-    const outFile = join8(dir, "out.txt");
+    const scratchRoot = ensureScratchRoot(join9(tmpdir(), "helix"));
+    if (scratchRoot !== null) sweepScratchRoot(scratchRoot);
+    const dir = mkdtempSync(scratchRoot !== null ? join9(scratchRoot, "codex-") : join9(tmpdir(), "helix-codex-"));
+    const outFile = join9(dir, "out.txt");
     try {
       const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
-      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts), question, timeoutMs);
+      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir);
       if (code !== 0) {
         return { ok: false, error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ""}` };
       }
@@ -25127,14 +25282,14 @@ function createMetricsSink(path, enabled, deps = {}) {
 function buildServer(store2, dualDeps, metrics2) {
   const m = metrics2 ?? noopMetricsSink;
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
-  const home2 = process.env.HELIX_HOME ?? join9(homedir2(), ".helix");
+  const home2 = process.env.HELIX_HOME ?? join10(homedir2(), ".helix");
   const dv = dualDeps ?? {
-    config: loadConfig({ globalPath: join9(home2, "config.json") }),
+    config: loadConfig({ globalPath: join10(home2, "config.json") }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
     echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-    auditPath: join9(home2, "audit.jsonl"),
-    codexLogPath: join9(home2, "codex-log.jsonl")
+    auditPath: join10(home2, "audit.jsonl"),
+    codexLogPath: join10(home2, "codex-log.jsonl")
   };
   const codexStatusDeps = {
     inspect: () => checkCodexStatus(),
@@ -25159,7 +25314,11 @@ function buildServer(store2, dualDeps, metrics2) {
   server2.registerTool("helix_memory_recall", {
     title: "Recall memory",
     description: "Recall relevant memory as a DATA-only block; flags items needing re-verification.",
-    inputSchema: { query: external_exports.string(), maxItems: external_exports.number().int().positive().optional() }
+    // The character bound is declared here as well as enforced in the store, so an oversized query
+    // is refused by schema validation before it reaches a handler at all — the same bounded-input
+    // discipline `maxItems` and `asOf` already get. The store keeps the authoritative check (it also
+    // bounds distinct TERMS, which needs the tokenizer) for callers that do not come through MCP.
+    inputSchema: { query: external_exports.string().max(MAX_QUERY_CHARS), maxItems: external_exports.number().int().positive().optional() }
   }, async (args) => m.runOp("helix_memory_recall", () => handleRecall(store2, args)));
   server2.registerTool("helix_memory_inspect", {
     title: "Inspect memory",
@@ -25237,15 +25396,37 @@ function installSelfTermination(deps) {
 }
 
 // src/server/index.ts
-var home = process.env.HELIX_HOME ?? join10(homedir3(), ".helix");
-var globalLedger = process.env.HELIX_LEDGER ?? join10(home, "memory.jsonl");
+var home = process.env.HELIX_HOME ?? join11(homedir3(), ".helix");
+var globalLedger = process.env.HELIX_LEDGER ?? join11(home, "memory.jsonl");
 var projectRoot = process.cwd();
-var projectLedger = join10(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync7(join10(projectRoot, ".helix")) && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
-var project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : void 0;
-var config2 = loadConfig({ globalPath: join10(home, "config.json") });
-var metrics = createMetricsSink(join10(home, "metrics.jsonl"), config2.metrics.enabled);
-var store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
+var projectLedger = join11(projectRoot, ".helix", "memory.jsonl");
+var projectActive = existsSync8(join11(projectRoot, ".helix")) && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
+var project = projectActive ? { ledger: projectLedger, root: projectRoot } : void 0;
+var config2 = loadConfig({ globalPath: join11(home, "config.json") });
+if (existsSync8(join11(projectRoot, ".helix", "config.json"))) {
+  process.stderr.write(`helix: NOTE - ${join11(projectRoot, ".helix", "config.json")} is not read; dual-verify, egress and logging settings come only from ${join11(home, "config.json")}
+`);
+}
+var metrics = createMetricsSink(join11(home, "metrics.jsonl"), config2.metrics.enabled);
+var stray = strayTrustFiles(home, globalLedger);
+if (stray.length > 0) {
+  process.stderr.write(
+    // ASCII only
+    `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME.
+  found next to the ledger: ${stray.join(", ")}
+  ledger directory        : ${dirname13(globalLedger)}
+  HELIX_HOME              : ${home}
+These were created by an older version, which derived the trust store's location from HELIX_LEDGER.
+The signing key now always lives under HELIX_HOME, so starting would mint a NEW key and silently
+drop every trust grade the old one conferred. Two ways out, both deliberate:
+  1. Move ${stray.join(", ")} from the ledger directory into HELIX_HOME, keeping the ledger where it is.
+  2. Discard the old trust state (delete those files) and re-establish it with the re-baseline
+     ceremony: node bin/helix-rebaseline.mjs --scope global
+`
+  );
+  process.exit(78);
+}
+var store = new MemoryStore(globalLedger, { home, sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
 store.healWitness();
 var scanScopes = [
   { ledger: globalLedger },
@@ -25265,8 +25446,8 @@ var server = buildServer(store, {
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
   echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-  auditPath: join10(home, "audit.jsonl"),
-  codexLogPath: join10(home, "codex-log.jsonl")
+  auditPath: join11(home, "audit.jsonl"),
+  codexLogPath: join11(home, "codex-log.jsonl")
 }, metrics);
 var transport = new StdioServerTransport();
 await server.connect(transport);

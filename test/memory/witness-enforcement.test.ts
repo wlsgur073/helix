@@ -140,7 +140,7 @@ describe('Task 7 — read-side witness enforcement', () => {
       let n = 0;
       const store = new MemoryStore(join(home, 'memory.jsonl'), {
         home, sessionId: 't', now: () => FIXED, genId: () => `m_${++n}`,
-        project: { ledger: projLedger, root, home },
+        project: { ledger: projLedger, root },
       });
       const g = store.commit({ content: 'global visible fact keepme', scope: 'global', source: 'user' });
       const pj = store.commit({ content: 'project excluded fact keepme', scope: 'project', source: 'user' });

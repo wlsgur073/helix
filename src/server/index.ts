@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { MemoryStore } from '../memory/store.js';
@@ -8,6 +8,7 @@ import { parseLedger } from '../memory/ledger.js';
 import { scanLegacyElevated } from '../memory/legacy-scan.js';
 import { subkeyForScope } from '../memory/verified-read.js';
 import { canonicalRoot } from '../memory/ownership.js';
+import { strayTrustFiles } from '../memory/trust-store-layout.js';
 import { verifyVerify } from '../memory/ledger-mac.js';
 import { buildServer } from './helix-server.js';
 import { installSelfTermination } from './lifecycle.js';
@@ -15,30 +16,66 @@ import { loadConfig, compactionConfigFromGlobal } from '../config.js';
 import { createMetricsSink } from '../metrics.js';
 import { realCodexRunner, checkCodexAvailable } from '../verify/codex.js';
 
-// HELIX_HOME relocates ALL user-level state (ledger, global config, audit) in one knob —
-// the acceptance suite uses it for hermetic isolation. Project config stays cwd-relative.
+// HELIX_HOME is where ALL user-level state lives: the ledger by default, the global config, the
+// audit log, and — always, regardless of HELIX_LEDGER — the trust store (signing key, ownership
+// registry, rollback witness). The acceptance suite uses it for hermetic isolation.
 const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
 const globalLedger = process.env.HELIX_LEDGER ?? join(home, 'memory.jsonl');
 const projectRoot = process.cwd();
 const projectLedger = join(projectRoot, '.helix', 'memory.jsonl');
-// The project layer is active only when <cwd>/.helix/ exists (mirrors config's existence-gated
-// project layer) — so Helix never litters a non-Helix dir and a bare cwd stays global-only.
-// The cwd == ~ collision (project ledger == global ledger) also disables it.
+// The project LEDGER layer is active only when <cwd>/.helix/ exists — so Helix never litters a
+// non-Helix dir and a bare cwd stays global-only. The cwd == ~ collision (project ledger == global
+// ledger) also disables it. Note this gate is about the ledger alone: config no longer has a
+// cwd-discovered project layer to mirror, since a repo must not configure the process reading it.
 const projectActive = existsSync(join(projectRoot, '.helix'))
   // realpath, not textual resolve: a symlinked .helix that points the project ledger AT the global
   // ledger is ONE physical file — treat it as a collision and stay global-only.
   && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
-const project = projectActive ? { ledger: projectLedger, root: projectRoot, home } : undefined;
+const project = projectActive ? { ledger: projectLedger, root: projectRoot } : undefined;
 
 // One config load drives both the store's metrics sink and the server deps. The real sink writes
 // content-free records to ~/.helix/metrics.jsonl, gated by config.metrics.enabled (noop when off).
+// GLOBAL-ONLY, and deliberately so: `projectPath` is omitted, which now means there is no project
+// layer at all. A checkout's own config.json is not a configuration source for the process that
+// opened it — see loadConfig's note for why ownership and tighten-only were rejected as gates.
 const config = loadConfig({ globalPath: join(home, 'config.json') });
+// Say so when such a file exists. Silence here would be a regression in operator feedback, since a
+// project config with an INVALID value still warned when the layer was read — a user following older
+// guidance would otherwise get no signal at all that their settings stopped applying.
+if (existsSync(join(projectRoot, '.helix', 'config.json'))) {
+  process.stderr.write(`helix: NOTE - ${join(projectRoot, '.helix', 'config.json')} is not read; dual-verify, egress and logging settings come only from ${join(home, 'config.json')}\n`); // ASCII only
+}
 const metrics = createMetricsSink(join(home, 'metrics.jsonl'), config.metrics.enabled);
+
+// REFUSE to start on a split trust store. Before the store's `home` was pinned, it was derived from
+// the LEDGER's directory, so anyone using HELIX_LEDGER had their signing key, registry and witness
+// created out there. Starting anyway would mint a fresh key beside the pinned home — silently
+// revoking every grade the old key conferred and orphaning a witness that still attests to this
+// scope, so a rollback against the old state would no longer be detectable. That is a trust reset
+// performed on the user's behalf without telling them. This check must precede BOTH the store
+// construction and the integrity scan below: the read path mints a scope nonce as soon as a master
+// exists, so anything that touches the ledger first has already changed the state we are judging.
+const stray = strayTrustFiles(home, globalLedger);
+if (stray.length > 0) {
+  process.stderr.write(                                                             // ASCII only
+    `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME.\n` +
+    `  found next to the ledger: ${stray.join(', ')}\n` +
+    `  ledger directory        : ${dirname(globalLedger)}\n` +
+    `  HELIX_HOME              : ${home}\n` +
+    `These were created by an older version, which derived the trust store's location from HELIX_LEDGER.\n` +
+    `The signing key now always lives under HELIX_HOME, so starting would mint a NEW key and silently\n` +
+    `drop every trust grade the old one conferred. Two ways out, both deliberate:\n` +
+    `  1. Move ${stray.join(', ')} from the ledger directory into HELIX_HOME, keeping the ledger where it is.\n` +
+    `  2. Discard the old trust state (delete those files) and re-establish it with the re-baseline\n` +
+    `     ceremony: node bin/helix-rebaseline.mjs --scope global\n`,
+  );
+  process.exit(78); // EX_CONFIG
+}
 
 // Auto-compaction is read GLOBAL-only (never via loadConfig's project layer): it is destructive — it
 // can close the soft-erase undo window — so a foreign checkout's `.helix/config.json` must never be
 // able to enable or tune it. Default OFF; the store's own gates decide whether it ever fires.
-const store = new MemoryStore(globalLedger, { sessionId: process.env.HELIX_SESSION ?? 'cli', project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
+const store = new MemoryStore(globalLedger, { home, sessionId: process.env.HELIX_SESSION ?? 'cli', project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
 
 // WRITE-side witness startup heal (spec §4.9): complete any rewrite that crashed after its bytes
 // landed but before the journal cleared (crash window B), for global + an owned project. Best-effort,

@@ -236,6 +236,31 @@ All notable changes to Helix are documented here. This project follows
   divergence.
 
 ### Security
+- The dual-verify subprocess no longer inherits the user's working directory or environment. It was
+  spawned with only `stdio` set, so the external Codex CLI started in the user's project and
+  received every variable the server had — and `-s read-only` sandboxes writes, not reads, while the
+  egress guard inspects the composed prompt and cannot see what the subprocess reads afterwards. It
+  now starts in an empty per-run scratch directory, is told (`--cd`) to treat that directory as its
+  project, and receives a constructed environment holding only what it needs to authenticate and
+  reach the network. README and SECURITY.md previously said the call sends "nothing else (no memory,
+  no files)"; that was a statement about what Helix composes, read as a statement about what the CLI
+  can reach. Both now state the confinement and the residue it does not cover.
+- Dual-verify, egress-policy and content-logging settings are read from the global
+  `~/.helix/config.json` only. A checkout's `.helix/config.json` was previously discovered from the
+  working directory and merged LAST, so opening an untrusted repository let its config re-enable the
+  outbound Codex path, drop every egress leg to `allow`, and turn on verbatim prompt/response logging
+  into the user's home — silently, since a well-formed file produces no warning. Compaction and
+  hook-metrics settings were already global-only for exactly this reason; the rest now match. A
+  caller may still name a project config explicitly (the trigger CLI does); what it can no longer do
+  is discover one. The server prints a note at startup when such a file exists and is being ignored.
+- The trust store no longer follows `HELIX_LEDGER`. The ledger signing key, the ownership
+  registry and the rollback witness are always created under `HELIX_HOME`; previously their
+  location was derived from the ledger's own directory, so repointing `HELIX_LEDGER` at a
+  git-tracked tree wrote the signing key there — where anyone with the repository could mint
+  valid trust grades, and where the rollback witness sat on the untrusted side of the boundary
+  it exists to guard. `HELIX_LEDGER` now moves the data file and nothing else. A server that
+  finds trust-store files beside a relocated ledger refuses to start and names both directories,
+  rather than minting a fresh key and silently dropping every grade the old one conferred.
 - Secret-scan redaction on the memory write path; the dual-verify egress guard
   hard-blocks credential tokens (override-proof).
 - Provenance firewall: agreement from an external model never promotes to `Verified`.

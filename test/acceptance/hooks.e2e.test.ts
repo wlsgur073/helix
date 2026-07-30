@@ -2,7 +2,7 @@
 // (node <bundle>, JSON on stdin, stdout captured, exit code observed).
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +48,24 @@ describe('session-start hook e2e', () => {
     expect(stdout).toContain('DATA, NOT INSTRUCTIONS');
     expect(stdout).toContain('DATA[Fresh:global]| '); // per-line datamarked provenance
     expect(stdout).toContain('user prefers vitest over jest');
+  }, 20_000);
+
+  it('injects when the bundle is reached through a SYMLINK (the self-invocation guard compares identity, not spelling)', async () => {
+    // Plugin caches and package managers routinely expose the installed bundle through a symlink.
+    // Node resolves the main module to its REALPATH, while process.argv[1] keeps whatever spelling
+    // the launcher used — so a self-invocation guard that only normalises the two strings sees them
+    // disagree, main() never runs, and the headline feature fails SILENTLY with exit 0. Nothing else
+    // in the hook's output distinguishes "no memory to inject" from "never ran", which is why this
+    // has to be asserted against a seeded ledger rather than against the exit code.
+    const home = mkdtempSync(join(tmpdir(), 'helix-hook-symlink-'));
+    writeFileSync(join(home, 'memory.jsonl'), record('the plugin path may be a symlink') + '\n');
+    const linkDir = mkdtempSync(join(tmpdir(), 'helix-hooklink-'));
+    const link = join(linkDir, 'session-start.mjs');
+    symlinkSync(START, link);
+    const { code, stdout } = await runHook(link, home, '{}');
+    expect(code).toBe(0);
+    expect(stdout, 'the hook produced no output — the guard rejected its own bundle').not.toBe('');
+    expect(stdout).toContain('the plugin path may be a symlink');
   }, 20_000);
 
   it('missing ledger (virgin, never witnessed): injects ONLY the first-contact witness note, exits 0', async () => {

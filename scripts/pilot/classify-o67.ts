@@ -14,6 +14,7 @@ import { projectLedgerPath } from '../../src/memory/ownership.js';
 import { lexicalEvidence, meaningfulTokens, tokenize } from '../../src/memory/retrieval.js';
 import { defaultExpansion } from '../../src/memory/expansion.js';
 import { probeUniverse, qualifiedId, corpusPrecondition, assertScopeParticipated } from './candidate-universe.js';
+import { isEntryPoint } from '../../src/entry-point.js';
 import type { MemoryScope } from '../../src/types.js';
 
 export interface ProbeInput { id: string; query: string; relevant: string[]; unambiguous: boolean }
@@ -93,7 +94,7 @@ const main = (): void => {
   const projectRoot = join(snapshotDir, 'proj');
   const store = new MemoryStore(join(home, 'memory.jsonl'), {
     home, sessionId: 'classify-o67', now: () => '2026-01-01T00:00:00.000Z',
-    project: { ledger: projectLedgerPath(projectRoot), root: projectRoot, home },
+    project: { ledger: projectLedgerPath(projectRoot), root: projectRoot },
   });
   // Snapshot preconditions, once, before any probe: identity uniqueness is a corpus property (a
   // per-probe check sits behind recall's relevance filter and would miss it), an unreadable ledger
@@ -151,4 +152,4 @@ const main = (): void => {
     probes: universe,
   }, null, 1) + '\n');
 };
-if (process.argv[1] && process.argv[1].endsWith('classify-o67.ts')) main();
+if (isEntryPoint(import.meta.url)) main();

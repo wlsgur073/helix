@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withFileLock, withFileLockAsync, lockPathOf, writeLockFileForTest } from '../../src/memory/lock.js';
-import { selfIdentity } from '../../src/memory/lock-liveness.js';
+import { selfIdentity, realProbe, type LivenessProbe } from '../../src/memory/lock-liveness.js';
 
 const target = (): string => { const d = mkdtempSync(join(tmpdir(), 'helix-lock-')); writeFileSync(join(d, 'ledger.jsonl'), ''); return join(d, 'ledger.jsonl'); };
 
@@ -35,6 +35,41 @@ describe('withFileLock (link-published)', () => {
     expect(existsSync(lockPathOf(t))).toBe(true);                          // still held
     expect(readFileSync(lockPathOf(t), 'utf8')).toContain('c'.repeat(32)); // untouched, byte-identical holder
   });
+  it('maxWaitMs bounds MEASURED time, so slow retry passes cannot multiply the caller budget', () => {
+    const t = target();
+    // A FOREIGN pid, deliberately: classifyHolder short-circuits at rule 7 for a same-pid/same-ticks
+    // payload and returns 'alive' WITHOUT consulting the probe at all, so a self-shaped fixture can
+    // never exercise a slow classification.
+    const foreign = { ...selfIdentity('d'.repeat(32)), pid: 999_999, startTicks: '4242' };
+    writeLockFileForTest(lockPathOf(t), foreign);
+    // The whole difference between a deadline and a retry tally is what happens when a PASS costs
+    // more than the 25 ms cadence, so the pass is made expensive on purpose. A tally credits itself
+    // 25 ms per pass no matter how long the pass really took, so it needs 8 passes to "reach" a
+    // 200 ms budget and spends ~8x(60+25) ms of real time getting there — the budget silently
+    // multiplies, and the timeout message then reports the fictional 200. A measured deadline stops
+    // after the first pass that crosses 200 ms of real time and reports that real number.
+    const SLOW_MS = 60;
+    const slowProbe: LivenessProbe = {
+      kill0() { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, SLOW_MS); return 'alive'; },
+      startTicksOf: () => '4242',   // matches the recorded ticks => not a recycled pid => still alive
+      stateOf: () => 'S',           // sleeping, not a zombie
+      bootId: () => realProbe.bootId(),
+      pidNs: () => realProbe.pidNs(),
+      bootInstantMs: () => realProbe.bootInstantMs(),
+    };
+    const t0 = performance.now();
+    let message = '';
+    try { withFileLock(t, () => 1, { maxWaitMs: 200, probe: slowProbe }); } catch (e) { message = (e as Error).message; }
+    const measured = performance.now() - t0;
+    const m = /timed out after (\d+)ms/.exec(message);
+    expect(m, `expected a duration in: ${message}`).not.toBeNull();
+    // The budget binds: overshoot is bounded by ONE slow pass, not by however many passes it takes
+    // to tick a counter up to the budget.
+    expect(measured, 'the budget did not bind — passes cost more than the cadence credited them').toBeLessThan(450);
+    // ...and the number handed to the operator is that measured time, not the counter.
+    expect(Number(m![1]), 'the reported duration is not the time that actually passed').toBeGreaterThan(measured / 2);
+    expect(existsSync(lockPathOf(t))).toBe(true);                        // never stolen — giving up stays fail-safe
+  }, 20_000);
   it('re-entrant acquisition fails FAST with a diagnostic (not a 5 s block)', () => {
     const t = target();
     const t0 = Date.now();

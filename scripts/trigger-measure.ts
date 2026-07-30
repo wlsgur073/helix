@@ -1,7 +1,9 @@
-// Measurement module for the T1 trigger daily snapshot (Phase 2 Track 2a, Task A2 — see
-// docs/superpowers/plans/2026-07-17-phase2-trigger-governance-and-disclosure.md). Resolves the SAME
-// participants/config the production server resolves (src/server/index.ts:17-27, src/config.ts:123-125),
-// feeds them to the pure evaluator (trigger-eval.ts), composes ONE self-validated JSON record, and
+// Measurement module for the T1 trigger daily snapshot. Resolves the same PARTICIPANTS the
+// production server resolves (src/server/index.ts), and reads its one configuration switch —
+// whether the metrics leg is enabled — from the GLOBAL config, exactly as the server and the
+// SessionStart hook do. The measured repository is a subject, never a configuration source: it
+// names the project ledger to size, and nothing else.
+// Feeds the result to the pure evaluator (trigger-eval.ts), composes ONE self-validated JSON record, and
 // owns the fsynced append to the trigger sink. scripts/trigger-cli.ts is the thin argv-parsing entry;
 // this module holds every measurement/compose/validate/append step behind an injectable reader seam
 // (deps.readFile) and an injectable env seam (deps.env) so tests run fully hermetically — no real
@@ -11,13 +13,12 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { realFsOps, writeAll, type DurableFsOps } from '../src/memory/fs-ops.js';
 import { isOwned, projectLedgerPath, canonicalRoot } from '../src/memory/ownership.js';
-import { loadConfig, type HelixConfig } from '../src/config.js';
+import { metricsEnabledFromGlobalConfig } from '../src/config.js';
 import { evaluateTrigger, type Leg, type MetricsEvent, type MetricsState, type ParticipantSize } from './trigger-eval.js';
 
 const POLICY = 'T1-2026-07-11';
 const SINK_FILE = 'trigger.jsonl';
 const METRICS_FILE = 'metrics.jsonl';
-const CONFIG_FILE = 'config.json';
 const GLOBAL_LEDGER_FILE = 'memory.jsonl';
 
 /** Injectable seams. Production defaults are the real filesystem/env; tests override these to run
@@ -189,9 +190,14 @@ export function parseMetricsBuffer(buf: Buffer): MetricsEvent[] {
 }
 
 /** disabled (config) wins first, even over an absent file; then ENOENT -> absent; any other read
- *  failure -> read-error; else present (and the file's events are parsed). */
-function resolveMetrics(home: string, config: HelixConfig, readFile: (path: string) => Buffer): { state: MetricsState; events: MetricsEvent[] | null } {
-  if (config.metrics.enabled === false) return { state: 'disabled', events: null };
+ *  failure -> read-error; else present (and the file's events are parsed).
+ *
+ *  The switch is read GLOBAL-only, matching the server and the SessionStart hook. It has to be: the
+ *  file being measured is `<home>/metrics.jsonl`, so whether that measurement is enabled is a
+ *  property of the home, not of whichever repository is being measured — and taking it from the
+ *  measured repo let a checkout suppress the evidence behind the storage-migration decision. */
+function resolveMetrics(home: string, readFile: (path: string) => Buffer): { state: MetricsState; events: MetricsEvent[] | null } {
+  if (!metricsEnabledFromGlobalConfig(home)) return { state: 'disabled', events: null };
   let buf: Buffer;
   try {
     buf = readFile(join(home, METRICS_FILE));
@@ -301,8 +307,7 @@ export function measureAndRecord(input: MeasureInput, deps: MeasureDeps = {}): s
   const disposition = resolveProjectDisposition(input.root, home, globalLedger);
   const participants = readTwoParticipants(globalLedger, input.root, home, disposition, readFile);
 
-  const config = loadConfig({ projectPath: join(input.root, '.helix', CONFIG_FILE), globalPath: join(home, CONFIG_FILE) });
-  const { state: metricsState, events } = resolveMetrics(home, config, readFile);
+  const { state: metricsState, events } = resolveMetrics(home, readFile);
   const { unknownLines, unknownMaxOps } = summarizeUnknowns(events ?? []);
 
   const verdict = evaluateTrigger({ participants, metricsState, events });

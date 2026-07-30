@@ -111,7 +111,12 @@ export const DEFAULT_CONFIG: HelixConfig = {
 };
 
 export interface LoadConfigOptions {
-  projectPath?: string; // default .helix/config.json under cwd
+  /** A project-scoped config to layer on top of the global one. OPT-IN: omitting it means there is
+   *  NO project layer. It used to default to `<cwd>/.helix/config.json`, which made every checkout a
+   *  configuration source for the process that opened it — see the merge note below. The option
+   *  survives because a caller can legitimately name a specific root (the trigger CLI does); what it
+   *  must not do is discover one. */
+  projectPath?: string;
   globalPath?: string;  // default ~/.helix/config.json
   warn?: (msg: string) => void; // one-time diagnostics sink (default stderr; injectable for tests)
 }
@@ -121,14 +126,26 @@ function readJson(path: string): Record<string, unknown> | null {
   catch { return null; } // missing or malformed -> ignore
 }
 
-/** Merge defaults <- global <- project (project wins). Unknown/missing keys keep defaults. */
+/** Merge defaults <- global <- project (project wins), where a project layer exists ONLY if the
+ *  caller named one. Unknown/missing keys keep defaults.
+ *
+ *  The project path is no longer defaulted from `process.cwd()`. Because the merge puts the project
+ *  layer last, that default made an untrusted checkout able to re-enable the outbound Codex path,
+ *  drop every egress leg to `allow`, and turn on verbatim prompt/response logging into the user's
+ *  home — with no warning, since a well-formed file is not a diagnostic. The settings that a repo
+ *  must not reach were already global-only for this reason (compaction, hook metrics); dual-verify
+ *  and egress are now on the same footing.
+ *
+ *  Ownership was considered as the gate instead and rejected: adoption consents to a MAC-protected
+ *  ledger, not to an unsigned mutable file that a later `git pull` can change. "Tighten-only" was
+ *  considered and rejected too — there is no risk ordering for `mode`, `model`, `effort` or
+ *  `timeoutMs`, so the rule would have to fail open for every key it could not order. */
 export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
-  const projectPath = opts.projectPath ?? join(process.cwd(), '.helix', 'config.json');
   const globalPath = opts.globalPath ?? join(homedir(), '.helix', 'config.json');
   const merged: HelixConfig = structuredClone(DEFAULT_CONFIG);
   const seen = new Set<string>();
   const warn = (msg: string): void => { if (!seen.has(msg)) { seen.add(msg); (opts.warn ?? ((m) => process.stderr.write(m + '\n')))(msg); } };
-  for (const path of [globalPath, projectPath]) {
+  for (const path of opts.projectPath ? [globalPath, opts.projectPath] : [globalPath]) {
     const raw = readJson(path);
     const dv = raw?.dualVerify as (Partial<HelixConfig['dualVerify']> & Record<string, unknown>) | undefined;
     if (dv) {

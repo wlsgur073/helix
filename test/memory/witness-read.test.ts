@@ -192,7 +192,7 @@ describe('hook path parity: gatherScopedRecords unchanged after the reroute (Ste
     const projLedger = join(proj, '.helix', 'memory.jsonl');
     try {
       const store = new MemoryStore(globalLedger, {
-        sessionId: 's', home, project: { ledger: projLedger, root: proj, home },
+        sessionId: 's', home, project: { ledger: projLedger, root: proj },
       });
       store.commit({ content: 'global fact one', scope: 'global', source: 'user' });
       const owned = store.commit({ content: 'project fact confirmed', scope: 'project', source: 'user' });

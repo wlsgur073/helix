@@ -18,9 +18,12 @@ beforeAll(async () => {
   await build({ entryPoints: ['scripts/legacy-lock-worker.ts'], outfile: legacyWorker, bundle: true, platform: 'node', format: 'esm', target: 'node20', logLevel: 'silent' });
 }, 30_000);
 
+// Monotonic budget: these barriers wait on real subprocesses, so a wall clock that steps backward
+// across a scheduling boundary (WSL2) would both over-run the worker's hold and shorten this
+// waiter's own budget — two ways for the same host hiccup to fail a lock-correctness assertion.
 const waitFor = async (pred: () => boolean, ms: number): Promise<void> => {
-  const until = Date.now() + ms;
-  while (!pred()) { if (Date.now() > until) throw new Error('waitFor timeout'); await new Promise((r) => setTimeout(r, 25)); }
+  const until = performance.now() + ms;
+  while (!pred()) { if (performance.now() > until) throw new Error('waitFor timeout'); await new Promise((r) => setTimeout(r, 25)); }
 };
 const procState = (pid: number): string => { try { const s = readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' ')[0]!; } catch { return '?'; } };
 const spawnWorker = (script: string, target: string, barrierDir: string, holdMs: number): ChildProcess =>

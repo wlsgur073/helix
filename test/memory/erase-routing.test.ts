@@ -10,7 +10,7 @@ function projectStore() {
   const root = mkdtempSync(join(tmpdir(), 'helix-proj-'));
   const global = join(home, 'memory.jsonl');
   const projLedger = join(root, '.helix', 'memory.jsonl');
-  const store = new MemoryStore(global, { sessionId: 's', home, project: { ledger: projLedger, root, home } });
+  const store = new MemoryStore(global, { sessionId: 's', home, project: { ledger: projLedger, root } });
   store.adopt();
   return { store, global, projLedger, home };
 }
@@ -22,7 +22,7 @@ function unownedProjectStore() {
   const root = mkdtempSync(join(tmpdir(), 'helix-proj-'));
   const global = join(home, 'memory.jsonl');
   const projLedger = join(root, '.helix', 'memory.jsonl');
-  const store = new MemoryStore(global, { sessionId: 's', home, project: { ledger: projLedger, root, home } });
+  const store = new MemoryStore(global, { sessionId: 's', home, project: { ledger: projLedger, root } });
   return { store, global, projLedger, home, root };
 }
 

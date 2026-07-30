@@ -97,7 +97,7 @@ describe('store ledger-HMAC', () => {
     }) + '\n');
     const store = new MemoryStore(join(home, 'memory.jsonl'), {
       sessionId: 's', home, now: () => '2026-06-09T00:00:00.000Z', genId: () => 'm_1',
-      project: { ledger: projLedger, root, home },
+      project: { ledger: projLedger, root },
     });
     store.adopt();
     const hit = store.recall('planted').items.find((i) => i.record.id === 'seed')!;

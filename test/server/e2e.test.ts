@@ -8,7 +8,8 @@ import { MemoryStore } from '../../src/memory/store.js';
 import { buildServer } from '../../src/server/helix-server.js';
 
 async function connectedClient(): Promise<Client> {
-  const store = new MemoryStore(join(mkdtempSync(join(tmpdir(), 'helix-e2e-')), 'm.jsonl'), { sessionId: 's1' });
+  const home = mkdtempSync(join(tmpdir(), 'helix-e2e-'));
+  const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1' });
   const server = buildServer(store, {
     // Hermetic dual-verify deps: disabled + a runner that must never be called,
     // so the e2e suite never touches real Codex regardless of any on-disk config.

@@ -4,6 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { MemoryStore } from '../memory/store.js';
 import type { RealityCheck } from '../memory/reality-check.js';
+import { MAX_QUERY_CHARS } from '../memory/retrieval.js';
 import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus, checkCodexModel } from '../verify/codex.js';
@@ -58,7 +59,11 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   server.registerTool('helix_memory_recall', {
     title: 'Recall memory',
     description: 'Recall relevant memory as a DATA-only block; flags items needing re-verification.',
-    inputSchema: { query: z.string(), maxItems: z.number().int().positive().optional() },
+    // The character bound is declared here as well as enforced in the store, so an oversized query
+    // is refused by schema validation before it reaches a handler at all — the same bounded-input
+    // discipline `maxItems` and `asOf` already get. The store keeps the authoritative check (it also
+    // bounds distinct TERMS, which needs the tokenizer) for callers that do not come through MCP.
+    inputSchema: { query: z.string().max(MAX_QUERY_CHARS), maxItems: z.number().int().positive().optional() },
   }, async (args) => m.runOp('helix_memory_recall', () => handleRecall(store, args)));
 
   server.registerTool('helix_memory_inspect', {

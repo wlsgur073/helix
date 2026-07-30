@@ -1,13 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { stampOwnership } from '../../src/memory/ownership.js';
+import { bundleCli } from '../helpers/bundle-cli.js';
 
 /** The classifier's pool construction (classify-o67.ts main()) is not exported and only runs under
- *  the argv guard, so it is exercised here through the CLI against a production-faithful dual-scope
- *  snapshot — the same fixture shape test/pilot/run-pilot.test.ts uses. */
+ *  the entry-point guard, so it is exercised here through the CLI against a production-faithful
+ *  dual-scope snapshot — the same fixture shape test/pilot/run-pilot.test.ts uses. */
+// Bundled with the pinned esbuild and spawned under plain `node` — see test/helpers/bundle-cli.ts
+// for why `npx tsx` is not used. This is also what forced the CLI's entry guard to compare path
+// IDENTITY rather than an `.endsWith('.ts')` spelling: under the old guard a bundled CLI exited 0
+// having done nothing, and every assertion below would have failed on a missing output file.
+let cli: string;
+beforeAll(async () => { cli = await bundleCli('scripts/pilot/classify-o67.ts'); }, 30_000);
+
 describe('classify-o67 CLI', () => {
   const row = (id: string, content: string) => JSON.stringify({
     id, tx: '2026-07-20T00:00:00.000Z', validFrom: '2026-07-20T00:00:00.000Z', validTo: null,
@@ -33,7 +41,7 @@ describe('classify-o67 CLI', () => {
       const manifest = { k: 20, probes: [{ id: 'p1', query: 'exit code contract', relevant: ['m_1'], unambiguous: true }] };
       const mPath = join(dir, 'manifest.json'); writeFileSync(mPath, JSON.stringify(manifest));
       const out = join(dir, 'out.json');
-      execFileSync('npx', ['tsx', 'scripts/pilot/classify-o67.ts', mPath, dir, out], { cwd: process.cwd() });
+      execFileSync(process.execPath, [cli,mPath, dir, out], { cwd: process.cwd() });
 
       const universePath = join(dir, 'out.universe.json');
       expect(existsSync(universePath)).toBe(true);
@@ -53,7 +61,7 @@ describe('classify-o67 CLI', () => {
       const manifest = { k: 20, probes: [{ id: 'p1', query: 'exit code contract', relevant: ['m_1'], unambiguous: true }] };
       const mPath = join(dir, 'manifest.json'); writeFileSync(mPath, JSON.stringify(manifest));
       const out = join(dir, 'out.json');
-      execFileSync('npx', ['tsx', 'scripts/pilot/classify-o67.ts', mPath, dir, out], { cwd: process.cwd() });
+      execFileSync(process.execPath, [cli,mPath, dir, out], { cwd: process.cwd() });
 
       const v = JSON.parse(readFileSync(out, 'utf8'));
       expect(v.rule).toBe('o67-class-rule-2026-07');
@@ -70,7 +78,7 @@ describe('classify-o67 CLI', () => {
       const manifest = { k: 20, probes: [{ id: 'p1', query: 'exit code contract', relevant: ['m_1'], unambiguous: true }] };
       const mPath = join(dir, 'manifest.json'); writeFileSync(mPath, JSON.stringify(manifest));
       const out = join(dir, 'out.json');
-      execFileSync('npx', ['tsx', 'scripts/pilot/classify-o67.ts', mPath, dir, out], { cwd: process.cwd() });
+      execFileSync(process.execPath, [cli,mPath, dir, out], { cwd: process.cwd() });
       const u = JSON.parse(readFileSync(join(dir, 'out.universe.json'), 'utf8'));
       expect(u.disclosure.projectDisposition).toBe('owned');
       expect(u.disclosure.rowsByScope).toEqual({ global: 1, project: 1 });
@@ -98,7 +106,7 @@ describe('classify-o67 CLI', () => {
       let stderr = '';
       expect(() => {
         try {
-          execFileSync('npx', ['tsx', 'scripts/pilot/classify-o67.ts', mPath, dir, out], { cwd: process.cwd(), stdio: 'pipe' });
+          execFileSync(process.execPath, [cli,mPath, dir, out], { cwd: process.cwd(), stdio: 'pipe' });
         } catch (e) { stderr = String((e as { stderr?: Buffer }).stderr ?? ''); throw e; }
       }).toThrow();
       expect(stderr).toMatch(/scope-did-not-participate/);
@@ -114,7 +122,7 @@ describe('classify-o67 CLI', () => {
       let stderr = '';
       expect(() => {
         try {
-          execFileSync('npx', ['tsx', 'scripts/pilot/classify-o67.ts', mPath, dir, join(dir, 'x.universe.json')], { cwd: process.cwd(), stdio: 'pipe' });
+          execFileSync(process.execPath, [cli,mPath, dir, join(dir, 'x.universe.json')], { cwd: process.cwd(), stdio: 'pipe' });
         } catch (e) { stderr = String((e as { stderr?: Buffer }).stderr ?? ''); throw e; }
       }).toThrow();
       expect(stderr).toMatch(/reserved-output-suffix/);

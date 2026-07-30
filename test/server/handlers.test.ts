@@ -11,8 +11,9 @@ import type { MemoryRecord } from '../../src/types.js';
 
 function store() {
   let n = 0;
-  return new MemoryStore(join(mkdtempSync(join(tmpdir(), 'helix-h-')), 'm.jsonl'), {
-    sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
+  const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+  return new MemoryStore(join(home, 'm.jsonl'), {
+    home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
   });
 }
 const text = (res: { content: Array<{ type: string; text?: string }> }) => res.content.map((c) => c.text ?? '').join('');
@@ -192,8 +193,8 @@ function layeredStore() {
   const proj = mkdtempSync(join(tmpdir(), 'helix-p-'));
   let n = 0;
   const s = new MemoryStore(join(home, 'memory.jsonl'), {
-    sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
-    genStamp: () => 'S', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj, home },
+    home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
+    genStamp: () => 'S', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj },
   });
   return { store: s, home, proj };
 }
@@ -203,7 +204,7 @@ describe('recheck + confirm handlers', () => {
     const dir = mkdtempSync(join(tmpdir(), 'helix-h-'));
     const auditPath = join(dir, 'audit.jsonl');
     let n = 0;
-    const s = new MemoryStore(join(dir, 'm.jsonl'), { sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}` });
+    const s = new MemoryStore(join(dir, 'm.jsonl'), { home: dir, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}` });
     const cwd = process.cwd();
     process.chdir(dir);
     try {

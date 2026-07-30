@@ -42,6 +42,10 @@ acknowledgement within a few days.
 `Corroborated` and `Verified` are conferred **only** by a `verify` record, and every `verify`
 record is HMAC-SHA256-authenticated with a key held **only** in `~/.helix` (a 32-byte master,
 mode `0600`, never written into the repo ledger; each project signs with its own HKDF subkey).
+That location is the home directory itself — `HELIX_HOME` when set — and it is **not** derived from
+where the ledger happens to be: pointing `HELIX_LEDGER` into a repository moves the data file and
+nothing else. The server refuses to start if it finds trust-store files beside a relocated ledger,
+which is the layout an older build produced, rather than minting a second key over the top of them.
 On replay an elevated grade is honored only if its `verify` record's MAC validates under the
 locally-held key, so:
 
@@ -228,6 +232,19 @@ The dual-verify echo check is a **verbatim-copy tripwire, not a robust exfiltrat
 guard** against a host model that transforms content before emitting it. The primary
 boundary is the provenance firewall + secret-scan + the DATA-quarantine; the egress
 guard and echo tripwire are defense-in-depth.
+
+**The egress guard governs the payload Helix composes — it is not a sandbox around the
+Codex CLI.** The CLI is a separate program with its own model and its own connection to
+its provider, and `-s read-only` sandboxes its *writes*, not its *reads*. Helix confines
+what it can: the subprocess is started in an empty scratch directory, told (`--cd`) to
+treat that directory as its working directory, and given a constructed environment
+containing only what the CLI needs to authenticate and reach the network — not the
+server's own. That removes the automatic exposure of your project directory and your
+environment variables. It does not remove the residue: a model that reads an absolute path
+it can guess is not stopped by a working directory, and whatever it reads leaves over its
+own API connection, where Helix has no visibility at all. Treat enabling dual-verify as
+granting a third-party CLI read access to the files your user account can read; if that is
+not acceptable, run it under an OS-level sandbox or leave the feature off.
 
 ## Handling of sensitive data at rest
 

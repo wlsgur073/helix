@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, utimesSync, symlinkSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  selectStaleScratch, shouldSweep, sweepScratchRoot,
+  selectStaleScratch, shouldSweep, sweepScratchRoot, ensureScratchRoot,
   FLOOR_MS, SWEEP_INTERVAL_MS, STAMP_NAME,
 } from '../../src/verify/scratch-gc.js';
 
@@ -75,5 +75,79 @@ describe('sweepScratchRoot (IO, best-effort)', () => {
   });
   it('a missing root is a no-op and never throws', () => {
     expect(() => sweepScratchRoot(join(tmpdir(), 'helix-gctest-does-not-exist-zzz'), Date.now())).not.toThrow();
+  });
+});
+
+// F9: the stamp is written at a FIXED path under a shared, world-writable temp root, so on a shared
+// host another local user can pre-create <temp>/helix and plant .gc-stamp as a symlink pointing at
+// something of ours. writeFileSync FOLLOWS symlinks, so the victim's next dual-verify run truncated
+// the target to zero bytes. The rest of this module already refuses to follow links — the sweep
+// classifies entries with lstat "never follow it" — so this was the one site the rule was not
+// applied at.
+const posixOnly = describe.skipIf(process.platform === 'win32');
+posixOnly('stamp publication never follows a planted symlink', () => {
+  const plantedStampOver = (victimBody: string): { root: string; victim: string } => {
+    const root = mkdtempSync(join(tmpdir(), 'helix-gcsquat-'));
+    const victim = join(mkdtempSync(join(tmpdir(), 'helix-gcvictim-')), 'ledger.jsonl');
+    writeFileSync(victim, victimBody);
+    // Age the victim: the rate-limit stats the stamp PATH, which follows the link to the victim, so
+    // a freshly written victim would make shouldSweep decline and the write would never be reached.
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    utimesSync(victim, old, old);
+    symlinkSync(victim, join(root, STAMP_NAME));
+    return { root, victim };
+  };
+
+  it('leaves the symlink target byte-identical', () => {
+    const body = 'IMPORTANT USER DATA\n';
+    const { root, victim } = plantedStampOver(body);
+    sweepScratchRoot(root);
+    expect(readFileSync(victim, 'utf8')).toBe(body);
+  });
+
+  it('replaces the planted link with a real stamp, so the squat does not survive the run', () => {
+    const { root } = plantedStampOver('IMPORTANT USER DATA\n');
+    sweepScratchRoot(root);
+    expect(lstatSync(join(root, STAMP_NAME)).isSymbolicLink()).toBe(false);
+  });
+});
+
+// The other half of F9: the scratch ROOT is a fixed name directly under a 1777 temp dir, and it was
+// created with `mkdirSync(root, {recursive:true})` — no mode. Two consequences. A root we create is
+// world-readable and world-traversable, and a root that ALREADY EXISTS is adopted unexamined, which
+// is the actual attack: mkdirSync's mode argument does nothing to a directory somebody else made
+// first. So the mode has to be asserted on creation AND the existing directory has to be inspected.
+posixOnly('scratch root is owner-only, and an existing one is inspected rather than trusted', () => {
+  const modeOf = (p: string): number => lstatSync(p).mode & 0o777;
+
+  it('creates a missing root owner-only', () => {
+    const root = join(mkdtempSync(join(tmpdir(), 'helix-rootnew-')), 'helix');
+    expect(ensureScratchRoot(root)).toBe(root);
+    expect(modeOf(root)).toBe(0o700);
+  });
+
+  it('hardens an existing root of ours that is too permissive, rather than adopting it as found', () => {
+    // mkdirSync's mode is ignored for an existing directory, so this is the state a pre-creating
+    // local user leaves behind — and the state an older version of this code left behind too.
+    const root = join(mkdtempSync(join(tmpdir(), 'helix-rootperm-')), 'helix');
+    mkdirSync(root, { mode: 0o777 });
+    expect(ensureScratchRoot(root)).toBe(root);
+    expect(modeOf(root)).toBe(0o700);
+  });
+
+  it('refuses a symlink standing in for the root', () => {
+    const base = mkdtempSync(join(tmpdir(), 'helix-rootlink-'));
+    const elsewhere = join(base, 'elsewhere');
+    mkdirSync(elsewhere);
+    const root = join(base, 'helix');
+    symlinkSync(elsewhere, root);
+    expect(ensureScratchRoot(root)).toBeNull();
+  });
+
+  it('refuses a plain file squatting the root name', () => {
+    const base = mkdtempSync(join(tmpdir(), 'helix-rootfile-'));
+    const root = join(base, 'helix');
+    writeFileSync(root, '');
+    expect(ensureScratchRoot(root)).toBeNull();
   });
 });

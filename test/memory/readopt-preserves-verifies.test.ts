@@ -17,7 +17,7 @@ describe('re-adoption preserves signed verifies through compaction (PR-1 deletio
     const projLedger = join(root, '.helix', 'memory.jsonl');
     mkdirSync(join(root, '.helix'), { recursive: true });
     const store = new MemoryStore(join(home, 'memory.jsonl'), {
-      sessionId: 's', home, project: { ledger: projLedger, root, home },
+      sessionId: 's', home, project: { ledger: projLedger, root },
     });
     store.adopt();                                          // mint the project nonce (call it N1)
     const keep = store.commit({ content: 'keep me alpha', source: 'user' });
