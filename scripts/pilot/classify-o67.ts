@@ -14,7 +14,7 @@ import { projectLedgerPath } from '../../src/memory/ownership.js';
 import { lexicalEvidence, meaningfulTokens, tokenize } from '../../src/memory/retrieval.js';
 import { defaultExpansion } from '../../src/memory/expansion.js';
 import { probeUniverse, qualifiedId, corpusPrecondition, assertScopeParticipated } from './candidate-universe.js';
-import { isEntryPoint } from './entry-point.js';
+import { isEntryPoint } from '../../src/entry-point.js';
 import type { MemoryScope } from '../../src/types.js';
 
 export interface ProbeInput { id: string; query: string; relevant: string[]; unambiguous: boolean }

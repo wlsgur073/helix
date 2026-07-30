@@ -38,7 +38,7 @@ import { join } from 'node:path';
 import type { MemoryScope } from '../../src/types.js';
 import { topicTerms } from './derive.js';
 import { segmentOracle } from './segment-oracle.js';
-import { isEntryPoint } from './entry-point.js';
+import { isEntryPoint } from '../../src/entry-point.js';
 
 /** Production recall bound, pinned by the protocol (§9a, K = 20). */
 export const K = 20;

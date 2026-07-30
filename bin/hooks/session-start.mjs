@@ -1,8 +1,20 @@
 // src/hooks/session-start.ts
 import { writeSync as writeSync2 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join6, resolve as resolve2 } from "node:path";
+import { join as join6 } from "node:path";
+
+// src/entry-point.ts
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+function isEntryPoint(importMetaUrl) {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  try {
+    return realpathSync(argv1) === realpathSync(fileURLToPath(importMetaUrl));
+  } catch {
+    return false;
+  }
+}
 
 // src/memory/firewall.ts
 var VERIFYING_SOURCES = /* @__PURE__ */ new Set(["user", "reality-check"]);
@@ -162,7 +174,7 @@ import { existsSync, mkdirSync, readFileSync as readFileSync3, renameSync, unlin
 import { join as join2, resolve, dirname as dirname2 } from "node:path";
 
 // src/memory/lock.ts
-import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from "node:fs";
+import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync as realpathSync2, rmSync, readdirSync } from "node:fs";
 import { randomBytes as randomBytes2 } from "node:crypto";
 import { performance as performance2 } from "node:perf_hooks";
 import { dirname, basename, join } from "node:path";
@@ -266,9 +278,9 @@ function sleepSync(ms) {
 }
 function canonical(target) {
   try {
-    return realpathSync(target);
+    return realpathSync2(target);
   } catch {
-    return join(realpathSync(dirname(target)), basename(target));
+    return join(realpathSync2(dirname(target)), basename(target));
   }
 }
 function timeoutMessage(lockPath, holder, waitedMs) {
@@ -1213,8 +1225,7 @@ async function main() {
   } catch {
   }
 }
-var invokedDirectly = process.argv[1] !== void 0 && resolve2(process.argv[1]) === resolve2(fileURLToPath(import.meta.url));
-if (invokedDirectly) void main();
+if (isEntryPoint(import.meta.url)) void main();
 export {
   gatherScopedRecords,
   unionPhysicalRows

@@ -9,8 +9,8 @@
 // the SAME verified grades the tools show. Key-absent => everything clamps to Fresh (fail-closed).
 import { writeSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { isEntryPoint } from '../entry-point.js';
 import { formatSessionStartContext } from './format-context.js';
 import { newNonce, collectWitnessNotes } from '../memory/content-frame.js';
 import { projectDispositionOf, projectLedgerPath, canonicalRoot, type ProjectDisposition } from '../memory/ownership.js';
@@ -148,8 +148,13 @@ async function main(): Promise<void> {
 }
 
 // Run only when invoked as the hook entry point (node <bundle>). Importing this module — e.g. a unit
-// test exercising gatherScopedRecords — must NOT consume stdin or block. resolve() normalises both
-// sides so a relative argv[1] still matches the bundle's own path.
-const invokedDirectly =
-  process.argv[1] !== undefined && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-if (invokedDirectly) void main();
+// test exercising gatherScopedRecords — must NOT consume stdin or block.
+//
+// This used to compare resolve(argv[1]) against resolve(import.meta.url). resolve() normalises but
+// does not DEREFERENCE: Node resolves the main module to its realpath while argv[1] keeps the
+// launcher's spelling, so the two disagree the moment a symlink is anywhere on the path — which is
+// the normal case for a plugin cache. main() then never ran and the hook exited 0 having injected
+// nothing, a silent failure of the headline feature. isEntryPoint realpaths both sides, the same
+// primitive the project-ledger check three screens up already uses (canonicalRoot) for the same
+// reason.
+if (isEntryPoint(import.meta.url)) void main();
