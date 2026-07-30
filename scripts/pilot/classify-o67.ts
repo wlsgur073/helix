@@ -31,8 +31,13 @@ export interface ProbeVerdict {
   targetMatched?: string[];             // sorted
   witnesses?: { id: string; extraTerms: string[] }[]; // id is scope-qualified; sorted by id; extraTerms sorted
   equalCoverage?: string[];             // scope-qualified ids of equal-set competitors, sorted
-  baseHit1Eligible: boolean;            // the manifest's unambiguous flag, echoed as data
-  finalHit1Eligible: boolean;           // base && !in-class (recommended-gate field; C5.1 confirms)
+  // The manifest's `unambiguous` flag, echoed as data on EVERY path. One tier, not two: owner
+  // decision D-b (2026-07-30) replaced the exclusion default, so there is no longer a "base"
+  // denominator distinct from a post-exclusion "final" one, and the `finalHit1Eligible` field that
+  // encoded the difference is deleted rather than renamed. Class membership rides on `status`
+  // alone and must never transform eligibility — including on the unscorable paths, which used to
+  // force it false and could shrink a denominator computed by counting this field.
+  hit1Eligible: boolean;
 }
 
 export const strictSuperset = (a: Set<string>, b: Set<string>): boolean =>
@@ -42,27 +47,27 @@ export const strictSuperset = (a: Set<string>, b: Set<string>): boolean =>
 export function classifyProbe(p: ProbeInput, pool: CandidateDoc[]): ProbeVerdict {
   const base = p.unambiguous === true;
   if (p.relevant.length !== 1) {
-    return { id: p.id, status: 'out-of-domain', reason: p.relevant.length === 0 ? 'no-target' : 'multi-target', baseHit1Eligible: base, finalHit1Eligible: base };
+    return { id: p.id, status: 'out-of-domain', reason: p.relevant.length === 0 ? 'no-target' : 'multi-target', hit1Eligible: base };
   }
   const targetId = p.relevant[0]!;
   const qTerms = [...new Set(meaningfulTokens(tokenize(p.query)))].sort();
   if (qTerms.length === 0) {
-    return { id: p.id, status: 'unscorable', reason: 'empty-query', targetId, baseHit1Eligible: base, finalHit1Eligible: false };
+    return { id: p.id, status: 'unscorable', reason: 'empty-query', targetId, hit1Eligible: base };
   }
   const byId = new Map<string, CandidateDoc[]>();
   for (const c of pool) { const arr = byId.get(c.id) ?? []; arr.push(c); byId.set(c.id, arr); }
   const targetDocs = byId.get(targetId) ?? [];
   if (targetDocs.length === 0) {
-    return { id: p.id, status: 'unscorable', reason: 'target-not-servable', targetId, baseHit1Eligible: base, finalHit1Eligible: false };
+    return { id: p.id, status: 'unscorable', reason: 'target-not-servable', targetId, hit1Eligible: base };
   }
   if (targetDocs.length > 1) {
-    return { id: p.id, status: 'unscorable', reason: 'duplicate-target-identity', targetId, baseHit1Eligible: base, finalHit1Eligible: false };
+    return { id: p.id, status: 'unscorable', reason: 'duplicate-target-identity', targetId, hit1Eligible: base };
   }
   const evOf = (c: CandidateDoc) => lexicalEvidence(qTerms, tokenize(c.content));
   const t = evOf(targetDocs[0]!);
-  const common = { targetId, targetScope: targetDocs[0]!.scope, qTerms, targetDirect: [...t.direct].sort(), targetRescued: [...t.rescued].sort(), targetMatched: [...t.matched].sort(), baseHit1Eligible: base };
+  const common = { targetId, targetScope: targetDocs[0]!.scope, qTerms, targetDirect: [...t.direct].sort(), targetRescued: [...t.rescued].sort(), targetMatched: [...t.matched].sort(), hit1Eligible: base };
   if (t.matched.size === 0) {
-    return { id: p.id, status: 'target-zero-evidence', ...common, finalHit1Eligible: base };
+    return { id: p.id, status: 'target-zero-evidence', ...common };
   }
   const witnesses: { id: string; extraTerms: string[] }[] = [];
   const equalCoverage: string[] = [];
@@ -78,7 +83,6 @@ export function classifyProbe(p: ProbeInput, pool: CandidateDoc[]): ProbeVerdict
   return {
     id: p.id, status: inClass ? 'in-class' : 'not-in-class', ...common,
     ...(witnesses.length ? { witnesses } : {}), ...(equalCoverage.length ? { equalCoverage } : {}),
-    finalHit1Eligible: base && !inClass,
   };
 }
 

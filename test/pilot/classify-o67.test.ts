@@ -28,8 +28,28 @@ describe('classifyProbe', () => {
     // rides alongside it instead, so the pair is recoverable without redefining a manifest field.
     expect(v.targetId).toBe('t1');
     expect(v.targetScope).toBe('project');
-    expect(v.finalHit1Eligible).toBe(false);
-    expect(v.baseHit1Eligible).toBe(true);
+    // Eligibility under the D-b composition has its own test below; this one is about membership.
+  });
+
+  it('keeps an in-class probe Hit@1 eligible — class membership never transforms eligibility', () => {
+    // Owner decision D-b (2026-07-30) replaced the exclusion default the rule had marked
+    // "confirmed or replaced at the C5.1 freeze": in-class members REMAIN in the binding Hit@1
+    // denominator. Membership is carried by `status` alone.
+    const v = classifyProbe(probe(), [target, restater]);
+    expect(v.status).toBe('in-class');
+    expect(v.hit1Eligible).toBe(true);
+    expect('finalHit1Eligible' in v).toBe(false);   // the exclusion-derived field is deleted, not renamed
+    expect('baseHit1Eligible' in v).toBe(false);    // "base" only meant anything against a "final"
+  });
+
+  it('echoes the manifest flag on EVERY return path, unscorable included', () => {
+    // The unscorable paths used to force the eligibility field false regardless of the manifest,
+    // which could silently shrink a denominator computed by counting the field. Unscorable is a
+    // gate failure on its own; eligibility must stay a faithful echo and let `status` carry errors.
+    const v = classifyProbe(probe({ relevant: ['missing'] }), [target]);
+    expect(v.status).toBe('unscorable');
+    expect(v.reason).toBe('target-not-servable');
+    expect(v.hit1Eligible).toBe(true);              // the manifest said unambiguous; that is the whole meaning
   });
 
   it('equal coverage is NOT in-class (reported informationally)', () => {
@@ -37,7 +57,7 @@ describe('classifyProbe', () => {
     const v = classifyProbe(probe(), [target, twin]);
     expect(v.status).toBe('not-in-class');
     expect(v.equalCoverage).toEqual(['global:c2']);
-    expect(v.finalHit1Eligible).toBe(true);
+    expect(v.hit1Eligible).toBe(true);
   });
 
   it('a zero-evidence target is target-zero-evidence, never in-class (empty set inflates exposure)', () => {

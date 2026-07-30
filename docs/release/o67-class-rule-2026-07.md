@@ -120,6 +120,12 @@ Classifier runs, 2026-07-26, snapshot-frozen, both manifests (identical results)
 OUTCOME is unchanged — the anchor below is what C1.3 asserts, and it is invariant across that
 change; only the serialization moved, so the run's byte hashes were re-recorded.
 
+Re-verified 2026-07-30 after the eligibility-field change enacting owner decision D-b (§4
+amendment): the anchor below reproduces **verbatim** on both manifests, needing no re-baseline
+at all. That is the point of anchoring on the summary rather than on a file hash — the change
+rewrote per-probe verdict fields, which a hash pin would have flagged as a broken anchor while
+the membership rule it is supposed to guard never moved.
+
 | probe | status | target matched (direct + rescued) | witnesses (extra terms) |
 |---|---|---|---|
 | O_67 (unambiguous, target scope `project`) | IN-CLASS | cli, id, store, throw, unknown + completetask, mutators | project:m_02fd751a… (+add), project:m_e7787d10… (+add) |
