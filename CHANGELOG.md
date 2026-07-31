@@ -236,6 +236,22 @@ All notable changes to Helix are documented here. This project follows
   divergence.
 
 ### Security
+- The re-baseline ceremony refuses a project scope that names the global ledger. It resolved the
+  ledger from the scope argument and the witness key from the same argument by a second, independent
+  route, and compared neither against the global ledger. In the default layout `HELIX_HOME` is
+  `$HOME/.helix`, so `--scope $HOME` resolved to the global ledger file while keying the witness
+  under the project root: one physical file recorded under two witness identities, with the older
+  one left attesting to a prefix of a file that had since grown — an unwitnessed tail until the next
+  write under that key. The ceremony compounded it by displaying `first-contact` and `epoch: 0 -> 1`
+  beside a non-zero byte count, telling the operator they were blessing virgin ground. The ledger
+  and its witness key are now derived together in one place, and that place is also where the
+  components that already enforced this same rule read it from. Also refused up front: a ledger with
+  more than one hard link. The append layer already rejected those, but only after the ceremony had
+  published its write-ahead witness journal, which left the scope holding a transition the ledger
+  never received. The link count is re-verified after the confirmation pause as well, next to the
+  existing content re-verify: a hard link created while the ceremony waits for the operator changes
+  no byte, so the content check alone cannot see it, and the append's own late refusal would strand
+  the scope the same way.
 - The dual-verify subprocess no longer inherits the user's working directory or environment. It was
   spawned with only `stdio` set, so the external Codex CLI started in the user's project and
   received every variable the server had — and `-s read-only` sandboxes writes, not reads, while the

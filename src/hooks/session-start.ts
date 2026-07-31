@@ -14,7 +14,8 @@ import { isEntryPoint } from '../entry-point.js';
 import { strayTrustFiles } from '../memory/trust-store-layout.js';
 import { formatSessionStartContext } from './format-context.js';
 import { newNonce, collectWitnessNotes } from '../memory/content-frame.js';
-import { projectDispositionOf, projectLedgerPath, canonicalRoot, type ProjectDisposition } from '../memory/ownership.js';
+import { projectDispositionOf, projectLedgerPath, type ProjectDisposition } from '../memory/ownership.js';
+import { aliasesGlobalLedger } from '../memory/scope-target.js';
 import { verifiedLiveWitnessed, type ReplayStats } from '../memory/verified-read.js';
 import { enforceWitnessProjection } from '../memory/verified-projection.js';
 import type { WitnessVerdict } from '../memory/witness-core.js';
@@ -84,7 +85,7 @@ export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): G
     const projLedger = projectLedgerPath(cwd);
     // guard: never read the global ledger as a "project" layer (cwd == ~ collision) — the SAME guard
     // gates both the disposition snapshot and the read below, so the two can never disagree.
-    if (canonicalRoot(projLedger) !== canonicalRoot(globalLedger)) { // realpath: a symlinked project ledger aliasing the global one is one file -> not a project layer
+    if (!aliasesGlobalLedger(projLedger, globalLedger)) { // one physical file is never two scopes -- see scope-target.ts
       try {
         // B2: the SAME shared tri-state predicate the store uses, from the same descriptor shape —
         // computed ONCE and reused to gate the read immediately below (mirrors store.ts's
@@ -164,7 +165,7 @@ async function main(): Promise<void> {
 // does not DEREFERENCE: Node resolves the main module to its realpath while argv[1] keeps the
 // launcher's spelling, so the two disagree the moment a symlink is anywhere on the path — which is
 // the normal case for a plugin cache. main() then never ran and the hook exited 0 having injected
-// nothing, a silent failure of the headline feature. isEntryPoint realpaths both sides, the same
-// primitive the project-ledger check three screens up already uses (canonicalRoot) for the same
-// reason.
+// nothing, a silent failure of the headline feature. isEntryPoint realpaths both sides — the same
+// realpath identity the project-ledger guard three screens up gets from aliasesGlobalLedger (a
+// canonicalRoot comparison under the hood) for the same reason.
 if (isEntryPoint(import.meta.url)) void main();

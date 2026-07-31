@@ -660,6 +660,23 @@ function witnessFenceRecord(epoch, nonce, tx) {
     classification: "normal"
   };
 }
+function aliasedLedgerMessage(nlink) {
+  return `ledger has ${nlink} hard links \u2014 aliased ledgers are unsupported (see SECURITY.md); refusing to write`;
+}
+function aliasedLedgerRefusal(rawPath, fsOps = realFsOps) {
+  let fd;
+  try {
+    fd = fsOps.openSync(canonical(rawPath), "r");
+  } catch {
+    return null;
+  }
+  try {
+    const nlink = fsOps.fstatSync(fd).nlink;
+    return nlink === 1 ? null : aliasedLedgerMessage(nlink);
+  } finally {
+    fsOps.closeSync(fd);
+  }
+}
 function appendRecordUnlocked(rawPath, record, fsOps = realFsOps) {
   mkdirSync3(dirname6(rawPath), { recursive: true });
   const path = canonical(rawPath);
@@ -667,7 +684,7 @@ function appendRecordUnlocked(rawPath, record, fsOps = realFsOps) {
   const fd = fsOps.openSync(path, "a+");
   try {
     const st = fsOps.fstatSync(fd);
-    if (st.nlink !== 1) throw new Error(`appendRecord: ledger has ${st.nlink} hard links \u2014 aliased ledgers are unsupported (see SECURITY.md); refusing to write`);
+    if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
     let line = JSON.stringify(record) + "\n";
     if (st.size > 0) {
       const tail = Buffer.alloc(1);
@@ -688,6 +705,17 @@ function readLedgerBytes(path) {
     if (err.code === "ENOENT") return Buffer.alloc(0);
     throw err;
   }
+}
+
+// src/memory/scope-target.ts
+function aliasesGlobalLedger(projectLedger, globalLedger) {
+  return canonicalRoot(projectLedger) === canonicalRoot(globalLedger);
+}
+function resolveScopeTarget(home, globalLedger, scope) {
+  if (scope === "global") return { ok: true, ledger: globalLedger, scopeKey: scopeKeyOf(home) };
+  const ledger = projectLedgerPath(scope);
+  if (aliasesGlobalLedger(ledger, globalLedger)) return { ok: false, reason: "aliases-global", ledger };
+  return { ok: true, ledger, scopeKey: scopeKeyOf(home, scope) };
 }
 
 // scripts/rebaseline-cli.ts
@@ -741,8 +769,29 @@ async function main(argv, deps = {}) {
     const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
     const promptLine = deps.promptLine ?? defaultPromptLine;
     const home = resolveHome(env);
-    const ledger = scope === "global" ? resolveGlobalLedger(env, home) : projectLedgerPath(scope);
-    const scopeKey = scope === "global" ? scopeKeyOf(home) : scopeKeyOf(home, scope);
+    const globalLedger = resolveGlobalLedger(env, home);
+    const target = resolveScopeTarget(home, globalLedger, scope);
+    if (!target.ok) {
+      process.stderr.write(
+        // ASCII only
+        `helix-rebaseline: REFUSING - ${scope} resolves to the global ledger, not a separate project ledger.
+  resolved ledger: ${target.ledger}
+  global ledger  : ${globalLedger}
+Re-baselining it under a project scope key would record one file under two witness identities.
+Use: --scope global
+`
+      );
+      exit(2);
+      return 2;
+    }
+    const { ledger, scopeKey } = target;
+    const aliased = aliasedLedgerRefusal(ledger);
+    if (aliased !== null) {
+      process.stderr.write(`helix-rebaseline: REFUSING - ${aliased}
+`);
+      exit(2);
+      return 2;
+    }
     mkdirSync4(dirname7(ledger), { recursive: true });
     const code = await withFileLockAsync(ledger, async () => {
       const displayedBytes = readLedgerBytes(ledger);
@@ -771,6 +820,13 @@ async function main(argv, deps = {}) {
       const currentBytes = readLedgerBytes(ledger);
       if (sha256Hex(currentBytes) !== displayedHash) {
         process.stderr.write("ledger changed during confirmation\n");
+        exit(3);
+        return 3;
+      }
+      const aliasedNow = aliasedLedgerRefusal(ledger);
+      if (aliasedNow !== null) {
+        process.stderr.write(`ledger changed during confirmation -- ${aliasedNow}
+`);
         exit(3);
         return 3;
       }

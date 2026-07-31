@@ -14282,6 +14282,9 @@ function witnessFenceRecord(epoch, nonce, tx) {
     classification: "normal"
   };
 }
+function aliasedLedgerMessage(nlink) {
+  return `ledger has ${nlink} hard links \u2014 aliased ledgers are unsupported (see SECURITY.md); refusing to write`;
+}
 function appendRecordUnlocked(rawPath, record2, fsOps = realFsOps) {
   mkdirSync4(dirname6(rawPath), { recursive: true });
   const path = canonical(rawPath);
@@ -14289,7 +14292,7 @@ function appendRecordUnlocked(rawPath, record2, fsOps = realFsOps) {
   const fd = fsOps.openSync(path, "a+");
   try {
     const st = fsOps.fstatSync(fd);
-    if (st.nlink !== 1) throw new Error(`appendRecord: ledger has ${st.nlink} hard links \u2014 aliased ledgers are unsupported (see SECURITY.md); refusing to write`);
+    if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
     let line = JSON.stringify(record2) + "\n";
     if (st.size > 0) {
       const tail = Buffer.alloc(1);
@@ -15911,6 +15914,11 @@ function scanLegacyElevated(records, verify) {
     }
   }
   return { ok: offenders.length === 0, offenders };
+}
+
+// src/memory/scope-target.ts
+function aliasesGlobalLedger(projectLedger2, globalLedger2) {
+  return canonicalRoot(projectLedger2) === canonicalRoot(globalLedger2);
 }
 
 // src/memory/trust-store-layout.ts
@@ -25400,7 +25408,7 @@ var home = process.env.HELIX_HOME ?? join11(homedir3(), ".helix");
 var globalLedger = process.env.HELIX_LEDGER ?? join11(home, "memory.jsonl");
 var projectRoot = process.cwd();
 var projectLedger = join11(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync8(join11(projectRoot, ".helix")) && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
+var projectActive = existsSync8(join11(projectRoot, ".helix")) && !aliasesGlobalLedger(projectLedger, globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot } : void 0;
 var config2 = loadConfig({ globalPath: join11(home, "config.json") });
 if (existsSync8(join11(projectRoot, ".helix", "config.json"))) {

@@ -7,7 +7,7 @@ import { MemoryStore } from '../memory/store.js';
 import { parseLedger } from '../memory/ledger.js';
 import { scanLegacyElevated } from '../memory/legacy-scan.js';
 import { subkeyForScope } from '../memory/verified-read.js';
-import { canonicalRoot } from '../memory/ownership.js';
+import { aliasesGlobalLedger } from '../memory/scope-target.js';
 import { strayTrustFiles } from '../memory/trust-store-layout.js';
 import { verifyVerify } from '../memory/ledger-mac.js';
 import { buildServer } from './helix-server.js';
@@ -28,9 +28,9 @@ const projectLedger = join(projectRoot, '.helix', 'memory.jsonl');
 // ledger) also disables it. Note this gate is about the ledger alone: config no longer has a
 // cwd-discovered project layer to mirror, since a repo must not configure the process reading it.
 const projectActive = existsSync(join(projectRoot, '.helix'))
-  // realpath, not textual resolve: a symlinked .helix that points the project ledger AT the global
-  // ledger is ONE physical file — treat it as a collision and stay global-only.
-  && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
+  // One physical file is never two scopes — see aliasesGlobalLedger for why this is canonical and
+  // not textual, and for the census of the call sites that share this rule.
+  && !aliasesGlobalLedger(projectLedger, globalLedger);
 const project = projectActive ? { ledger: projectLedger, root: projectRoot } : undefined;
 
 // One config load drives both the store's metrics sink and the server deps. The real sink writes

@@ -131,6 +131,15 @@ function isOwned(projectRoot, home) {
   return stamp !== null && stamp === entry.stamp;
 }
 
+// src/memory/ledger-mac.ts
+var DOMAIN = Buffer.from("helix-ledger-mac");
+var NULL_FIELD = Buffer.from([0, 0, 0, 0, 0]);
+
+// src/memory/scope-target.ts
+function aliasesGlobalLedger(projectLedger, globalLedger) {
+  return canonicalRoot(projectLedger) === canonicalRoot(globalLedger);
+}
+
 // src/config.ts
 import { readFileSync as readFileSync3 } from "node:fs";
 import { join as join3 } from "node:path";
@@ -242,7 +251,7 @@ function toParticipant(id, outcome) {
 }
 function resolveProjectDisposition(root, home, globalLedger) {
   if (!existsSync2(join4(root, ".helix"))) return "absent";
-  const distinctFromGlobal = canonicalRoot(projectLedgerPath(root)) !== canonicalRoot(globalLedger);
+  const distinctFromGlobal = !aliasesGlobalLedger(projectLedgerPath(root), globalLedger);
   return distinctFromGlobal && isOwned(root, home) ? "owned" : "unowned";
 }
 function readTwoParticipants(globalLedger, root, home, disposition, readFile) {

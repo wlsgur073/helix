@@ -21,12 +21,12 @@ import { isAbsolute, dirname, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import type { MemoryRecord } from '../src/types.js';
 import { withFileLockAsync } from '../src/memory/lock.js';
-import { readLedgerBytes, appendRecordUnlocked, witnessFenceRecord } from '../src/memory/ledger.js';
+import { readLedgerBytes, appendRecordUnlocked, witnessFenceRecord, aliasedLedgerRefusal } from '../src/memory/ledger.js';
 import {
-  scopeKeyOf, readScopeWitness, classifyState, planTransition, openTransition, completeTransition,
+  readScopeWitness, classifyState, planTransition, openTransition, completeTransition,
 } from '../src/memory/witness-store.js';
 import { sha256Hex } from '../src/memory/witness-core.js';
-import { projectLedgerPath } from '../src/memory/ownership.js';
+import { resolveScopeTarget } from '../src/memory/scope-target.js';
 
 export interface RebaselineDeps {
   env?: NodeJS.ProcessEnv;
@@ -90,9 +90,13 @@ function computeAppendedBytes(existing: Buffer, record: MemoryRecord): Buffer {
 /** Never throws: every failure path (usage, TTY refusal, or any exception from the locked
  *  ceremony) is caught and turned into a numeric exit code — both returned AND applied via
  *  deps.exit (default: process.exitCode, never the hard process.exit(), matching this repo's
- *  natural-exit convention). Exit 2 = usage/TTY refusal (nothing attempted); exit 1 = confirmation
+ *  natural-exit convention). Exit 2 = nothing attempted: bad usage, no TTY, a project scope that
+ *  resolves to the global ledger, or an already-hard-linked ledger — the last two are refused
+ *  before the lock, the display and the prompt, because a target the ceremony cannot honour must
+ *  not be one the operator is asked to bless. Exit 1 = confirmation
  *  declined OR an unexpected failure (nothing written in either case); exit 3 = the ledger changed
- *  during the confirmation pause (nothing written); exit 0 = a fresh epoch fence was committed. */
+ *  during the confirmation pause — its content OR its link count (nothing written); exit 0 = a
+ *  fresh epoch fence was committed. */
 export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<number> {
   const exit = deps.exit ?? ((code: number): void => { process.exitCode = code; });
 
@@ -116,8 +120,40 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
     const promptLine = deps.promptLine ?? defaultPromptLine;
 
     const home = resolveHome(env);
-    const ledger = scope === 'global' ? resolveGlobalLedger(env, home) : projectLedgerPath(scope);
-    const scopeKey = scope === 'global' ? scopeKeyOf(home) : scopeKeyOf(home, scope);
+    // ONE resolution for the ledger AND its witness key. They used to be derived from `scope` by two
+    // independent routes, which is how a project scope could name the global ledger: in the default
+    // layout HELIX_HOME is `$HOME/.helix`, so `--scope $HOME` resolves to the global ledger file
+    // while keying the witness under `canonicalRoot($HOME)`. One file, two witness identities — and
+    // the older one is left attesting to a prefix of a file that has since grown.
+    const globalLedger = resolveGlobalLedger(env, home);
+    const target = resolveScopeTarget(home, globalLedger, scope);
+    if (!target.ok) {
+      process.stderr.write(                                                         // ASCII only
+        `helix-rebaseline: REFUSING - ${scope} resolves to the global ledger, not a separate project ledger.\n` +
+        `  resolved ledger: ${target.ledger}\n` +
+        `  global ledger  : ${globalLedger}\n` +
+        `Re-baselining it under a project scope key would record one file under two witness identities.\n` +
+        `Use: --scope global\n`,
+      );
+      exit(2);
+      return 2;
+    }
+    const { ledger, scopeKey } = target;
+
+    // Pre-flight, before ANY durable intent: the ceremony publishes a write-ahead witness journal and
+    // only then appends the fence, so an append that refuses the ledger AFTER the journal is on disk
+    // strands the scope in `transition-interrupted` — reads exclude it, writes throw — from a
+    // ceremony that wrote nothing. Ask first. The append re-checks on its own descriptor and remains
+    // the authority; this only makes the already-aliased case cost a message instead of an outage.
+    const aliased = aliasedLedgerRefusal(ledger);
+    if (aliased !== null) {
+      // Reason text is the ledger layer's own wording, reused verbatim so the pre-check and the
+      // append can never describe the same refusal two different ways.
+      process.stderr.write(`helix-rebaseline: REFUSING - ${aliased}\n`);
+      exit(2);
+      return 2;
+    }
+
     mkdirSync(dirname(ledger), { recursive: true }); // the lock file lives next to the ledger; must exist before withFileLockAsync
 
     // The ENTIRE ceremony — display, confirmation, re-verify, commit — runs inside ONE held ledger
@@ -150,6 +186,19 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
       const currentBytes = readLedgerBytes(ledger);
       if (sha256Hex(currentBytes) !== displayedHash) {
         process.stderr.write('ledger changed during confirmation\n');
+        exit(3);
+        return 3;
+      }
+
+      // The OTHER pause-spanning sample gets the same discipline: the link count was probed before
+      // the prompt, and an `ln` during the pause changes no byte — the hash above cannot see it.
+      // The append would still refuse it, but only after openTransition has published the journal,
+      // stranding the scope 'transition-interrupted' from a ceremony that wrote nothing. Re-ask now,
+      // while refusing still costs a message. (The append's descriptor-time check remains the
+      // authority; what this closes is the human-scale pause window, not the microseconds after it.)
+      const aliasedNow = aliasedLedgerRefusal(ledger);
+      if (aliasedNow !== null) {
+        process.stderr.write(`ledger changed during confirmation -- ${aliasedNow}\n`);
         exit(3);
         return 3;
       }

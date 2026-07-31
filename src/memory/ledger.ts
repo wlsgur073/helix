@@ -65,6 +65,45 @@ export function witnessFenceRecord(epoch: number, nonce: string, tx: string): Me
   };
 }
 
+/** The one wording for "this ledger is an alias", so the pre-check below and the append itself can
+ *  never disagree about the rule or describe it two different ways. */
+function aliasedLedgerMessage(nlink: number): string {
+  return `ledger has ${nlink} hard links — aliased ledgers are unsupported (see SECURITY.md); refusing to write`;
+}
+
+/**
+ * Whether `appendRecordUnlocked` would refuse this ledger for the one reason that is a standing
+ * property of the ledger itself — a link count above 1 — or null when that check passes. Null is
+ * NOT a promise the append will succeed: its transient preconditions (the orphan-tmp sweep, the
+ * open for append) are judged only by the append, on its own descriptor, at its own time.
+ *
+ * For callers that publish DURABLE INTENT before they append. The re-baseline ceremony is the one
+ * that matters: it opens a write-ahead witness journal, then appends the fence. When the append
+ * refused an aliased ledger the journal was already on disk describing a transition the ledger never
+ * received, leaving the scope `transition-interrupted` — reads exclude it, writes throw — an outage
+ * produced by a ceremony that wrote nothing. Such a caller has to ask this question BEFORE it
+ * publishes anything.
+ *
+ * A pre-check, not a guarantee: the append re-checks on its own descriptor, which is the authority.
+ * An `ln` landing between the two still refuses there. This closes the ordinary case — a ledger that
+ * was ALREADY aliased when the operator started — so the refusal costs a message instead of a stuck
+ * scope. A ledger that does not exist yet is not an alias, and reports null.
+ */
+export function aliasedLedgerRefusal(rawPath: LedgerPath, fsOps: DurableFsOps = realFsOps): string | null {
+  let fd: number;
+  try {
+    fd = fsOps.openSync(canonical(rawPath), 'r');  // canonical: the SAME inode identity the append resolves to
+  } catch {
+    return null;                                   // absent (or unopenable) — the append will speak for itself
+  }
+  try {
+    const nlink = fsOps.fstatSync(fd).nlink;
+    return nlink === 1 ? null : aliasedLedgerMessage(nlink);
+  } finally {
+    fsOps.closeSync(fd);
+  }
+}
+
 /** Append one record as a single JSONL line WITHOUT taking the ledger lock — for callers that
  *  ALREADY hold it (withFileLock is not re-entrant), e.g. the store's signing writeVerify.
  *  Durable + self-repairing (spec Layer 5): sweeps orphan tmps (the fence — a sweep failure ABORTS
@@ -81,7 +120,7 @@ export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, 
   const fd = fsOps.openSync(path, 'a+');
   try {
     const st = fsOps.fstatSync(fd);
-    if (st.nlink !== 1) throw new Error(`appendRecord: ledger has ${st.nlink} hard links — aliased ledgers are unsupported (see SECURITY.md); refusing to write`);
+    if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
     let line = JSON.stringify(record) + '\n';
     if (st.size > 0) {
       const tail = Buffer.alloc(1);
