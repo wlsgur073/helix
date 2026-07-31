@@ -6,10 +6,10 @@
  *  and its read in agreement, and `scripts/trigger-measure.ts` repeats it again with a comment
  *  pointing at the server. The re-baseline ceremony did not have it — that was the defect — and an
  *  invariant nobody could name is exactly the kind that gets copied three times and forgotten
- *  elsewhere: the dev-only replay benchmark (`scripts/bench-replay.ts` runReal) still selects its
- *  scopes without this rule and is the known remaining call site to migrate. Naming the rule is
- *  most of the fix; `resolveScopeTarget` is the rest, because it stops the ceremony deriving a
- *  ledger and a witness key from the same argument by two independent routes. */
+ *  elsewhere (the dev-only replay benchmark had also missed it; `scripts/bench-replay.ts` runReal
+ *  reads it from here now). Naming the rule is most of the fix; `resolveScopeTarget` is the rest,
+ *  because it stops the ceremony deriving a ledger and a witness key from the same argument by two
+ *  independent routes. */
 import { canonicalRoot, projectLedgerPath } from './ownership.js';
 import { scopeKeyOf } from './witness-store.js';
 

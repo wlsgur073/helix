@@ -11,6 +11,7 @@ import { ensureMaster, signVerify, digestContent } from '../src/memory/ledger-ma
 import { subkeyForScope, verifiedLiveStats } from '../src/memory/verified-read.js';
 import { MemoryStore } from '../src/memory/store.js';
 import { isOwned, projectLedgerPath } from '../src/memory/ownership.js';
+import { aliasesGlobalLedger } from '../src/memory/scope-target.js';
 
 // --- deterministic RNG (seedable) — reproducible fixtures, no Math.random ---
 function lcg(seed: number): () => number {
@@ -180,13 +181,21 @@ export function runSweep(opts: { sizes: number[]; iters: number; seed: number })
   }
 }
 
-export function runReal(): void {
-  const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
-  const globalLedger = process.env.HELIX_LEDGER ?? join(home, 'memory.jsonl');
+/** Injectable seam, trigger-cli.ts's deps convention: defaults reproduce the ambient reads
+ *  byte-for-byte, so the CLI dispatch below stays a plain `runReal()`. `cwd` is a thunk like
+ *  RebaselineDeps' `now` — sampled once, here. */
+export interface RealDeps { env?: NodeJS.ProcessEnv; cwd?: () => string; }
+
+export function runReal(deps: RealDeps = {}): void {
+  const env = deps.env ?? process.env;
+  const cwd = (deps.cwd ?? process.cwd)();
+  const home = env.HELIX_HOME ?? join(homedir(), '.helix');
+  const globalLedger = env.HELIX_LEDGER ?? join(home, 'memory.jsonl');
   process.stdout.write(`bench-replay --real (read-only) home=${home}\n`);
   const scopes: Array<{ label: string; ledger: string; root?: string }> = [{ label: 'global', ledger: globalLedger }];
-  const cwd = process.cwd();
-  if (existsSync(join(cwd, '.helix')) && isOwned(cwd, home)) {
+  // One physical file is never two participants (cwd == $HOME aliases the global ledger in the
+  // default layout) — the same gate the server, hook, and trigger measurement apply. See scope-target.ts.
+  if (existsSync(join(cwd, '.helix')) && !aliasesGlobalLedger(projectLedgerPath(cwd), globalLedger) && isOwned(cwd, home)) {
     scopes.push({ label: 'project', ledger: projectLedgerPath(cwd), root: cwd });
   }
   for (const s of scopes) {

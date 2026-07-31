@@ -227,6 +227,10 @@ All notable changes to Helix are documented here. This project follows
   journal slot holds one transition at a time, so the predecessor's evidence is already gone and
   clearing the slot would delete an alarm this writer cannot vouch for rather than restore anything.
   Such a failure leaves the journal pending for a re-drive to supersede, exactly as before.
+- `bench-replay --real` no longer benches one physical file under two labels. Its project-scope
+  gate checked ownership but not the one-file-is-one-participant rule the server, session-start
+  hook, and trigger measurement already apply, so in the default layout a benchmark run from an
+  adopted `$HOME` printed a phantom `project` row measuring the global ledger a second time.
 - `dualVerify.mode`, `stakesFloor`, `model` and `effort` no longer discard an invalid value in
   silence. Previously an unrecognised `effort` left the field at `null`, which means "omit `-c` and
   inherit `~/.codex/config.toml`" — so `"effort": "max"` produced whatever Codex was configured with,
