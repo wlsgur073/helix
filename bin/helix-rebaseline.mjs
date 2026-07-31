@@ -642,6 +642,30 @@ function completeTransition(home, scopeKey, bytes, headTx, fsOps = realFsOps) {
     writeStoreFileAt(path, nextStore, fsOps);
   });
 }
+function discardTransition(home, scopeKey, nonce, fsOps = realFsOps) {
+  mkdirSync2(home, { recursive: true });
+  const master = ensureMaster(home);
+  const rawPath = witnessPath(home);
+  withFileLock(rawPath, () => {
+    const path = canonical(rawPath);
+    const store = readStoreFileAt(path);
+    const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
+    const journal = state.macInvalid ? null : state.journal;
+    if (!journal) throw new WitnessAdvanceError("discardTransition: no pending journal for scope");
+    if (journal.nonce !== nonce) {
+      throw new WitnessAdvanceError("discardTransition: the pending journal belongs to a different transition (superseded meanwhile?) \u2014 refusing to retract it");
+    }
+    if (journal.supersedes !== null) {
+      throw new WitnessAdvanceError(
+        "discardTransition: this transition superseded a still-unresolved one, whose evidence the single journal slot no longer holds \u2014 retracting would clear an alarm this writer cannot vouch for; leaving it pending for a re-drive instead"
+      );
+    }
+    const entry = state.macInvalid ? null : state.entry;
+    appendWitnessLogLine(home, { v: 1, scope: scopeKey, epoch: journal.epoch, kind: journal.kind, tx: journal.tx, nonce: journal.nonce, op: "discard" }, fsOps);
+    const nextStore = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry, journal: null } } };
+    writeStoreFileAt(path, nextStore, fsOps);
+  });
+}
 
 // src/memory/ledger.ts
 function witnessFenceRecord(epoch, nonce, tx) {
@@ -830,7 +854,7 @@ Use: --scope global
       const fence = witnessFenceRecord(plan.epoch, plan.nonce, now());
       const finalBytes = computeAppendedBytes(currentBytes, fence);
       const expected = { byteLength: finalBytes.length, prefixHash: sha256Hex(finalBytes) };
-      openTransition(home, scopeKey, {
+      const journal = openTransition(home, scopeKey, {
         kind: "rebaseline",
         epoch: plan.epoch,
         nonce: plan.nonce,
@@ -839,7 +863,18 @@ Use: --scope global
         expected,
         tx: fence.tx
       });
-      appendRecordUnlocked(ledger, fence);
+      try {
+        appendRecordUnlocked(ledger, fence);
+      } catch (e) {
+        try {
+          if (readLedgerBytes(ledger).equals(currentBytes)) {
+            discardTransition(home, scopeKey, journal.nonce);
+            process.stderr.write("append refused before any byte landed -- the opened witness journal was retracted; nothing written\n");
+          }
+        } catch {
+        }
+        throw e;
+      }
       const landedBytes = readLedgerBytes(ledger);
       completeTransition(home, scopeKey, landedBytes, fence.tx);
       process.stdout.write(`re-baselined ${scope} at epoch ${plan.epoch}

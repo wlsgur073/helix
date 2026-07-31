@@ -5,7 +5,7 @@
 // (test/rebaseline-smoke.test.ts) and only exercises the argv-parsing / TTY-gate surface (it can
 // never reach the confirmation prompt from a non-interactive spawn).
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, linkSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, linkSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../scripts/rebaseline-cli.js';
@@ -371,6 +371,64 @@ describe('rebaseline-cli main() — refusal paths', () => {
       expect(readScopeWitness(home, projectKey).entry).toBeNull(); // no second witness identity
       expect(classifyState(readScopeWitness(home, globalKey), readLedgerBytes(ledger)).kind).toBe('in-sync');
     } finally { cap.restore(); }
+  });
+
+  it('an append refusal AFTER the journal opened retracts it — the ceremony fails without stranding the scope', async () => {
+    // The pre-flight cannot see every refusal (here: an unwritable ledger file — the no-root
+    // stand-in for a read-only mount). The append then throws after openTransition published the
+    // write-ahead journal. Only THIS process can vouch that nothing landed — it has held the
+    // ledger lock since before the display and re-reads the unchanged bytes under it — so it
+    // retracts its own journal instead of leaving the scope 'transition-interrupted' (reads
+    // excluded, writes throwing) until an operator re-runs the ceremony.
+    const { home, ledger } = mismatchedGlobalHome();
+    homes.push(home);
+    const before = readLedgerBytes(ledger);
+    const key = scopeKeyOf(home);
+    const beforeState = readScopeWitness(home, key);
+    chmodSync(ledger, 0o444);
+
+    const cap = captureStd();
+    let code: number;
+    try {
+      code = await main(['--scope', 'global'], {
+        env: envFor(home), isTTY: true, promptLine: async () => 'bless',
+      });
+    } finally { cap.restore(); chmodSync(ledger, 0o644); }
+
+    expect(code).toBe(1);
+    expect(cap.stderr()).toContain('retracted');                     // told the operator the journal did not outlive the failure
+    expect(readLedgerBytes(ledger).equals(before)).toBe(true);
+    const afterState = readScopeWitness(home, key);
+    expect(afterState.journal).toBeNull();                           // the stranding this retraction exists to prevent
+    expect(afterState.entry).toEqual(beforeState.entry);
+    expect(classifyState(afterState, readLedgerBytes(ledger)).kind).toBe('mismatch'); // back where it started, not interrupted
+  });
+
+  it('a failed ceremony over an ALREADY-interrupted scope leaves the alarm standing — it never retracts a transition that superseded one', async () => {
+    // The ceremony's whole purpose over this fixture is supersession: its journal absorbs the
+    // crashed writer's, which survives only as a nonce in `supersedes`. So a retraction here would
+    // not restore the pre-ceremony state — it would DELETE an alarm this process cannot vouch for,
+    // turning a failed, nothing-written ceremony into the un-sticking that only a SUCCESSFUL one
+    // (blessed, fence landed, epoch bumped) is allowed to perform.
+    const { home, ledger, key } = transitionInterruptedGlobalHome();
+    homes.push(home);
+    const before = readLedgerBytes(ledger);
+    chmodSync(ledger, 0o444);
+
+    const cap = captureStd();
+    let code: number;
+    try {
+      code = await main(['--scope', 'global'], {
+        env: envFor(home), isTTY: true, promptLine: async () => 'bless',
+      });
+    } finally { cap.restore(); chmodSync(ledger, 0o644); }
+
+    expect(code).toBe(1);
+    expect(readLedgerBytes(ledger).equals(before)).toBe(true);          // nothing written, as reported
+    const afterState = readScopeWitness(home, key);
+    expect(afterState.journal).not.toBeNull();                          // the alarm outlives the failure
+    expect(classifyState(afterState, readLedgerBytes(ledger)).kind).toBe('transition-interrupted');
+    expect(cap.stderr()).not.toContain('retracted');                    // and the operator is not told otherwise
   });
 
   it('refuses a hard-linked ledger before publishing a witness journal', async () => {

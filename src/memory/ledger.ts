@@ -7,7 +7,7 @@ import { withFileLock, canonical } from './lock.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import { fenceId, sha256Hex } from './witness-core.js';
-import { planTransition, openTransition, completeTransition, classifyState, readScopeWitness, WitnessBlockedError } from './witness-store.js';
+import { planTransition, openTransition, completeTransition, discardTransition, classifyState, readScopeWitness, WitnessBlockedError } from './witness-store.js';
 
 export type LedgerPath = string;
 
@@ -479,6 +479,10 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
     sweepOrphanTmps(path, { fsOps, keep: tmp });
     const fd = fsOps.openSync(tmp, 'wx');
     let closed = false;
+    const w = opts.witness;
+    let fenceTx: string | null = null;
+    let preRewriteHash: string | null = null; // ledger content at journal-open time — the catch's nothing-landed proof
+    let retractNonce: string | null = null;   // set from the journal openTransition actually wrote, so a retraction key exists only for OUR landed journal
     try {
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost after tmp creation');
       const mode = modeOf(path);
@@ -491,9 +495,7 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       // safe), never a second ledger lock. Ordering resolution: mint epoch+nonce (planTransition) ->
       // build the fence and the EXACT final bytes -> journal (openTransition) BEFORE the file is
       // written -> write+rename -> completeTransition AFTER the new bytes are durable.
-      const w = opts.witness;
       let rows = kept;
-      let fenceTx: string | null = null;
       if (w) {
         const kind = w.kind ?? 'compaction';
         // Anti-laundering gate (spec §4.2 PR-1, SECURITY.md "the very next ordinary append after a
@@ -526,10 +528,12 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
         // assert (below) doubles as a serialization-drift guard if these ever diverge.
         const finalText = rows.map((r) => JSON.stringify(r) + '\n').join('');
         const expected = { byteLength: Buffer.byteLength(finalText), prefixHash: sha256Hex(Buffer.from(finalText)) };
-        openTransition(w.home, w.scopeKey, {
+        preRewriteHash = sha256Hex(readLedgerBytes(path)); // sampled under the lock the rename needs — nothing can move it but us
+        const journal = openTransition(w.home, w.scopeKey, {
           kind, epoch: plan.epoch, nonce: plan.nonce, predecessor: plan.predecessor,
           supersedes: plan.supersedes, expected, tx: fenceTx,
         });
+        retractNonce = journal.nonce;
       }
       for (const r of rows) writeAll(fsOps, fd, JSON.stringify(r) + '\n');
       fsOps.fsyncSync(fd);
@@ -553,6 +557,22 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
     } catch (e) {
       if (!closed) { try { fsOps.closeSync(fd); } catch { /* already closed by a throwing close */ } }
       try { fsOps.unlinkSync(tmp); } catch { /* a successor's sweep may have taken it */ }
+      // The rewrite failed while THIS process still holds the ledger lock. A byte-identical
+      // re-read under that lock proves the rename never happened — only the failing writer has
+      // that temporal knowledge, so it retracts its own journal here and the failure does not
+      // strand the scope 'transition-interrupted'. A crash (this line never runs) keeps the
+      // journal pending — the honest verdict for a state nobody can vouch for; and if the rename
+      // DID land, the hash differs, the journal stays, and classifyWitness reports
+      // 'transition-heal' from the new bytes instead. A transition that SUPERSEDED a pending one is
+      // refused by discardTransition itself — this proof covers only our own rewrite, never the
+      // earlier writer's window. The whole proof is inside the try: if the re-read itself throws
+      // (the failing disk that caused the rewrite failure), there is no proof, so there is no
+      // retraction — and the original error still reaches the rethrow below.
+      if (w && retractNonce !== null && preRewriteHash !== null) {
+        try {
+          if (sha256Hex(readLedgerBytes(path)) === preRewriteHash) discardTransition(w.home, w.scopeKey, retractNonce);
+        } catch { /* best-effort hygiene; a pending journal stays the honest state */ }
+      }
       throw e;
     }
   });

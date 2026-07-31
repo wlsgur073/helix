@@ -212,6 +212,21 @@ All notable changes to Helix are documented here. This project follows
   advertises it, so the API rejects it after the metered call is already spent.
 
 ### Fixed
+- A witnessed rewrite that fails before its first byte lands no longer strands the scope. Both
+  rewrite paths — the re-baseline ceremony and witnessed compaction — publish a write-ahead witness
+  journal and only then touch the ledger, so a refusal in between (an unwritable ledger file, a
+  failed rename, an orphan-tmp sweep error) used to leave a pending journal over unchanged bytes:
+  `transition-interrupted`, where reads exclude the scope and writes throw, until an operator re-ran
+  a ceremony. The failing writer is the one party that can prove nothing landed — it holds the
+  ledger lock continuously and re-reads the unchanged bytes under it — so it now retracts its own
+  journal (a new witness-store retract operation, keyed on the journal's random nonce and logged to
+  the witness log before the slot clears). Two states deliberately get no retraction. A crashed
+  writer: from disk alone, "bytes match the pre-transition state" cannot distinguish a rewrite that
+  never started from one that landed and was rolled back, so that stays `transition-interrupted` —
+  the conservative verdict — by design. And a rewrite that superseded a still-pending journal: the
+  journal slot holds one transition at a time, so the predecessor's evidence is already gone and
+  clearing the slot would delete an alarm this writer cannot vouch for rather than restore anything.
+  Such a failure leaves the journal pending for a re-drive to supersede, exactly as before.
 - `dualVerify.mode`, `stakesFloor`, `model` and `effort` no longer discard an invalid value in
   silence. Previously an unrecognised `effort` left the field at `null`, which means "omit `-c` and
   inherit `~/.codex/config.toml`" — so `"effort": "max"` produced whatever Codex was configured with,

@@ -23,7 +23,7 @@ import type { MemoryRecord } from '../src/types.js';
 import { withFileLockAsync } from '../src/memory/lock.js';
 import { readLedgerBytes, appendRecordUnlocked, witnessFenceRecord, aliasedLedgerRefusal } from '../src/memory/ledger.js';
 import {
-  readScopeWitness, classifyState, planTransition, openTransition, completeTransition,
+  readScopeWitness, classifyState, planTransition, openTransition, completeTransition, discardTransition,
 } from '../src/memory/witness-store.js';
 import { sha256Hex } from '../src/memory/witness-core.js';
 import { resolveScopeTarget } from '../src/memory/scope-target.js';
@@ -211,13 +211,35 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
       const finalBytes = computeAppendedBytes(currentBytes, fence);
       const expected = { byteLength: finalBytes.length, prefixHash: sha256Hex(finalBytes) };
 
-      openTransition(home, scopeKey, {
+      const journal = openTransition(home, scopeKey, {
         kind: 'rebaseline', epoch: plan.epoch, nonce: plan.nonce,
         predecessor: plan.predecessor, supersedes: plan.supersedes,
         expected, tx: fence.tx,
       });
 
-      appendRecordUnlocked(ledger, fence); // we hold the ledger lock — the unlocked inner append is correct here
+      try {
+        appendRecordUnlocked(ledger, fence); // we hold the ledger lock — the unlocked inner append is correct here
+      } catch (e) {
+        // Only THIS process can vouch that the failed append wrote nothing: the ledger lock has
+        // been held since before the display, so an unchanged byte-for-byte re-read means the
+        // rewrite never started — retract our own journal, and the failure costs a message
+        // instead of a stranded scope. If the bytes DID move (a torn append), the journal stays
+        // pending: classifyWitness turns a fully-landed fence into 'transition-heal' and anything
+        // else into 'transition-interrupted', both of which say more than we know from here.
+        // The proof read lives inside the try with the retraction it authorizes: a re-read that
+        // itself throws is not a proof, and must not replace the append failure the operator needs
+        // to see. discardTransition refuses outright when this ceremony SUPERSEDED a pending
+        // journal — recovering that scope is the ceremony's job, but only a ceremony that actually
+        // lands its fence may retire the alarm, so a failed one leaves it standing. The note is
+        // written only after a retraction that really happened.
+        try {
+          if (readLedgerBytes(ledger).equals(currentBytes)) {
+            discardTransition(home, scopeKey, journal.nonce);
+            process.stderr.write('append refused before any byte landed -- the opened witness journal was retracted; nothing written\n');
+          }
+        } catch { /* retraction is best-effort hygiene; a pending journal stays the honest state */ }
+        throw e;
+      }
       const landedBytes = readLedgerBytes(ledger);
       // completeTransition's exact-bytes assert is the serialization-consistency guard: if
       // computeAppendedBytes ever diverges from appendRecordUnlocked's real write path, this throws

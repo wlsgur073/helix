@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   witnessPath, witnessLogPath, scopeKeyOf, readScopeWitness, classifyScope, classifyState,
-  advanceWitness, planTransition, openTransition, completeTransition, maybeCleanupClear,
-  WitnessAdvanceError, WitnessBlockedError,
+  advanceWitness, planTransition, openTransition, completeTransition, discardTransition,
+  maybeCleanupClear, WitnessAdvanceError, WitnessBlockedError,
 } from '../../src/memory/witness-store.js';
 import { sha256Hex } from '../../src/memory/witness-core.js';
 import { realFsOps, type DurableFsOps } from '../../src/memory/fs-ops.js';
@@ -239,6 +239,93 @@ describe('openTransition / completeTransition', () => {
       expect(state.entry!.byteLength).toBe(target.length);
       expect(state.entry!.prefixHash).toBe(sha256Hex(target));
       expect(state.entry!.headTx).toBe('tx-final');
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+});
+
+describe('discardTransition (a failed writer retracts its OWN journal)', () => {
+  // The retract half of the open/complete pair, for a rewrite that provably never touched the
+  // ledger. The bytes-unchanged proof is the CALLER's (it holds the ledger lock continuously and
+  // re-reads under it); from disk state alone that state is indistinguishable from a landed-then-
+  // rolled-back rewrite, which is why classifyWitness keeps calling it 'transition-interrupted'
+  // and this function only enforces what it can see: a pending journal it owns, which superseded
+  // nothing.
+  it('nulls the pending journal for a matching nonce, leaves the entry standing, and logs the retraction', () => {
+    const home = tmpHome();
+    try {
+      const bytes = Buffer.from('row1\nrow2\n', 'utf8');
+      advanceWitness(home, '@global', bytes, 'tx-1');
+      const entryBefore = readScopeWitness(home, '@global').entry;
+      const p = planTransition(home, '@global', 'rebaseline');
+      const fenced = Buffer.concat([bytes, Buffer.from('fence\n', 'utf8')]);
+      const journal = openTransition(home, '@global', {
+        kind: 'rebaseline', epoch: p.epoch, nonce: p.nonce, predecessor: p.predecessor, supersedes: p.supersedes,
+        expected: { byteLength: fenced.length, prefixHash: sha256Hex(fenced) },
+        tx: 'tx-failed-append',
+      });
+      expect(readScopeWitness(home, '@global').journal).not.toBeNull();
+      expect(journal.supersedes).toBeNull(); // the only shape a retraction can restore
+
+      discardTransition(home, '@global', journal.nonce);
+
+      const after = readScopeWitness(home, '@global');
+      expect(after.journal).toBeNull();
+      expect(after.entry).toEqual(entryBefore);                    // the standing attestation is untouched
+      expect(classifyState(after, bytes).kind).toBe('in-sync');    // the scope is simply back
+      const log = readFileSync(witnessLogPath(home), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
+      expect(log.at(-1)).toMatchObject({ scope: '@global', tx: 'tx-failed-append', op: 'discard' });
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('refuses an absent journal, a nonce it does not own, and the fence tx (a wall clock is not an identity)', () => {
+    const home = tmpHome();
+    try {
+      const bytes = Buffer.from('row1\n', 'utf8');
+      advanceWitness(home, '@global', bytes, 'tx-1');
+      expect(() => discardTransition(home, '@global', 'nonce-none')).toThrow(WitnessAdvanceError);
+
+      const p = planTransition(home, '@global', 'rebaseline');
+      const journal = openTransition(home, '@global', {
+        kind: 'rebaseline', epoch: p.epoch, nonce: p.nonce, predecessor: p.predecessor, supersedes: p.supersedes,
+        expected: { byteLength: 1, prefixHash: sha256Hex(Buffer.from('x')) },
+        tx: '2026-07-18T00:00:00.000Z',
+      });
+      expect(() => discardTransition(home, '@global', 'someone-elses-nonce')).toThrow(WitnessAdvanceError);
+      // The tx is a millisecond wall-clock stamp — guessable, and a CONSTANT under a fixed clock.
+      // Keying on it would let a colliding stamp retract a transition its holder never opened.
+      expect(() => discardTransition(home, '@global', journal.tx)).toThrow(WitnessAdvanceError);
+      expect(readScopeWitness(home, '@global').journal).not.toBeNull(); // refused = untouched
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('refuses to retract a transition that SUPERSEDED a pending one — the predecessor it absorbed cannot be restored', () => {
+    const home = tmpHome();
+    try {
+      const bytes = Buffer.from('row1\n', 'utf8');
+      advanceWitness(home, '@global', bytes, 'tx-1');
+
+      // J1: a writer that journaled and never landed its bytes (the interrupted alarm).
+      const p1 = planTransition(home, '@global', 'compaction');
+      const j1 = openTransition(home, '@global', {
+        kind: 'compaction', epoch: p1.epoch, nonce: p1.nonce, predecessor: p1.predecessor, supersedes: p1.supersedes,
+        expected: { byteLength: 99, prefixHash: sha256Hex(Buffer.from('never-written')) },
+        tx: 'tx-crashed',
+      });
+
+      // J2: a re-drive that absorbs J1 — single-slot supersession, so J1's `expected` is gone from
+      // the store and survives only as a nonce here.
+      const p2 = planTransition(home, '@global', 'rebaseline');
+      expect(p2.supersedes).toBe(j1.nonce);
+      const j2 = openTransition(home, '@global', {
+        kind: 'rebaseline', epoch: p2.epoch, nonce: p2.nonce, predecessor: p2.predecessor, supersedes: p2.supersedes,
+        expected: { byteLength: 42, prefixHash: sha256Hex(Buffer.from('also-never-written')) },
+        tx: 'tx-redrive',
+      });
+
+      // J2's owner can prove ITS rewrite never started; it can prove nothing about J1's window.
+      expect(() => discardTransition(home, '@global', j2.nonce)).toThrow(WitnessAdvanceError);
+      expect(readScopeWitness(home, '@global').journal!.nonce).toBe(j2.nonce); // still pending, for a re-drive to supersede
+      expect(classifyState(readScopeWitness(home, '@global'), bytes).kind).toBe('transition-interrupted');
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });
