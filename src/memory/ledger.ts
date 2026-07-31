@@ -1,4 +1,4 @@
-import { readFileSync, mkdirSync, statSync } from 'node:fs';
+import { readFileSync, mkdirSync, statSync, type Stats } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
@@ -88,20 +88,22 @@ function aliasedLedgerMessage(nlink: number): string {
  * An `ln` landing between the two still refuses there. This closes the ordinary case — a ledger that
  * was ALREADY aliased when the operator started — so the refusal costs a message instead of a stuck
  * scope. A ledger that does not exist yet is not an alias, and reports null.
+ *
+ * STATS, never OPENS: open('r') on a FIFO blocks until a writer appears — blocking is not an
+ * exception, so no catch can make an opening check total — and open('r') on a directory succeeds
+ * with nlink >= 2, which would misreport a misconfigured path as an aliased ledger. Only a regular
+ * file can BE an aliased ledger; for anything else the layer that actually touches the path is the
+ * one whose error is accurate, so everything non-regular reports null.
  */
-export function aliasedLedgerRefusal(rawPath: LedgerPath, fsOps: DurableFsOps = realFsOps): string | null {
-  let fd: number;
+export function aliasedLedgerRefusal(rawPath: LedgerPath): string | null {
+  let st: Stats;
   try {
-    fd = fsOps.openSync(canonical(rawPath), 'r');  // canonical: the SAME inode identity the append resolves to
+    st = statSync(canonical(rawPath));  // canonical: the SAME inode identity the append resolves to
   } catch {
-    return null;                                   // absent (or unopenable) — the append will speak for itself
+    return null;                        // absent (or unstatable) — the append will speak for itself
   }
-  try {
-    const nlink = fsOps.fstatSync(fd).nlink;
-    return nlink === 1 ? null : aliasedLedgerMessage(nlink);
-  } finally {
-    fsOps.closeSync(fd);
-  }
+  if (!st.isFile()) return null;
+  return st.nlink === 1 ? null : aliasedLedgerMessage(st.nlink);
 }
 
 /** Append one record as a single JSONL line WITHOUT taking the ledger lock — for callers that

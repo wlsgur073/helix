@@ -663,19 +663,15 @@ function witnessFenceRecord(epoch, nonce, tx) {
 function aliasedLedgerMessage(nlink) {
   return `ledger has ${nlink} hard links \u2014 aliased ledgers are unsupported (see SECURITY.md); refusing to write`;
 }
-function aliasedLedgerRefusal(rawPath, fsOps = realFsOps) {
-  let fd;
+function aliasedLedgerRefusal(rawPath) {
+  let st;
   try {
-    fd = fsOps.openSync(canonical(rawPath), "r");
+    st = statSync2(canonical(rawPath));
   } catch {
     return null;
   }
-  try {
-    const nlink = fsOps.fstatSync(fd).nlink;
-    return nlink === 1 ? null : aliasedLedgerMessage(nlink);
-  } finally {
-    fsOps.closeSync(fd);
-  }
+  if (!st.isFile()) return null;
+  return st.nlink === 1 ? null : aliasedLedgerMessage(st.nlink);
 }
 function appendRecordUnlocked(rawPath, record, fsOps = realFsOps) {
   mkdirSync3(dirname6(rawPath), { recursive: true });

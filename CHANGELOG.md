@@ -251,7 +251,9 @@ All notable changes to Helix are documented here. This project follows
   never received. The link count is re-verified after the confirmation pause as well, next to the
   existing content re-verify: a hard link created while the ceremony waits for the operator changes
   no byte, so the content check alone cannot see it, and the append's own late refusal would strand
-  the scope the same way.
+  the scope the same way. The pre-check stats the path rather than opening it: a directory or FIFO
+  at the ledger path is not misreported as an alias — the downstream layer's own error stays the
+  accurate one — and the check cannot hang on a FIFO, which `open('r')` would block on.
 - The dual-verify subprocess no longer inherits the user's working directory or environment. It was
   spawned with only `stdio` set, so the external Codex CLI started in the user's project and
   received every variable the server had — and `-s read-only` sandboxes writes, not reads, while the
