@@ -98,6 +98,14 @@ reported unexercised — not silently validated.
 > its §10 pin table is unfilled, and D2's own reasoning is why — a half-pinned document fixes no
 > identities, so the locked claim template above still governs. Filling that table and committing
 > it is the freeze that opens the window.
+>
+> **Update (2026-08-02; D1–D5 still unchanged).** That freeze happened: §10 was filled from
+> [`v2-freeze-receipt-2026-08.json`](./v2-freeze-receipt-2026-08.json) (candidate and runtime
+> both `27b4373d…`, verified equal and byte-identical across load paths at issue) and committed —
+> the preregistration is **IN FORCE**, and the v2 window runs
+> `2026-08-02T11:35:05.000Z < tx ≤ 2026-08-30T11:35:05.000Z`. The locked claim template above is
+> superseded by the preregistration's own §1 claim for results produced under it; v1's failed
+> O_67 result remains unwaived and reported exactly as D1 fixed it.
 
 - **Pre-registered position** (assistant, before external review): choose (b); no third
   waiver; drift, waiver-credibility, and class-not-instance arguments; a self-registered

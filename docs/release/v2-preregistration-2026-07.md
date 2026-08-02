@@ -1,12 +1,17 @@
 # Helix — preregistered recall pilot, protocol v2
 
-Date drafted: 2026-07-31 · Status: **DRAFT — NOT YET IN FORCE.**
+Date drafted: 2026-07-31 · §10 filled: 2026-08-02 · Status: **IN FORCE from the commit that
+carries this filled table — that commit is the freeze.**
 
-This document becomes the **method freeze** when §10's pin table is filled and it is committed;
-that commit opens the measurement window. Until then it fixes the METHOD but pins no identities,
-and no claim may be made under it. `gate-decision-2026-07-22.md` D2 is explicit that choosing the
-v2 path is a policy decision and that v2 becomes *prospective* only when its actual method is
-frozen — so a half-pinned document is not a preregistration, and this header says so on its face.
+§10's pin table is **filled** from the freeze receipt
+([`v2-freeze-receipt-2026-08.json`](./v2-freeze-receipt-2026-08.json), payload
+`55720757298abee064f5a319bd4e31ef723c2ed18d21f36fc0d7b8418d24a89c`), issued by the committed
+`freeze-receipt.ts` after it verified the working tree equal to the candidate commit for every
+pinned path and the cutoff equal to that commit's authored time. The measurement window is
+`2026-08-02T11:35:05.000Z < tx ≤ 2026-08-30T11:35:05.000Z`. `gate-decision-2026-07-22.md` D2 is
+explicit that v2 becomes *prospective* only when its actual method is frozen — a half-pinned
+document is not a preregistration, which is why this header carried **DRAFT — NOT YET IN FORCE**
+until the table below was filled.
 
 Governing texts: `gate-decision-2026-07-22.md` (D1–D5, BINDING, as amended 2026-07-29/30),
 `o67-class-rule-2026-07.md` (BINDING, as amended 2026-07-30),
@@ -96,7 +101,7 @@ and D5 expressly anticipates a revised subset rule validated on new temporal cas
 | eligibility rules | the manifest's `unambiguous` flag, computed against the **merged global + project** competitor set — the universe production recall actually serves |
 | query derivation and mapping rules | derivation rule v1 unchanged (`pilot-protocol.md` §3a, `:117-131`, six ordered steps over `derive.ts`'s `topicTerms`); **mapping rule = mechanical identity mapping**, `relevant = [record.id]` |
 | K and every metric definition | K = 20 unchanged; Hit@1 per §5; the full gate, all seven conditions, in §4 |
-| the holdout cutoff | §2 — the freeze commit's authored time, canonical UTC, strict `>`, plus the close instant |
+| the holdout cutoff | §2 — the candidate commit's authored time, canonical UTC, strict `>`, plus the close instant |
 | minimum sample size or explicit stopping rule | minimum **2**, with a **fixed 28-day close** (§5) |
 
 **The mapping element is filled positively, not waived.** Recording it as "not applicable"
@@ -458,46 +463,50 @@ and reset the window (§8).
 
 ## 10. Frozen identities and hashes
 
-**UNFILLED — this table is what makes the document a preregistration.** Filling it and committing
-is the freeze.
+**FILLED 2026-08-02, from the freeze receipt** (`v2-freeze-receipt-2026-08.json`, payload
+`55720757298abee064f5a319bd4e31ef723c2ed18d21f36fc0d7b8418d24a89c`) — the commit carrying this
+filled table is the freeze. The runtime was redeployed at the candidate commit the same day per
+`deploy-runbook.md` (three shas equal, both load paths byte-identical), so the candidate and
+runtime pins coincide; they remain separate rows because they CAN drift, and both are verified
+again at the close.
 
 Identities are pinned **separately**, because they can drift independently:
 
 | pin | value |
 |---|---|
-| candidate commit (protocol / classifier / tooling) | *(filled at freeze)* |
-| runtime bytes actually serving recall — installed plugin `gitCommitSha`, both load paths | *(filled at freeze)* |
-| configuration actually serving recall (`~/.helix/config.json`, redacted) | *(filled at freeze)* |
-| holdout cutoff (canonical UTC) | *(filled at freeze)* |
-| close instant (cutoff + 28 days, canonical UTC) | *(filled at freeze)* |
+| candidate commit (protocol / classifier / tooling) | `27b4373d64d13c7b258aab011570be2d973c34da` |
+| runtime bytes actually serving recall — installed plugin `gitCommitSha`, both load paths | `27b4373d64d13c7b258aab011570be2d973c34da` — both load paths verified byte-identical, 2026-08-02 redeploy per `deploy-runbook.md` |
+| configuration actually serving recall (`~/.helix/config.json`, redacted) | `sha256 16f6d97fffb6b9934f82bcb03570af8657464d9899c22deb89c9cb61555ef9c3` |
+| holdout cutoff (canonical UTC) | `2026-08-02T11:35:05.000Z` |
+| close instant (cutoff + 28 days, canonical UTC) | `2026-08-30T11:35:05.000Z` |
 | K | **20** |
-| `git hash-object` — `scripts/pilot/derive.ts` | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/generate-manifest.ts` | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/snapshot.ts` | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/classify-o67.ts` | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/candidate-universe.ts` | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/gate-set.ts` | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/prepare-gate.ts` | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/score-gate.ts` | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/binomial.ts` | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/run-pilot.ts` | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/freeze-receipt.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/input-pins.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/ordering-receipt.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/release-record.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/pin-hashes.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `scripts/pilot/artifact-io.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `src/memory/retrieval.ts` (primitive + tokenizer) | *(filled at freeze)* |
-| `git hash-object` — `src/memory/store.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `src/memory/expansion.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `src/memory/ownership.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `src/memory/verified-read.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `src/memory/verified-projection.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `src/memory/witness-store.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `src/memory/witness-read.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| `git hash-object` — `src/memory/witness-core.ts` *(added 2026-08-02)* | *(filled at freeze)* |
-| sha256 — `o67-class-rule-2026-07.md` | *(filled at freeze)* |
-| sha256 — `gate-decision-2026-07-22.md` *(added 2026-08-02)* | *(filled at freeze)* |
+| `git hash-object` — `scripts/pilot/derive.ts` | `68065a1b12d4b38655af432873d609a07c8d2070` |
+| `git hash-object` — `scripts/pilot/generate-manifest.ts` | `45ffe35803ac8f9eae938c9a4deb42182a5d5d21` |
+| `git hash-object` — `scripts/pilot/snapshot.ts` | `e4cf939d2ac42bbf13d9409eee4f6d0ffb92a26c` |
+| `git hash-object` — `scripts/pilot/classify-o67.ts` | `2f0f2ccbd8753fdafddcebe06e64c63757678b7c` |
+| `git hash-object` — `scripts/pilot/candidate-universe.ts` | `8d78e7a420798b5d836ed40f1505359475837af3` |
+| `git hash-object` — `scripts/pilot/gate-set.ts` | `54c8b767fb6da35349062d1baedc1dcde8ede6f9` |
+| `git hash-object` — `scripts/pilot/prepare-gate.ts` | `38a29589ecf705fcd2d0ba8efb013d9e76f37f5f` |
+| `git hash-object` — `scripts/pilot/score-gate.ts` | `bc49663e43210d8f06ff77075b5b68a6d689750e` |
+| `git hash-object` — `scripts/pilot/binomial.ts` | `5bdc0c6dc6879de2caa3872869636cbfe0ff6ef3` |
+| `git hash-object` — `scripts/pilot/run-pilot.ts` | `4c5383d8786a508169d8251a938ef89c15edbf73` |
+| `git hash-object` — `scripts/pilot/freeze-receipt.ts` *(added 2026-08-02)* | `72c89a51b57121cd512b9851044c7440120f9c13` |
+| `git hash-object` — `scripts/pilot/input-pins.ts` *(added 2026-08-02)* | `abc4f4fb90a09033dee9f709fa45b57dd1b52dbe` |
+| `git hash-object` — `scripts/pilot/ordering-receipt.ts` *(added 2026-08-02)* | `72a5bd1b8b0d11317632e4821ce04ecd43a41b45` |
+| `git hash-object` — `scripts/pilot/release-record.ts` *(added 2026-08-02)* | `40fbe797ccca53e6dd0d4cff78c84e034f8c874f` |
+| `git hash-object` — `scripts/pilot/pin-hashes.ts` *(added 2026-08-02)* | `bf9276386ff52ba4e83db675f991047b2facf37d` |
+| `git hash-object` — `scripts/pilot/artifact-io.ts` *(added 2026-08-02)* | `9fe42a028e349fd6c02f2cfb40e480cdffe95eb5` |
+| `git hash-object` — `src/memory/retrieval.ts` (primitive + tokenizer) | `52b15217ecbb5cd5a391d76a8b55619f67919515` |
+| `git hash-object` — `src/memory/store.ts` *(added 2026-08-02)* | `80f0688d93a251150efc77334e306e3f213831a7` |
+| `git hash-object` — `src/memory/expansion.ts` *(added 2026-08-02)* | `88d472e3bdb6494684fdd161bceaf7a0ae233dbf` |
+| `git hash-object` — `src/memory/ownership.ts` *(added 2026-08-02)* | `bb9d3999b8b43be105957c39b2332bee29d72d6d` |
+| `git hash-object` — `src/memory/verified-read.ts` *(added 2026-08-02)* | `027333ed8a4abf12b2295fcf837d686db7a9416f` |
+| `git hash-object` — `src/memory/verified-projection.ts` *(added 2026-08-02)* | `80192ba43815b4a2b3a0134519c268431a7bd885` |
+| `git hash-object` — `src/memory/witness-store.ts` *(added 2026-08-02)* | `8f381105a7dcdaf9a3ef850009ef7348af7ac28d` |
+| `git hash-object` — `src/memory/witness-read.ts` *(added 2026-08-02)* | `c948a73cf740d1c2c580d1aaa916c70abca3af09` |
+| `git hash-object` — `src/memory/witness-core.ts` *(added 2026-08-02)* | `bde7f616306dcf220bed67f62f2cafdf2d0cd575` |
+| sha256 — `o67-class-rule-2026-07.md` | `c1fe768ca0ec2b117bc41a73e8c45546d83a2d3b7d8f344fe143114814b8a448` |
+| sha256 — `gate-decision-2026-07-22.md` *(added 2026-08-02)* | `ebdbb307e13310a948f789f686aa4819a8f92f6e5dba037646d61d2d0b4424ae` |
 | sha256 — this document's parent commit blob | *(n/a — see below)* |
 
 *(Rows added 2026-08-02, in two groups mirroring `pin-hashes.ts`'s `PINNED_TOOL_PATHS` /
