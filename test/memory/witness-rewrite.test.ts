@@ -86,7 +86,7 @@ describe('Task 6 — witnessed rewrites', () => {
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
-  it('crash window A (interrupted before rename): openTransition journaled, rename throws, ledger stays OLD -> transition-interrupted; re-drive supersedes the stale slot -> in-sync', () => {
+  it('a rename failure after openTransition retracts the journal: the failed rewrite leaves the scope where it started, not interrupted', () => {
     const home = newHome();
     try {
       const ledger = join(home, 'memory.jsonl');
@@ -95,8 +95,12 @@ describe('Task 6 — witnessed rewrites', () => {
       store.commit({ content: 'bravo fact deploy', source: 'user' });
       const oldBytes = readLedgerBytes(ledger);
 
-      // Injected fsOps whose renameSync throws: compactLedger throws AFTER openTransition has journaled,
-      // and its catch-block unlinks the tmp, leaving the ledger at OLD bytes (the new head never landed).
+      // Injected fsOps whose renameSync throws: compactLedger throws AFTER openTransition has
+      // journaled, and its catch unlinks the tmp — the ledger keeps its OLD bytes. The failing
+      // compaction still holds the ledger lock and re-reads those unchanged bytes, so it can vouch
+      // the rewrite never landed and retract its own journal. (A genuine CRASH in this window gets
+      // no retraction — the journal stays pending and the scope is honestly interrupted, because
+      // from disk alone that state cannot be told apart from a landed-then-rolled-back rewrite.)
       const faultyFs: DurableFsOps = { ...realFsOps, renameSync: () => { throw new Error('injected rename failure (crash window A)'); } };
       expect(() => compactLedger(ledger, {
         erasedIds: new Set(),
@@ -104,17 +108,98 @@ describe('Task 6 — witnessed rewrites', () => {
         fsOps: faultyFs,
       })).toThrow(/injected rename failure/);
 
-      expect(readLedgerBytes(ledger).equals(oldBytes)).toBe(true);                       // ledger untouched
-      expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('transition-interrupted'); // journal pending, OLD bytes
+      expect(readLedgerBytes(ledger).equals(oldBytes)).toBe(true);            // ledger untouched
+      expect(readScopeWitness(home, '@global').journal).toBeNull();           // journal retracted, not stranded
+      expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('in-sync'); // back where it started
 
-      // RE-DRIVE the real compaction: planTransition sees the interrupted journal and SUPERSEDES it
-      // (new epoch one past the stale slot), lands the new head, completes -> in-sync, slot cleared.
+      // A later compaction starts from that clean state and just works.
       compactLedger(ledger, {
         erasedIds: new Set(),
         witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:02:00.000Z', kind: 'compaction' },
       });
       expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('in-sync');
       expect(readScopeWitness(home, '@global').journal).toBeNull();
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('a failed rewrite that SUPERSEDED a pending journal never retracts: the predecessor alarm outlives it and stays re-drivable', () => {
+    const home = newHome();
+    try {
+      const ledger = join(home, 'memory.jsonl');
+      const store = makeStore(home);
+      store.commit({ content: 'alpha fact deploy', source: 'user' });
+      store.commit({ content: 'bravo fact deploy', source: 'user' });
+
+      // Crash window A staged the honest way: journal a transition whose target bytes were never
+      // written. The scope is 'transition-interrupted' — the alarm that says a rewrite MAY have
+      // landed and been rolled back, which no after-the-fact reader can rule out.
+      const { kept } = planCompaction(parseLedger(ledger), { erasedIds: new Set() });
+      const plan0 = planTransition(home, '@global', 'compaction');
+      const fence0 = witnessFenceRecord(plan0.epoch, plan0.nonce, '2026-07-18T00:01:00.000Z');
+      const neverWritten = kept.concat(fence0).map((r) => JSON.stringify(r) + '\n').join('');
+      openTransition(home, '@global', {
+        kind: 'compaction', epoch: plan0.epoch, nonce: plan0.nonce, predecessor: plan0.predecessor,
+        supersedes: plan0.supersedes,
+        expected: { byteLength: Buffer.byteLength(neverWritten), prefixHash: sha256Hex(Buffer.from(neverWritten)) },
+        tx: fence0.tx,
+      });
+      expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('transition-interrupted');
+      const oldBytes = readLedgerBytes(ledger);
+
+      // A re-drive compaction supersedes that journal (single-slot: the predecessor is absorbed,
+      // only its nonce survives in `supersedes`) and then fails before its rename. Its
+      // bytes-unchanged proof covers only ITS OWN rewrite — it knows nothing about the crashed
+      // writer's window — so retracting would clear an alarm it cannot vouch for. The predecessor's
+      // `expected` is preserved nowhere, so there is nothing to restore: leaving the slot pending is
+      // the only honest option.
+      const faultyFs: DurableFsOps = { ...realFsOps, renameSync: () => { throw new Error('injected rename failure (superseding re-drive)'); } };
+      expect(() => compactLedger(ledger, {
+        erasedIds: new Set(),
+        witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:02:00.000Z', kind: 'compaction' },
+        fsOps: faultyFs,
+      })).toThrow(/injected rename failure/);
+
+      expect(readLedgerBytes(ledger).equals(oldBytes)).toBe(true);              // nothing landed
+      expect(readScopeWitness(home, '@global').journal).not.toBeNull();         // the alarm survives
+      expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('transition-interrupted');
+
+      // Still the legitimate re-drive path — a compaction that SUCCEEDS supersedes and resolves it.
+      compactLedger(ledger, {
+        erasedIds: new Set(),
+        witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:03:00.000Z', kind: 'compaction' },
+      });
+      expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('in-sync');
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('a failure AFTER the rename landed keeps the journal: the scope heals from the new bytes instead of being retracted into a mismatch', () => {
+    const home = newHome();
+    try {
+      const ledger = join(home, 'memory.jsonl');
+      const store = makeStore(home);
+      const a = store.commit({ content: 'alpha fact deploy', source: 'user' });
+      store.commit({ content: 'bravo fact deploy', source: 'user' });
+
+      // fsyncDir runs AFTER a successful renameSync, so the new bytes ARE on disk when this throws.
+      // The catch's bytes-unchanged proof must fail here — retracting would strand the scope in a
+      // 'mismatch' the entry can no longer explain, and healWitness only rescues 'transition-heal'.
+      // (Destructive compaction on purpose: dropping a row makes the new bytes a genuine fork of the
+      // old rather than a prefix-extension, so a wrong retraction shows up as mismatch, not as an
+      // unwitnessed suffix.)
+      const faultyFs: DurableFsOps = { ...realFsOps, fsyncDir: () => { throw new Error('injected dir fsync failure (post-rename)'); } };
+      expect(() => compactLedger(ledger, {
+        erasedIds: new Set([a.id]),
+        witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:01:00.000Z', kind: 'erase' },
+        fsOps: faultyFs,
+      })).toThrow(/injected dir fsync failure/);
+
+      expect(readScopeWitness(home, '@global').journal).not.toBeNull();          // NOT retracted
+      expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('transition-heal');
+
+      // Benign and self-resolving: the next witnessed append completes the transition.
+      store.commit({ content: 'charlie fact deploy', source: 'user' });
+      expect(readScopeWitness(home, '@global').journal).toBeNull();
+      expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('in-sync');
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 

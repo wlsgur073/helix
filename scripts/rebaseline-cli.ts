@@ -21,12 +21,12 @@ import { isAbsolute, dirname, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import type { MemoryRecord } from '../src/types.js';
 import { withFileLockAsync } from '../src/memory/lock.js';
-import { readLedgerBytes, appendRecordUnlocked, witnessFenceRecord } from '../src/memory/ledger.js';
+import { readLedgerBytes, appendRecordUnlocked, witnessFenceRecord, aliasedLedgerRefusal } from '../src/memory/ledger.js';
 import {
-  scopeKeyOf, readScopeWitness, classifyState, planTransition, openTransition, completeTransition,
+  readScopeWitness, classifyState, planTransition, openTransition, completeTransition, discardTransition,
 } from '../src/memory/witness-store.js';
 import { sha256Hex } from '../src/memory/witness-core.js';
-import { projectLedgerPath } from '../src/memory/ownership.js';
+import { resolveScopeTarget } from '../src/memory/scope-target.js';
 
 export interface RebaselineDeps {
   env?: NodeJS.ProcessEnv;
@@ -90,9 +90,13 @@ function computeAppendedBytes(existing: Buffer, record: MemoryRecord): Buffer {
 /** Never throws: every failure path (usage, TTY refusal, or any exception from the locked
  *  ceremony) is caught and turned into a numeric exit code — both returned AND applied via
  *  deps.exit (default: process.exitCode, never the hard process.exit(), matching this repo's
- *  natural-exit convention). Exit 2 = usage/TTY refusal (nothing attempted); exit 1 = confirmation
+ *  natural-exit convention). Exit 2 = nothing attempted: bad usage, no TTY, a project scope that
+ *  resolves to the global ledger, or an already-hard-linked ledger — the last two are refused
+ *  before the lock, the display and the prompt, because a target the ceremony cannot honour must
+ *  not be one the operator is asked to bless. Exit 1 = confirmation
  *  declined OR an unexpected failure (nothing written in either case); exit 3 = the ledger changed
- *  during the confirmation pause (nothing written); exit 0 = a fresh epoch fence was committed. */
+ *  during the confirmation pause — its content OR its link count (nothing written); exit 0 = a
+ *  fresh epoch fence was committed. */
 export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<number> {
   const exit = deps.exit ?? ((code: number): void => { process.exitCode = code; });
 
@@ -116,8 +120,40 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
     const promptLine = deps.promptLine ?? defaultPromptLine;
 
     const home = resolveHome(env);
-    const ledger = scope === 'global' ? resolveGlobalLedger(env, home) : projectLedgerPath(scope);
-    const scopeKey = scope === 'global' ? scopeKeyOf(home) : scopeKeyOf(home, scope);
+    // ONE resolution for the ledger AND its witness key. They used to be derived from `scope` by two
+    // independent routes, which is how a project scope could name the global ledger: in the default
+    // layout HELIX_HOME is `$HOME/.helix`, so `--scope $HOME` resolves to the global ledger file
+    // while keying the witness under `canonicalRoot($HOME)`. One file, two witness identities — and
+    // the older one is left attesting to a prefix of a file that has since grown.
+    const globalLedger = resolveGlobalLedger(env, home);
+    const target = resolveScopeTarget(home, globalLedger, scope);
+    if (!target.ok) {
+      process.stderr.write(                                                         // ASCII only
+        `helix-rebaseline: REFUSING - ${scope} resolves to the global ledger, not a separate project ledger.\n` +
+        `  resolved ledger: ${target.ledger}\n` +
+        `  global ledger  : ${globalLedger}\n` +
+        `Re-baselining it under a project scope key would record one file under two witness identities.\n` +
+        `Use: --scope global\n`,
+      );
+      exit(2);
+      return 2;
+    }
+    const { ledger, scopeKey } = target;
+
+    // Pre-flight, before ANY durable intent: the ceremony publishes a write-ahead witness journal and
+    // only then appends the fence, so an append that refuses the ledger AFTER the journal is on disk
+    // strands the scope in `transition-interrupted` — reads exclude it, writes throw — from a
+    // ceremony that wrote nothing. Ask first. The append re-checks on its own descriptor and remains
+    // the authority; this only makes the already-aliased case cost a message instead of an outage.
+    const aliased = aliasedLedgerRefusal(ledger);
+    if (aliased !== null) {
+      // Reason text is the ledger layer's own wording, reused verbatim so the pre-check and the
+      // append can never describe the same refusal two different ways.
+      process.stderr.write(`helix-rebaseline: REFUSING - ${aliased}\n`);
+      exit(2);
+      return 2;
+    }
+
     mkdirSync(dirname(ledger), { recursive: true }); // the lock file lives next to the ledger; must exist before withFileLockAsync
 
     // The ENTIRE ceremony — display, confirmation, re-verify, commit — runs inside ONE held ledger
@@ -154,6 +190,19 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
         return 3;
       }
 
+      // The OTHER pause-spanning sample gets the same discipline: the link count was probed before
+      // the prompt, and an `ln` during the pause changes no byte — the hash above cannot see it.
+      // The append would still refuse it, but only after openTransition has published the journal,
+      // stranding the scope 'transition-interrupted' from a ceremony that wrote nothing. Re-ask now,
+      // while refusing still costs a message. (The append's descriptor-time check remains the
+      // authority; what this closes is the human-scale pause window, not the microseconds after it.)
+      const aliasedNow = aliasedLedgerRefusal(ledger);
+      if (aliasedNow !== null) {
+        process.stderr.write(`ledger changed during confirmation -- ${aliasedNow}\n`);
+        exit(3);
+        return 3;
+      }
+
       // Fresh plan (re-derived, not reused from the display-time call above — planTransition is a
       // pure read and "only ADVISORY"; openTransition re-asserts consistency under the witness
       // lock regardless, but re-deriving right before commit is the defensive, spec-literal order).
@@ -162,13 +211,35 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
       const finalBytes = computeAppendedBytes(currentBytes, fence);
       const expected = { byteLength: finalBytes.length, prefixHash: sha256Hex(finalBytes) };
 
-      openTransition(home, scopeKey, {
+      const journal = openTransition(home, scopeKey, {
         kind: 'rebaseline', epoch: plan.epoch, nonce: plan.nonce,
         predecessor: plan.predecessor, supersedes: plan.supersedes,
         expected, tx: fence.tx,
       });
 
-      appendRecordUnlocked(ledger, fence); // we hold the ledger lock — the unlocked inner append is correct here
+      try {
+        appendRecordUnlocked(ledger, fence); // we hold the ledger lock — the unlocked inner append is correct here
+      } catch (e) {
+        // Only THIS process can vouch that the failed append wrote nothing: the ledger lock has
+        // been held since before the display, so an unchanged byte-for-byte re-read means the
+        // rewrite never started — retract our own journal, and the failure costs a message
+        // instead of a stranded scope. If the bytes DID move (a torn append), the journal stays
+        // pending: classifyWitness turns a fully-landed fence into 'transition-heal' and anything
+        // else into 'transition-interrupted', both of which say more than we know from here.
+        // The proof read lives inside the try with the retraction it authorizes: a re-read that
+        // itself throws is not a proof, and must not replace the append failure the operator needs
+        // to see. discardTransition refuses outright when this ceremony SUPERSEDED a pending
+        // journal — recovering that scope is the ceremony's job, but only a ceremony that actually
+        // lands its fence may retire the alarm, so a failed one leaves it standing. The note is
+        // written only after a retraction that really happened.
+        try {
+          if (readLedgerBytes(ledger).equals(currentBytes)) {
+            discardTransition(home, scopeKey, journal.nonce);
+            process.stderr.write('append refused before any byte landed -- the opened witness journal was retracted; nothing written\n');
+          }
+        } catch { /* retraction is best-effort hygiene; a pending journal stays the honest state */ }
+        throw e;
+      }
       const landedBytes = readLedgerBytes(ledger);
       // completeTransition's exact-bytes assert is the serialization-consistency guard: if
       // computeAppendedBytes ever diverges from appendRecordUnlocked's real write path, this throws

@@ -5,11 +5,12 @@
 // (test/rebaseline-smoke.test.ts) and only exercises the argv-parsing / TTY-gate surface (it can
 // never reach the confirmation prompt from a non-interactive spawn).
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, linkSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../scripts/rebaseline-cli.js';
 import { MemoryStore } from '../src/memory/store.js';
+import { projectLedgerPath } from '../src/memory/ownership.js';
 import { readLedgerBytes, witnessFenceRecord } from '../src/memory/ledger.js';
 import { withFileLock } from '../src/memory/lock.js';
 import {
@@ -285,6 +286,186 @@ describe('rebaseline-cli main() — refusal paths', () => {
     const afterState = readScopeWitness(home, key);
     expect(afterState.entry).toEqual(beforeState.entry);
     expect(afterState.journal).toEqual(beforeState.journal);
+  });
+
+  it('link-race: promptLine hard-links the ledger before resolving "bless" -> exit 3, no journal published', async () => {
+    // The pre-flight link-count check runs before the prompt, and the prompt blocks on a human with
+    // no timeout. An `ln` during that pause changes no byte, so the content re-verify alone cannot
+    // see it — the append's own nlink refusal would fire only after openTransition had published
+    // the journal, stranding the scope 'transition-interrupted' from a ceremony that wrote nothing.
+    // Both pause-spanning samples have to be re-verified after the pause, not just the bytes.
+    const { home, ledger } = mismatchedGlobalHome();
+    homes.push(home);
+    const before = readLedgerBytes(ledger);
+    const key = scopeKeyOf(home);
+    const beforeState = readScopeWitness(home, key);
+
+    const cap = captureStd();
+    let code: number;
+    try {
+      code = await main(['--scope', 'global'], {
+        env: envFor(home), isTTY: true,
+        promptLine: async () => {
+          linkSync(ledger, join(home, 'linked-during-pause.jsonl'));
+          return 'bless';
+        },
+      });
+    } finally { cap.restore(); }
+
+    expect(code).toBe(3);
+    expect(cap.stderr()).toContain('ledger changed during confirmation');
+    expect(cap.stderr()).toContain('hard link');
+    expect(readLedgerBytes(ledger).equals(before)).toBe(true);
+    const afterState = readScopeWitness(home, key);
+    expect(afterState.journal).toBeNull();               // published nothing — the stranding this re-check exists to prevent
+    expect(afterState.entry).toEqual(beforeState.entry);
+    expect(classifyState(afterState, readLedgerBytes(ledger)).kind).toBe('mismatch'); // still recoverable
+  });
+
+  // Two refusals that must land BEFORE the ceremony engages anything these tests can observe — no
+  // display output, no prompt, no ledger write, no witness or journal movement. Both are cases
+  // where the ARGUMENTS name a target the ceremony cannot honour, so asking the operator to type
+  // "bless" would be asking them to authorise a write that is going to fail (or, worse, succeed
+  // against the wrong witness identity).
+
+  it('refuses a project scope whose ledger is the resolved global ledger', async () => {
+    // The default install layout is the collision: HELIX_HOME is `$HOME/.helix`, so the global
+    // ledger is `$HOME/.helix/memory.jsonl` — which is exactly what `--scope $HOME` resolves to
+    // via projectLedgerPath(). The ledger is one physical file; the witness keys are '@global' and
+    // canonicalRoot($HOME). Blessing under the second leaves the first attesting to a prefix of a
+    // file that has since grown, so the tail it no longer covers becomes an unwitnessed window.
+    const root = tmpHome();                 // stands in for $HOME
+    homes.push(root);
+    const home = join(root, '.helix');      // == HELIX_HOME
+    const ledger = join(home, 'memory.jsonl');
+    const globalKey = scopeKeyOf(home);
+    const projectKey = scopeKeyOf(home, root);
+    expect(projectLedgerPath(root)).toBe(ledger); // the collision, stated as a premise
+
+    const cap = captureStd();
+    try {
+      // A legitimate global re-baseline first, so there is real witness state to damage.
+      expect(await main(['--scope', 'global'], {
+        env: envFor(home), isTTY: true, promptLine: async () => 'bless', now: () => '2026-07-30T00:00:00.000Z',
+      })).toBe(0);
+      const before = readLedgerBytes(ledger);
+      expect(before.length).toBeGreaterThan(0);
+      expect(classifyState(readScopeWitness(home, globalKey), before).kind).toBe('in-sync');
+      const shownByLegit = cap.stdout();                  // everything displayed so far came from ceremony 1
+
+      let prompted = false;
+      const code = await main(['--scope', root], {
+        env: envFor(home), isTTY: true,
+        promptLine: async () => { prompted = true; return 'bless'; },
+      });
+
+      expect(code).toBe(2);
+      expect(prompted).toBe(false);                       // refused before the operator was asked
+      expect(cap.stdout()).toBe(shownByLegit);            // and before the display — nothing new was shown to bless
+      // The collision refusal itself — NOT the generic usage error, whose text also happens to
+      // contain '--scope global'. This is what pins "refused because the scope aliases the global
+      // ledger" rather than merely "exit 2 for this argv".
+      expect(cap.stderr()).toContain('resolves to the global ledger');
+      expect(cap.stderr()).toContain('Use: --scope global'); // and the working alternative, spelled out
+      expect(readLedgerBytes(ledger).equals(before)).toBe(true);
+      expect(readScopeWitness(home, projectKey).entry).toBeNull(); // no second witness identity
+      expect(classifyState(readScopeWitness(home, globalKey), readLedgerBytes(ledger)).kind).toBe('in-sync');
+    } finally { cap.restore(); }
+  });
+
+  it('an append refusal AFTER the journal opened retracts it — the ceremony fails without stranding the scope', async () => {
+    // The pre-flight cannot see every refusal (here: an unwritable ledger file — the no-root
+    // stand-in for a read-only mount). The append then throws after openTransition published the
+    // write-ahead journal. Only THIS process can vouch that nothing landed — it has held the
+    // ledger lock since before the display and re-reads the unchanged bytes under it — so it
+    // retracts its own journal instead of leaving the scope 'transition-interrupted' (reads
+    // excluded, writes throwing) until an operator re-runs the ceremony.
+    const { home, ledger } = mismatchedGlobalHome();
+    homes.push(home);
+    const before = readLedgerBytes(ledger);
+    const key = scopeKeyOf(home);
+    const beforeState = readScopeWitness(home, key);
+    chmodSync(ledger, 0o444);
+
+    const cap = captureStd();
+    let code: number;
+    try {
+      code = await main(['--scope', 'global'], {
+        env: envFor(home), isTTY: true, promptLine: async () => 'bless',
+      });
+    } finally { cap.restore(); chmodSync(ledger, 0o644); }
+
+    expect(code).toBe(1);
+    expect(cap.stderr()).toContain('retracted');                     // told the operator the journal did not outlive the failure
+    expect(readLedgerBytes(ledger).equals(before)).toBe(true);
+    const afterState = readScopeWitness(home, key);
+    expect(afterState.journal).toBeNull();                           // the stranding this retraction exists to prevent
+    expect(afterState.entry).toEqual(beforeState.entry);
+    expect(classifyState(afterState, readLedgerBytes(ledger)).kind).toBe('mismatch'); // back where it started, not interrupted
+  });
+
+  it('a failed ceremony over an ALREADY-interrupted scope leaves the alarm standing — it never retracts a transition that superseded one', async () => {
+    // The ceremony's whole purpose over this fixture is supersession: its journal absorbs the
+    // crashed writer's, which survives only as a nonce in `supersedes`. So a retraction here would
+    // not restore the pre-ceremony state — it would DELETE an alarm this process cannot vouch for,
+    // turning a failed, nothing-written ceremony into the un-sticking that only a SUCCESSFUL one
+    // (blessed, fence landed, epoch bumped) is allowed to perform.
+    const { home, ledger, key } = transitionInterruptedGlobalHome();
+    homes.push(home);
+    const before = readLedgerBytes(ledger);
+    chmodSync(ledger, 0o444);
+
+    const cap = captureStd();
+    let code: number;
+    try {
+      code = await main(['--scope', 'global'], {
+        env: envFor(home), isTTY: true, promptLine: async () => 'bless',
+      });
+    } finally { cap.restore(); chmodSync(ledger, 0o644); }
+
+    expect(code).toBe(1);
+    expect(readLedgerBytes(ledger).equals(before)).toBe(true);          // nothing written, as reported
+    const afterState = readScopeWitness(home, key);
+    expect(afterState.journal).not.toBeNull();                          // the alarm outlives the failure
+    expect(classifyState(afterState, readLedgerBytes(ledger)).kind).toBe('transition-interrupted');
+    expect(cap.stderr()).not.toContain('retracted');                    // and the operator is not told otherwise
+  });
+
+  it('refuses a hard-linked ledger before publishing a witness journal', async () => {
+    // appendRecordUnlocked refuses a ledger with nlink !== 1 ("aliased ledgers are unsupported").
+    // But the ceremony publishes its write-ahead journal FIRST, so that refusal used to strand a
+    // pending transition the ledger never received: the scope lands 'transition-interrupted',
+    // where reads exclude it and writes throw — an outage produced by a ceremony that wrote
+    // nothing. The link check therefore has to run before openTransition, not after.
+    const { home, ledger } = mismatchedGlobalHome();
+    homes.push(home);
+    const alias = join(home, 'ledger-backup.jsonl');
+    linkSync(ledger, alias);                              // a second name for the same inode
+
+    const before = readLedgerBytes(ledger);
+    const key = scopeKeyOf(home);
+    const beforeState = readScopeWitness(home, key);
+
+    const cap = captureStd();
+    let code: number;
+    let prompted = false;
+    try {
+      code = await main(['--scope', 'global'], {
+        env: envFor(home), isTTY: true,
+        promptLine: async () => { prompted = true; return 'bless'; },
+      });
+    } finally { cap.restore(); }
+
+    expect(code).toBe(2);
+    expect(prompted).toBe(false);
+    expect(cap.stdout()).toBe('');                        // refused before the display ran at all
+    expect(cap.stderr()).toContain('hard link');
+    expect(readLedgerBytes(ledger).equals(before)).toBe(true);
+    const afterState = readScopeWitness(home, key);
+    expect(afterState.journal).toBeNull();                // the stranding this test exists to prevent
+    expect(afterState.journal).toEqual(beforeState.journal);
+    expect(afterState.entry).toEqual(beforeState.entry);
+    expect(classifyState(afterState, readLedgerBytes(ledger)).kind).toBe('mismatch'); // still recoverable
   });
 });
 

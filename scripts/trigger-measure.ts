@@ -12,7 +12,8 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { realFsOps, writeAll, type DurableFsOps } from '../src/memory/fs-ops.js';
-import { isOwned, projectLedgerPath, canonicalRoot } from '../src/memory/ownership.js';
+import { isOwned, projectLedgerPath } from '../src/memory/ownership.js';
+import { aliasesGlobalLedger } from '../src/memory/scope-target.js';
 import { metricsEnabledFromGlobalConfig } from '../src/config.js';
 import { evaluateTrigger, type Leg, type MetricsEvent, type MetricsState, type ParticipantSize } from './trigger-eval.js';
 
@@ -101,7 +102,7 @@ function toParticipant(id: 'global' | 'project', outcome: ReadOutcome): Particip
  *  no project layer at all. Only 'owned' ever contributes bytes/rows — see readTwoParticipants. */
 export function resolveProjectDisposition(root: string, home: string, globalLedger: string): 'owned' | 'unowned' | 'absent' {
   if (!existsSync(join(root, '.helix'))) return 'absent';
-  const distinctFromGlobal = canonicalRoot(projectLedgerPath(root)) !== canonicalRoot(globalLedger); // realpath: a symlinked project ledger aliasing the global one is not a distinct participant
+  const distinctFromGlobal = !aliasesGlobalLedger(projectLedgerPath(root), globalLedger); // one physical file is never two participants -- see scope-target.ts
   return distinctFromGlobal && isOwned(root, home) ? 'owned' : 'unowned';
 }
 

@@ -632,64 +632,18 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   return trailer.length > 0 ? out + "\n" + trailer.join("\n") : out;
 }
 
-// src/memory/ledger.ts
-import { readFileSync as readFileSync7, mkdirSync as mkdirSync4, statSync as statSync3 } from "node:fs";
-
-// src/memory/projection.ts
-function buildProjection(records) {
-  const removed = /* @__PURE__ */ new Set();
-  const live = /* @__PURE__ */ new Map();
-  for (const r of records) {
-    if (r.type === "verify") {
-      const target = r.supersedes;
-      if (target && live.has(target)) {
-        const cur = live.get(target);
-        live.set(target, { ...cur, state: r.state });
-      }
-      continue;
-    }
-    if (r.type === "supersede" || r.type === "invalidate" || r.type === "erase") {
-      if (r.supersedes) removed.add(r.supersedes);
-      if (r.type === "supersede") live.set(r.id, r);
-      continue;
-    }
-    live.set(r.id, r);
-  }
-  for (const id of removed) live.delete(id);
-  return live;
-}
-
-// src/memory/witness-core.ts
-import { createHash } from "node:crypto";
-function sha256Hex(bytes) {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-function matchesAt(bytes, byteLength, prefixHash) {
-  if (bytes.length < byteLength) return false;
-  return sha256Hex(bytes.subarray(0, byteLength)) === prefixHash;
-}
-function classifyWitness(bytes, entry, journal) {
-  if (journal) {
-    const exact = bytes.length === journal.expected.byteLength && matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash);
-    return exact ? { kind: "transition-heal", journal } : { kind: "transition-interrupted", journal };
-  }
-  if (!entry) return { kind: "first-contact", reason: "no-entry" };
-  if (!matchesAt(bytes, entry.byteLength, entry.prefixHash)) return { kind: "mismatch" };
-  return bytes.length === entry.byteLength ? { kind: "in-sync" } : { kind: "unwitnessed-suffix" };
-}
-
 // src/memory/witness-store.ts
 import { randomBytes as randomBytes5, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { mkdirSync as mkdirSync3, readFileSync as readFileSync6 } from "node:fs";
 import { dirname as dirname5, join as join5 } from "node:path";
 
 // src/memory/ledger-mac.ts
-import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, hkdfSync, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
 import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync5, linkSync as linkSync2, unlinkSync as unlinkSync3, statSync as statSync2, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
 import { dirname as dirname4, join as join4 } from "node:path";
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 function digestContent(content) {
-  return createHash2("sha256").update(Buffer.from(content, "utf8")).digest("hex");
+  return createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex");
 }
 var LedgerMacError = class extends Error {
 };
@@ -719,7 +673,7 @@ function deriveSubkey(master, nonce) {
   return Buffer.from(hkdfSync("sha256", master, Buffer.from(nonce, "utf8"), Buffer.from("helix-ledger-mac-v1", "utf8"), 32));
 }
 function keyIdOf(subkey) {
-  return createHash2("sha256").update(Buffer.concat([Buffer.from("keyid"), subkey])).digest().subarray(0, 8).toString("hex");
+  return createHash("sha256").update(Buffer.concat([Buffer.from("keyid"), subkey])).digest().subarray(0, 8).toString("hex");
 }
 var DOMAIN = Buffer.from("helix-ledger-mac");
 function field(buf) {
@@ -771,6 +725,25 @@ function verifyVerify(record, subkey) {
     return false;
   }
   return got.length === want.length && timingSafeEqual(got, want);
+}
+
+// src/memory/witness-core.ts
+import { createHash as createHash2 } from "node:crypto";
+function sha256Hex(bytes) {
+  return createHash2("sha256").update(bytes).digest("hex");
+}
+function matchesAt(bytes, byteLength, prefixHash) {
+  if (bytes.length < byteLength) return false;
+  return sha256Hex(bytes.subarray(0, byteLength)) === prefixHash;
+}
+function classifyWitness(bytes, entry, journal) {
+  if (journal) {
+    const exact = bytes.length === journal.expected.byteLength && matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash);
+    return exact ? { kind: "transition-heal", journal } : { kind: "transition-interrupted", journal };
+  }
+  if (!entry) return { kind: "first-contact", reason: "no-entry" };
+  if (!matchesAt(bytes, entry.byteLength, entry.prefixHash)) return { kind: "mismatch" };
+  return bytes.length === entry.byteLength ? { kind: "in-sync" } : { kind: "unwitnessed-suffix" };
 }
 
 // src/memory/witness-store.ts
@@ -828,6 +801,38 @@ function readScopeWitness(home, scopeKey) {
 function classifyState(state, bytes) {
   if (state.macInvalid) return { kind: "first-contact", reason: "mac-invalid" };
   return classifyWitness(bytes, state.entry, state.journal);
+}
+
+// src/memory/scope-target.ts
+function aliasesGlobalLedger(projectLedger, globalLedger) {
+  return canonicalRoot(projectLedger) === canonicalRoot(globalLedger);
+}
+
+// src/memory/ledger.ts
+import { readFileSync as readFileSync7, mkdirSync as mkdirSync4, statSync as statSync3 } from "node:fs";
+
+// src/memory/projection.ts
+function buildProjection(records) {
+  const removed = /* @__PURE__ */ new Set();
+  const live = /* @__PURE__ */ new Map();
+  for (const r of records) {
+    if (r.type === "verify") {
+      const target = r.supersedes;
+      if (target && live.has(target)) {
+        const cur = live.get(target);
+        live.set(target, { ...cur, state: r.state });
+      }
+      continue;
+    }
+    if (r.type === "supersede" || r.type === "invalidate" || r.type === "erase") {
+      if (r.supersedes) removed.add(r.supersedes);
+      if (r.type === "supersede") live.set(r.id, r);
+      continue;
+    }
+    live.set(r.id, r);
+  }
+  for (const id of removed) live.delete(id);
+  return live;
 }
 
 // src/memory/ledger.ts
@@ -1201,7 +1206,7 @@ function gatherScopedRecords({ home, globalLedger, cwd }) {
   let projectDisposition = "inactive";
   if (cwd) {
     const projLedger = projectLedgerPath(cwd);
-    if (canonicalRoot(projLedger) !== canonicalRoot(globalLedger)) {
+    if (!aliasesGlobalLedger(projLedger, globalLedger)) {
       try {
         projectDisposition = projectDispositionOf({ root: cwd, home, ledger: projLedger });
         if (projectDisposition === "owned") {

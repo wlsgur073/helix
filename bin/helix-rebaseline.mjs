@@ -642,6 +642,30 @@ function completeTransition(home, scopeKey, bytes, headTx, fsOps = realFsOps) {
     writeStoreFileAt(path, nextStore, fsOps);
   });
 }
+function discardTransition(home, scopeKey, nonce, fsOps = realFsOps) {
+  mkdirSync2(home, { recursive: true });
+  const master = ensureMaster(home);
+  const rawPath = witnessPath(home);
+  withFileLock(rawPath, () => {
+    const path = canonical(rawPath);
+    const store = readStoreFileAt(path);
+    const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
+    const journal = state.macInvalid ? null : state.journal;
+    if (!journal) throw new WitnessAdvanceError("discardTransition: no pending journal for scope");
+    if (journal.nonce !== nonce) {
+      throw new WitnessAdvanceError("discardTransition: the pending journal belongs to a different transition (superseded meanwhile?) \u2014 refusing to retract it");
+    }
+    if (journal.supersedes !== null) {
+      throw new WitnessAdvanceError(
+        "discardTransition: this transition superseded a still-unresolved one, whose evidence the single journal slot no longer holds \u2014 retracting would clear an alarm this writer cannot vouch for; leaving it pending for a re-drive instead"
+      );
+    }
+    const entry = state.macInvalid ? null : state.entry;
+    appendWitnessLogLine(home, { v: 1, scope: scopeKey, epoch: journal.epoch, kind: journal.kind, tx: journal.tx, nonce: journal.nonce, op: "discard" }, fsOps);
+    const nextStore = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry, journal: null } } };
+    writeStoreFileAt(path, nextStore, fsOps);
+  });
+}
 
 // src/memory/ledger.ts
 function witnessFenceRecord(epoch, nonce, tx) {
@@ -660,6 +684,19 @@ function witnessFenceRecord(epoch, nonce, tx) {
     classification: "normal"
   };
 }
+function aliasedLedgerMessage(nlink) {
+  return `ledger has ${nlink} hard links \u2014 aliased ledgers are unsupported (see SECURITY.md); refusing to write`;
+}
+function aliasedLedgerRefusal(rawPath) {
+  let st;
+  try {
+    st = statSync2(canonical(rawPath));
+  } catch {
+    return null;
+  }
+  if (!st.isFile()) return null;
+  return st.nlink === 1 ? null : aliasedLedgerMessage(st.nlink);
+}
 function appendRecordUnlocked(rawPath, record, fsOps = realFsOps) {
   mkdirSync3(dirname6(rawPath), { recursive: true });
   const path = canonical(rawPath);
@@ -667,7 +704,7 @@ function appendRecordUnlocked(rawPath, record, fsOps = realFsOps) {
   const fd = fsOps.openSync(path, "a+");
   try {
     const st = fsOps.fstatSync(fd);
-    if (st.nlink !== 1) throw new Error(`appendRecord: ledger has ${st.nlink} hard links \u2014 aliased ledgers are unsupported (see SECURITY.md); refusing to write`);
+    if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
     let line = JSON.stringify(record) + "\n";
     if (st.size > 0) {
       const tail = Buffer.alloc(1);
@@ -688,6 +725,17 @@ function readLedgerBytes(path) {
     if (err.code === "ENOENT") return Buffer.alloc(0);
     throw err;
   }
+}
+
+// src/memory/scope-target.ts
+function aliasesGlobalLedger(projectLedger, globalLedger) {
+  return canonicalRoot(projectLedger) === canonicalRoot(globalLedger);
+}
+function resolveScopeTarget(home, globalLedger, scope) {
+  if (scope === "global") return { ok: true, ledger: globalLedger, scopeKey: scopeKeyOf(home) };
+  const ledger = projectLedgerPath(scope);
+  if (aliasesGlobalLedger(ledger, globalLedger)) return { ok: false, reason: "aliases-global", ledger };
+  return { ok: true, ledger, scopeKey: scopeKeyOf(home, scope) };
 }
 
 // scripts/rebaseline-cli.ts
@@ -741,8 +789,29 @@ async function main(argv, deps = {}) {
     const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
     const promptLine = deps.promptLine ?? defaultPromptLine;
     const home = resolveHome(env);
-    const ledger = scope === "global" ? resolveGlobalLedger(env, home) : projectLedgerPath(scope);
-    const scopeKey = scope === "global" ? scopeKeyOf(home) : scopeKeyOf(home, scope);
+    const globalLedger = resolveGlobalLedger(env, home);
+    const target = resolveScopeTarget(home, globalLedger, scope);
+    if (!target.ok) {
+      process.stderr.write(
+        // ASCII only
+        `helix-rebaseline: REFUSING - ${scope} resolves to the global ledger, not a separate project ledger.
+  resolved ledger: ${target.ledger}
+  global ledger  : ${globalLedger}
+Re-baselining it under a project scope key would record one file under two witness identities.
+Use: --scope global
+`
+      );
+      exit(2);
+      return 2;
+    }
+    const { ledger, scopeKey } = target;
+    const aliased = aliasedLedgerRefusal(ledger);
+    if (aliased !== null) {
+      process.stderr.write(`helix-rebaseline: REFUSING - ${aliased}
+`);
+      exit(2);
+      return 2;
+    }
     mkdirSync4(dirname7(ledger), { recursive: true });
     const code = await withFileLockAsync(ledger, async () => {
       const displayedBytes = readLedgerBytes(ledger);
@@ -774,11 +843,18 @@ async function main(argv, deps = {}) {
         exit(3);
         return 3;
       }
+      const aliasedNow = aliasedLedgerRefusal(ledger);
+      if (aliasedNow !== null) {
+        process.stderr.write(`ledger changed during confirmation -- ${aliasedNow}
+`);
+        exit(3);
+        return 3;
+      }
       const plan = planTransition(home, scopeKey, "rebaseline");
       const fence = witnessFenceRecord(plan.epoch, plan.nonce, now());
       const finalBytes = computeAppendedBytes(currentBytes, fence);
       const expected = { byteLength: finalBytes.length, prefixHash: sha256Hex(finalBytes) };
-      openTransition(home, scopeKey, {
+      const journal = openTransition(home, scopeKey, {
         kind: "rebaseline",
         epoch: plan.epoch,
         nonce: plan.nonce,
@@ -787,7 +863,18 @@ async function main(argv, deps = {}) {
         expected,
         tx: fence.tx
       });
-      appendRecordUnlocked(ledger, fence);
+      try {
+        appendRecordUnlocked(ledger, fence);
+      } catch (e) {
+        try {
+          if (readLedgerBytes(ledger).equals(currentBytes)) {
+            discardTransition(home, scopeKey, journal.nonce);
+            process.stderr.write("append refused before any byte landed -- the opened witness journal was retracted; nothing written\n");
+          }
+        } catch {
+        }
+        throw e;
+      }
       const landedBytes = readLedgerBytes(ledger);
       completeTransition(home, scopeKey, landedBytes, fence.tx);
       process.stdout.write(`re-baselined ${scope} at epoch ${plan.epoch}

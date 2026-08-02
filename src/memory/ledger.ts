@@ -1,4 +1,4 @@
-import { readFileSync, mkdirSync, statSync } from 'node:fs';
+import { readFileSync, mkdirSync, statSync, type Stats } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
@@ -7,7 +7,7 @@ import { withFileLock, canonical } from './lock.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import { fenceId, sha256Hex } from './witness-core.js';
-import { planTransition, openTransition, completeTransition, classifyState, readScopeWitness, WitnessBlockedError } from './witness-store.js';
+import { planTransition, openTransition, completeTransition, discardTransition, classifyState, readScopeWitness, WitnessBlockedError } from './witness-store.js';
 
 export type LedgerPath = string;
 
@@ -65,6 +65,47 @@ export function witnessFenceRecord(epoch: number, nonce: string, tx: string): Me
   };
 }
 
+/** The one wording for "this ledger is an alias", so the pre-check below and the append itself can
+ *  never disagree about the rule or describe it two different ways. */
+function aliasedLedgerMessage(nlink: number): string {
+  return `ledger has ${nlink} hard links — aliased ledgers are unsupported (see SECURITY.md); refusing to write`;
+}
+
+/**
+ * Whether `appendRecordUnlocked` would refuse this ledger for the one reason that is a standing
+ * property of the ledger itself — a link count above 1 — or null when that check passes. Null is
+ * NOT a promise the append will succeed: its transient preconditions (the orphan-tmp sweep, the
+ * open for append) are judged only by the append, on its own descriptor, at its own time.
+ *
+ * For callers that publish DURABLE INTENT before they append. The re-baseline ceremony is the one
+ * that matters: it opens a write-ahead witness journal, then appends the fence. When the append
+ * refused an aliased ledger the journal was already on disk describing a transition the ledger never
+ * received, leaving the scope `transition-interrupted` — reads exclude it, writes throw — an outage
+ * produced by a ceremony that wrote nothing. Such a caller has to ask this question BEFORE it
+ * publishes anything.
+ *
+ * A pre-check, not a guarantee: the append re-checks on its own descriptor, which is the authority.
+ * An `ln` landing between the two still refuses there. This closes the ordinary case — a ledger that
+ * was ALREADY aliased when the operator started — so the refusal costs a message instead of a stuck
+ * scope. A ledger that does not exist yet is not an alias, and reports null.
+ *
+ * STATS, never OPENS: open('r') on a FIFO blocks until a writer appears — blocking is not an
+ * exception, so no catch can make an opening check total — and open('r') on a directory succeeds
+ * with nlink >= 2, which would misreport a misconfigured path as an aliased ledger. Only a regular
+ * file can BE an aliased ledger; for anything else the layer that actually touches the path is the
+ * one whose error is accurate, so everything non-regular reports null.
+ */
+export function aliasedLedgerRefusal(rawPath: LedgerPath): string | null {
+  let st: Stats;
+  try {
+    st = statSync(canonical(rawPath));  // canonical: the SAME inode identity the append resolves to
+  } catch {
+    return null;                        // absent (or unstatable) — the append will speak for itself
+  }
+  if (!st.isFile()) return null;
+  return st.nlink === 1 ? null : aliasedLedgerMessage(st.nlink);
+}
+
 /** Append one record as a single JSONL line WITHOUT taking the ledger lock — for callers that
  *  ALREADY hold it (withFileLock is not re-entrant), e.g. the store's signing writeVerify.
  *  Durable + self-repairing (spec Layer 5): sweeps orphan tmps (the fence — a sweep failure ABORTS
@@ -81,7 +122,7 @@ export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, 
   const fd = fsOps.openSync(path, 'a+');
   try {
     const st = fsOps.fstatSync(fd);
-    if (st.nlink !== 1) throw new Error(`appendRecord: ledger has ${st.nlink} hard links — aliased ledgers are unsupported (see SECURITY.md); refusing to write`);
+    if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
     let line = JSON.stringify(record) + '\n';
     if (st.size > 0) {
       const tail = Buffer.alloc(1);
@@ -438,6 +479,10 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
     sweepOrphanTmps(path, { fsOps, keep: tmp });
     const fd = fsOps.openSync(tmp, 'wx');
     let closed = false;
+    const w = opts.witness;
+    let fenceTx: string | null = null;
+    let preRewriteHash: string | null = null; // ledger content at journal-open time — the catch's nothing-landed proof
+    let retractNonce: string | null = null;   // set from the journal openTransition actually wrote, so a retraction key exists only for OUR landed journal
     try {
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost after tmp creation');
       const mode = modeOf(path);
@@ -450,9 +495,7 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       // safe), never a second ledger lock. Ordering resolution: mint epoch+nonce (planTransition) ->
       // build the fence and the EXACT final bytes -> journal (openTransition) BEFORE the file is
       // written -> write+rename -> completeTransition AFTER the new bytes are durable.
-      const w = opts.witness;
       let rows = kept;
-      let fenceTx: string | null = null;
       if (w) {
         const kind = w.kind ?? 'compaction';
         // Anti-laundering gate (spec §4.2 PR-1, SECURITY.md "the very next ordinary append after a
@@ -485,10 +528,12 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
         // assert (below) doubles as a serialization-drift guard if these ever diverge.
         const finalText = rows.map((r) => JSON.stringify(r) + '\n').join('');
         const expected = { byteLength: Buffer.byteLength(finalText), prefixHash: sha256Hex(Buffer.from(finalText)) };
-        openTransition(w.home, w.scopeKey, {
+        preRewriteHash = sha256Hex(readLedgerBytes(path)); // sampled under the lock the rename needs — nothing can move it but us
+        const journal = openTransition(w.home, w.scopeKey, {
           kind, epoch: plan.epoch, nonce: plan.nonce, predecessor: plan.predecessor,
           supersedes: plan.supersedes, expected, tx: fenceTx,
         });
+        retractNonce = journal.nonce;
       }
       for (const r of rows) writeAll(fsOps, fd, JSON.stringify(r) + '\n');
       fsOps.fsyncSync(fd);
@@ -512,6 +557,22 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
     } catch (e) {
       if (!closed) { try { fsOps.closeSync(fd); } catch { /* already closed by a throwing close */ } }
       try { fsOps.unlinkSync(tmp); } catch { /* a successor's sweep may have taken it */ }
+      // The rewrite failed while THIS process still holds the ledger lock. A byte-identical
+      // re-read under that lock proves the rename never happened — only the failing writer has
+      // that temporal knowledge, so it retracts its own journal here and the failure does not
+      // strand the scope 'transition-interrupted'. A crash (this line never runs) keeps the
+      // journal pending — the honest verdict for a state nobody can vouch for; and if the rename
+      // DID land, the hash differs, the journal stays, and classifyWitness reports
+      // 'transition-heal' from the new bytes instead. A transition that SUPERSEDED a pending one is
+      // refused by discardTransition itself — this proof covers only our own rewrite, never the
+      // earlier writer's window. The whole proof is inside the try: if the re-read itself throws
+      // (the failing disk that caused the rewrite failure), there is no proof, so there is no
+      // retraction — and the original error still reaches the rethrow below.
+      if (w && retractNonce !== null && preRewriteHash !== null) {
+        try {
+          if (sha256Hex(readLedgerBytes(path)) === preRewriteHash) discardTransition(w.home, w.scopeKey, retractNonce);
+        } catch { /* best-effort hygiene; a pending journal stays the honest state */ }
+      }
       throw e;
     }
   });

@@ -212,6 +212,25 @@ All notable changes to Helix are documented here. This project follows
   advertises it, so the API rejects it after the metered call is already spent.
 
 ### Fixed
+- A witnessed rewrite that fails before its first byte lands no longer strands the scope. Both
+  rewrite paths — the re-baseline ceremony and witnessed compaction — publish a write-ahead witness
+  journal and only then touch the ledger, so a refusal in between (an unwritable ledger file, a
+  failed rename, an orphan-tmp sweep error) used to leave a pending journal over unchanged bytes:
+  `transition-interrupted`, where reads exclude the scope and writes throw, until an operator re-ran
+  a ceremony. The failing writer is the one party that can prove nothing landed — it holds the
+  ledger lock continuously and re-reads the unchanged bytes under it — so it now retracts its own
+  journal (a new witness-store retract operation, keyed on the journal's random nonce and logged to
+  the witness log before the slot clears). Two states deliberately get no retraction. A crashed
+  writer: from disk alone, "bytes match the pre-transition state" cannot distinguish a rewrite that
+  never started from one that landed and was rolled back, so that stays `transition-interrupted` —
+  the conservative verdict — by design. And a rewrite that superseded a still-pending journal: the
+  journal slot holds one transition at a time, so the predecessor's evidence is already gone and
+  clearing the slot would delete an alarm this writer cannot vouch for rather than restore anything.
+  Such a failure leaves the journal pending for a re-drive to supersede, exactly as before.
+- `bench-replay --real` no longer benches one physical file under two labels. Its project-scope
+  gate checked ownership but not the one-file-is-one-participant rule the server, session-start
+  hook, and trigger measurement already apply, so in the default layout a benchmark run from an
+  adopted `$HOME` printed a phantom `project` row measuring the global ledger a second time.
 - `dualVerify.mode`, `stakesFloor`, `model` and `effort` no longer discard an invalid value in
   silence. Previously an unrecognised `effort` left the field at `null`, which means "omit `-c` and
   inherit `~/.codex/config.toml`" — so `"effort": "max"` produced whatever Codex was configured with,
@@ -236,6 +255,24 @@ All notable changes to Helix are documented here. This project follows
   divergence.
 
 ### Security
+- The re-baseline ceremony refuses a project scope that names the global ledger. It resolved the
+  ledger from the scope argument and the witness key from the same argument by a second, independent
+  route, and compared neither against the global ledger. In the default layout `HELIX_HOME` is
+  `$HOME/.helix`, so `--scope $HOME` resolved to the global ledger file while keying the witness
+  under the project root: one physical file recorded under two witness identities, with the older
+  one left attesting to a prefix of a file that had since grown — an unwitnessed tail until the next
+  write under that key. The ceremony compounded it by displaying `first-contact` and `epoch: 0 -> 1`
+  beside a non-zero byte count, telling the operator they were blessing virgin ground. The ledger
+  and its witness key are now derived together in one place, and that place is also where the
+  components that already enforced this same rule read it from. Also refused up front: a ledger with
+  more than one hard link. The append layer already rejected those, but only after the ceremony had
+  published its write-ahead witness journal, which left the scope holding a transition the ledger
+  never received. The link count is re-verified after the confirmation pause as well, next to the
+  existing content re-verify: a hard link created while the ceremony waits for the operator changes
+  no byte, so the content check alone cannot see it, and the append's own late refusal would strand
+  the scope the same way. The pre-check stats the path rather than opening it: a directory or FIFO
+  at the ledger path is not misreported as an alias — the downstream layer's own error stays the
+  accurate one — and the check cannot hang on a FIFO, which `open('r')` would block on.
 - The dual-verify subprocess no longer inherits the user's working directory or environment. It was
   spawned with only `stdio` set, so the external Codex CLI started in the user's project and
   received every variable the server had — and `-s read-only` sandboxes writes, not reads, while the

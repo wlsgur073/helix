@@ -14244,6 +14244,30 @@ function completeTransition(home2, scopeKey, bytes, headTx, fsOps = realFsOps) {
     writeStoreFileAt(path, nextStore, fsOps);
   });
 }
+function discardTransition(home2, scopeKey, nonce, fsOps = realFsOps) {
+  mkdirSync3(home2, { recursive: true });
+  const master = ensureMaster(home2);
+  const rawPath = witnessPath(home2);
+  withFileLock(rawPath, () => {
+    const path = canonical(rawPath);
+    const store2 = readStoreFileAt(path);
+    const state = deriveState(scopeKey, master, store2.scopes[scopeKey]);
+    const journal = state.macInvalid ? null : state.journal;
+    if (!journal) throw new WitnessAdvanceError("discardTransition: no pending journal for scope");
+    if (journal.nonce !== nonce) {
+      throw new WitnessAdvanceError("discardTransition: the pending journal belongs to a different transition (superseded meanwhile?) \u2014 refusing to retract it");
+    }
+    if (journal.supersedes !== null) {
+      throw new WitnessAdvanceError(
+        "discardTransition: this transition superseded a still-unresolved one, whose evidence the single journal slot no longer holds \u2014 retracting would clear an alarm this writer cannot vouch for; leaving it pending for a re-drive instead"
+      );
+    }
+    const entry = state.macInvalid ? null : state.entry;
+    appendWitnessLogLine(home2, { v: 1, scope: scopeKey, epoch: journal.epoch, kind: journal.kind, tx: journal.tx, nonce: journal.nonce, op: "discard" }, fsOps);
+    const nextStore = { v: 1, scopes: { ...store2.scopes, [scopeKey]: { entry, journal: null } } };
+    writeStoreFileAt(path, nextStore, fsOps);
+  });
+}
 
 // src/memory/ledger.ts
 var MARKER_SENTINEL_TX = "1970-01-01T00:00:00.000Z";
@@ -14282,6 +14306,9 @@ function witnessFenceRecord(epoch, nonce, tx) {
     classification: "normal"
   };
 }
+function aliasedLedgerMessage(nlink) {
+  return `ledger has ${nlink} hard links \u2014 aliased ledgers are unsupported (see SECURITY.md); refusing to write`;
+}
 function appendRecordUnlocked(rawPath, record2, fsOps = realFsOps) {
   mkdirSync4(dirname6(rawPath), { recursive: true });
   const path = canonical(rawPath);
@@ -14289,7 +14316,7 @@ function appendRecordUnlocked(rawPath, record2, fsOps = realFsOps) {
   const fd = fsOps.openSync(path, "a+");
   try {
     const st = fsOps.fstatSync(fd);
-    if (st.nlink !== 1) throw new Error(`appendRecord: ledger has ${st.nlink} hard links \u2014 aliased ledgers are unsupported (see SECURITY.md); refusing to write`);
+    if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
     let line = JSON.stringify(record2) + "\n";
     if (st.size > 0) {
       const tail = Buffer.alloc(1);
@@ -14423,6 +14450,10 @@ function compactLedger(rawPath, opts) {
     sweepOrphanTmps(path, { fsOps, keep: tmp });
     const fd = fsOps.openSync(tmp, "wx");
     let closed = false;
+    const w = opts.witness;
+    let fenceTx = null;
+    let preRewriteHash = null;
+    let retractNonce = null;
     try {
       if (!ctx.stillOwned()) throw new Error("compactLedger: lock lost after tmp creation");
       const mode = modeOf(path);
@@ -14430,9 +14461,7 @@ function compactLedger(rawPath, opts) {
       const beforeBytes = fileSize(path);
       const records = parseLedger(path);
       const { kept, droppedForgedVerifies } = planCompaction(records, opts);
-      const w = opts.witness;
       let rows = kept;
-      let fenceTx = null;
       if (w) {
         const kind = w.kind ?? "compaction";
         const verdict = classifyState(readScopeWitness(w.home, w.scopeKey), readLedgerBytes(path));
@@ -14449,7 +14478,8 @@ function compactLedger(rawPath, opts) {
         fenceTx = fence.tx;
         const finalText = rows.map((r) => JSON.stringify(r) + "\n").join("");
         const expected = { byteLength: Buffer.byteLength(finalText), prefixHash: sha256Hex(Buffer.from(finalText)) };
-        openTransition(w.home, w.scopeKey, {
+        preRewriteHash = sha256Hex(readLedgerBytes(path));
+        const journal = openTransition(w.home, w.scopeKey, {
           kind,
           epoch: plan.epoch,
           nonce: plan.nonce,
@@ -14458,6 +14488,7 @@ function compactLedger(rawPath, opts) {
           expected,
           tx: fenceTx
         });
+        retractNonce = journal.nonce;
       }
       for (const r of rows) writeAll(fsOps, fd, JSON.stringify(r) + "\n");
       fsOps.fsyncSync(fd);
@@ -14481,6 +14512,12 @@ function compactLedger(rawPath, opts) {
       try {
         fsOps.unlinkSync(tmp);
       } catch {
+      }
+      if (w && retractNonce !== null && preRewriteHash !== null) {
+        try {
+          if (sha256Hex(readLedgerBytes(path)) === preRewriteHash) discardTransition(w.home, w.scopeKey, retractNonce);
+        } catch {
+        }
       }
       throw e;
     }
@@ -15911,6 +15948,11 @@ function scanLegacyElevated(records, verify) {
     }
   }
   return { ok: offenders.length === 0, offenders };
+}
+
+// src/memory/scope-target.ts
+function aliasesGlobalLedger(projectLedger2, globalLedger2) {
+  return canonicalRoot(projectLedger2) === canonicalRoot(globalLedger2);
 }
 
 // src/memory/trust-store-layout.ts
@@ -25400,7 +25442,7 @@ var home = process.env.HELIX_HOME ?? join11(homedir3(), ".helix");
 var globalLedger = process.env.HELIX_LEDGER ?? join11(home, "memory.jsonl");
 var projectRoot = process.cwd();
 var projectLedger = join11(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync8(join11(projectRoot, ".helix")) && canonicalRoot(projectLedger) !== canonicalRoot(globalLedger);
+var projectActive = existsSync8(join11(projectRoot, ".helix")) && !aliasesGlobalLedger(projectLedger, globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot } : void 0;
 var config2 = loadConfig({ globalPath: join11(home, "config.json") });
 if (existsSync8(join11(projectRoot, ".helix", "config.json"))) {

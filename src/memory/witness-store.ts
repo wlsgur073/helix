@@ -147,7 +147,7 @@ export function classifyScope(home: string, scopeKey: string, bytes: Buffer): Wi
   return classifyState(readScopeWitness(home, scopeKey), bytes);
 }
 
-function appendWitnessLogLine(home: string, line: { v: 1; scope: string; epoch: number; kind: JournalEntry['kind']; tx: string; nonce: string }, fsOps: DurableFsOps): void {
+function appendWitnessLogLine(home: string, line: { v: 1; scope: string; epoch: number; kind: JournalEntry['kind']; tx: string; nonce: string; op?: 'discard' }, fsOps: DurableFsOps): void {
   const fd = fsOps.openSync(witnessLogPath(home), 'a', 0o600);
   try {
     writeAll(fsOps, fd, JSON.stringify(line) + '\n');
@@ -293,6 +293,65 @@ export function completeTransition(home: string, scopeKey: string, bytes: Buffer
     const unsigned = { epoch: journal.epoch, byteLength: journal.expected.byteLength, prefixHash: journal.expected.prefixHash, headTx };
     const nextEntry = signedEntry(scopeKey, master, unsigned);
     const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry: nextEntry, journal: null } } };
+    writeStoreFileAt(path, nextStore, fsOps);
+  });
+}
+
+/** Under the witness lock; the RETRACT half of the open/complete pair — journal := null, entry
+ *  untouched — for a transition whose rewrite provably never touched the ledger (the append/rename
+ *  refused before its first byte). Logs the retraction to witness-log BEFORE clearing the slot
+ *  (mirror of openTransition's intent-first ordering: if the clear itself never lands, the scope
+ *  stays pending — the conservative side).
+ *
+ *  Identified by `nonce`, not by tx: the fence's tx is a wall-clock stamp (millisecond resolution,
+ *  and a constant under an injected fixed clock), so it cannot prove ownership of a transition. The
+ *  journal's nonce is 16 random bytes minted per plan, so equality IS the ownership proof — and the
+ *  caller gets it from the JournalEntry openTransition returned, which means a retraction key can
+ *  only exist for a journal that actually landed.
+ *
+ *  TWO refusals, both structural:
+ *
+ *  1. A journal this caller did not open (nonce mismatch, or none pending) — the ordinary
+ *     someone-moved-the-witness case.
+ *  2. A journal that SUPERSEDED a still-unresolved one (`supersedes !== null`). openTransition is
+ *     single-slot: the predecessor is absorbed and only its nonce survives, so clearing the slot
+ *     would not restore the pre-open state — it would DELETE the predecessor's evidence. The
+ *     caller's proof covers only its own rewrite; it says nothing about the earlier writer's
+ *     window. Retracting there either launders a rollback alarm (predecessor interrupted) or
+ *     discards the binding between already-landed bytes and their epoch, leaving a 'mismatch' the
+ *     entry can no longer explain (predecessor healing). Leaving the slot pending is the only
+ *     honest option, and it is exactly what a re-drive expects to supersede.
+ *
+ *  SAFETY CONTRACT, deliberately split: the bytes-unchanged proof belongs to the CALLER, because
+ *  only the failing writer has it — it held the LEDGER lock continuously from before
+ *  openTransition and re-read the bytes under that lock after the failure. From disk state alone,
+ *  "bytes match the pre-transition state" cannot distinguish a rewrite that never started from one
+ *  that landed and was rolled back (the journal-first rationale in witness-core.ts), which is why
+ *  classifyWitness keeps calling that state 'transition-interrupted' and no read path may relax
+ *  it; a CRASHED writer's journal therefore stays pending until an operator re-drives it. */
+export function discardTransition(home: string, scopeKey: string, nonce: string, fsOps: DurableFsOps = realFsOps): void {
+  mkdirSync(home, { recursive: true });
+  const master = ensureMaster(home);
+  const rawPath = witnessPath(home);
+  withFileLock(rawPath, () => {
+    const path = canonical(rawPath);
+    const store = readStoreFileAt(path);
+    const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
+    const journal = state.macInvalid ? null : state.journal;
+    if (!journal) throw new WitnessAdvanceError('discardTransition: no pending journal for scope');
+    if (journal.nonce !== nonce) {
+      throw new WitnessAdvanceError('discardTransition: the pending journal belongs to a different transition (superseded meanwhile?) — refusing to retract it');
+    }
+    if (journal.supersedes !== null) {
+      throw new WitnessAdvanceError(
+        'discardTransition: this transition superseded a still-unresolved one, whose evidence the ' +
+        'single journal slot no longer holds — retracting would clear an alarm this writer cannot ' +
+        'vouch for; leaving it pending for a re-drive instead',
+      );
+    }
+    const entry = state.macInvalid ? null : state.entry;
+    appendWitnessLogLine(home, { v: 1, scope: scopeKey, epoch: journal.epoch, kind: journal.kind, tx: journal.tx, nonce: journal.nonce, op: 'discard' }, fsOps);
+    const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry, journal: null } } };
     writeStoreFileAt(path, nextStore, fsOps);
   });
 }
