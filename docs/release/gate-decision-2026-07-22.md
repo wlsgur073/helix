@@ -92,6 +92,13 @@ reported unexercised — not silently validated.
 > decision: a prospectively frozen v2 subset rule is what D5 expressly permits, not the silent
 > waiver of v1's failed result that D1 refused.
 
+> **Pointer (added 2026-07-31; D1–D5 and both blocks above are unchanged).** The preregistration
+> D2 says does not yet exist is now drafted at
+> [`v2-preregistration-2026-07.md`](./v2-preregistration-2026-07.md). It is **NOT YET IN FORCE**:
+> its §10 pin table is unfilled, and D2's own reasoning is why — a half-pinned document fixes no
+> identities, so the locked claim template above still governs. Filling that table and committing
+> it is the freeze that opens the window.
+
 - **Pre-registered position** (assistant, before external review): choose (b); no third
   waiver; drift, waiver-credibility, and class-not-instance arguments; a self-registered
   objection on v2's informed-by-v1 taint.

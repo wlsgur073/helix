@@ -38,8 +38,12 @@
  *  `src/memory/projection.ts` for it. Behaviour is locked by test/pilot/generate-manifest.test.ts,
  *  test/pilot/generate-manifest-scope-cutoff.test.ts, and byte reproduction of both frozen
  *  manifests. */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { projectLedgerPath } from '../../src/memory/ownership.js';
 import type { MemoryScope } from '../../src/types.js';
+import {
+  exitOnInvocationError, parseJsonInput, readInput, refuseOutputCollisions, writeArtifact,
+} from './artifact-io.js';
 import { topicTerms } from './derive.js';
 import { segmentOracle } from './segment-oracle.js';
 import { readSnapshot, type LedgerRow, type ScopedLedger } from './snapshot.js';
@@ -194,7 +198,7 @@ const USAGE = 'usage: generate-manifest <snapshotDir> <oracleMd> <mappingJson> <
  *  hashed as evidence of the window it was generated for, and a window it cannot state is not
  *  evidence of one. */
 const write = (outPath: string, probes: Probe[], win?: HoldoutWindow): void => {
-  writeFileSync(outPath, JSON.stringify(win === undefined
+  writeArtifact({ arg: '<out>', path: outPath }, JSON.stringify(win === undefined
     ? { k: K, probes }
     : { k: K, txAfter: win.after, txClose: win.close, probes }, null, 1) + '\n');
   const ledgerCount = probes.filter((p) => p.side === 'ledger').length;
@@ -208,26 +212,46 @@ const takeFlag = (argv: string[], name: string): { value?: string; rest: string[
   return i === -1 ? { rest: argv } : { value: argv[i + 1], rest: [...argv.slice(0, i), ...argv.slice(i + 2)] };
 };
 
+/** The snapshot's two ledgers, which no argument names directly and which `readSnapshot` opens.
+ *  They are inputs of the run all the same, and an `<out>` inside the snapshot would corrupt the
+ *  corpus the manifest is being enumerated from. */
+const snapshotInputs = (snapshotDir: string) => [
+  { arg: '<snapshotDir>', path: join(snapshotDir, 'home', 'memory.jsonl') },
+  { arg: '<snapshotDir>', path: projectLedgerPath(join(snapshotDir, 'proj')) },
+];
+
 const main = (): void => {
-  const argv = process.argv.slice(2);
-  const after = takeFlag(argv, '--after');
-  const close = takeFlag(after.rest, '--close');
-  if (after.value !== undefined || close.value !== undefined) {
-    // The holdout form takes NO oracle arguments and BOTH window endpoints, so "the holdout has no
-    // oracle side" and "the window is bounded at both ends" are properties of the interface rather
-    // than rules someone has to remember — an optional upper bound would leave the unbounded-window
-    // defect one omission away. Arity is checked EXACTLY, not as a minimum: the two shapes overlap
-    // such that passing the frozen form's arguments here would line the oracle path up with the
-    // output slot and overwrite a hash-pinned artifact.
-    const [snapshotDir, outPath] = close.rest;
-    if (!after.value || !close.value || close.rest.length !== 2 || !snapshotDir || !outPath) { console.error(USAGE); process.exit(2); }
-    const win: HoldoutWindow = { after: after.value, close: close.value };
-    write(outPath, buildProbes(readSnapshot(snapshotDir), null, win), win);
-    return;
-  }
-  const [snapshotDir, oraclePath, mappingPath, outPath] = argv;
-  if (argv.length !== 4 || !snapshotDir || !oraclePath || !mappingPath || !outPath) { console.error(USAGE); process.exit(2); }
-  const mapping = JSON.parse(readFileSync(mappingPath, 'utf8')) as Record<string, string[]>; // entryIndex -> record ids
-  write(outPath, buildProbes(readSnapshot(snapshotDir), { md: readFileSync(oraclePath, 'utf8'), mapping }));
+  try {
+    const argv = process.argv.slice(2);
+    const after = takeFlag(argv, '--after');
+    const close = takeFlag(after.rest, '--close');
+    if (after.value !== undefined || close.value !== undefined) {
+      // The holdout form takes NO oracle arguments and BOTH window endpoints, so "the holdout has no
+      // oracle side" and "the window is bounded at both ends" are properties of the interface rather
+      // than rules someone has to remember — an optional upper bound would leave the unbounded-window
+      // defect one omission away. Arity is checked EXACTLY, not as a minimum: the two shapes overlap
+      // such that passing the frozen form's arguments here would line the oracle path up with the
+      // output slot.
+      //
+      // The arity check is what stops that CONFUSION. It never stopped an `<out>` deliberately
+      // aimed at an input — this program is the one the incident is named after, and it went on
+      // writing its manifest over its own oracle at exit 0 until `refuseOutputCollisions` was added
+      // below (§9 line 376).
+      const [snapshotDir, outPath] = close.rest;
+      if (!after.value || !close.value || close.rest.length !== 2 || !snapshotDir || !outPath) { console.error(USAGE); process.exit(2); }
+      refuseOutputCollisions({ arg: '<out>', path: outPath }, snapshotInputs(snapshotDir));
+      const win: HoldoutWindow = { after: after.value, close: close.value };
+      write(outPath, buildProbes(readSnapshot(snapshotDir), null, win), win);
+      return;
+    }
+    const [snapshotDir, oraclePath, mappingPath, outPath] = argv;
+    if (argv.length !== 4 || !snapshotDir || !oraclePath || !mappingPath || !outPath) { console.error(USAGE); process.exit(2); }
+    const oracle = { arg: '<oracleMd>', path: oraclePath };
+    const mappingArg = { arg: '<mappingJson>', path: mappingPath };
+    refuseOutputCollisions({ arg: '<out>', path: outPath },
+      [oracle, mappingArg, ...snapshotInputs(snapshotDir)]);
+    const mapping = parseJsonInput(mappingArg, readInput(mappingArg)) as Record<string, string[]>; // entryIndex -> record ids
+    write(outPath, buildProbes(readSnapshot(snapshotDir), { md: readInput(oracle), mapping }));
+  } catch (e) { exitOnInvocationError(e); }
 };
 if (isEntryPoint(import.meta.url)) main();

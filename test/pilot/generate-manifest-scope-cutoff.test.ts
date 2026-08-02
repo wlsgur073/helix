@@ -200,8 +200,9 @@ describe('generator CLI', () => {
       const out = join(dir, 'holdout.json');
       run(['--after', '2026-07-21T00:00:00.000Z', '--close', '2026-08-18T00:00:00.000Z', dir, out]);
       const m = JSON.parse(readFileSync(out, 'utf8'));
-      // Both endpoints are carried, in a fixed key order: the manifest is the artifact §5 hashes
-      // as evidence of the window it was generated for, so a window it cannot state is not evidence.
+      // Both endpoints are carried, in a fixed key order: the manifest is one of the artifacts §9's
+      // chain hashes (item 3) as evidence of the window it was generated for, so a window it cannot
+      // state is not evidence. (§5 fixes the close ITSELF; it hashes nothing.)
       expect(Object.keys(m)).toEqual(['k', 'txAfter', 'txClose', 'probes']);
       expect(m.txAfter).toBe('2026-07-21T00:00:00.000Z');
       expect(m.txClose).toBe('2026-08-18T00:00:00.000Z');

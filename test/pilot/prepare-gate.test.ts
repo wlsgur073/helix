@@ -316,3 +316,63 @@ describe('prepared gate-set artifact', () => {
     expect(prepareGateSet(base()).payload.inputs).toEqual(H);
   });
 });
+
+describe('the close bounds the ENTIRE corpus (§2, §9 item 2)', () => {
+  /** Round 3, finding F1: nothing between freeze and score compared any snapshot row's `tx`
+   *  against the pinned close. A row minted six weeks after the window closed competed for rank,
+   *  and a post-close `supersede` was even COUNTED into `Es` — §4 defines `Es` "in the as-of-close
+   *  snapshot", so the count overstated exposure and flipped the stale condition to binding for a
+   *  hazard the window never contained. The snapshot hash of §9 item 2 is supposed to DEMONSTRATE
+   *  `cutoff < tx ≤ close`; this refusal is that demonstration's implementer. Rows at or before
+   *  the cutoff are LEGITIMATE — they are the competitor corpus — so only the close is enforced. */
+  const H2 = { manifest: 'a'.repeat(64), classifier: 'b'.repeat(64), universe: 'c'.repeat(64) };
+  const withRows = (rows: Record<string, unknown>[]) => ({
+    manifest: { k: 20, txAfter: '2026-07-21T00:00:00.000Z', txClose: '2026-08-18T00:00:00.000Z',
+      probes: [mProbe('m_a')] },
+    classifier: { rule: 'o67-class-rule-2026-07', manifest: 'holdout.json', summary: {},
+      probes: [cVerdict('m_a')] },
+    universe: {
+      rule: 'o67-class-rule-2026-07', artifact: 'candidate-universe', manifest: 'holdout.json', recallBound: 26,
+      disclosure: { rowsByScope: { global: 0, project: rows.length }, projectDisposition: 'owned',
+        integrityAvailable: true, witnessNotes: [], expansionAvailable: true },
+      probes: [{ id: 'L_m_a', candidates: ['project:m_a'] }],
+    },
+    ledgers: [
+      { scope: 'global' as const, rows: [] },
+      { scope: 'project' as const, rows: rows as unknown as LedgerRow[] },
+    ],
+    pins: { k: 20, txAfter: '2026-07-21T00:00:00.000Z', txClose: '2026-08-18T00:00:00.000Z', inputs: { ...H2 } },
+    inputHashes: { ...H2 },
+    now: () => '2026-08-18T09:00:00.000Z',
+  });
+  const row = (id: string, tx: unknown, over: Record<string, unknown> = {}) =>
+    ({ id, tx, type: 'assert', content: `content ${id}`, supersedes: null, ...over });
+
+  it('refuses any row whose tx is after the pinned close, naming scope, row and tx', () => {
+    const late = () => prepareGateSet(withRows([row('m_a', '2026-08-01T00:00:00.000Z'), row('m_late', '2026-09-30T00:00:00.000Z')]));
+    expect(late).toThrow(/snapshot-after-close/);
+    expect(late).toThrow(/m_late/);
+    expect(late).toThrow(/2026-09-30/);
+  });
+
+  it('refuses a post-close CLOSER outright instead of counting it into Es', () => {
+    // The double defect: the closer both survived the window check (there was none) and INFLATED
+    // `Es`, turning the stale condition binding for a hazard the as-of-close corpus never held.
+    expect(() => prepareGateSet(withRows([
+      row('m_a', '2026-08-01T00:00:00.000Z'),
+      row('m_closer', '2026-09-30T00:00:00.000Z', { type: 'supersede', supersedes: 'm_a' }),
+    ]))).toThrow(/snapshot-after-close/);
+    // And the boundary is INCLUSIVE: a row AT the close is the window's last legitimate moment.
+    const atClose = prepareGateSet(withRows([row('m_a', '2026-08-18T00:00:00.000Z')]));
+    expect(atClose.payload.stale.label).toBe('UNEXPOSED — no temporal evidence');
+  });
+
+  it('refuses a row whose tx is missing or not the canonical spelling, which cannot be compared', () => {
+    // §2 compares bounds with a strict STRING comparison. A missing or differently-spelled tx
+    // would sort meaninglessly against the close — '2026-08-01T00:00:00Z' < '2026-08-18…' is true
+    // for reasons that have nothing to do with time.
+    expect(() => prepareGateSet(withRows([row('m_a', undefined)]))).toThrow(/ledger-tx-non-canonical/);
+    expect(() => prepareGateSet(withRows([row('m_a', '2026-08-01T00:00:00Z')]))).toThrow(/ledger-tx-non-canonical/);
+    expect(() => prepareGateSet(withRows([row('m_a', '2026-13-01T00:00:00.000Z')]))).toThrow(/ledger-tx-non-canonical/);
+  });
+});

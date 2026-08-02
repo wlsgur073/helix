@@ -12,6 +12,7 @@
  *  keeps set semantics (dedup, ordering, equality) obviously correct.
  */
 import { readFileSync } from 'node:fs';
+import { invocationFail } from './artifact-io.js';
 import type { MemoryScope } from '../../src/types.js';
 
 export interface Candidate { id: string; scope: MemoryScope }
@@ -63,7 +64,10 @@ const readLedgerLines = (path: string): string[] => {
     text = readFileSync(path, 'utf8');
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw new Error(`ledger-unreadable: ${path} exists but could not be read (${(e as Error).message}); ` +
+    // An INVOCATION error (exit 2): the operator named a directory that does not hold a readable
+    // ledger, which is an argument they retype. Exit 1 stays for a corpus that read and then
+    // disagreed — `corpus-id-collision` below is that, and it keeps exit 1 (finding X3).
+    return invocationFail('ledger-unreadable', `${path} exists but could not be read (${(e as Error).message}); ` +
       'counting it as zero rows would silently shrink the recall bound');
   }
   return text.split('\n').filter(Boolean);
@@ -90,7 +94,15 @@ export const corpusPrecondition = (
   const rowsByScope: Record<string, number> = {};
   const owner = new Map<string, MemoryScope>();
   for (const { scope, path } of ledgers) {
-    const ids = readLedgerLines(path).map((l) => (JSON.parse(l) as { id: string }).id);
+    const ids = readLedgerLines(path).map((l, i) => {
+      // Same class as the read failure above and same code: a ledger line that is not JSON escaped
+      // as a bare `SyntaxError` naming neither the file nor the row, at the gate's own exit code.
+      try { return (JSON.parse(l) as { id: string }).id; }
+      catch (e) {
+        return invocationFail('ledger-unparsable', `${path} line ${i + 1} is not JSON ` +
+          `(${(e as Error).message}); a skipped row would shrink the recall bound invisibly`);
+      }
+    });
     rowsByScope[scope] = ids.length;
     for (const id of ids) {
       const prior = owner.get(id);

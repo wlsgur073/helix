@@ -7,13 +7,16 @@
  *  Candidate pool = the record set MemoryStore.recall would serve (identities only; order
  *  discarded and never recorded). Deterministic: fixed clock, sorted arrays, no randomness.
  *  Usage: npx tsx scripts/pilot/classify-o67.ts <manifest> <snapshotDir> <out> */
-import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  exitOnInvocationError, invocationFail, parseJsonInput, readInput, refuseOutputCollisions, writeArtifact,
+} from './artifact-io.js';
 import { MemoryStore } from '../../src/memory/store.js';
 import { projectLedgerPath } from '../../src/memory/ownership.js';
 import { lexicalEvidence, meaningfulTokens, tokenize } from '../../src/memory/retrieval.js';
 import { defaultExpansion } from '../../src/memory/expansion.js';
 import { probeUniverse, qualifiedId, corpusPrecondition, assertScopeParticipated } from './candidate-universe.js';
+import { expansionAssetPaths, snapshotTrustPaths } from './pin-hashes.js';
 import { isEntryPoint } from '../../src/entry-point.js';
 import type { MemoryScope } from '../../src/types.js';
 
@@ -87,13 +90,46 @@ export function classifyProbe(p: ProbeInput, pool: CandidateDoc[]): ProbeVerdict
 }
 
 const main = (): void => {
+  try { classifyMain(); } catch (e) { exitOnInvocationError(e); }
+};
+
+const classifyMain = (): void => {
   const [manifestPath, snapshotDir, outPath] = process.argv.slice(2);
   if (!manifestPath || !snapshotDir || !outPath) { console.error('usage: classify-o67 <manifest> <snapshotDir> <out>'); process.exit(2); }
   // The universe artifact is written to a sibling path derived from <out>. If <out> itself ended in
   // .universe.json, a later run could derive that same name and silently overwrite THIS run's
-  // verdicts — the artifact rule §6 hashes before scoring. Reserve the suffix instead.
-  if (outPath.endsWith('.universe.json')) { throw new Error(`reserved-output-suffix: <out> must not end in .universe.json (${outPath}); that name is derived for the candidate-universe artifact`); }
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { k: number; probes: ProbeInput[] };
+  // verdicts — the artifact rule §6 hashes before scoring. Reserve the suffix instead —
+  // case-INSENSITIVELY, because on a case-insensitive filesystem `x.UNIVERSE.JSON` IS the derived
+  // name, and a case-sensitive reserve let it walk past and take exactly the name it reserves.
+  if (outPath.toLowerCase().endsWith('.universe.json')) {
+    invocationFail('reserved-output-suffix', `<out> must not end in .universe.json (${outPath}); that name ` +
+      'is derived for the candidate-universe artifact');
+  }
+  const manifestArg = { arg: '<manifest>', path: manifestPath };
+  // BOTH destinations are checked, and both before anything is read or classified. The second file's
+  // name is DERIVED from <out>, so leaving <out> unconstrained left the derived path unconstrained
+  // too — an existing `x.universe.json` was overwritten by a run whose <out> was `x.json`, with no
+  // argument naming it. Checking after the verdicts were written would be worse than useless: the
+  // first file would already be on disk when the second refusal arrived (§9 line 376).
+  const universePath = `${outPath.replace(/\.json$/i, '')}.universe.json`;
+  // Every path the classification READS, including the ones no argument names: the recall this
+  // program runs opens the ownership registry, the .owner stamp, the master key and the witness
+  // journal (src/memory/store.ts's trust surface), and the semantic-neighbor asset resolves
+  // module-relative with a silent fallback. Round 3 proved the cost of the narrower list: an
+  // <out> aimed at the ABSENT registry was silently CREATED inside the frozen snapshot at exit 0,
+  // and a present one drew `output-exists`, whose remedy text cannot know the file is load-bearing.
+  // Absent inputs stay in the list on purpose — aliasing a not-yet-existing input is exactly the
+  // minting-into-the-snapshot case.
+  const inputs = [manifestArg,
+    { arg: '<snapshotDir>', path: join(snapshotDir, 'home', 'memory.jsonl') },
+    { arg: '<snapshotDir>', path: projectLedgerPath(join(snapshotDir, 'proj')) },
+    ...Object.values(snapshotTrustPaths(snapshotDir)).map((path) => ({ arg: '<snapshotDir>', path })),
+    ...expansionAssetPaths().map((path) => ({ arg: '(semantic-neighbor asset, resolved module-relative)', path }))];
+  refuseOutputCollisions({ arg: '<out>', path: outPath }, inputs);
+  refuseOutputCollisions({ arg: '<out>.universe.json (derived)', path: universePath },
+    [...inputs, { arg: '<out>', path: outPath }]);
+
+  const manifest = parseJsonInput(manifestArg, readInput(manifestArg)) as { k: number; probes: ProbeInput[] };
   const home = join(snapshotDir, 'home');
   const projectRoot = join(snapshotDir, 'proj');
   const store = new MemoryStore(join(home, 'memory.jsonl'), {
@@ -136,11 +172,11 @@ const main = (): void => {
     unscorable: verdicts.filter((v) => v.status === 'unscorable').map((v) => v.id),
     outOfDomain: verdicts.filter((v) => v.status === 'out-of-domain').map((v) => v.id),
   };
-  writeFileSync(outPath, JSON.stringify({ rule: 'o67-class-rule-2026-07', manifest: manifestPath.split('/').pop(), summary, probes: verdicts }, null, 1) + '\n');
+  writeArtifact({ arg: '<out>', path: outPath }, JSON.stringify({ rule: 'o67-class-rule-2026-07', manifest: manifestPath.split('/').pop(), summary, probes: verdicts }, null, 1) + '\n');
   // SEPARATE artifact by design: the verdict file's bytes stay reproducible (the C1.3 retrodiction
   // anchor is pinned against them), while rule §6's window-close procedure gets the universe it
   // requires to be hashed BEFORE scoring.
-  writeFileSync(outPath.replace(/\.json$/, '') + '.universe.json', JSON.stringify({
+  writeArtifact({ arg: '<out>.universe.json (derived)', path: universePath }, JSON.stringify({
     rule: 'o67-class-rule-2026-07',
     artifact: 'candidate-universe',
     manifest: manifestPath.split('/').pop(),

@@ -37,6 +37,10 @@ or prior-approved requirement; anything else is gold-plating and was deliberatel
   direction), the gate-composition confirmation (`finalHit1Eligible` is named for a
   composition the freeze must confirm or rename), the exposure minima, the preregistration,
   and the freeze-commit retrodiction rerun.
+  > **Updated 2026-07-31 (§11).** Of the gates listed above, items 1–6 and 8 are **delivered** and
+  > item 9 is **drafted but not in force**; item 10 still runs at the freeze commit. The anchor was
+  > re-verified on 2026-07-30 across the eligibility-field change and reproduced verbatim on both
+  > manifests, which is continuity evidence and not a substitute for that rerun.
   Those are downstream freeze-INTEGRATION prerequisites for a completed artifact, not evidence
   that the artifact is unshipped. Reopen this criterion only if that work changes the normative
   membership rule, or if the freeze-commit retrodiction fails — never merely because the
@@ -206,6 +210,12 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   freeze-INTEGRATION prerequisites for C1.3's already-completed artifact — C5.1 owns
   integration, policy confirmation, output completion, pinning and freeze-time reproduction;
   C1.3 owns the shipped rule itself.
+  > **Updated 2026-07-31 (§11).** The two confirmations named above are resolved. The
+  > `finalHit1Eligible` field was **deleted**, not renamed — owner decision D-b removed the
+  > exclusion the field encoded, so there is no second tier left to name — and every emitted
+  > identity is scope-qualified. The checklist's "minimum sample or stopping rule" element is now
+  > a minimum of 2 plus a **fixed close**; "stopping rule" is a misnomer for v2 and should not be
+  > used for it.
 - **C5.1 pre-freeze closure list (merged 2026-07-27/28 from an owner draft + two Codex compare
   rounds; reconciled in §8).** Nothing here changes the pilot's measured question: items 1–4
   make the frozen method *executable*, 5–8 decide what gets frozen, 9 writes it down, 10–12
@@ -365,6 +375,13 @@ The prior approved design's clean-room tier and drill set are carried forward IN
      defect. Window open/close ordering itself is already fixed by D3 and rule §6.
   10. **Re-run the C1.3 retrodiction reproduction AT the freeze commit** rather than relying on
       the 2026-07-26 run.
+  > **Items 5–10: see §11 (added 2026-07-31). The text above is unchanged and is the record of
+  > what was asked on 2026-07-27/28; §11 states what was decided and where the two now disagree.**
+  > Read together with it, because two phrases above are actively misleading on their own: item 6
+  > asks for a minimum for the O_67 class, which **no longer has one**, and item 7 says both
+  > shortfall labels block, which is now true of **Hit@1 only**. The method itself is written out
+  > in [`v2-preregistration-2026-07.md`](./v2-preregistration-2026-07.md) — drafted, **not yet in
+  > force**, since filling its §10 pin table is the freeze.
   11. **On the freeze commit itself:** the committed provenance-audit suite as the C1.1
       acceptance drill, and full suite + typecheck as C2.3. The two opt-in metered
       external-model end-to-end tests (the only skips in an otherwise green tree) are
@@ -715,3 +732,80 @@ session's first answer was wrong and had to be withdrawn — is in the working d
 `docs/superpowers/specs/2026-07-29-v2-gate-composition-design.md` §9. That tree is gitignored, so
 this section and the two normative amendments are the tracked account; C5.1 closure item 9 folds
 them into the v2 preregistration.
+
+---
+
+## 11. Amendment record — 2026-07-31 (C5.1 closure items 5–10)
+
+Appended at the end so no line number above it moves. §5's closure list is **unchanged and left
+visible**; this section states the disposition of items 5–10 and supersedes their text where the
+two now disagree. The method they settle is written out in the new tracked document
+[`v2-preregistration-2026-07.md`](./v2-preregistration-2026-07.md), which is **drafted but NOT YET
+IN FORCE** — its §10 pin table is unfilled, and filling it is the freeze.
+
+| item | disposition |
+|---|---|
+| **5** — confirm or replace the O_67 gate composition | **SETTLED and SHIPPED.** Owner decision D-b replaced the recommended default: in-class members REMAIN in the binding Hit@1 denominator, so there is no exclusion and nothing to shadow. `finalHit1Eligible` was **deleted rather than renamed** — a "base" only means something against a "final" — leaving one tier, `hit1Eligible`, echoing the manifest's flag on every return path including the unscorable ones. |
+| **6** — separate minima and the sample unit | **SETTLED, asymmetrically.** Hit@1 takes a minimum of **2** distinct eligible target identities, explicitly a starvation floor rather than a statistical minimum. The O_67 class takes **no minimum at all**: D-a made it reporting-only, so its `E` denominator does not exist. The sample unit's three roles — exposure, denominator, success rule — are stated separately and coincide only because a ledger-only holdout emits one probe per record; that coincidence is frozen as an invariant and preparation fails closed on a duplicate identity. |
+| **7** — shortfall consequence in the shipped labels | **SETTLED; the item's "both block" is superseded for O_67 only.** Hit@1's `UNEXERCISED — 0/2` and `PARTIALLY EXERCISED — n/2 (minimum not met)` both block. The O_67 labels block neither. `UNSCORABLE — GATE FAILURE` is unchanged and its scope is now the whole pipeline. The item's "28-day cap" framing is also superseded: v2 has a **fixed 28-day close**, not a cap over a stopping rule, so the cap can never function as a waiver because there is no earlier stop to waive. |
+| **8** — adopt or carry forward the remaining D2 elements | **SETTLED.** All six are filled in the preregistration §3. The item correctly predicted this would be mostly transcription; one element was not. The **mapping rule is filled positively** as mechanical identity mapping rather than waived as "not applicable" — v2 runs no oracle side, but mapping still occurs, and recording it as N/A would leave a required element unfilled and invite the reading that v2 skipped it. |
+| **9** — write the v2 preregistration | **DRAFTED, not in force.** It carries the six §f elements, the D5 duties, the window-close ordering, the separately-pinned identities, and the D3 window lifecycle no existing document fixed. One requirement in the item lapsed: a **blinded census procedure** is no longer needed, because a fixed close means a count of qualifying exposures cannot change when scoring happens. What replaced it is an explicit inspection rule — nothing derived from ranks may be read while the window is open — so the absence of a stopping decision is verifiable rather than asserted. |
+| **10** — re-run the C1.3 retrodiction at the freeze commit | **Unchanged, still due at the freeze.** Recorded for continuity: the anchor was re-verified on 2026-07-30 across the eligibility-field change and reproduced **verbatim** on both manifests, needing no re-baseline. That is not a substitute for the freeze-commit run. |
+
+**A pre-freeze code obligation this section discovered.** Writing the preregistration's evidence
+chain surfaced a requirement nothing satisfies: the chain binds **runner outputs embedding the
+prepare hash and the run id**, and `run-pilot.ts` writes neither. Adding them naively would break
+the stability condition, since a run id differs on every run — so the runner must adopt the
+payload / receipts split, and the scoring phase must compare **payload** hashes rather than
+whole-file hashes. The two are one change. Likewise the **freeze receipt**, the
+**prepare-before-run ordering receipt** and the **release record** have no producer yet. All of it
+must land **before** the freeze: building method tooling afterwards resolves a method choice and
+resets the window.
+
+**Why this was written before the remaining code.** Doing item 9 first was an owner decision, and
+it paid for itself immediately — the runner/stability coupling above would otherwise have surfaced
+midway through building the reporting tooling, after its shape was already fixed.
+
+**One measurement corrected while writing this.** C5.2's superseded bullet (§5) describes the
+accrual rate as "0.78 — one row per active day, on about 78 % of days". Re-measured 2026-07-31
+over the live corpus, the **rate is confirmed** at 0.77 rows/day, and the corpus still holds **33
+rows, all `assert`, with zero closer rows across its whole 43-day history** — but the
+*decomposition* is wrong: activity falls on **24 of 43 days (56 %)** at about **1.4 rows per
+active day**. The product is the same, so the 183-day arithmetic that retired the 20-case proposal
+is unaffected and no conclusion moves. The distribution claim is corrected here rather than in
+that bullet, which stays as the record of what was written on 2026-07-30.
+
+---
+
+## 12. Amendment record — 2026-08-02 (§11's code obligation DELIVERED)
+
+The pre-freeze code obligation §11 recorded is **done**; the preregistration's §9b carries the
+authoritative delivery note, and this section only fixes the readiness ledger. What landed, in
+the tree and green (typecheck clean; full suite 1871 passed / 2 skipped, the two being the
+long-standing opt-in metered external-model tests):
+
+- **§9b's two bullets**: the runner's payload/receipts split with payload-hash Stability
+  comparison, and producers for the freeze receipt, the ordering receipt and the release record.
+  Element 1 became TWO artifacts (`freeze-receipt.ts` at T, `input-pins.ts` at the close, bound by
+  `freezeSha256`) because §9's own ordering makes a single receipt unissuable at its ordered
+  position — the first adversarial-review round proved the one-artifact design could only be
+  issued after the close, exactly what §8 forbids.
+- **Four rounds of adversarial verification with live CLI reproductions**, each round's confirmed
+  findings regression-locked before the next: a query-swap and a K-swap invisible to every
+  id-level check; a snapshot substitution and a silent scope degradation via a deleted ownership
+  registry; a macNonce swap, a planted witness journal and an emptied semantic-neighbor table,
+  each flipping the release verdict with all then-current pins green; the runner minting a nonce
+  INTO the frozen snapshot; `tx > close` rows passing preparation and post-close closers inflating
+  `Es`; and the freeze receipt pinning working-tree bytes no commit contained. The repairs widened
+  the pinned-input surface to **ten names** and the pinned-tool table to **25 paths + 2 method
+  docs** (prereg §10, rows dated 2026-08-02), added tree-vs-commit divergence refusal at the
+  freeze, close-time re-verification of the method pins (§9a's sentence now has an implementer),
+  and a byte-identity regression test over the whole snapshot across a successful run.
+- **Residuals accepted and stated in the artifacts themselves**: nothing signs a run
+  (self-attested chain; the ordering receipt's honesty text and the stability condition's detail
+  say exactly what is and is not established), `redactionAcknowledged` remains a declaration, and
+  the runtime identity is verified at freeze/deploy time, not re-derivable at the close (the pins'
+  attestation says so).
+
+C5.1's remaining pre-freeze work is unchanged by this section: fill prereg §10 and commit — the
+freeze — then run the close sequence the tooling now enforces.

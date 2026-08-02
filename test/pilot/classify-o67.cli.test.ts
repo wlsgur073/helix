@@ -128,4 +128,128 @@ describe('classify-o67 CLI', () => {
       expect(stderr).toMatch(/reserved-output-suffix/);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it('reserves the universe suffix case-INSENSITIVELY', () => {
+    // x.UNIVERSE.JSON walked past a case-sensitive `endsWith` — and on a case-insensitive
+    // filesystem (a drvfs mount is one) it IS the derived name, so a later run whose <out> was
+    // x.json would overwrite this run's verdict artifact through the derived path.
+    const { dir } = fixture();
+    try {
+      const manifest = { k: 20, probes: [{ id: 'p1', query: 'exit code contract', relevant: ['m_1'], unambiguous: true }] };
+      const mPath = join(dir, 'manifest.json'); writeFileSync(mPath, JSON.stringify(manifest));
+      let stderr = '';
+      expect(() => {
+        try {
+          execFileSync(process.execPath, [cli, mPath, dir, join(dir, 'x.UNIVERSE.JSON')], { cwd: process.cwd(), stdio: 'pipe' });
+        } catch (e) { stderr = String((e as { stderr?: Buffer }).stderr ?? ''); throw e; }
+      }).toThrow();
+      expect(stderr).toMatch(/reserved-output-suffix/);
+      expect(existsSync(join(dir, 'x.UNIVERSE.JSON'))).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('classify-o67 collision inputs — every path the classification READS', () => {
+  /** Round-3 finding, reproduced live: the input list held the manifest and the two ledgers, but
+   *  the recall this program runs ALSO opens the ownership registry (home/projects.json), the
+   *  repo-side .owner stamp, and the semantic-neighbor asset. An <out> aimed at the registry or
+   *  the stamp while ABSENT was silently CREATED inside the frozen snapshot at exit 0; while
+   *  present, the refusal was `output-exists`, whose old remedy text was the destructive repair.
+   *  artifact-io's own contract: "inputs is every path this invocation READS, including ones no
+   *  flag names." */
+  const row = (id: string, content: string) => JSON.stringify({
+    id, tx: '2026-07-20T00:00:00.000Z', validFrom: '2026-07-20T00:00:00.000Z', validTo: null,
+    type: 'assert', state: 'Fresh', content,
+    provenance: { source: 'user', sessionId: 't' }, supersedes: null, blastRadius: null,
+    reverifyTrigger: null, classification: 'normal',
+  }) + '\n';
+
+  const fixture = (opts: { adopt?: boolean; projectRows?: boolean } = {}) => {
+    const dir = mkdtempSync(join(tmpdir(), 'o67-inputs-'));
+    const home = join(dir, 'home'); const projectRoot = join(dir, 'proj'); const proj = join(projectRoot, '.helix');
+    mkdirSync(home, { recursive: true }); mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, 'memory.jsonl'), opts.projectRows === false ? '' : row('m_1', 'exit code two on usage error is the contract'));
+    writeFileSync(join(home, 'memory.jsonl'), row('m_2', 'global background fact about releases and exit code contracts'));
+    if (opts.adopt !== false) stampOwnership(projectRoot, home, { genStamp: () => 'o67-stamp' });
+    const manifest = { k: 20, probes: [{ id: 'p1', query: 'exit code contract', relevant: ['m_2'], unambiguous: true }] };
+    const mPath = join(dir, 'manifest.json'); writeFileSync(mPath, JSON.stringify(manifest));
+    return { dir, mPath };
+  };
+
+  const refusal = (mPath: string, dir: string, out: string): { status: number; stderr: string } => {
+    try {
+      execFileSync(process.execPath, [cli, mPath, dir, out], { cwd: process.cwd(), stdio: 'pipe' });
+      return { status: 0, stderr: '' };
+    } catch (e) {
+      const err = e as { status?: number; stderr?: Buffer };
+      return { status: err.status ?? -1, stderr: String(err.stderr ?? '') };
+    }
+  };
+
+  it('refuses <out> aimed at the PRESENT ownership registry as an alias, and the registry survives', () => {
+    const { dir, mPath } = fixture();
+    try {
+      const registry = join(dir, 'home', 'projects.json');
+      const before = readFileSync(registry, 'utf8');
+      const r = refusal(mPath, dir, registry);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toMatch(/output-aliases-input/);
+      expect(readFileSync(registry, 'utf8')).toBe(before);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('refuses <out> aimed at the PRESENT .owner stamp as an alias, and the stamp survives', () => {
+    const { dir, mPath } = fixture();
+    try {
+      const owner = join(dir, 'proj', '.helix', '.owner');
+      const before = readFileSync(owner, 'utf8');
+      const r = refusal(mPath, dir, owner);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toMatch(/output-aliases-input/);
+      expect(readFileSync(owner, 'utf8')).toBe(before);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('refuses <out> aimed at an ABSENT registry instead of minting one inside the frozen snapshot', () => {
+    // The sharper half of the finding: with no adoption and an empty project ledger the run
+    // otherwise COMPLETES, and the old input list let it create home/projects.json at exit 0 — a
+    // registry file materialising inside a frozen snapshot, changing what every later run over
+    // that snapshot serves.
+    const { dir, mPath } = fixture({ adopt: false, projectRows: false });
+    try {
+      const registry = join(dir, 'home', 'projects.json');
+      const r = refusal(mPath, dir, registry);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toMatch(/output-aliases-input/);
+      expect(existsSync(registry)).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('refuses <out> aimed at the ABSENT .owner stamp the same way', () => {
+    const { dir, mPath } = fixture({ adopt: false, projectRows: false });
+    try {
+      const owner = join(dir, 'proj', '.helix', '.owner');
+      const r = refusal(mPath, dir, owner);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toMatch(/output-aliases-input/);
+      expect(existsSync(owner)).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('refuses <out> aimed at the resolved semantic-neighbor asset as an ALIAS, not merely as existing', () => {
+    // The asset is an ambient input — no argument names it, expansion.ts resolves it
+    // module-relative and falls back silently — and `output-exists`'s remedy cannot know it is
+    // load-bearing. Only the alias refusal states the truth: the run is not runnable as written.
+    // (canonicalPath sees through the bundle's data/ symlink, so the repo spelling and the
+    // bundle-resolved spelling are one file.)
+    const { dir, mPath } = fixture();
+    const asset = join(process.cwd(), 'data', 'semantic-neighbors.json');
+    try {
+      const before = readFileSync(asset, 'utf8');
+      const r = refusal(mPath, dir, asset);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toMatch(/output-aliases-input/);
+      expect(readFileSync(asset, 'utf8')).toBe(before);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
 });

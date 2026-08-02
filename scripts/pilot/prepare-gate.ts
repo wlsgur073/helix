@@ -16,11 +16,15 @@
  *  instead of a silent reconciliation.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { projectLedgerPath } from '../../src/memory/ownership.js';
+import { defaultExpansion } from '../../src/memory/expansion.js';
 import { isEntryPoint } from '../../src/entry-point.js';
-import { readSnapshot, type ScopedLedger } from './snapshot.js';
+import {
+  exitOnInvocationError, flagAccumulator, parseJsonInput, readInput, refuseOutputCollisions, writeArtifact,
+} from './artifact-io.js';
+import { expansionTableSha256, sha256BytesOrAbsent, snapshotTrustPaths } from './pin-hashes.js';
+import { parseLedgerText, type ScopedLedger } from './snapshot.js';
 import {
   HIT1_MINIMUM, RULE,
   type ClassifierOutput, type ClassifierVerdict, type EligibleSet, type GateSet, type GateSetPayload,
@@ -183,6 +187,19 @@ const byCodeUnit = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const sameSet = (a: string[], b: string[]) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
+/** INVARIANT OWNED BY THE CALLER — this function cannot check it. `inputHashes` arrives beside
+ *  ALREADY-PARSED objects, and nothing here reads the bytes those hashes claim to describe: the
+ *  pin comparison below establishes only that the SUPPLIED hashes match the freeze, not that the
+ *  supplied objects came from the hashed bytes. Every hash and its object must therefore derive
+ *  from ONE read of the same text, which is exactly what `main()` does — `readInput` once per
+ *  file, then parse AND hash over that same string, the ledgers included (`parseLedgerText` over
+ *  the string the `ledger:*` hashes are computed from; an earlier main re-read them through
+ *  `readSnapshot`, so its stale-exposure count derived from a second read the pins did not
+ *  describe). The CLI is the guarded path. A library caller who reads a file twice, or parses one
+ *  buffer and hashes another, re-opens the gap `runPilot` closed for the manifest by taking TEXT
+ *  instead (`run-pilot.ts`, `manifestText`): an artifact pinning hashes of bytes that are not the
+ *  bytes it measured. Today the only callers are `main()` and tests; a new caller inherits this
+ *  obligation with the signature. */
 export const prepareGateSet = (input: {
   manifest: Manifest;
   classifier: ClassifierOutput;
@@ -234,6 +251,34 @@ export const prepareGateSet = (input: {
       `'${d.projectDisposition}', so recall served none of them`);
   }
 
+  // §2 bounds the ENTIRE corpus at the close, and §9 item 2's snapshot hash is supposed to
+  // DEMONSTRATE `cutoff < tx ≤ close` — a demonstration that had no implementer until round 3
+  // proved it: a row minted six weeks after the close competed for rank, and a post-close
+  // `supersede` was COUNTED into `Es`, flipping the stale condition binding for a hazard the
+  // as-of-close corpus never held. Rows at or before the CUTOFF are legitimate (they are the
+  // competitor corpus), so only the close edge is enforced, inclusively, by the same strict
+  // string comparison the window bounds use — which is also why a missing or non-canonical `tx`
+  // is refused rather than compared: '…T00:00:00Z' sorts below the close for reasons that have
+  // nothing to do with time.
+  const CANONICAL_TX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  for (const { scope, rows } of ledgers) {
+    for (const r of rows) {
+      // The ternary keeps `fail`'s `never` in expression position — control-flow analysis only
+      // credits a never-returning call there — so `tx` is a plain string below.
+      const tx: string = (typeof r.tx === 'string' && CANONICAL_TX.test(r.tx) &&
+        !Number.isNaN(new Date(r.tx).getTime()) && new Date(r.tx).toISOString() === r.tx)
+        ? r.tx
+        : fail('ledger-tx-non-canonical', `${scope} row ${r.id} has tx ${JSON.stringify(r.tx)}, which is not ` +
+          'the canonical UTC spelling §2 compares window bounds with; a row that cannot be compared against ' +
+          'the close cannot be shown to belong to the as-of-close snapshot');
+      if (tx > pins.txClose) {
+        fail('snapshot-after-close', `${scope} row ${r.id} has tx ${tx}, after the pinned close ` +
+          `${pins.txClose}. The snapshot is supposed to stand in for one taken AT the close (§2); a later row ` +
+          'competes for rank — or closes an in-window record — from outside the measured window');
+      }
+    }
+  }
+
   const payload: GateSetPayload = {
     rule: RULE,
     k: manifest.k,
@@ -251,8 +296,8 @@ export const prepareGateSet = (input: {
     payload,
     receipts: {
       preparedAt: now(),
-      attestation: 'self-reported wall clock; §5 requires an append-only or externally attested receipt ' +
-        'showing prepare-finished before runner-started, which this field alone does not provide',
+      attestation: 'self-reported wall clock; §9 item 4 requires an append-only or externally attested ' +
+        'receipt showing prepare-finished before runner-started, which this field alone does not provide',
     },
   };
 };
@@ -260,16 +305,22 @@ export const prepareGateSet = (input: {
 /** Every input is a NAMED flag and there are no positionals at all.
  *
  *  Two reasons, both learned here. Overlapping positional shapes in `generate-manifest` once lined
- *  an oracle path up with an output slot and overwrote a hash-pinned artifact; named flags cannot
- *  do that. And an unknown flag is REFUSED rather than ignored, which is what keeps this phase
- *  outcome-blind in practice: `--results` is not an input of this phase, so passing one is an
- *  error instead of a silently dropped argument that leaves the operator believing it was used. */
+ *  an oracle path up with an output SLOT; with named flags no slot is decided by position, so that
+ *  particular confusion cannot arise. And an unknown flag is REFUSED rather than ignored, which is
+ *  what keeps this phase outcome-blind in practice: `--results` is not an input of this phase, so
+ *  passing one is an error instead of a silently dropped argument that leaves the operator
+ *  believing it was used.
+ *
+ *  What they do NOT do — and an earlier version of this comment claimed they did — is stop a
+ *  hash-pinned artifact being overwritten. Naming the slots does not constrain the VALUE handed to
+ *  `--out`, and `--out <the manifest path>` destroyed a pinned input after the input had been
+ *  hashed. That needs a check on the destination: `refuseOutputCollisions` in `main`, §9 line 376. */
 const INPUTS = ['manifest', 'classifier', 'universe', 'snapshot', 'pins', 'out'] as const;
 const USAGE = `usage: prepare-gate ${INPUTS.map((n) => `--${n} <path>`).join(' ')}\n` +
   '  This phase is OUTCOME-BLIND: it takes no runner output, and never will.';
 
 const parseFlags = (argv: string[]): Record<string, string> => {
-  const out: Record<string, string> = {};
+  const out = flagAccumulator();
   for (let i = 0; i < argv.length; i += 2) {
     const flag = argv[i];
     const value = argv[i + 1];
@@ -282,10 +333,11 @@ const parseFlags = (argv: string[]): Record<string, string> => {
         'it joins the manifest, the classifier verdicts and the snapshot, and it must never be handed ' +
         'a runner result, a score, or a prior report');
     }
-    if (name in out) fail('duplicate-input', `--${name} given more than once`);
+    // `Object.hasOwn`, never `in`: `in` walks Object.prototype (finding X2).
+    if (Object.hasOwn(out, name)) fail('duplicate-input', `--${name} given more than once`);
     out[name] = value!;
   }
-  for (const name of INPUTS) if (!(name in out)) fail('missing-input', `--${name} is required`);
+  for (const name of INPUTS) if (!Object.hasOwn(out, name)) fail('missing-input', `--${name} is required`);
   return out;
 };
 
@@ -294,30 +346,69 @@ const main = (): void => {
   try { flags = parseFlags(process.argv.slice(2)); }
   catch (e) { console.error(`${(e as Error).message}\n${USAGE}`); process.exit(2); return; }
 
-  const read = (p: string) => readFileSync(p, 'utf8');
-  const hash = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
-  const manifestText = read(flags.manifest!);
-  const classifierText = read(flags.classifier!);
-  const universeText = read(flags.universe!);
-  // The ledgers are hashed as inputs too. The corpus is as much a part of what was measured as the
-  // manifest is, and §5's chain binds an as-of-close snapshot hash for exactly that reason.
-  const globalText = read(join(flags.snapshot!, 'home', 'memory.jsonl'));
-  const projectText = read(projectLedgerPath(join(flags.snapshot!, 'proj')));
+  try {
+    const out = { arg: '--out', path: flags.out! };
+    const manifestPath = { arg: '--manifest', path: flags.manifest! };
+    const classifierPath = { arg: '--classifier', path: flags.classifier! };
+    const universePath = { arg: '--universe', path: flags.universe! };
+    const pinsPath = { arg: '--pins', path: flags.pins! };
+    // The ledgers are hashed as inputs too. The corpus is as much a part of what was measured as
+    // the manifest is, and §9 item 2 binds an as-of-close snapshot hash for exactly that reason —
+    // which is also why an --out inside the snapshot is refused below even though no flag names
+    // these two files directly. The four TRUST files ride in the same list: they are read (or
+    // found absent, which is itself pinned) by the hashing below, and an --out aimed at one would
+    // overwrite the trust surface after it had been pinned.
+    const globalLedger = { arg: '--snapshot', path: join(flags.snapshot!, 'home', 'memory.jsonl') };
+    const projectLedger = { arg: '--snapshot', path: projectLedgerPath(join(flags.snapshot!, 'proj')) };
+    const trustPaths = snapshotTrustPaths(flags.snapshot!);
+    refuseOutputCollisions(out,
+      [manifestPath, classifierPath, universePath, pinsPath, globalLedger, projectLedger,
+        ...Object.values(trustPaths).map((path) => ({ arg: '--snapshot', path }))]);
 
-  const gateSet = prepareGateSet({
-    manifest: JSON.parse(manifestText) as Manifest,
-    classifier: JSON.parse(classifierText) as ClassifierOutput,
-    universe: JSON.parse(universeText) as UniverseArtifact,
-    ledgers: readSnapshot(flags.snapshot!),
-    pins: JSON.parse(read(flags.pins!)) as Pins,
-    inputHashes: {
-      manifest: hash(manifestText), classifier: hash(classifierText), universe: hash(universeText),
-      'ledger:global': hash(globalText), 'ledger:project': hash(projectText),
-    },
-    now: () => new Date().toISOString(),
-  });
-  writeFileSync(flags.out!, JSON.stringify(gateSet, null, 1) + '\n');
-  console.log(`gate-set prepared: ${gateSet.payload.eligible.label}; O_67 ${gateSet.payload.o67.label}; ` +
-    `stale ${gateSet.payload.stale.label}\npayload sha256: ${gateSet.payloadSha256}`);
+    // The expansion pin hashes the RESOLVED table — the object recall ranks with — so it must
+    // resolve HERE. Refusing `undefined` mirrors the disclosure-side degraded-run refusal inside
+    // prepareGateSet: pins compared against a table this process cannot even resolve would make
+    // the comparison a statement about some other deployment.
+    // `?? fail(...)` rather than a guarding if: `fail` returns `never`, but control-flow analysis
+    // only credits that in expression position, so this is what leaves `expansion` non-optional.
+    const expansion = defaultExpansion() ??
+      fail('expansion-unavailable', 'the semantic-neighbor asset did not resolve beside this executable, so the ' +
+        'expansion:semantic-neighbors pin cannot be verified — and a prepare that skipped it would freeze a ' +
+        'denominator under a method this process cannot reproduce');
+
+    const hash = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
+    const manifestText = readInput(manifestPath);
+    const classifierText = readInput(classifierPath);
+    const universeText = readInput(universePath);
+    const globalText = readInput(globalLedger);
+    const projectText = readInput(projectLedger);
+
+    const gateSet = prepareGateSet({
+      manifest: parseJsonInput(manifestPath, manifestText) as Manifest,
+      classifier: parseJsonInput(classifierPath, classifierText) as ClassifierOutput,
+      universe: parseJsonInput(universePath, universeText) as UniverseArtifact,
+      // Parsed from the SAME strings the ledger hashes are computed over — one read per file. A
+      // second read of the same path could see different bytes, and the stale-exposure count
+      // inside the hashed payload would then derive from bytes the pins do not describe.
+      ledgers: [
+        { scope: 'global', rows: parseLedgerText(globalLedger.path, globalText) },
+        { scope: 'project', rows: parseLedgerText(projectLedger.path, projectText) },
+      ],
+      pins: parseJsonInput(pinsPath, readInput(pinsPath)) as Pins,
+      inputHashes: {
+        manifest: hash(manifestText), classifier: hash(classifierText), universe: hash(universeText),
+        'ledger:global': hash(globalText), 'ledger:project': hash(projectText),
+        'ownership:registry': sha256BytesOrAbsent('--snapshot', trustPaths['ownership:registry']!),
+        'ownership:owner': sha256BytesOrAbsent('--snapshot', trustPaths['ownership:owner']!),
+        'trust:master-key': sha256BytesOrAbsent('--snapshot', trustPaths['trust:master-key']!),
+        'trust:witness': sha256BytesOrAbsent('--snapshot', trustPaths['trust:witness']!),
+        'expansion:semantic-neighbors': expansionTableSha256(expansion),
+      },
+      now: () => new Date().toISOString(),
+    });
+    writeArtifact(out, JSON.stringify(gateSet, null, 1) + '\n');
+    console.log(`gate-set prepared: ${gateSet.payload.eligible.label}; O_67 ${gateSet.payload.o67.label}; ` +
+      `stale ${gateSet.payload.stale.label}\npayload sha256: ${gateSet.payloadSha256}`);
+  } catch (e) { exitOnInvocationError(e); }
 };
 if (isEntryPoint(import.meta.url)) main();

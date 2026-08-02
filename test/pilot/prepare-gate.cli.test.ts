@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { bundleCli } from '../helpers/bundle-cli.js';
+import { expansionTableSha256 } from '../../scripts/pilot/pin-hashes.js';
+import { defaultExpansion } from '../../src/memory/expansion.js';
 
 let cli: string;
 beforeAll(async () => { cli = await bundleCli('scripts/pilot/prepare-gate.ts'); }, 30_000);
@@ -12,6 +14,13 @@ beforeAll(async () => { cli = await bundleCli('scripts/pilot/prepare-gate.ts'); 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 const TX_AFTER = '2026-07-21T00:00:00.000Z';
 const TX_CLOSE = '2026-08-18T00:00:00.000Z';
+/** The ten pin names of the contract. The four trust files do not exist in these fixtures, so
+ *  their pins are the LITERAL sentinel; the expansion pin has a single shared definition on
+ *  purpose (both producer and every verifier must hash the RESOLVED table identically). */
+const TEN_NAMES = [
+  'classifier', 'expansion:semantic-neighbors', 'ledger:global', 'ledger:project', 'manifest',
+  'ownership:owner', 'ownership:registry', 'trust:master-key', 'trust:witness', 'universe',
+];
 
 /** A complete, healthy input set on disk. Every file is written through here so a test can perturb
  *  exactly one of them and leave the pins describing the others correctly. */
@@ -44,15 +53,19 @@ const fixture = (perturb: (f: Record<string, unknown>) => void = () => {}) => {
   }
   const h = (p: string) => sha256(readFileSync(p, 'utf8'));
   paths.pins = join(dir, 'pins.json');
-  writeFileSync(paths.pins, JSON.stringify({
+  const writePins = () => writeFileSync(paths.pins!, JSON.stringify({
     k: 20, txAfter: TX_AFTER, txClose: TX_CLOSE,
     inputs: {
       manifest: h(paths.manifest!), classifier: h(paths.classifier!), universe: h(paths.universe!),
       'ledger:global': h(join(dir, 'home', 'memory.jsonl')),
       'ledger:project': h(join(dir, 'proj', '.helix', 'memory.jsonl')),
+      'ownership:registry': 'absent', 'ownership:owner': 'absent',
+      'trust:master-key': 'absent', 'trust:witness': 'absent',
+      'expansion:semantic-neighbors': expansionTableSha256(defaultExpansion()!),
     },
   }, null, 1) + '\n');
-  return { dir, paths, out: join(dir, 'gate-set.json') };
+  writePins();
+  return { dir, paths, writePins, out: join(dir, 'gate-set.json') };
 };
 
 const status = (args: string[]): number => {
@@ -75,10 +88,52 @@ describe('prepare-gate CLI', () => {
       expect(g.payload.eligible.label).toBe('EXERCISED — 2/2');
       expect(g.payload.stale.label).toBe('UNEXPOSED — no temporal evidence');
       expect(g.payloadSha256).toMatch(/^[0-9a-f]{64}$/);
-      // The corpus is hashed as an input in its own right: §5's chain binds an as-of-close
-      // snapshot hash, and the ledgers are as much what was measured as the manifest is.
-      expect(Object.keys(g.payload.inputs).sort())
-        .toEqual(['classifier', 'ledger:global', 'ledger:project', 'manifest', 'universe']);
+      // The corpus is hashed as an input in its own right: §9's chain binds an as-of-close
+      // snapshot hash (item 2), and the ledgers are as much what was measured as the manifest is.
+      // The trust files and the resolved expansion table are pinned alongside them, because round
+      // 3 proved each one changes a rank while every narrower pin stays green.
+      expect(Object.keys(g.payload.inputs).sort()).toEqual(TEN_NAMES);
+    } finally { rmSync(f.dir, { recursive: true, force: true }); }
+  });
+
+  it('refuses to prepare when the semantic-neighbor asset does not resolve beside it', () => {
+    // The expansion pin hashes the RESOLVED table, so prepare must resolve one to verify the pin —
+    // a prepare that skipped the comparison would freeze a denominator under a method this process
+    // cannot reproduce. Mirrors input-pins' refusal of the same state.
+    const f = fixture();
+    const bare = mkdtempSync(join(tmpdir(), 'noasset-'));
+    try {
+      const stripped = join(bare, 'prepare-gate.mjs');
+      execFileSync('cp', [cli, stripped]);
+      let thrown: { status?: number; stderr?: Buffer } | undefined;
+      try {
+        execFileSync(process.execPath, [stripped, ...args(f)], { cwd: process.cwd(), stdio: 'pipe' });
+      } catch (e) { thrown = e as { status?: number; stderr?: Buffer }; }
+      expect(thrown, 'a bundle with no data/ beside it must refuse').toBeDefined();
+      expect(thrown!.status).toBe(1);
+      expect(String(thrown!.stderr)).toMatch(/expansion-unavailable/);
+      expect(() => readFileSync(f.out, 'utf8')).toThrow(/ENOENT/);
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a snapshot holding a row minted after the pinned close', () => {
+    // §2's population is `cutoff < tx ≤ close` and §9 item 2's snapshot hash is supposed to
+    // DEMONSTRATE it. The row is written before the pins are derived, so every hash matches and
+    // the refusal exercised is the WINDOW one, not input-hash-mismatch.
+    const f = fixture();
+    try {
+      const late = JSON.stringify({ id: 'm_late', tx: '2026-09-30T00:00:00.000Z', type: 'assert',
+        content: 'minted after the close', supersedes: null });
+      writeFileSync(join(f.dir, 'proj', '.helix', 'memory.jsonl'),
+        readFileSync(join(f.dir, 'proj', '.helix', 'memory.jsonl'), 'utf8') + late + '\n');
+      f.writePins();
+      expect(status(args(f))).toBe(1);
+      expect(() => execFileSync(process.execPath, [cli, ...args(f)], { cwd: process.cwd(), stdio: 'pipe' }))
+        .toThrow(/snapshot-after-close/);
+      expect(() => readFileSync(f.out, 'utf8')).toThrow(/ENOENT/);
     } finally { rmSync(f.dir, { recursive: true, force: true }); }
   });
 
