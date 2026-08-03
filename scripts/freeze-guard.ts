@@ -5,9 +5,15 @@
 //      byte-for-byte the issuer's own computation (freeze-receipt.ts), so a mismatch is
 //      tampering, never a serializer disagreement;
 //   2. the candidate commit exists in this repository;
-//   3. ANCHOR equality — every payload.tools path re-hashed from the CANDIDATE COMMIT's
+//   3. PIN COMPLETENESS — every path in PINNED_TOOL_PATHS / PINNED_METHOD_DOCS
+//      (scripts/pilot/pin-hashes.ts) must appear as a key in the receipt's own
+//      payload.tools / payload.methodDocs; a receipt whose map was trimmed or emptied
+//      (with payloadSha256 recomputed to match) is a HARD failure naming the missing
+//      path(s), not a smaller-but-passing anchor set;
+//   4. ANCHOR equality — every payload.tools path re-hashed from the CANDIDATE COMMIT's
 //      blob (git ls-tree), every payload.methodDocs path re-hashed from the candidate
-//      commit's content bytes (git show | sha256). History rewrite or receipt edit → red.
+//      commit's content bytes (git show | sha256). History rewrite, a changed value, or
+//      an omitted pin → red.
 // WARN-ONLY (exit 0): before payload.txClose, working-tree divergence from the pins is
 //   listed as ::warning:: lines. Undeployed repo work during the window is legitimate;
 //   the close chain runs from the candidate commit, not from this tree.
@@ -17,7 +23,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { sha256Bytes, sha256Hex, gitHashObject } from './pilot/pin-hashes.js';
+import { sha256Bytes, sha256Hex, gitHashObject, PINNED_TOOL_PATHS, PINNED_METHOD_DOCS } from './pilot/pin-hashes.js';
 
 export interface GuardReport { ok: boolean; failures: string[]; warnings: string[]; notes: string[] }
 
@@ -50,6 +56,22 @@ export function runFreezeGuard(receiptPath: string, repoRoot: string, nowIso?: s
     git(repoRoot, ['cat-file', '-e', `${p.candidateCommit}^{commit}`]);
   } catch {
     failures.push(`candidate-commit: ${p.candidateCommit} is not a commit in this repository`);
+  }
+
+  // Pin completeness: the anchor loops below only verify what the receipt happens to
+  // list, so a receipt whose maps were trimmed or emptied — with payloadSha256
+  // recomputed to match — would otherwise iterate zero entries and report "verified".
+  // Every path §10/pin-hashes.ts pins must be present as a key here, independent of
+  // whether the payload hash or candidate commit already failed above.
+  for (const path of PINNED_TOOL_PATHS) {
+    if (!(path in p.tools)) {
+      failures.push(`pin-omitted: payload.tools is missing pinned path ${path} (PINNED_TOOL_PATHS, scripts/pilot/pin-hashes.ts) — a trimmed or emptied receipt map must not verify`);
+    }
+  }
+  for (const path of PINNED_METHOD_DOCS) {
+    if (!(path in p.methodDocs)) {
+      failures.push(`pin-omitted: payload.methodDocs is missing pinned path ${path} (PINNED_METHOD_DOCS, scripts/pilot/pin-hashes.ts) — a trimmed or emptied receipt map must not verify`);
+    }
   }
 
   if (failures.length === 0) {

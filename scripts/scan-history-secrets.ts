@@ -83,7 +83,7 @@ export function enumerateBlobPaths(repoRoot: string): Map<string, string[]> {
   return map;
 }
 
-function runScan(repoRoot: string): { hits: SecretHitRecord[]; scanned: number } {
+function runScan(repoRoot: string): { hits: SecretHitRecord[]; scanned: number; blobCount: number } {
   const blobs = enumerateBlobPaths(repoRoot);
   let scanned = 0;
   const hits: SecretHitRecord[] = [];
@@ -105,7 +105,7 @@ function runScan(repoRoot: string): { hits: SecretHitRecord[]; scanned: number }
       hits.push({ kind: s.kind, sha, path });
     }
   }
-  return { hits, scanned };
+  return { hits, scanned, blobCount: blobs.size };
 }
 
 export function scanRepo(repoRoot: string): SecretHitRecord[] {
@@ -114,7 +114,14 @@ export function scanRepo(repoRoot: string): SecretHitRecord[] {
 
 const isEntrypoint = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isEntrypoint) {
-  const { hits, scanned } = runScan(process.cwd());
+  const { hits, scanned, blobCount } = runScan(process.cwd());
+  if (blobCount === 0) {
+    // A vacuous scan (no blob enumerated across any ref) must not read as a clean scan —
+    // it means the enumeration itself is broken (wrong cwd, no refs, a swallowed git
+    // failure), and "0 hits" would otherwise look identical to a real, clean sweep.
+    console.error('FAIL: enumeration found 0 blobs across all refs — refusing to report a clean scan for a scan that never ran.');
+    process.exit(1);
+  }
   for (const h of hits) console.log(`HIT ${h.kind} | blob ${h.sha.slice(0, 10)} | ${h.path}`);
   console.log(`\nscanned ${scanned} unique blobs across all refs; ${hits.length} named hit(s) after allowlist`);
   process.exit(hits.length === 0 ? 0 : 1);

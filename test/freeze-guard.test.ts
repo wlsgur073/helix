@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve, dirname } from 'node:path';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runFreezeGuard } from '../scripts/freeze-guard.js';
 import { sha256Hex } from '../scripts/pilot/pin-hashes.js';
@@ -48,5 +48,21 @@ describe('freeze-guard', () => {
     const r = runFreezeGuard(p, ROOT);
     expect(r.ok).toBe(false);
     expect(r.failures.some((f) => f.includes(firstTool))).toBe(true);
+  });
+
+  it('fails when the tools map is emptied, even with payloadSha256 recomputed to match (pin completeness)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fg-'));
+    const doc = JSON.parse(readFileSync(RECEIPT, 'utf8'));
+    const expectedFirstTool = Object.keys(doc.payload.tools)[0];
+    if (!expectedFirstTool) throw new Error('Receipt must have at least one tool');
+    doc.payload.tools = {}; // emptied — a per-entry anchor loop trivially "passes" over zero entries
+    // …with a RECOMPUTED payloadSha256, exactly how the issuer computes it, so only a
+    // completeness check against PINNED_TOOL_PATHS can catch the omission:
+    doc.payloadSha256 = sha256Hex(JSON.stringify(doc.payload));
+    const p = join(dir, 'receipt.json');
+    writeFileSync(p, JSON.stringify(doc));
+    const r = runFreezeGuard(p, ROOT);
+    expect(r.ok).toBe(false);
+    expect(r.failures.some((f) => f.includes(expectedFirstTool))).toBe(true);
   });
 });
