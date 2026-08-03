@@ -17,7 +17,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "freeze-guard": "tsx scripts/freeze-guard.ts"
+    "freeze-guard": "tsx scripts/freeze-guard.ts",
+    "scan:history": "tsx scripts/scan-history-secrets.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
