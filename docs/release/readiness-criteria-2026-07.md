@@ -728,8 +728,8 @@ Separately, the corpus grows at 0.78 rows/day, not the 1.65 C5.2 assumed.
 
 **Where the reasoning lives.** The decisions were taken after three symmetric peer-synthesis rounds
 plus a fourth on the gate conditions, and the reconciliation — including four points on which this
-session's first answer was wrong and had to be withdrawn — is in the working design record
-the local v2 gate-composition design notes §9. That workspace is gitignored, so
+session's first answer was wrong and had to be withdrawn — is in the working design record:
+the local v2 gate-composition design notes (2026-07-29), §9. That workspace is gitignored, so
 this section and the two normative amendments are the tracked account; C5.1 closure item 9 folds
 them into the v2 preregistration.
 

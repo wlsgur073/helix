@@ -1,4 +1,4 @@
-// Locks for the 2026-07 matcher-asymmetry repair (spec: its source design notes).
+// Locks for the 2026-07 matcher-asymmetry repair (spec: its source design notes §8).
 // Two fixture kinds:
 //   negatives    = blocked classes (guards must hold);
 //   CHARACTERIZATION = accepted, documented residuals — if a future guard closes the
