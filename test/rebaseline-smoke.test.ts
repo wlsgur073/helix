@@ -1,5 +1,5 @@
 // Smoke test for the COMPILED re-baseline ceremony CLI artifact (Task 9 — see
-// docs/superpowers/plans/2026-07-18-highwater-counter-witness.md). Spawns bin/helix-rebaseline.mjs
+// the highwater-counter witness plan). Spawns bin/helix-rebaseline.mjs
 // with `node` (child_process spawnSync, piped stdio), never tsx and never the .ts source, so a
 // bundling regression (a missing external, a broken relative-import rewrite — this is the first
 // bundle in the repo pulling in node:readline/promises) fails here even though

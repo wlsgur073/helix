@@ -1,5 +1,5 @@
 // Shared grammar for BOTH T1 trigger sink record kinds (Phase 2 Track 2a -- see
-// docs/superpowers/plans/2026-07-17-phase2-trigger-governance-and-disclosure.md). The sink
+// the trigger-governance rollout plan). The sink
 // (<home>/trigger.jsonl) has exactly two writers, single-writer-per-kind: the measurement CLI
 // (scripts/trigger-measure.ts / scripts/trigger-cli.ts, Task A2, compiled to bin/helix-trigger.mjs in
 // Task A3) appends `kind:"evaluation"` records; the systemd ExecStopPost adapter

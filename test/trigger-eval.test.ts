@@ -1,5 +1,5 @@
 // Tests for the pure T1 trigger evaluator (Phase 2 Track 2a, Task A1 — see
-// docs/superpowers/plans/2026-07-17-phase2-trigger-governance-and-disclosure.md).
+// the trigger-governance rollout plan).
 import { describe, expect, it } from 'vitest';
 import {
   evaluateTrigger,

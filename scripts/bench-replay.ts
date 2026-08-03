@@ -1,4 +1,4 @@
-// Standing replay benchmark + sensor report (spec docs/superpowers/specs/2026-07-05-replay-metrics-sensor-design.md §8).
+// Standing replay benchmark + sensor report (from the replay-metrics sensor design, its §8).
 // Modes: default synthetic sweep | --real (read-only on the actual ledgers) | --report (summarize metrics.jsonl).
 // Establishes the HMAC-era baseline — the 2026-06-13 numbers predate the MAC gate and are NOT comparable.
 // Generator functions are exported for the future A4 JSONL-vs-SQLite comparison.

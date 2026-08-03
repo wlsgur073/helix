@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ExecStopPost adapter for the T1 dogfood trigger sensor (Phase 2 Track 2a, Task A4 -- see
-# docs/superpowers/plans/2026-07-17-phase2-trigger-governance-and-disclosure.md). Invoked by systemd
+# the trigger-governance rollout plan). Invoked by systemd
 # as `ExecStopPost=<abs repo path>/scripts/dogfood-postrun.sh <dogfood root>` on every stop path
 # (clean exit, non-zero exit, signal kill, failed startup -- man-verified, systemd 255). ExecStart's
 # shell state is NOT inherited by ExecStopPost -- everything this script needs arrives via argv ($1)

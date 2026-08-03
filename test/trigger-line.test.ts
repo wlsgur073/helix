@@ -1,5 +1,5 @@
 // Tests for the T1 trigger measurement CLI (Phase 2 Track 2a, Task A2 — see
-// docs/superpowers/plans/2026-07-17-phase2-trigger-governance-and-disclosure.md). Exercises BOTH the
+// the trigger-governance rollout plan). Exercises BOTH the
 // thin CLI entry (main, from trigger-cli.ts) and the measurement module (trigger-measure.ts) it
 // delegates to, per the task's tsconfig note: scripts/ is only typechecked transitively via test
 // imports, so both modules must be imported here for `npm run typecheck` to see them at all.

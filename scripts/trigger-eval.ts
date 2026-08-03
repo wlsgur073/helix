@@ -1,5 +1,5 @@
 // Pure T1 trigger evaluator (Phase 2 Track 2a, Task A1 — see
-// docs/superpowers/plans/2026-07-17-phase2-trigger-governance-and-disclosure.md).
+// the trigger-governance rollout plan).
 // No I/O: turns a participant-size snapshot plus a metrics event list into a three-valued verdict
 // per leg. The measurement CLI (Task A2, not built here) owns reading the ledgers and the metrics
 // sink; this module only judges what it is handed.

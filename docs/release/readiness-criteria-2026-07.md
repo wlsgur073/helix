@@ -223,7 +223,7 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   items 10–11 RUN ON that commit, and item 12 is an off-machine copy taken after it, landing
   in no commit at all — which is why C5.3 is not violated by placing it last (C5.3 forbids a
   CHANGE after the cutoff, and a backup is not a change). Evidence paths cited below under
-  `docs/superpowers/` are LOCAL operating records (that tree is gitignored), not shipped
+  the private workspace docs are LOCAL operating records (that tree is gitignored), not shipped
   artifacts; the claims they support are restated here so this document stands alone.
 
   **The numbers are stable IDENTIFIERS, not the execution order** — C1.3 above and
@@ -231,7 +231,7 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   silently break those references. Blocks 5–8, 9, 10–12 do run in the order written, and each
   of those consumes the previous block's output. **Within block 1–4 that is FALSE and an
   earlier draft of this paragraph wrongly asserted it** (analysis 2026-07-28, evidence in
-  `docs/superpowers/evidence/2026-07-28-c51-items-1-4-sequencing/`): items 3–4 live in
+  the local sequencing-evidence record): items 3–4 live in
   `generate-manifest.ts`, items 1–2 in `classify-o67.ts`, and the data flow runs
   generator → manifest → classifier, i.e. 3–4 → 1–2. The classifier never feeds the generator.
   Execution order nonetheless runs the OTHER way, and deliberately: the block's sequencing is
@@ -606,7 +606,7 @@ stopping condition. Three rounds, within budget; the exchange ends here.
 
 Implementation-sequencing analysis of block 1–4 (2026-07-28, parallel code audit + adversarial
 refutation of the sequencing claims; evidence in
-`docs/superpowers/evidence/2026-07-28-c51-items-1-4-sequencing/`). The owner's draft answer — "start
+the local sequencing-evidence record). The owner's draft answer — "start
 with item 1, because item 2 depends on it and because items 1 and 4 share a scope-qualified identity
 primitive" — fell apart on its first leg and half of its second, and is recorded here because the
 correction took three passes to settle. Leg one, REFUTED: scope never had to come through the pool.
@@ -729,7 +729,7 @@ Separately, the corpus grows at 0.78 rows/day, not the 1.65 C5.2 assumed.
 **Where the reasoning lives.** The decisions were taken after three symmetric peer-synthesis rounds
 plus a fourth on the gate conditions, and the reconciliation — including four points on which this
 session's first answer was wrong and had to be withdrawn — is in the working design record
-`docs/superpowers/specs/2026-07-29-v2-gate-composition-design.md` §9. That tree is gitignored, so
+the local v2 gate-composition design notes §9. That workspace is gitignored, so
 this section and the two normative amendments are the tracked account; C5.1 closure item 9 folds
 them into the v2 preregistration.
 

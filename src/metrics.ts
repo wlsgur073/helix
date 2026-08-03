@@ -1,4 +1,4 @@
-// Content-free latency/size metrics (spec: docs/superpowers/specs/2026-07-05-replay-metrics-sensor-design.md).
+// Content-free latency/size metrics (spec: the replay-metrics sensor design).
 // DELIBERATE POLICY SPLIT vs audit.ts: appendAudit is LOUD on failure (a security record must not
 // silently fail); every method here SWALLOWS all errors (metrics are best-effort and must never
 // take a tool call or session start down with them).

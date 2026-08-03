@@ -1,5 +1,5 @@
 // Smoke test for the COMPILED T1 trigger CLI artifact (Phase 2 Track 2a, Task A3 — see
-// docs/superpowers/plans/2026-07-17-phase2-trigger-governance-and-disclosure.md). Spawns
+// the trigger-governance rollout plan). Spawns
 // bin/helix-trigger.mjs with `node` (child_process spawnSync), never tsx and never the .ts source,
 // so a bundling regression that only manifests in the built artifact (a missing external, a broken
 // relative-import rewrite) fails here even though trigger-eval.test.ts / trigger-line.test.ts (which

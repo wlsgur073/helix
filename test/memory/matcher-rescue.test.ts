@@ -1,5 +1,5 @@
-// Locks for the 2026-07 matcher-asymmetry repair (spec: docs/superpowers/specs/
-// 2026-07-21-retrieval-matcher-asymmetry-repair-design.md §8). Two fixture kinds:
+// Locks for the 2026-07 matcher-asymmetry repair (spec: its source design notes).
+// Two fixture kinds:
 //   negatives    = blocked classes (guards must hold);
 //   CHARACTERIZATION = accepted, documented residuals — if a future guard closes the
 //   class the test flips and must be consciously updated, not "fixed".

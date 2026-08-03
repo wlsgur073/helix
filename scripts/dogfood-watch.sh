@@ -2,7 +2,7 @@
 # Terminal-riding watchdog for the helix dogfood runner.
 # Silent when healthy. Banners (max once per calendar day) when the schedule
 # mechanism is dead or no run completion has been recorded for >= 2 days.
-# Spec: docs/superpowers/specs/2026-07-18-dogfood-schedule-reliability-design.md
+# Spec: the dogfood schedule-reliability design (local operating notes)
 # Contract: never break shell startup - no set -e, every path neutralized,
 # always exit 0. Env seams exist so drills never touch live state.
 

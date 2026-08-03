@@ -1,5 +1,5 @@
 // Spawn tests for the systemd ExecStopPost adapter (Phase 2 Track 2a, Task A4 -- see
-// docs/superpowers/plans/2026-07-17-phase2-trigger-governance-and-disclosure.md). systemd invokes
+// the trigger-governance rollout plan). systemd invokes
 // `scripts/dogfood-postrun.sh` directly -- these tests are its ONLY exercise. To exercise the REAL
 // relative-location logic (`$(dirname "$0")/../bin/helix-trigger.mjs`), each test copies the adapter
 // into a fresh temp tree as `<tmp>/scripts/dogfood-postrun.sh` and places a STUB

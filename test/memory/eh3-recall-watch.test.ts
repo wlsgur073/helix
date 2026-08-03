@@ -1,6 +1,6 @@
 // EH-3 watch — recall returns a SUBSET of the oracle (regression guardrail).
 //
-// Backlog: docs/superpowers/plans/2026-06-18-engine-hardening-backlog.md (EH-3).
+// Backlog: the engine-hardening backlog, item EH-3 (local operating notes).
 // Provenance: the tinytask dogfood (2026-06-18, two autonomous runs). The agent's
 // helix_memory_recall returned fewer items than the STATE.md oracle held — "fewer
 // items than STATE holds, but nothing stale or wrong" (HELIX-FEEDBACK.md). It was
