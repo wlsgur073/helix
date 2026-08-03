@@ -38,5 +38,6 @@ code path reachable from `src/server/index.ts`. No backlog entry is required thi
 - Dev-toolchain advisories (esbuild, postcss) are scoped to `npm ci` plus local build/test
   tooling; they do not ship in `bin/` and are not part of the runtime attack surface.
 - This snapshot is point-in-time (2026-08-03). `npm audit` output changes as the advisory database
-  and installed tree change; re-run Step 1 of the companion task brief before trusting these
-  numbers on a later date.
+  and installed tree change; to re-validate on a later date, re-run `npm audit --json` and
+  reproduce the esbuild metafile exactly as described in Method above, then re-check each
+  verdict's evidence.
