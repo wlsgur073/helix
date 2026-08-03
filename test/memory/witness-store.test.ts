@@ -45,6 +45,26 @@ describe('round-trip / tamper / anti-laundering / key-absent', () => {
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
+  // Task 7 (2026-08-03 dual-umask mutation re-verification): the round-trip test above asserts
+  // the ON-DISK mode via statSync, which is umask-dependent — under umask 0077, plain openSync's
+  // default 0o666 mode is ALREADY masked down to 0o600 by the OS, so deleting the fchmodSync(fd,
+  // 0o600) call in writeStoreFileAt leaves that assertion green by coincidence. This test instead
+  // spies on the injected fsOps seam and asserts fchmodSync was actually CALLED with 0o600 —
+  // umask-independent, so it kills the fchmod-removal mutant under any ambient umask.
+  it('owner-only mode is enforced by fchmod itself, not by the ambient umask', () => {
+    const home = tmpHome();
+    try {
+      const modes: number[] = [];
+      const spyFs: DurableFsOps = {
+        ...realFsOps,
+        fchmodSync: (fd, mode) => { modes.push(mode); realFsOps.fchmodSync(fd, mode); },
+      };
+      const bytes = Buffer.from('row1\nrow2\n', 'utf8');
+      advanceWitness(home, '@global', bytes, 'tx-1', spyFs);
+      expect(modes).toContain(0o600);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
   it('tamper: flip one hex char of the stored entry mac on disk -> classifyScope -> first-contact/mac-invalid', () => {
     const home = tmpHome();
     try {
