@@ -8,12 +8,16 @@ const cache = new Map<string, string>();
 /** Bundle a repo TypeScript CLI to a temp `.mjs` and return its path, so a test can spawn it with
  *  `process.execPath` — plain `node`, no loader.
  *
- *  Why not `npx tsx <script.ts>`: `tsx` is in neither `package.json` nor `node_modules`, so that
- *  spelling makes every `npm test` on a clean machine resolve a FLOATING version off the registry
- *  and execute it with full developer privileges (and fail outright when offline). In a project
- *  whose thesis is a verifiable supply chain that is the one unpinned execution path. `esbuild` is
- *  already a pinned devDependency, and this is the discipline the repo states elsewhere —
- *  see `test/memory/lock-concurrency.test.ts`, which bundles its worker for exactly this reason.
+ *  Why not `npx tsx <script.ts>`: this used to read "`tsx` is in neither `package.json` nor
+ *  `node_modules`" — no longer true (corrected 2026-08-04: `tsx` became a pinned devDependency when
+ *  `freeze-guard` / `scan:history` landed), but the discipline stands and is now cheaper to keep.
+ *  `npx` falls back to a FLOATING registry version whenever the local copy is absent — a fresh
+ *  clone before `npm ci`, a pruned production install, an `npx tsx@latest` typo — and executes it
+ *  with full developer privileges. In a project whose thesis is a verifiable supply chain, a test
+ *  runner that CAN reach the network on some machines and not others is the one unpinned execution
+ *  path. Bundling with the pinned `esbuild` and spawning plain `node` cannot degrade that way, and
+ *  it is the discipline the repo states elsewhere — see `test/memory/lock-concurrency.test.ts`,
+ *  which bundles its worker for exactly this reason.
  *
  *  The output is placed at `<tmp>/bin/<name>.mjs` with `data/` beside it as `<tmp>/data`, MIRRORING
  *  the shipped layout. That is not cosmetic: `data/semantic-neighbors.json` is resolved relative to
