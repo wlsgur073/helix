@@ -93,6 +93,30 @@ export function isHexCore(t: string): boolean {
   return /^[0-9a-fA-F]{24,}$/.test(stripWrapper(t));
 }
 
+/** E-CITE: strip ONE trailing source-citation line reference — `:112`, `:44-45`, `:45:7` — so the
+ *  path in front of it can be judged on its own. Deliberately NOT done by adding `:` to the C2.2
+ *  separator class: that would split every colon anywhere in the token and exempt `label:<secret>`
+ *  pairs.
+ *
+ *  Whatever this removes is thereafter judged by NOTHING, so the grammar has to earn the removal —
+ *  a bare bounded-digit strip does not. `backup.recovery.identifier.593821` is correctly caught by
+ *  the "no digit run over 4" segment rule, and an unconditional strip released the SAME digits the
+ *  moment that separator became a colon: a 6-digit code (12 with the range form) laundered straight
+ *  past a sibling rule written to stop it. So the prefix must also be FILE-SHAPED — it must end in a
+ *  dot plus a 1-to-5-character alphanumeric extension — and each number is capped at 5 digits (above
+ *  any real line number; `bin/helix-mcp.mjs` line 13040 is the longest in this repo). A label whose
+ *  final segment is a word rather than an extension keeps its digits and stays in the net.
+ *
+ *  ACCEPTED RESIDUAL, stated rather than hidden: a token that is syntactically INDISTINGUISHABLE
+ *  from a citation — an all-benign chain ending in a <=5-char segment, then a colon and up to two
+ *  5-digit groups — is released. No local syntactic test can separate that from a real citation.
+ *  This is the same class of limit the chain test already declares for re-encoded secrets, and the
+ *  digits it can carry (<=10) sit near the 4 the segment rule already allows anywhere, unconditionally. */
+const CITATION_LINE_REF = /^(.*\.[A-Za-z][A-Za-z0-9]{0,4}):\d{1,5}(?:[-:]\d{1,5})?$/;
+function stripLineRef(t: string): string {
+  return CITATION_LINE_REF.exec(t)?.[1] ?? t;
+}
+
 /** C2.2: true iff T's stripped core is a chain (>= 2 segments over -._/ separators) in which EVERY
  *  segment is individually low-entropy: pure alphabetic (any length), pure digits of <= 4 (years,
  *  months, days, small counters), or a word with a short trailing digit suffix (v2, specs2, api03,
@@ -103,9 +127,10 @@ export function isHexCore(t: string): boolean {
  *  char-level low-confidence net cannot police re-encoding (an adversary can always spell a secret
  *  as words); this net exists for ACCIDENTAL inclusions, and accidental keys virtually always carry
  *  a high-entropy segment. Read only by the egress gate (like isHexCore); write-path redaction is
- *  unaffected. */
+ *  unaffected. A trailing source-citation line reference is removed first (stripLineRef) so a
+ *  `path.ext:112` pointer is judged on its path, with the segment rules applying unchanged. */
 export function isBenignWordChain(t: string): boolean {
-  const segments = stripWrapper(t).split(/[-._/]+/).filter((s) => s !== '');
+  const segments = stripLineRef(stripWrapper(t)).split(/[-._/]+/).filter((s) => s !== '');
   if (segments.length < 2) return false;
   return segments.every(
     (s) => /^[A-Za-z]+$/.test(s) || /^[0-9]{1,4}$/.test(s) || (s.length <= 8 && /^[A-Za-z]+[0-9]{1,3}$/.test(s)),

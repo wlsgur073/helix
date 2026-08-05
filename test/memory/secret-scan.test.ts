@@ -229,3 +229,86 @@ describe('F6: findSecrets sees confusables that NFKC folds back into a credentia
     expect(findSecrets('ﬁle uses a ligature but carries no credential')).toEqual([]);
   });
 });
+
+// E-CITE — the guard blocked the workflow the project mandates. CLAUDE.md requires Codex questions
+// to carry "file:line pointers rather than inlining whole files", but a path with a `:NN` suffix has
+// no `:` in the C2.2 separator class, so its final segment (`ts:112`) disqualifies the whole chain
+// and the citation lands in the entropy net. The give-away that this is arbitrary rather than
+// protective: `src/memory/store.ts:628` passes only because it is 23 chars, one short of the length
+// threshold — the same citation shape blocks or passes on path length alone.
+//
+// The fix strips a trailing line reference and then runs the UNCHANGED chain test on what is left,
+// so the exemption inherits every existing anti-greedy rule instead of adding new trust. The strip
+// must be EARNED by the prefix's grammar — file-shaped, with each number at most 5 digits. A bare
+// bounded-digit strip is not enough: it launders past the sibling "no digit run over 4" rule the
+// moment a separator becomes a colon, which is what the control pair below locks.
+describe('E-CITE: a source citation with a line reference is a benign word chain', () => {
+  const chainOf = (text: string) => findSecrets(text).find((s) => s.tier === 'entropy');
+
+  it('true for the real blocked FP: a path with a line number', () => {
+    const e = chainOf('the clamp lives at src/memory/verified-projection.ts:112 today');
+    expect(e).toBeDefined();
+    expect(e!.entropyWordChain).toBe(true);
+  });
+  it('true for a line RANGE and for a line:column pair', () => {
+    expect(chainOf('see src/server/helix-server.ts:44-45 for the schema')!.entropyWordChain).toBe(true);
+    expect(chainOf('see test/memory/firewall.test.ts:45:7 for the lock')!.entropyWordChain).toBe(true);
+  });
+  it('true when the citation is backtick-wrapped (wrapper strip composes with the line strip)', () => {
+    expect(chainOf('the guard `src/memory/verified-projection.ts:112` moved')!.entropyWordChain).toBe(true);
+  });
+
+  it('FALSE: the path part is still judged — a secret-shaped segment is not laundered by a :NN suffix', () => {
+    const e = chainOf('ref prod-api-token-Zx9fQ2Lm8Kp3Vt5Rw7.ts:112 here');
+    expect(e).toBeDefined();
+    expect(e!.entropyWordChain).toBe(false);
+  });
+  it('FALSE: a colon-separated credential pair is not a line reference', () => {
+    const e = chainOf('creds deploybot:Zx9fQ2Lm8Kp3Vt5Rw7Aq1Bc2 rotated');
+    expect(e).toBeDefined();
+    expect(e!.entropyWordChain).toBe(false);
+  });
+  it('FALSE: a long digit run after the colon is not a plausible line number', () => {
+    const e = chainOf('ref path/to/file.ts:1234567890123456 today');
+    expect(e).toBeDefined();
+    expect(e!.entropyWordChain).toBe(false);
+  });
+  it('FALSE: only a TRAILING line reference is stripped, never an interior colon', () => {
+    const e = chainOf('ref path/to/file.ts:112/Zx9fQ2Lm8Kp3Vt5Rw7Aq1 here');
+    expect(e).toBeDefined();
+    expect(e!.entropyWordChain).toBe(false);
+  });
+
+  // The Codex compare review refuted the first version of this fix, which stripped any bounded digit
+  // tail. Whatever is stripped is thereafter judged by nothing, so the strip must be earned by the
+  // GRAMMAR of what precedes it — otherwise a colon is all it takes to launder digits past the
+  // sibling "no digit run over 4" rule. The control pair below is the whole argument: same digits,
+  // same prefix, only the separator differs, and both must reach the same verdict.
+  it('FALSE: a numeric value behind a word label is NOT a citation — the colon form must match the dot form', () => {
+    const withDot = chainOf('code backup.recovery.identifier.593821 issued');
+    const withColon = chainOf('code backup.recovery.identifier:593821 issued');
+    expect(withDot!.entropyWordChain).toBe(false);
+    expect(withColon!.entropyWordChain).toBe(false); // the regression the first fix introduced
+  });
+  it('FALSE: a word-labelled pair of numeric groups (passphrase + recovery shape)', () => {
+    expect(chainOf('note winter.garden.lantern:593821-047216 kept')!.entropyWordChain).toBe(false);
+  });
+  it('FALSE: a position wider than five digits is not a line number', () => {
+    expect(chainOf('ref alpha.beta.gamma.delta:1234567 here')!.entropyWordChain).toBe(false);
+    expect(chainOf('ref alpha.beta.gamma.delta:123456-654321 here')!.entropyWordChain).toBe(false);
+  });
+  it('FALSE: a repeated suffix chain is not a line:column pair (one optional group, anchored)', () => {
+    expect(chainOf('ref path/to/file.ts:12:34:56789 here')!.entropyWordChain).toBe(false);
+  });
+  it('a five-digit line number still works (a real bundle line is that long)', () => {
+    expect(chainOf('the disjunct sits at src/memory/verified-projection.ts:13040 today')!.entropyWordChain).toBe(true);
+    // The bundle's own citation never even reaches the entropy net — 23 chars, one under the
+    // threshold. Recorded because it is the same length accident that made this defect look benign.
+    expect(chainOf('the disjunct sits at bin/helix-mcp.mjs:13040 today')).toBeUndefined();
+  });
+  it('write-path: an exempt citation STILL redacts (egress-gate-only, EH-4 symmetry)', () => {
+    const content = 'the clamp lives at src/memory/verified-projection.ts:112 today';
+    const r = redactSecrets(content, findSecrets(content));
+    expect(r.content).toBe('the clamp lives at [redacted:high-entropy] today');
+  });
+});

@@ -744,3 +744,37 @@ describe('C2.2: egress word-chain entropy exemption + credential proximity guard
     expect(block(['ref team-123456789012-prod-rollout today'])).toBe('blocked');
   });
 });
+
+describe('E-CITE: the citation exemption at the egress gate', () => {
+  const CITE = 'src/memory/verified-projection.ts:112';
+  const gate = (texts: string[], policy = DEFAULTS()) =>
+    classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy });
+
+  it('PASS: the citation form the working agreement mandates for a Codex question', () => {
+    expect(gate([`the state clamp lives at ${CITE} today`]).decision).toBe('pass');
+  });
+  it('BLOCK: a credential keyword in the same statement still guards it (proximity, unchanged)', () => {
+    expect(gate([`password: ${CITE}`]).decision).toBe('blocked');
+  });
+
+  // Codex's caveat on the tier fold, made into a lock: "recognized credential" is what the named leg
+  // catches, and its catch must be INDEPENDENT of any entropy exemption in the same payload. If the
+  // exemption ever short-circuited the scan, this is what would flip.
+  it('BLOCK: a recognized provider credential blocks even beside an exempt citation', () => {
+    const v = gate([`see ${CITE} — key AKIAIOSFODNN7EXAMPLE rotates`]);
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('named'); // the override-proof leg, not a policy key
+  });
+  it('BLOCK: and the named leg stays override-proof with every policy leg set to allow', () => {
+    const v = gate([`see ${CITE} — key AKIAIOSFODNN7EXAMPLE rotates`], ALL('allow'));
+    expect(v.decision).toBe('blocked');
+  });
+  it('BLOCK: secretEntropyExempt:block closes the citation exemption too', () => {
+    const v = gate([`the state clamp lives at ${CITE} today`], { ...DEFAULTS(), secretEntropyExempt: 'block' });
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('secretEntropyExempt');
+  });
+  it('BLOCK: a word-labelled numeric value is not a citation and stays in the net', () => {
+    expect(gate(['code backup.recovery.identifier:593821 issued']).decision).toBe('blocked');
+  });
+});

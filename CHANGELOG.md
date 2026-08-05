@@ -255,6 +255,21 @@ All notable changes to Helix are documented here. This project follows
   divergence.
 
 ### Security
+- The egress guard no longer blocks source citations by accident. A `path/to/file.ts:112` pointer has
+  no `:` in the benign-word-chain separator class, so its final segment disqualified the whole token
+  and the citation landed in the entropy net — while the same shape one character shorter passed, the
+  outcome turning on path length rather than on content. A bounded trailing line reference (`:112`,
+  `:44-45`, `:45:7`) is now stripped before the **unchanged** chain test, so the path in front is
+  judged on its own and the exemption inherits every existing anti-greedy rule. Not done by adding
+  `:` to the separator class, which would have exempted `label:<secret>` pairs. The strip is earned
+  by the prefix's grammar rather than granted to any digit tail: it applies only when the prefix is
+  file-shaped (ending in a dot plus a 1–5 character extension) and each number is at most five
+  digits. Without that condition a colon alone would launder digits past the sibling "no digit run
+  over 4" rule — `backup.recovery.identifier.593821` is caught by it, and an unconditional strip
+  released the same digits the moment the separator became a colon. A secret-shaped path segment, a
+  word-labelled numeric value, a long digit run and an interior colon all stay in the net; a
+  recognized provider credential still blocks through its own override-proof leg; and the write path
+  still redacts these bytes.
 - The write-path secret scan sees confusables. It read raw bytes while the render path NFKC-folds, so
   a fullwidth-encoded credential was persisted verbatim and came back out live. `findSecrets` now
   runs a per-token NFKC pass and reports the raw token's span, giving the write path the coverage the

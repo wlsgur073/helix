@@ -40,6 +40,14 @@ acknowledgement within a few days.
   Until 2026-08-04 that release was applied inside the detector, upstream of every
   policy key, so no configuration could reach it. Note the asymmetry that remains by
   design: the WRITE path redacts these same bytes regardless of this leg.
+  A trailing source-citation line reference (`path/to/file.ts:112`, `:44-45`, `:45:7`)
+  is removed before the chain test, so a code pointer is judged on its path. The removal
+  is conditional on the prefix being file-shaped (a dot plus a 1–5 character extension)
+  with each number at most five digits — a word-labelled numeric value such as
+  `backup.recovery.identifier:593821` is **not** a citation and stays in the net, as does
+  an interior `label:<secret>` pair. The residual limit, stated plainly: a token
+  syntactically indistinguishable from a citation is released, and no local test can
+  separate the two.
 - **Untrusted content** (recalled memory, external-model output) is treated as DATA,
   never instructions: NFKC/control/bidi normalization + per-line datamarking + a
   per-call nonce frame.
