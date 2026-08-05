@@ -177,10 +177,13 @@ function scanText(text: string): Scan {
   const highHits = piiHits.filter((h) => h.severity === 'high');
   return {
     secretHit: secretSpans.length > 0,
-    secretNamed: secretSpans.some((s) => s.tier === 'named'),
-    secretHeuristic: secretSpans.some((s) => s.tier === 'heuristic'),
+    // Read `tiers` (every tier that matched these bytes), NOT `tier` (the highest-CONFIDENCE one).
+    // `tier` is for display and redaction kinds; gating on it let a merge decide policy, because
+    // confidence rank is not blocking strength — see SecretSpan.tiers.
+    secretNamed: secretSpans.some((s) => s.tiers.includes('named')),
+    secretHeuristic: secretSpans.some((s) => s.tiers.includes('heuristic')),
     secretEntropy: secretSpans.some(
-      (s) => s.tier === 'entropy' && (!(s.entropyHex || s.entropyWordChain) || nearCredential(text, s.start, s.end)),
+      (s) => s.tiers.includes('entropy') && (!(s.entropyHex || s.entropyWordChain) || nearCredential(text, s.start, s.end)),
     ),
     piiKinds: [...new Set(piiHits.map((h) => h.kind))],
     highKinds: [...new Set(highHits.map((h) => h.kind))],

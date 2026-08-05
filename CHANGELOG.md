@@ -255,6 +255,18 @@ All notable changes to Helix are documented here. This project follows
   divergence.
 
 ### Security
+- The egress policy now decides on the FULL secret classification instead of a lossy projection of
+  it. A reducer upstream of the policy table was collapsing the detection before any leg could see
+  it, and it produced a way for a payload to be released that the operator's configuration said
+  should block:
+  - **Overlapping spans kept only the highest-CONFIDENCE tier.** `mergeSpans` ranks
+    `named > heuristic > entropy`, which is right for choosing a redaction label and wrong for
+    choosing a policy leg. With `secretHeuristic: allow, secretEntropy: block`, a bare high-entropy
+    token blocked but the SAME token prefixed `password=` merged to heuristic-only and was released —
+    adding a credential marker made the bytes *less* blocked. A span now carries every tier that
+    matched it (`SecretSpan.tiers`); `tier` remains the display/redaction winner. The mirror case
+    (provider + heuristic) was already covered by a test and passed only because `named` happens to
+    outrank `heuristic`.
 - The re-baseline ceremony refuses a project scope that names the global ledger. It resolved the
   ledger from the scope argument and the witness key from the same argument by a second, independent
   route, and compared neither against the global ledger. In the default layout `HELIX_HOME` is

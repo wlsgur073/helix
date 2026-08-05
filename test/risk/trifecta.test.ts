@@ -184,6 +184,24 @@ describe('classifyEgress', () => {
     expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), secretHeuristic: 'allow' } })).decision).toBe('blocked');
   });
 
+  // N2-TIER-MERGE. The mirror of the provider+heuristic case above, and the one that broke: there,
+  // `named` outranks `heuristic` in TIER_RANK so the merged span keeps the override-proof tier by
+  // luck. Here `heuristic` outranks `entropy`, so merging ERASES the entropy tier and the payload is
+  // gated only by the leg the operator released — adding the credential marker "password=" makes the
+  // SAME bytes LESS blocked. The token is the identical one the entropy-only test above uses.
+  it('deny-dominant overlap: a heuristic+entropy span stays blocked under secretHeuristic:allow', () => {
+    const bare = ['token n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf'];
+    const marked = ['password=n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf'];
+    const policy = { ...ALL('block'), secretHeuristic: 'allow' as const };
+    // Control: bare, the entropy leg blocks it.
+    expect(classifyEgress(clean({ texts: bare, policy })).decision).toBe('blocked');
+    // The same secret, now also matching the released heuristic leg, must still block on entropy.
+    const v = classifyEgress(clean({ texts: marked, policy }));
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('secretEntropy');
+    expect(v.blockedLegs).toContain('secretEntropy');
+    expect(v.releasedLegs).toContain('secretHeuristic');
+  });
   it('piiHigh releases card PII independently of piiBulk', () => {
     const texts = ['card 4111 1111 1111 1111 on file'];
     expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), piiHigh: 'allow' } })).decision).toBe('allowed_override');

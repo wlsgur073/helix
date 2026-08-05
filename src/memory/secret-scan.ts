@@ -17,6 +17,14 @@ export interface SecretSpan {
    *  'entropy' = the catch-all entropy net (low confidence, e.g. a git SHA — egress-gated but
    *  policy-overridable). */
   tier: SecretTier;
+  /** EVERY tier that matched these bytes, not just the reporting one. `tier` above is the highest-
+   *  CONFIDENCE member (it picks the redaction kind); merging overlapping spans used to keep only
+   *  that one, which silently erased the others — so an egress policy leg could not gate a tier its
+   *  span also belonged to. Ranking by confidence is not ranking by blocking strength: with
+   *  `secretHeuristic: allow, secretEntropy: block`, a bare high-entropy token blocked while the
+   *  SAME token prefixed `password=` merged to heuristic-only and was released. Policy code MUST
+   *  read this set; display/redaction code keeps reading `tier`. */
+  tiers: SecretTier[];
   /** EH-4: set on entropy-tier spans only — true iff the token's wrapper-punctuation-stripped core
    *  is pure hex >= 24 (git SHA / digest / hex id). Read ONLY by the egress gate; never affects
    *  write-path redaction. */
@@ -105,8 +113,9 @@ export function isBenignWordChain(t: string): boolean {
 }
 
 /** Merge overlapping spans into non-overlapping ones (required for safe in-place redaction).
- *  A merged span takes the highest-rank tier among its overlapping members (named > heuristic >
- *  entropy via TIER_RANK), and the kind of that highest-rank member. */
+ *  A merged span REPORTS the highest-rank tier among its overlapping members (named > heuristic >
+ *  entropy via TIER_RANK) and that member's kind — but it ACCUMULATES every member's tier in
+ *  `tiers`, so nothing a policy leg needs is lost to the merge. */
 function mergeSpans(spans: SecretSpan[]): SecretSpan[] {
   const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
   const out: SecretSpan[] = [];
@@ -114,9 +123,10 @@ function mergeSpans(spans: SecretSpan[]): SecretSpan[] {
     const last = out[out.length - 1];
     if (last && s.start < last.end) {
       last.end = Math.max(last.end, s.end);
+      for (const t of s.tiers) if (!last.tiers.includes(t)) last.tiers.push(t);
       if (TIER_RANK[s.tier] > TIER_RANK[last.tier]) { last.tier = s.tier; last.kind = s.kind; }
     } else {
-      out.push({ ...s });
+      out.push({ ...s, tiers: [...s.tiers] });
     }
   }
   return out;
@@ -132,7 +142,7 @@ export function findSecrets(content: string): SecretSpan[] {
   for (const { kind, tier, re } of PATTERNS) {
     const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
     for (let m = g.exec(content); m !== null; m = g.exec(content)) {
-      spans.push({ start: m.index, end: m.index + m[0].length, kind, tier });
+      spans.push({ start: m.index, end: m.index + m[0].length, kind, tier, tiers: [tier] });
       if (g.lastIndex === m.index) g.lastIndex++; // guard against a zero-width match looping
     }
   }
@@ -141,6 +151,7 @@ export function findSecrets(content: string): SecretSpan[] {
     if (isHighEntropyToken(m[0])) {
       spans.push({
         start: m.index, end: m.index + m[0].length, kind: 'high-entropy', tier: 'entropy',
+        tiers: ['entropy'],
         entropyHex: isHexCore(m[0]), entropyWordChain: isBenignWordChain(m[0]),
       });
     }
