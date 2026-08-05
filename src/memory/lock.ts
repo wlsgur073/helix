@@ -44,7 +44,7 @@ export function lockPathOf(target: string): string { return canonical(target) + 
 /** Test-only helper: publish an arbitrary lock payload the same atomic way production does. */
 export function writeLockFileForTest(lockPath: string, payload: object): void {
   const src = `${lockPath}.lk-${randomBytes(16).toString('hex')}.tmp`;
-  writeFileSync(src, JSON.stringify(payload), { flag: 'wx' });
+  writeFileSync(src, JSON.stringify(payload), { flag: 'wx', mode: 0o600 });   // match production exactly
   try { linkSync(src, lockPath); } finally { unlinkSync(src); }
 }
 
@@ -89,7 +89,7 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
   for (;;) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString('hex')}.tmp`;
     try {
-      writeFileSync(srcTmp, payloadText, { flag: 'wx' });   // full write returns before...
+      writeFileSync(srcTmp, payloadText, { flag: 'wx', mode: 0o600 });   // full write returns before...
       try { linkSync(srcTmp, lockPath); break; }            // ...the name is published (atomic, with content)
       finally { try { unlinkSync(srcTmp); } catch { /* swept by a holder mid-flight — harmless */ } }
     } catch (e) {
@@ -215,7 +215,7 @@ function stealUnderGate(lockPath: string, probe: LivenessProbe): void {
   const gateToken = randomBytes(16).toString('hex');
   const gateSrc = `${gatePath}.src-${gateToken}.tmp`;
   try {
-    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: 'wx' });
+    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: 'wx', mode: 0o600 });
     try { linkSync(gateSrc, gatePath); } finally { try { unlinkSync(gateSrc); } catch { /* raced */ } }
   } catch { return; }                                              // gate busy (same boot) — no steal this round
   try {

@@ -68,7 +68,7 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit;
 export function appendAudit(path: string, event: AuditEvent): void {
   mkdirSync(dirname(path), { recursive: true });
   const isNew = !existsSync(path);
-  const fd = openSync(path, 'a');
+  const fd = openSync(path, 'a', 0o600);   // owner-only ON CREATE (the audit trail is unauthenticated; a group writer could rewrite it)
   try {
     // writeAll loops short writes (a truncated row is never fsynced) and guards a zero-progress write.
     writeAll(realFsOps, fd, JSON.stringify(event) + '\n');

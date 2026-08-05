@@ -270,6 +270,17 @@ All notable changes to Helix are documented here. This project follows
   word-labelled numeric value, a long digit run and an interior colon all stay in the net; a
   recognized provider credential still blocks through its own override-proof leg; and the write path
   still redacts these bytes.
+- Everything Helix persists under `HELIX_HOME` is owner-only, and stays that way. Creation sites
+  passed no mode and inherited `0666` masked by the process umask — on a `umask 002` box that is
+  `0664`, **group-writable**, not the `0644` an earlier audit assumed and bounded as a confidentiality
+  problem. The ledger, the audit log, the session log and the lock publish files now pass an explicit
+  `0o600`, and a startup pass (`hardenHomePermissions`) repairs what shipped versions already wrote —
+  creation modes cannot reach files that already exist. **The decisive part is the directory:** POSIX
+  puts unlink permission on the parent, so a `0600` master key inside a `0775` `~/.helix` can still be
+  replaced wholesale; the pass tightens the directory to `0700` too. It warns and fixes rather than
+  failing closed (an over-broad mode is a state shipped versions created, not evidence of tampering),
+  refuses to chmod through a symlink or a non-regular file rather than following it, leaves project
+  `.helix` trees alone — those are boundary-writable by design — and never throws.
 - The write-path secret scan sees confusables. It read raw bytes while the render path NFKC-folds, so
   a fullwidth-encoded credential was persisted verbatim and came back out live. `findSecrets` now
   runs a per-token NFKC pass and reports the raw token's span, giving the write path the coverage the

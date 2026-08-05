@@ -6,6 +6,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { MemoryStore } from '../memory/store.js';
 import { parseLedger } from '../memory/ledger.js';
 import { scanLegacyElevated } from '../memory/legacy-scan.js';
+import { hardenHomePermissions } from '../memory/home-permissions.js';
 import { subkeyForScope } from '../memory/verified-read.js';
 import { aliasesGlobalLedger } from '../memory/scope-target.js';
 import { strayTrustFiles } from '../memory/trust-store-layout.js';
@@ -38,6 +39,12 @@ const project = projectActive ? { ledger: projectLedger, root: projectRoot } : u
 // GLOBAL-ONLY, and deliberately so: `projectPath` is omitted, which now means there is no project
 // layer at all. A checkout's own config.json is not a configuration source for the process that
 // opened it — see loadConfig's note for why ownership and tighten-only were rejected as gates.
+// Repair an over-broad HELIX_HOME before anything reads or writes inside it. Creation-time modes
+// only cover files this version creates; every file a shipped version already wrote keeps the mode
+// it was born with. Runs before loadConfig deliberately: config.json is authority-bearing, so it
+// should be owner-only BEFORE its contents are trusted. Warn-and-fix and never throws — see
+// hardenHomePermissions for why an over-broad mode is not treated as evidence of tampering.
+hardenHomePermissions(home, { warn: (m) => process.stderr.write(`${m}\n`) });
 const config = loadConfig({ globalPath: join(home, 'config.json') });
 // Say so when such a file exists. Silence here would be a regression in operator feedback, since a
 // project config with an INVALID value still warned when the layer was read — a user following older

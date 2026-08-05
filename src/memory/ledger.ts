@@ -119,7 +119,7 @@ export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, 
   mkdirSync(dirname(rawPath), { recursive: true });
   const path = canonical(rawPath);   // resolve the FINAL-component symlink to the real inode's path (write-layer identity, the SAME rule the lock uses) so append and compaction never diverge onto different inodes
   sweepOrphanTmps(path, { fsOps });
-  const fd = fsOps.openSync(path, 'a+');
+  const fd = fsOps.openSync(path, 'a+', 0o600);   // owner-only ON CREATE; umask can only clear bits, never set them
   try {
     const st = fsOps.fstatSync(fd);
     if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
@@ -485,8 +485,14 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
     let retractNonce: string | null = null;   // set from the journal openTransition actually wrote, so a retraction key exists only for OUR landed journal
     try {
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost after tmp creation');
-      const mode = modeOf(path);
-      if (mode !== null) fsOps.fchmodSync(fd, mode);              // umask-proof: rename replaces the inode
+      // Preserve the destination's mode across the rename — a project ledger may be deliberately
+      // group-readable for a shared team layout, and compaction is not the place to change that.
+      // But NEVER inherit a mode looser than owner-only from a MISSING destination, and never fall
+      // through to the umask: with no target to copy, 0600 is the only safe default. (A home ledger
+      // that is itself over-broad is repaired by hardenHomePermissions at startup, so the mode this
+      // reads is already tight; this line must not be the thing that re-widens it.)
+      const mode = modeOf(path) ?? 0o600;
+      fsOps.fchmodSync(fd, mode);                                 // umask-proof: rename replaces the inode
       const beforeBytes = fileSize(path);                          // inside the lock, BEFORE the read
       const records = parseLedger(path);
       const { kept, droppedForgedVerifies } = planCompaction(records, opts);
