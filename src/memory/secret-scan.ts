@@ -132,6 +132,48 @@ function mergeSpans(spans: SecretSpan[]): SecretSpan[] {
   return out;
 }
 
+/** F6: every detector above reads the RAW bytes, but the render path NFKC-folds — so a confusable
+ *  encoding (fullwidth `ＡＫＩＡ…`, fullwidth `ｐａｓｓｗｏｒｄ＝`) was persisted verbatim and came back out
+ *  as a live credential. The egress guard already scans both forms for exactly this reason
+ *  (classifyEgress: "the raw form is blind to a confusable that normalization folds back into a live
+ *  secret"); this gives the WRITE path the same coverage without changing a single caller.
+ *
+ *  Per-TOKEN, never whole-string. Folding the whole string shifts every index, and the spans
+ *  returned here must address the CALLER's raw bytes — `redactSecrets` splices them. Token
+ *  boundaries survive folding because JS `\s`, the complement of the `\S+` used here, already
+ *  includes every space character NFKC maps to a space (U+3000 among them), so a raw token can
+ *  neither contain one nor split under folding.
+ *
+ *  The RAW token's whole span is emitted, not a sub-range: a folded match's offsets mean nothing in
+ *  the raw string, and redacting the entire confusable token is the conservative reading. Tokens
+ *  that fold to themselves — nearly all of them — cost one comparison and are skipped. */
+function foldedTokenSpans(content: string): SecretSpan[] {
+  const out: SecretSpan[] = [];
+  const tok = /\S+/g;
+  for (let m = tok.exec(content); m !== null; m = tok.exec(content)) {
+    const folded = m[0].normalize('NFKC');
+    if (folded === m[0]) continue;                       // folding reveals nothing here
+    let hit: { kind: string; tier: SecretTier } | null = null;
+    for (const { kind, tier, re } of PATTERNS) {
+      if (new RegExp(re.source, re.flags.replace('g', '')).test(folded)) { hit = { kind, tier }; break; }
+    }
+    if (hit === null && isHighEntropyToken(folded)) hit = { kind: 'high-entropy', tier: 'entropy' };
+    if (hit === null) continue;
+    const span: SecretSpan = {
+      start: m.index, end: m.index + m[0].length,
+      kind: hit.kind, tier: hit.tier, tiers: [hit.tier],
+    };
+    // The entropy exemptions are shape questions, so they are asked of the FOLDED core — the shape
+    // an operator would recognise — exactly as they are for a token that needed no folding.
+    if (hit.tier === 'entropy') {
+      span.entropyHex = isHexCore(folded);
+      span.entropyWordChain = isBenignWordChain(folded);
+    }
+    out.push(span);
+  }
+  return out;
+}
+
 /**
  * All secret spans in `content`: named provider patterns (high confidence) plus high-entropy
  * tokens (low confidence), merged into non-overlapping spans sorted by start. Spans drive
@@ -156,6 +198,7 @@ export function findSecrets(content: string): SecretSpan[] {
       });
     }
   }
+  spans.push(...foldedTokenSpans(content));   // F6: what the render path would reveal
   return mergeSpans(spans);
 }
 

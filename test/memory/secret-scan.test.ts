@@ -183,3 +183,49 @@ describe('C2.2: findSecrets tags entropy spans with entropyWordChain', () => {
     expect(r.content).toBe('kept [redacted:high-entropy] tracked');
   });
 });
+
+// F6 — the write path scanned RAW bytes while the render path NFKC-folds, so a fullwidth-encoded
+// credential was stored verbatim and came back out as a live key. The egress guard learned this
+// exact lesson already (classifyEgress scans BOTH forms because "the raw form is blind to a
+// confusable that normalization folds back into a live secret"); the write path never got the same
+// treatment. Spans must still index the RAW string — redactSecrets splices the caller's bytes.
+describe('F6: findSecrets sees confusables that NFKC folds back into a credential', () => {
+  const FULLWIDTH_AWS = 'ＡＫＩＡＩＯＳＦＯＤＮＮ７ＥＸＡＭＰＬＥ';
+
+  it('flags a fullwidth-encoded provider key that only matches after folding', () => {
+    const raw = `deploy key ${FULLWIDTH_AWS} rotate quarterly`;
+    const spans = findSecrets(raw);
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.kind).toBe('aws-access-key');
+    expect(spans[0]!.tiers).toContain('named');
+  });
+
+  it('the span indexes the RAW string, so redaction removes the confusable bytes themselves', () => {
+    const raw = `deploy key ${FULLWIDTH_AWS} rotate quarterly`;
+    const out = redactSecrets(raw, findSecrets(raw));
+    expect(out.content).toBe('deploy key [redacted:aws-access-key] rotate quarterly');
+    // The decisive assertion: what is persisted must not fold back into a working credential.
+    expect(out.content.normalize('NFKC')).not.toContain('AKIAIOSFODNN7EXAMPLE');
+  });
+
+  it('the same blind spot on the heuristic tier: a fullwidth assignment folds into one', () => {
+    const raw = 'note ｐａｓｓｗｏｒｄ＝Ｓｕｐ３ｒＳ３ｃｒｅｔ here';
+    const spans = findSecrets(raw);
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.tiers).toContain('heuristic');
+  });
+
+  it('the same blind spot on the entropy tier: fullwidth digits/letters defeat the raw net', () => {
+    // The raw token has length >= 24 but no [A-Za-z] and no [0-9] in ASCII terms, so the entropy
+    // net never sees it; folded, it is the same token the ASCII test above already flags.
+    const raw = 'token ｎ２Ｘｋ９Ｌｐ４Ｑａ７Ｚｒ３Ｖｙ８Ｗｂ１Ｍｃ６Ｔｄ０Ｈｓ５Ｊｆ end';
+    const spans = findSecrets(raw);
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.tiers).toContain('entropy');
+  });
+
+  it('leaves ordinary prose alone — folding must not manufacture hits', () => {
+    expect(findSecrets('The migration script rewrites the users table.')).toEqual([]);
+    expect(findSecrets('ﬁle uses a ligature but carries no credential')).toEqual([]);
+  });
+});

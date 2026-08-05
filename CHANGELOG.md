@@ -255,6 +255,12 @@ All notable changes to Helix are documented here. This project follows
   divergence.
 
 ### Security
+- The write-path secret scan sees confusables. It read raw bytes while the render path NFKC-folds, so
+  a fullwidth-encoded credential was persisted verbatim and came back out live. `findSecrets` now
+  runs a per-token NFKC pass and reports the raw token's span, giving the write path the coverage the
+  egress guard already had. Per-token rather than whole-string because the spans must address the
+  caller's own bytes; token boundaries survive folding because JS `\s` already includes every space
+  character NFKC can produce.
 - The egress policy now decides on the FULL secret classification instead of a lossy projection of
   it. Two reducers upstream of the policy table were collapsing the detection before any leg could
   see it, and each produced a way for a payload to be released that the operator's configuration
