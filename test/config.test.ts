@@ -166,9 +166,20 @@ describe('loadConfig', () => {
     }
   });
 
-  it('defaults every egressPolicy leg to block (fail-closed)', () => {
+  // Fail-closed, with ONE named exception. `secretEntropyExempt` ships 'allow' because the EH-4/C2.2
+  // hex/word-chain release it gates is a false-positive mitigation that fired twice on real artifact
+  // names — closing it by default would re-block design prose carrying a git SHA. That release
+  // already existed unconditionally inside the detector, where NO policy key could reach it; giving
+  // it a leg did not open a hole, it made a standing one addressable. The assertion is written as
+  // "exactly one leg defaults open, and it is this one" so a future leg cannot quietly ship open.
+  it('defaults every egressPolicy leg to block except the one documented exemption leg', () => {
     const cfg = loadConfig({ projectPath: join(tmpDir(), 'n.json'), globalPath: join(tmpDir(), 'n.json') });
-    expect(cfg.dualVerify.egressPolicy).toEqual({ memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' });
+    expect(cfg.dualVerify.egressPolicy).toEqual({
+      memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block',
+      secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow',
+    });
+    const open = Object.entries(cfg.dualVerify.egressPolicy).filter(([, v]) => v === 'allow').map(([k]) => k);
+    expect(open).toEqual(['secretEntropyExempt']);
     expect(DEFAULT_CONFIG.dualVerify.egressPolicy.secretHeuristic).toBe('block');
   });
 

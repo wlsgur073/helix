@@ -7,9 +7,15 @@ export type StakesFloor = 'low' | 'medium' | 'high' | 'xhigh';
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 
 export type EgressLegPolicy = 'block' | 'allow';
-export type EgressLeg = 'memoryEcho' | 'piiHigh' | 'piiBulk' | 'secretHeuristic' | 'secretEntropy';
+/** `secretEntropyExempt` gates the EH-4/C2.2 subclass of the entropy net — a token whose stripped
+ *  core is pure hex (git SHA / digest) or a chain of individually low-entropy segments (dated
+ *  filenames, doc paths), with no credential keyword in the same statement. That release used to be
+ *  applied inside the detector, so it sat OUTSIDE every policy key and no configuration could close
+ *  it. It defaults to `allow` — the false-positive class it exists for fired twice on real artifact
+ *  names — but an operator who wants hex-shaped tokens gated can now say so. */
+export type EgressLeg = 'memoryEcho' | 'piiHigh' | 'piiBulk' | 'secretHeuristic' | 'secretEntropy' | 'secretEntropyExempt';
 export type EgressPolicy = Record<EgressLeg, EgressLegPolicy>;
-const EGRESS_LEGS: readonly EgressLeg[] = ['memoryEcho', 'piiHigh', 'piiBulk', 'secretHeuristic', 'secretEntropy'];
+const EGRESS_LEGS: readonly EgressLeg[] = ['memoryEcho', 'piiHigh', 'piiBulk', 'secretHeuristic', 'secretEntropy', 'secretEntropyExempt'];
 
 export interface CompactionConfig {
   auto: boolean;
@@ -102,7 +108,9 @@ export const DEFAULT_CONFIG: HelixConfig = {
     // Block every non-named egress leg to the external Codex model by default. User opts into risk
     // per-leg (a human edit, outside model control). Invalid/unknown => 'block'. Named secrets are
     // override-proof regardless of this map.
-    egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' },
+    // secretEntropyExempt defaults to 'allow' so the shipped behaviour is byte-for-byte unchanged:
+    // a git SHA in design prose still does not block. What changes is that it is now REACHABLE.
+    egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' },
     // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
     logContent: false,
   },

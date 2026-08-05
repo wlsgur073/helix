@@ -1,6 +1,7 @@
 import { mkdirSync, openSync, existsSync, fsyncSync, closeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeAll, realFsOps, fsyncDir } from './memory/fs-ops.js';
+import type { EgressLeg } from './config.js';
 
 /** Schema note (append-only history): `decidedLeg` replaces the mis-named `blockedLeg` (an
  *  `allowed_override` used to write its DECIDER into a field literally called `blockedLeg`,
@@ -20,7 +21,9 @@ export interface DualVerifyAudit {
   // or memory snippet. Both blocked AND allowed-override events are logged. ---
   egressDecision?: 'pass' | 'blocked' | 'allowed_override';
   decidedLeg?: 'secret' | 'pii' | 'memory_echo';                       // the coarse leg that DECIDED (renamed from blockedLeg)
-  releasedLegs?: Array<'memoryEcho' | 'piiHigh' | 'piiBulk' | 'secretHeuristic' | 'secretEntropy'>; // policy keys a policy released
+  // Was a hand-copied union of the same five keys, which silently went stale the moment a sixth leg
+  // existed. Sourced from EgressLeg so the audit schema cannot drift from the policy it records.
+  releasedLegs?: EgressLeg[];                                          // policy keys a policy released
   piiKinds?: Array<'email' | 'phone' | 'credit_card' | 'national_id'>; // labels, never values
   echoMemoryIds?: string[];                                            // ledger IDs, never text
 }

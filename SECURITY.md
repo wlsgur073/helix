@@ -31,6 +31,15 @@ acknowledgement within a few days.
   (override-proof — a config policy of `allow` cannot release them); generic
   heuristic-detected (`password=`-style) and high-entropy secrets are blocked by
   default but are per-leg policy-overridable (`dualVerify.egressPolicy`).
+  **One documented exception to "blocked by default":** a high-entropy token whose
+  stripped core is pure hex (git SHA / digest) or a chain of individually low-entropy
+  segments (dated filenames, doc paths), with no credential keyword in the same
+  statement, is RELEASED by default — a false-positive mitigation for design prose,
+  which fired twice on real artifact names. It is gated by its own leg,
+  `secretEntropyExempt` (default `allow`); set it to `block` to close the exemption.
+  Until 2026-08-04 that release was applied inside the detector, upstream of every
+  policy key, so no configuration could reach it. Note the asymmetry that remains by
+  design: the WRITE path redacts these same bytes regardless of this leg.
 - **Untrusted content** (recalled memory, external-model output) is treated as DATA,
   never instructions: NFKC/control/bidi normalization + per-line datamarking + a
   per-call nonce frame.

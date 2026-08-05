@@ -61,7 +61,13 @@ describe('detectEcho', () => {
   });
 });
 
-const ALL = (v: 'block' | 'allow'): EgressPolicy => ({ memoryEcho: v, piiHigh: v, piiBulk: v, secretHeuristic: v, secretEntropy: v });
+const ALL = (v: 'block' | 'allow'): EgressPolicy => ({ memoryEcho: v, piiHigh: v, piiBulk: v, secretHeuristic: v, secretEntropy: v, secretEntropyExempt: v });
+
+/** The SHIPPED default policy: every leg blocks EXCEPT `secretEntropyExempt`, which ships `allow`
+ *  (config.ts DEFAULT). Before D2 the EH-4/C2.2 exemption was unconditional, so `ALL('block')` and
+ *  the real default were indistinguishable for hex/word-chain content — that equivalence is exactly
+ *  what D2 broke, so a test asserting DEFAULT behaviour must say so explicitly. */
+const DEFAULTS = (): EgressPolicy => ({ ...ALL('block'), secretEntropyExempt: 'allow' });
 
 // Module-scoped (not local to `describe('classifyEgress', ...)`) so the D1 describe block below can
 // reuse it too — it has no dependency on anything inside that describe's closure.
@@ -202,6 +208,26 @@ describe('classifyEgress', () => {
     expect(v.blockedLegs).toContain('secretEntropy');
     expect(v.releasedLegs).toContain('secretHeuristic');
   });
+
+  // D2. EH-4/C2.2 release a hex-shaped or word-chain entropy span so design prose carrying a git SHA
+  // is not permanently blocked. That release was unconditional and evaluated in the DETECTOR, so it
+  // stood outside every policy key — SECURITY.md:31-33 promises high-entropy secrets are "blocked by
+  // default but per-leg policy-overridable", and for this subclass BOTH halves were false. The
+  // exemption keeps its default (a bare SHA in prose still does not block), but it is now its own leg
+  // an operator can close.
+  it('secretEntropyExempt:block closes the hex-shape entropy exemption', () => {
+    const texts = ['deployed commit 4b13009d912414a917053f8ea11661cb94ca38ee to prod'];
+    // Shipped default: the exemption holds — the operator has not asked for hex to be gated, and
+    // the verdict is the same audit-only `pass` it was before this leg existed.
+    const d = classifyEgress(clean({ texts, policy: DEFAULTS() }));
+    expect(d.decision).toBe('pass');
+    expect(d.auditOnlyLegs).toEqual(['secret']);
+    // The operator closes it explicitly. Before this leg existed, NO policy value could.
+    const v = classifyEgress(clean({ texts, policy: { ...DEFAULTS(), secretEntropyExempt: 'block' } }));
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('secretEntropyExempt');
+  });
+
   it('piiHigh releases card PII independently of piiBulk', () => {
     const texts = ['card 4111 1111 1111 1111 on file'];
     expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), piiHigh: 'allow' } })).decision).toBe('allowed_override');
@@ -265,6 +291,9 @@ describe('classifyEgress leg dominance (a blocked leg is never suppressed by an 
     piiHigh: 'card 4111 1111 1111 1111 on file',
     secretHeuristic: 'first-impression pass: install steps here',
     secretEntropy: 'token n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf',
+    // Hex core, no credential keyword in the statement -> the EH-4/C2.2 exempt subclass. Distinct
+    // from the row above, which is rich-alphabet and therefore never exempt.
+    secretEntropyExempt: 'deployed commit 4b13009d912414a917053f8ea11661cb94ca38ee to prod',
     piiBulk: 'a@x.com, b@x.com, c@x.com',
   };
   // Decision precedence in classifyEgress (named secrets sit above all of these, deny-dominant).
@@ -333,6 +362,7 @@ describe('classifyEgress leg dominance (a blocked leg is never suppressed by an 
     piiHigh: /high-severity PII/,
     secretHeuristic: /keyword-assignment/,
     secretEntropy: /high-entropy/,
+    secretEntropyExempt: /hex\/word-chain entropy/,
     piiBulk: /bulk low-severity PII/,
   };
   for (const [i, higher] of ORDER.slice(0, -1).entries()) {
@@ -492,7 +522,7 @@ describe('G1 mutation lock: each defense independently matters (not just redunda
 
 describe('EH-4: egress hex-literal exemption + credential proximity guard', () => {
   const SHA = 'da39a3ee5e6b4b0d3255bfef95601890afd80709';
-  const block = (texts: string[], policy: EgressPolicy = ALL('block')): string =>
+  const block = (texts: string[], policy: EgressPolicy = DEFAULTS()): string =>
     classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy }).decision;
 
   it('PASS: a bare git SHA / digest with no credential keyword (hex-exempt)', () => {
@@ -536,7 +566,7 @@ describe('EH-4: egress hex-literal exemption + credential proximity guard', () =
 
   it('audit: a hex-exempt pass records the secret leg with a content-free reason', () => {
     const texts = [`fixed in commit ${SHA}`];
-    const v = classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy: ALL('block') });
+    const v = classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy: DEFAULTS() });
     expect(v.decision).toBe('pass');
     expect(v.legs).toContain('secret');
     expect(v.reason).not.toContain(SHA);
@@ -601,7 +631,7 @@ describe('D1: classifier reports leg OUTCOMES, not just detections', () => {
 
   it('a hex-exempt entropy span is auditOnly secret, NEVER released (it was never gated)', () => {
     // an EH-4-exempt hex digest with no credential keyword => pass, secret detected but not gated
-    const v = classifyEgress(clean({ texts: ['digest a3f5c9d2b7e14608a3f5c9d2b7e14608a3f5c9d2'], policy: ALL('block') }));
+    const v = classifyEgress(clean({ texts: ['digest a3f5c9d2b7e14608a3f5c9d2b7e14608a3f5c9d2'], policy: DEFAULTS() }));
     expect(v.decision).toBe('pass');
     expect(v.auditOnlyLegs).toEqual(['secret']);
     expect(v.releasedLegs).toEqual([]);
@@ -669,7 +699,7 @@ describe('D1: classifier reports leg OUTCOMES, not just detections', () => {
   it('detected legs STRICTLY exceed released: a hex-exempt secret + an allowed card', () => {
     const v = classifyEgress(clean({
       texts: ['digest a3f5c9d2b7e14608a3f5c9d2b7e14608a3f5c9d2 ship to 4111 1111 1111 1111'],
-      policy: { ...ALL('block'), piiHigh: 'allow' },
+      policy: { ...DEFAULTS(), piiHigh: 'allow' },
     }));
     expect(v.decision).toBe('allowed_override');
     expect(v.releasedLegs).toEqual(['piiHigh']);      // ONLY the policy-released key
@@ -687,14 +717,14 @@ describe('C2.2: egress word-chain entropy exemption + credential proximity guard
   const FP1 = 'docs/release/gate-decision-2026-07-22.md';
   const FP2 = 'helix-docs-backup-2026-07-22-specs.tar.gz';
   const block = (texts: string[]): string =>
-    classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy: ALL('block') }).decision;
+    classifyEgress({ texts, outbound: normalizeUntrusted(texts.join('\n')), ledger: [], policy: DEFAULTS() }).decision;
 
   it('PASS: the two real observed FP tokens, bare and backticked', () => {
     expect(block([`the decision is recorded in ${FP1} today`])).toBe('pass');
     expect(block(['archived to `' + FP2 + '` after review'])).toBe('pass');
   });
   it('PASS reason names the exempt-entropy audit-only fallthrough', () => {
-    const v = classifyEgress({ texts: [`see ${FP1}`], outbound: normalizeUntrusted(`see ${FP1}`), ledger: [], policy: ALL('block') });
+    const v = classifyEgress({ texts: [`see ${FP1}`], outbound: normalizeUntrusted(`see ${FP1}`), ledger: [], policy: DEFAULTS() });
     expect(v.reason).toBe('pass: exempt entropy (hex or word-chain, audit-only)');
   });
   it('BLOCK: a credential keyword in the same statement guards the chain', () => {

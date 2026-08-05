@@ -7,7 +7,7 @@ import { normalizeUntrusted } from '../../src/memory/content-frame.js';
 
 // EH-1 Task 2: egress policy is now per-leg. These characterization tests exercise the
 // entropy / high-PII legs, both of which remain policy-overridable; ALL() sets every leg uniformly.
-const ALL = (v: 'block' | 'allow'): EgressPolicy => ({ memoryEcho: v, piiHigh: v, piiBulk: v, secretHeuristic: v, secretEntropy: v });
+const ALL = (v: 'block' | 'allow'): EgressPolicy => ({ memoryEcho: v, piiHigh: v, piiBulk: v, secretHeuristic: v, secretEntropy: v, secretEntropyExempt: 'allow' });
 
 // AUDIT 2026-06-15 — J1 detectors (FP/FN).
 // CHARACTERIZATION tests: each asserts the CURRENT behavior and documents a finding.

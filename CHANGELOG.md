@@ -256,9 +256,9 @@ All notable changes to Helix are documented here. This project follows
 
 ### Security
 - The egress policy now decides on the FULL secret classification instead of a lossy projection of
-  it. A reducer upstream of the policy table was collapsing the detection before any leg could see
-  it, and it produced a way for a payload to be released that the operator's configuration said
-  should block:
+  it. Two reducers upstream of the policy table were collapsing the detection before any leg could
+  see it, and each produced a way for a payload to be released that the operator's configuration
+  said should block:
   - **Overlapping spans kept only the highest-CONFIDENCE tier.** `mergeSpans` ranks
     `named > heuristic > entropy`, which is right for choosing a redaction label and wrong for
     choosing a policy leg. With `secretHeuristic: allow, secretEntropy: block`, a bare high-entropy
@@ -267,6 +267,17 @@ All notable changes to Helix are documented here. This project follows
     matched it (`SecretSpan.tiers`); `tier` remains the display/redaction winner. The mirror case
     (provider + heuristic) was already covered by a test and passed only because `named` happens to
     outrank `heuristic`.
+  - **The EH-4/C2.2 hex/word-chain release was applied inside the detector.** `scanText` — whose
+    contract is "pure, no policy, no decision" — subtracted exempt spans from the entropy signal, so
+    `egressPolicy.secretEntropy: block` had nothing left to gate and no configuration could close
+    the release. The exemption is now its own leg, **`secretEntropyExempt`**, defaulting to `allow`:
+    the shipped verdict for a git SHA in design prose is byte-for-byte what it was (an audit-only
+    `pass`), but an operator can now set it to `block`. It is an opt-in leg — applicable only when
+    set to `block` — so the default introduces no verdict churn on the false-positive class the
+    exemption exists to serve. `SECURITY.md`'s "blocked by default but per-leg policy-overridable"
+    claim was false for this subclass in both halves; it now names the exception.
+  The audit record's `releasedLegs` type was a hand-copied union of the five leg names and went
+  stale the moment a sixth existed; it is now sourced from `EgressLeg`.
 - The re-baseline ceremony refuses a project scope that names the global ledger. It resolved the
   ledger from the scope argument and the witness key from the same argument by a second, independent
   route, and compared neither against the global ledger. In the default layout `HELIX_HOME` is

@@ -125,7 +125,7 @@ export interface EgressVerdict {
  *  `gated`-array DECISION precedence below (echo > piiHigh > heuristic > entropy > piiBulk), so
  *  `decidedBy` is always the first leg rendered — NOT config's EGRESS_LEGS order (which places piiBulk
  *  third, not last). */
-export const EGRESS_LEG_ORDER: readonly EgressLeg[] = ['memoryEcho', 'piiHigh', 'secretHeuristic', 'secretEntropy', 'piiBulk'];
+export const EGRESS_LEG_ORDER: readonly EgressLeg[] = ['memoryEcho', 'piiHigh', 'secretHeuristic', 'secretEntropy', 'secretEntropyExempt', 'piiBulk'];
 /** Canonical order for the coarse audit-only legs (detected but never gated). */
 export const AUDIT_LEG_ORDER: readonly Leg[] = ['secret', 'pii', 'memory_echo'];
 
@@ -156,7 +156,12 @@ interface Scan {
   secretHit: boolean;
   secretNamed: boolean;
   secretHeuristic: boolean;
+  /** Entropy spans the exemption does NOT cover — gated by `secretEntropy`. */
   secretEntropy: boolean;
+  /** Entropy spans the EH-4/C2.2 exemption DOES cover (hex core or benign word-chain, no credential
+   *  keyword in the statement). Reported as its own signal instead of being subtracted here: the
+   *  detector must not decide, or the policy layer can never gate what the detector already dropped. */
+  secretEntropyExempt: boolean;
   piiKinds: PiiKind[];
   highKinds: PiiKind[];
   highPii: boolean;
@@ -184,6 +189,10 @@ function scanText(text: string): Scan {
     secretHeuristic: secretSpans.some((s) => s.tiers.includes('heuristic')),
     secretEntropy: secretSpans.some(
       (s) => s.tiers.includes('entropy') && (!(s.entropyHex || s.entropyWordChain) || nearCredential(text, s.start, s.end)),
+    ),
+    // The exact complement of the line above: report the exempt subclass, do not silently drop it.
+    secretEntropyExempt: secretSpans.some(
+      (s) => s.tiers.includes('entropy') && (s.entropyHex || s.entropyWordChain) && !nearCredential(text, s.start, s.end),
     ),
     piiKinds: [...new Set(piiHits.map((h) => h.kind))],
     highKinds: [...new Set(highHits.map((h) => h.kind))],
@@ -250,6 +259,7 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   const secretNamed = any((s) => s.secretNamed);
   const secretHeuristic = any((s) => s.secretHeuristic);
   const secretEntropy = any((s) => s.secretEntropy);
+  const secretEntropyExempt = any((s) => s.secretEntropyExempt);
 
   const piiKinds: PiiKind[] = [...new Set(scans.flatMap((s) => s.piiKinds))];
   const highKinds: PiiKind[] = [...new Set(scans.flatMap((s) => s.highKinds))];
@@ -282,6 +292,14 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
     { hit: highPii, key: 'piiHigh', label: `high-severity PII (${highKinds.length} kinds)` },
     { hit: secretHeuristic, key: 'secretHeuristic', label: 'secret keyword-assignment (low-confidence)' },
     { hit: secretEntropy, key: 'secretEntropy', label: 'high-entropy token (low-confidence)' },
+    // OPT-IN leg (deliberately unlike the four above, which are applicable whenever they hit). The
+    // exemption ships released, so making it applicable by default would relabel every design-prose
+    // SHA from `pass` to `allowed_override` and move the coarse `secret` leg out of auditOnlyLegs —
+    // churn on the exact false-positive class the exemption exists to serve, with nothing new
+    // transmitted. Applicable only when the operator asks for it, so `allow` reproduces the pre-D2
+    // audit-only pass byte-for-byte and `block` makes it a first-class blocking leg. Consulting the
+    // policy HERE is sound; the D2 defect was consulting it in the detector, where no leg can reach.
+    { hit: secretEntropyExempt && input.policy.secretEntropyExempt === 'block', key: 'secretEntropyExempt', label: 'hex/word-chain entropy token (exemption closed by policy)' },
     { hit: bulkLowPii, key: 'piiBulk', label: `bulk low-severity PII (${lowPiiCount} hits)` },
   ];
   const applicable = gated.filter((g) => g.hit);

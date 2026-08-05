@@ -14,7 +14,7 @@ function deps(over: Partial<DualVerifyDeps>): DualVerifyDeps {
     ...over,
   };
 }
-const enabled = (): HelixConfig => ({ dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' }, logContent: false }, metrics: { enabled: true } });
+const enabled = (): HelixConfig => ({ dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, metrics: { enabled: true } });
 
 describe('dualVerify', () => {
   it('forwards config.dualVerify.timeoutMs to the runner', async () => {
@@ -126,7 +126,7 @@ describe('dualVerify', () => {
   it('passes the configured model + effort to the runner', async () => {
     let seen: { model?: string | null; effort?: string | null; timeoutMs?: number } | undefined;
     await dualVerify({ question: 'q', helixAnswer: 'a' }, deps({
-      config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'xhigh', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' }, logContent: false }, metrics: { enabled: true } },
+      config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'xhigh', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, metrics: { enabled: true } },
       runner: async (_q, opts) => { seen = opts; return { ok: true, answer: 'x' }; },
     }));
     expect(seen).toEqual({ model: 'gpt-5.5', effort: 'xhigh', timeoutMs: 120_000 });
@@ -135,7 +135,7 @@ describe('dualVerify', () => {
 
 describe('critique mode', () => {
   const critiqueCfg = (): HelixConfig =>
-    ({ dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' }, logContent: false }, metrics: { enabled: true } });
+    ({ dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, metrics: { enabled: true } });
 
   it('sends a critique prompt carrying the question and the data-framed answer', async () => {
     let prompt = '';
@@ -199,7 +199,7 @@ describe('dualVerify egress gate (S1)', () => {
   it('hard-blocks a secret under BOTH policies (override-proof)', async () => {
     const secret = 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34';
     for (const policy of ['block', 'allow'] as const) {
-      const cfg = enabled(); cfg.dualVerify.egressPolicy = { memoryEcho: policy, piiHigh: policy, piiBulk: policy, secretHeuristic: policy, secretEntropy: policy };
+      const cfg = enabled(); cfg.dualVerify.egressPolicy = { memoryEcho: policy, piiHigh: policy, piiBulk: policy, secretHeuristic: policy, secretEntropy: policy, secretEntropyExempt: 'allow' };
       const r = await dualVerify({ question: 'is this live?', helixAnswer: secret },
         deps({ config: cfg, echo: disabledEcho }));
       expect(r.ran).toBe(false);
@@ -289,7 +289,7 @@ describe('dualVerify: outcome + promptSent (for opt-in content logging)', () => 
 
   it('critique success -> outcome sent, promptSent equals the critique prompt (contains question + answer)', async () => {
     const critiqueCfg: HelixConfig =
-      { dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block' }, logContent: false }, metrics: { enabled: true } };
+      { dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, metrics: { enabled: true } };
     const r = await dualVerify({ question: 'which db?', helixAnswer: 'use postgres' },
       deps({ config: critiqueCfg, runner: async () => ({ ok: true, answer: 'fine' }) }));
     expectOutcome(r.outcome, 'sent');
