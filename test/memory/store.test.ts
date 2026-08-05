@@ -127,7 +127,7 @@ describe('MemoryStore recall / verify / inspect / erase', () => {
     }
   });
 
-  it('recheck determinate FAIL on a user item is contested (no write, state stays)', () => {
+  it('recheck determinate FAIL on an UNVOUCHED user item demotes to Suspect (source is not a shield)', () => {
     const { store, dir } = tmpStore();
     const cwd = process.cwd();
     process.chdir(dir);
@@ -135,8 +135,47 @@ describe('MemoryStore recall / verify / inspect / erase', () => {
       writeFileSync(join(dir, 'app.json'), 'base /v1/users');         // file present but pattern absent
       const a = store.commit({ content: 'api base /v2/users in app.json', source: 'user' });
       const r = store.recheck(a.id, { kind: 'file-contains', path: 'app.json', pattern: '/v2/users' });
+      expect(r.result).toEqual({ kind: 'state', state: 'Suspect' });
+      expect(store.inspect().find((s) => s.record.id === a.id)!.record.state).toBe('Suspect');
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it('recheck determinate FAIL on a CONFIRMED (Verified) item is contested — the human vouch is protected', () => {
+    const { store, dir } = tmpStore();
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      writeFileSync(join(dir, 'app.json'), 'base /v1/users');
+      const a = store.commit({ content: 'api base /v2/users in app.json', source: 'user' });
+      store.confirm(a.id);                                            // human out-of-band vouch -> Verified
+      const r = store.recheck(a.id, { kind: 'file-contains', path: 'app.json', pattern: '/v2/users' });
       expect(r.result).toEqual({ kind: 'contested' });
-      expect(store.inspect().find((s) => s.record.id === a.id)!.record.state).toBe('Fresh');
+      expect(r.record).toBeNull();
+      expect(store.inspect().find((s) => s.record.id === a.id)!.record.state).toBe('Verified');
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  // N2-CONTESTED / S1: `source` is caller-declared at the MCP boundary (helix-server.ts:45 lets the
+  // model pick it) and unauthenticated on disk (the ledger MAC never covers `provenance`). Two items
+  // that differ ONLY in that claim must get identical treatment, or the claim is a free trust upgrade.
+  it('INVARIANT: a claimed provenance source cannot change a recheck verdict', () => {
+    const { store, dir } = tmpStore();
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      writeFileSync(join(dir, 'app.json'), 'base /v1/users');
+      const check = { kind: 'file-contains' as const, path: 'app.json', pattern: '/v2/users' };
+      const content = 'api base /v2/users in app.json';
+      const claimed = store.commit({ content, source: 'user' });
+      const honest = store.commit({ content, source: 'agent-inference' });
+      expect(store.recheck(claimed.id, check).result).toEqual(store.recheck(honest.id, check).result);
+      const stateOf = (id: string) => store.inspect().find((s) => s.record.id === id)!.record.state;
+      expect(stateOf(claimed.id)).toBe(stateOf(honest.id));
+      expect(stateOf(claimed.id)).toBe('Suspect');
     } finally {
       process.chdir(cwd);
     }
@@ -200,8 +239,9 @@ describe('MemoryStore.confirm', () => {
       process.chdir(cwd);
     }
   });
-  // (Suspect -> Verified recovery is proven at the resolveTransition unit level in Task 2; a user item
-  //  cannot reach Suspect via recheck since a determinate FAIL on a user target is contested, not a demote.)
+  // (Suspect -> Verified recovery is proven at the resolveTransition unit level in Task 2. Since
+  //  N2-CONTESTED an UNVOUCHED user item CAN reach Suspect via recheck — `source` is no longer a
+  //  shield — and confirm() still lifts it straight back to Verified, so the human keeps the override.)
 
   it('INVARIANT: only confirm yields Verified — recheck never does', () => {
     const { store, dir } = tmpStore();

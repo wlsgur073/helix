@@ -255,6 +255,23 @@ All notable changes to Helix are documented here. This project follows
   divergence.
 
 ### Security
+- A claimed provenance can no longer make a fact undemotable. The write-side trust authority
+  (`resolveTransition`) treated a determinate reality-check FAIL as `contested` — no ledger record,
+  no state change — when the target's `provenance.source` was `user`. That field is unauthenticated
+  at every layer: the ledger MAC never covers it (and says so, together with the invariant that no
+  such field may drive a trust decision), the verified projection clamps `state` and spreads the rest
+  through unchanged, and at the MCP boundary the calling model picks the value outright. So an item
+  that merely *claimed* human authorship was permanently immune to mechanical contradiction, with no
+  file write required. The guard now tests `targetState` alone — the same intent in authenticated
+  form, since only `confirm` mints `Verified` and that grade survives projection only through a
+  MAC-verified record. An **unvouched** item, whatever it claims, now demotes to `Suspect` on a
+  determinate FAIL, which is reversible in both directions (a later PASS lifts it to `Corroborated`;
+  `confirm` still lifts it to `Verified` from any state). The human vouch is still protected; the
+  unbacked claim of one is not. The parameter is accepted-and-ignored for now because `store.ts` is
+  freeze-pinned and still passes it; a behavioural regression lock asserts every verdict is identical
+  across every claimed source. This also closes the separately-filed "the boundary lets a caller
+  declare `source: 'user'`" report: no schema can authenticate that field, so the fix is that nothing
+  security-critical may depend on it.
 - The egress guard no longer blocks source citations by accident. A `path/to/file.ts:112` pointer has
   no `:` in the benign-word-chain separator class, so its final segment disqualified the whole token
   and the citation landed in the entropy net — while the same shape one character shorter passed, the

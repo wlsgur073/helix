@@ -151,6 +151,18 @@ still confirm which ledger it physically lives in (read the ledger JSONL directl
   can still be superseded or evicted by a later Fresh non-authoritative commit; the replacement is
   honestly `Fresh` — no grade is forged — so this is a within-model crowd-out property, not a
   trust-forgery.
+- **`provenance.source` is caller-declared, and is not a trust boundary.** The ledger MAC does not
+  cover it, the verified projection passes it through unclamped, and the tool schema lets the calling
+  model choose it — the server has no way to tell what you said from what a document you pasted said.
+  So it may drive **disclosure and ranking** (the reverify-before-use flag, the recall penalty, which
+  items the SessionStart preamble surfaces), where failing open still leaves the content visible in
+  front of you. It must never drive a **durable trust-state** decision. Until 2026-08-05 one did: a
+  determinate reality-check failure against an item *claiming* `source=user` was suppressed entirely
+  rather than demoting it to `Suspect`, so the claim alone bought permanent immunity from mechanical
+  contradiction. The demotion guard now reads only the authenticated `Verified` grade. Two
+  configuration-dependent controls remain, and are defence-in-depth rather than mechanisms: the
+  supersede refusal, and `confirm`'s eligibility check — which is only as strong as the tool-approval
+  prompt above it, per the trust-model note on not allow-listing `helix_memory_confirm`.
 
 ## Rollback witness (cross-boundary ledger rollback)
 
