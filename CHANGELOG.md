@@ -216,6 +216,19 @@ All notable changes to Helix are documented here. This project follows
   advertises it, so the API rejects it after the metered call is already spent.
 
 ### Fixed
+- **A fact id is now owned by the first ledger row that claims it**, so a row appended with an
+  existing id is inert. A signed `verify` binds only `(id, contentDigest)`, so a duplicate row with
+  the same id and content satisfied it as well as the row it was signed for — and rode the grade up
+  carrying the appending writer's `provenance`, `classification` and validity bounds, none of which
+  any MAC covers. Ownership is decided by file position, not `tx` or `gen`: a non-`verify` row
+  carries no MAC at all, so those fields are attacker-chosen, while getting in front of the genuine
+  row requires rewriting the witnessed prefix, which the rollback witness reports as `mismatch`.
+  Ownership is resolved over the whole ledger *before* the `--asOf` window is applied — a duplicate
+  dated into the past would otherwise be the only claimant of its id inside that window, and a v1
+  `verify` supplies the matching signature for free because `macInputV1` never bound `tx`. No effect
+  on any ledger Helix wrote: ids are `randomUUID`-derived and updates mint a new id carrying
+  `supersedes`. A duplicate id is still reported as a history anomaly, and compaction now keeps the
+  genuine row rather than the appended one.
 - **The content digest a `verify` signs is now injective.** It hashed the UTF-8 encoding of the
   content, and that encoding replaces every lone surrogate with U+FFFD — so unboundedly many
   distinct contents shared one digest and could be swapped under a signed grade, including

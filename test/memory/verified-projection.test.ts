@@ -192,3 +192,41 @@ describe('resolveTargetGrade (shared grade + evidence helper, spec C §4.3)', ()
     expect(evidence.every((e) => !e.winner)).toBe(true);
   });
 });
+
+// F2 leg 1, end to end. The verify binds (id, contentDigest) and NOTHING else, so a second row with
+// the same id and the same content satisfied it exactly as well as the row it was signed for — and
+// carried the appended writer's `provenance` and `classification` up with the grade.
+describe('an appended duplicate id cannot inherit a signed grade (F2 leg 1)', () => {
+  const D = digestContent('fact');
+  const genuine = base({ id: 'a', content: 'fact', provenance: { source: 'agent-inference', sessionId: 's' }, classification: 'personal' });
+  const verify = sv2({ id: 'v', supersedes: 'a', state: 'Corroborated', gen: 1, targetDigest: D });
+
+  it('serves the owning row, so the forged provenance and classification never ride the grade up', () => {
+    const forged = base({
+      id: 'a', content: 'fact', tx: '2026-07-01T00:00:00.000Z',
+      provenance: { source: 'user', sessionId: 's' }, classification: 'normal',
+    });
+    const live = buildVerifiedProjection([genuine, verify, forged], { verify: V, keyAvailable: true }).live.get('a')!;
+    expect(live.provenance.source).toBe('agent-inference');
+    expect(live.classification).toBe('personal');
+    expect(live.state).toBe('Corroborated');   // the honest elevation is preserved, not collateral
+  });
+
+  it('picking a tx before the verify does not help, because ordering is not what decides ownership', () => {
+    // An `assert` row carries no MAC at all, so its `tx` is adversary-chosen. Any rule that read it
+    // would be a trust decision driven by an unauthenticated field — the thing ledger-mac.ts forbids.
+    const forged = base({
+      id: 'a', content: 'fact', tx: '2020-01-01T00:00:00.000Z',
+      provenance: { source: 'user', sessionId: 's' },
+    });
+    const live = buildVerifiedProjection([genuine, verify, forged], { verify: V, keyAvailable: true }).live.get('a')!;
+    expect(live.provenance.source).toBe('agent-inference');
+  });
+
+  it('a duplicate carrying CHANGED content no longer replaces the fact or drops its grade', () => {
+    const forged = base({ id: 'a', content: 'replaced', tx: '2026-07-01T00:00:00.000Z' });
+    const live = buildVerifiedProjection([genuine, verify, forged], { verify: V, keyAvailable: true }).live.get('a')!;
+    expect(live.content).toBe('fact');
+    expect(live.state).toBe('Corroborated');
+  });
+});

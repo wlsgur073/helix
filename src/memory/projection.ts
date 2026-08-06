@@ -11,10 +11,40 @@ export type Projection = Map<string, MemoryRecord>;
  * 'verify' records update their target's state (referenced via `supersedes`) and are NOT
  * surfaced as live facts — a verify event is not itself recallable.
  */
+/**
+ * `records` with every non-canonical duplicate of a fact id dropped: the FIRST row bearing an id
+ * owns it, in file order.
+ *
+ * Ledger-wide by construction, and that scope is the point — `asof.ts` must resolve ownership over
+ * the WHOLE ledger before it windows by `tx`, because a forged duplicate dated before the row it
+ * shadows is the only claimant inside its own window and a window-scoped rule sees nothing to
+ * arbitrate.
+ *
+ * Helix never re-uses an id: `store.commit` mints `m_${randomUUID()}` and models every update as a
+ * NEW id carrying `supersedes`, so this is a no-op on any ledger the store wrote — it only bites
+ * rows some other writer appended to `memory.jsonl` directly. Letting the LAST such row win handed
+ * that writer the earlier row's signed grade along with adversary-chosen `provenance`,
+ * `classification` and validity bounds, none of which any MAC covers (F2 leg 1). File position is
+ * the only ordering signal worth reading here: a non-verify row carries no MAC at all, so its `tx`
+ * and `gen` are adversary-chosen, whereas rewriting the witnessed prefix to get in front of the
+ * genuine row is what the rollback witness classifies as `mismatch`.
+ *
+ * `verify`/`invalidate`/`erase` never write the live map and pass through untouched.
+ */
+export function withoutDuplicateFactIds(records: MemoryRecord[]): MemoryRecord[] {
+  const owned = new Set<string>();
+  return records.filter((r) => {
+    if (r.type === 'verify' || r.type === 'invalidate' || r.type === 'erase') return true;
+    if (owned.has(r.id)) return false;
+    owned.add(r.id);
+    return true;
+  });
+}
+
 export function buildProjection(records: MemoryRecord[]): Projection {
   const removed = new Set<string>();
   const live = new Map<string, MemoryRecord>();
-  for (const r of records) {
+  for (const r of withoutDuplicateFactIds(records)) {
     if (r.type === 'verify') {
       const target = r.supersedes;
       if (target && live.has(target)) {

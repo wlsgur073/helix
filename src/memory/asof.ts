@@ -1,5 +1,5 @@
 import type { MemoryRecord, AsOfFact } from '../types.js';
-import { buildProjection } from './projection.js';
+import { buildProjection, withoutDuplicateFactIds } from './projection.js';
 import { digestContent } from './ledger-mac.js';
 import { resolveTargetGrade, isKnownState } from './verified-projection.js';
 
@@ -12,7 +12,12 @@ export function buildAsOfEvidence(
   t: string,
   opts: { verify: (r: MemoryRecord) => boolean; keyAvailable: boolean },
 ): { facts: AsOfFact[]; keyAvailable: boolean } {
-  const asOfRecords = records.filter((r) => r.tx <= t);            // declared membership window
+  // Ownership of a fact id is resolved LEDGER-WIDE, before the window, and deliberately not inside
+  // it: a forged duplicate dated before the row it shadows is the sole claimant of its id within
+  // `tx <= t`, so a window-scoped rule has nothing to arbitrate and serves the forgery. The verify
+  // it needs inside that window is free on a legacy ledger — `macInputV1` omits `tx`, so a byte-copy
+  // of a v1 verify with its `tx` moved back still validates (F2 leg 1, asOf variant).
+  const asOfRecords = withoutDuplicateFactIds(records).filter((r) => r.tx <= t); // declared membership window
   const liveAt = buildProjection(asOfRecords.filter((r) => r.type !== 'verify')); // facts live at t
   const facts: AsOfFact[] = [];
 

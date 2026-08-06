@@ -85,3 +85,31 @@ describe('buildAsOfEvidence (spec C §4)', () => {
     expect(f.record.state).toBe('Fresh'); // the stamped record.state agrees with the grade (no contradiction)
   });
 });
+
+// F2 leg 1, the asOf variant. Ownership of a fact id must be resolved over the WHOLE ledger, never
+// over the `tx <= t` window: a forged duplicate dated before the genuine row is the only row bearing
+// its id inside its own window, so a window-scoped rule sees nothing to arbitrate. The adversary
+// still needs a valid verify inside that window, and v1 supplies one for free — `macInputV1` omits
+// `tx`, so a byte-copy of an existing v1 verify with only its `tx` moved back is still MAC-valid.
+describe('asOf resolves id ownership ledger-wide, not per window (F2 leg 1)', () => {
+  const genuine = base({ id: 'a', content: 'fact', tx: T('20'), provenance: { source: 'agent-inference', sessionId: 's' } });
+  const v1 = sv1({ id: 'v', supersedes: 'a', state: 'Corroborated', gen: 1, targetDigest: D, tx: T('30') });
+  const v1Moved = { ...v1, tx: T('05') };                      // no key needed: v1 never bound tx
+  const forged = base({ id: 'a', content: 'fact', tx: T('01'), provenance: { source: 'user', sessionId: 's' } });
+  const ledger = [genuine, v1, forged, v1Moved];
+
+  it('the premise holds: a v1 verify survives having its tx rewritten', () => {
+    expect(V(v1Moved)).toBe(true);
+  });
+
+  it('does not serve the forged duplicate inside the window only it occupies', () => {
+    const facts = buildAsOfEvidence(ledger, T('10'), { verify: V, keyAvailable: true }).facts;
+    expect(facts.find((f) => f.record.id === 'a')).toBeUndefined();
+  });
+
+  it('still serves the genuine row, with its honest grade, once its own tx is in range', () => {
+    const f = buildAsOfEvidence(ledger, T('59'), { verify: V, keyAvailable: true }).facts.find((x) => x.record.id === 'a')!;
+    expect(f.record.provenance.source).toBe('agent-inference');
+    expect(f.grade).toBe('Corroborated');
+  });
+});

@@ -12,6 +12,42 @@ function rec(p: Partial<MemoryRecord> & { id: string }): MemoryRecord {
   };
 }
 
+// F2 leg 1. A fact id is owned by the FIRST row that claims it, in file order, for the whole
+// ledger. Helix never re-uses an id — `store.commit` mints `m_${randomUUID()}` and models every
+// update as a NEW id carrying `supersedes` — so a second row claiming a live id can only come from
+// something that wrote `memory.jsonl` behind the store's back. Letting the later row win handed
+// that writer the earlier row's signed grade along with adversary-chosen `provenance`,
+// `classification` and validity bounds, none of which any MAC covers.
+describe('fact-id ownership is first-wins (F2 leg 1)', () => {
+  it('a later row claiming a live id does not displace the row that owns it', () => {
+    const proj = buildProjection([
+      rec({ id: 'm_1', content: 'genuine' }),
+      rec({ id: 'm_1', content: 'forged', tx: '2026-07-01T00:00:00.000Z' }),
+    ]);
+    expect(proj.get('m_1')?.content).toBe('genuine');
+  });
+
+  it('a supersede-shaped claim cannot take an owned id either', () => {
+    // `supersede` writes the live map on its OWN id, so a rule that only covered `assert` left this
+    // shape as a bypass: no `supersedes` target means nothing is removed, only replaced.
+    const proj = buildProjection([
+      rec({ id: 'm_1', content: 'genuine' }),
+      rec({ id: 'm_1', type: 'supersede', supersedes: null, content: 'forged' }),
+    ]);
+    expect(proj.get('m_1')?.content).toBe('genuine');
+  });
+
+  it('still lets a legitimate supersede chain replace facts, because each link mints a new id', () => {
+    const proj = buildProjection([
+      rec({ id: 'm_1', content: 'v1' }),
+      rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'v2' }),
+      rec({ id: 'm_3', type: 'supersede', supersedes: 'm_2', content: 'v3' }),
+    ]);
+    expect([...proj.keys()]).toEqual(['m_3']);
+    expect(proj.get('m_3')?.content).toBe('v3');
+  });
+});
+
 describe('projection', () => {
   it('builds a map of live items, latest-wins on supersede', () => {
     const proj = buildProjection([

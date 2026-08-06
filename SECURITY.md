@@ -82,6 +82,13 @@ locally-held key, so:
 - Against an adversary that can write `.helix/memory.jsonl` but **cannot read `~/.helix`**,
   `Corroborated`/`Verified` are **unforgeable at the file/append surface**. This is the same trust
   boundary the ownership registry already relies on.
+- **A fact id is owned by the first row that claims it**, in file order, and an appended row bearing
+  an existing id is inert. A `verify` binds only `(id, contentDigest)`, so a second row with that id
+  and that content used to satisfy it just as well as the row it was signed for — and rode the grade
+  up carrying the appending writer's `provenance`, `classification` and validity bounds, none of
+  which any MAC covers. Position, not `tx` or `gen`, decides ownership: a non-`verify` row carries no
+  MAC at all, so those fields are adversary-chosen, whereas getting *in front* of the genuine row
+  means rewriting the witnessed prefix, which the rollback witness reports as `mismatch`.
 - **The content binding is injective.** The digest a `verify` signs is taken over an encoding that
   distinguishes every JS string, including ill-formed ones. Plain UTF-8 does not: it replaces every
   lone surrogate with U+FFFD, so unboundedly many distinct contents — including well-formed ones —
@@ -93,6 +100,11 @@ locally-held key, so:
   that the clock was correct. Pre-existing v1 verifications stay valid but carry an unauthenticated
   (editable) `tx` — timing trust is therefore per-record, and grows only as facts are genuinely
   re-verified. Grade validity never depends on `tx`: a v1 grade survives even if its `tx` is garbage.
+  **Point-in-time membership does depend on it**, and that is the one place an editable v1 `tx`
+  still buys something: `--asOf` selects rows by raw `tx`, so a byte-copy of a v1 verify with its
+  `tx` moved back is a valid verify inside a past window. Fact-id ownership is therefore resolved
+  over the whole ledger *before* the window is applied — otherwise a duplicate dated into the past
+  would be the only claimant of its id there, with nothing left to arbitrate against.
 
 **This authenticates the file surface, not the tool surface.** A legitimate `helix_memory_confirm`
 call still carries no enforceable human-approval signal, so the guidance above stands: do **not**
