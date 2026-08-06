@@ -105,15 +105,25 @@ describe('Task 7 — read-side witness enforcement', () => {
       } finally { rmSync(home, { recursive: true, force: true }); }
     });
 
-    it('asOf on the same mismatched state keeps historical grades but still renders the note', () => {
+    it('asOf on the same mismatched state keeps historical grades and says so, instead of claiming a clamp it does not perform', () => {
+      // F2-WRITE follow-on. asOf is deliberately NOT clamped (a point-in-time reconstruction reports
+      // what the ledger attested then), but it used to render the LIVE path's note verbatim —
+      // "elevated grades are clamped to Fresh" — while serving Verified. The disclosure contradicted
+      // the behaviour on the one surface where a reader is most likely to be doing forensics.
       const { store, home, aId } = forkedMismatch();
       try {
         const view = store.asOfView('2026-07-19T00:00:00.000Z');
         const factA = view.facts.find((f) => f.record.id === aId)!;
-        expect(factA.grade).toBe('Verified');             // asOf is NOT clamped
-        expect(view.witnessNotes).toContain(WITNESS_MISMATCH_NOTE);
+        expect(factA.grade).toBe('Verified');             // asOf is NOT clamped — unchanged, on purpose
+
         const out = TEXT(handleInspect(store, { asOf: '2026-07-19T00:00:00.000Z' }));
-        expect(out).toContain(WITNESS_MISMATCH_NOTE);
+        expect(out).toContain('rollback witness mismatch');           // the alarm is still disclosed
+        expect(out).not.toContain('clamped to Fresh');                // but not with a false claim
+        expect(out).toContain('not a current-authority verdict');     // the surface-true statement
+
+        // Unchanged on purpose: the LIVE surfaces do clamp, so the generic note stays correct there.
+        const live = TEXT(handleRecall(store, { query: 'alpha' }));
+        expect(live).toContain(WITNESS_MISMATCH_NOTE);
       } finally { rmSync(home, { recursive: true, force: true }); }
     });
 

@@ -55,6 +55,12 @@ export const UNADOPTED_LEDGER_NOTE =
 // note text itself must never be interpolated, name a path, or carry an imperative to act.
 export const WITNESS_MISMATCH_NOTE =
   '(rollback witness mismatch: this ledger does not descend from its witnessed head; elevated grades are clamped to Fresh until an authorized re-baseline)';
+/** The as-of variant of WITNESS_MISMATCH_NOTE. A point-in-time reconstruction deliberately does NOT
+ *  clamp — it reports what the ledger attested at that instant — so the live wording, which promises
+ *  a clamp, was false there, and false on exactly the surface a reader reaches while investigating an
+ *  alarm. Same constraints as every witness note: static, no interpolation, no path, no imperative. */
+export const WITNESS_MISMATCH_ASOF_NOTE =
+  '(rollback witness mismatch: this ledger does not descend from its witnessed head; this as-of view preserves the reconstructed historical grades present in the available bytes, which may omit later corrections and are not a current-authority verdict)';
 export const WITNESS_TRANSITION_NOTE =
   '(a ledger rewrite for this scope was interrupted; its records are excluded until the transition is re-driven or re-baselined)';
 export const WITNESS_INIT_NOTE =
@@ -74,6 +80,15 @@ export function witnessNoteFor(verdict: WitnessVerdict): string | null {
 
 /** Map an ordered list of per-scope verdicts (global first, then project) to their notes — deduped,
  *  order-preserving. Two scopes sharing a verdict render the note once (spec: ordered + deduped). */
+/** The as-of rendering of a read surface's witness notes: the mismatch note becomes its surface-true
+ *  variant, every other note passes through. Applied at the RENDER layer rather than at the source
+ *  because `MemoryStore.asOfView` composes the generic set and is a frozen path for the v2 window;
+ *  the consequence, stated so it is not mistaken for completeness, is that a LIBRARY caller reading
+ *  `asOfView().witnessNotes` still receives the generic wording until that call site can be changed. */
+export function asOfWitnessNotes(notes: string[]): string[] {
+  return notes.map((n) => (n === WITNESS_MISMATCH_NOTE ? WITNESS_MISMATCH_ASOF_NOTE : n));
+}
+
 export function collectWitnessNotes(verdicts: WitnessVerdict[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];

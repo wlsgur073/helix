@@ -227,6 +227,11 @@ All notable changes to Helix are documented here. This project follows
   reality-check **demotions** still land under the same verdict — a scope under suspicion must stay
   able to record that something failed. It keys on the record rather than the caller's operation
   label, because `signVerify` does not itself assert the record type.
+- **The `--asOf` view no longer claims a clamp it does not perform.** That surface preserves
+  historical grades on purpose, but it rendered the live path's note verbatim — "elevated grades are
+  clamped to Fresh" — while serving `Verified`. It now carries its own wording. The live surfaces are
+  unchanged, where that sentence is still true. Known limit: a *library* caller reading
+  `asOfView().witnessNotes` still receives the generic wording; only the tool surface is corrected.
 - **A fact id is now owned by the first ledger row that claims it**, so a row appended with an
   existing id is inert. A signed `verify` binds only `(id, contentDigest)`, so a duplicate row with
   the same id and content satisfied it as well as the row it was signed for — and rode the grade up

@@ -4,7 +4,7 @@ import type { HelixConfig } from '../config.js';
 import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type EchoSource } from '../verify/dual-verify.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, newNonce, safeId, UNADOPTED_LEDGER_NOTE } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, newNonce, safeId, UNADOPTED_LEDGER_NOTE, asOfWitnessNotes } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
 import { appendAudit, type VerifyAudit } from '../audit.js';
 import { readFileSync } from 'node:fs';
@@ -82,7 +82,9 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
     if (args.history) return ok('inspect: history and asOf are mutually exclusive — pass one.');
     if (!isIsoInstant(args.asOf)) return ok('inspect: as-of cursor must be a canonical ISO-8601 instant (e.g. 2026-07-04T00:00:00.000Z).');
     const { facts, keyAvailable, truncated, projectDisposition, witnessNotes } = store.asOfView(args.asOf);
-    if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
+    // asOf does not clamp, so the live mismatch note — which promises a clamp — is false here.
+    const asOfNotes = asOfWitnessNotes(witnessNotes);
+    if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + unadoptedNote(projectDisposition) + witnessNotesText(asOfNotes));
     const lines: Array<{ text: string; mark: string }> = [];
     for (const f of facts) {
       lines.push({ text: `${safeId(f.record.id)} ${f.record.content}`, mark: `DATA[${f.grade}:${f.scope}]| ` });
@@ -98,7 +100,7 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
     if (facts.some((f) => f.evidence.some((e) => !e.txAuthenticated))) notes.push('\n\n(verify timing marked auth=N is declared, not authenticated — v1/legacy)');
     if (truncated) notes.push('\n\n(history may be truncated by a past compaction — reconstruction before the horizon is unreliable)');
     if (projectDisposition === 'unadopted-present') notes.push(unadoptedNote(projectDisposition));
-    for (const n of witnessNotes) notes.push(`\n\n${n}`);
+    for (const n of asOfNotes) notes.push(`\n\n${n}`);
     return ok(frame + notes.join(''));
   }
   if (args.history) {
