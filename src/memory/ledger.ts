@@ -33,6 +33,19 @@ export const isHorizonMarker = (r: MemoryRecord): boolean => isMarkerShape(r) &&
  *  prefix via parseLedger output (e.g. test assertions), never need the predicate itself. */
 const isIntegrityMarker = (r: MemoryRecord): boolean => isMarkerShape(r) && r.id.startsWith('integrity_');
 
+/** A stale epoch fence — the marker SHAPE plus the family prefix, exactly like the two predicates
+ *  above. Gating on the prefix alone (as this did until 2026-08-06) drops any live row wearing the
+ *  namespace: an `assert` is physically destroyed with no horizon marker (that test fires only for a
+ *  row no longer live, and this one is) and no droppedForgedVerifies, so the compaction records that
+ *  it destroyed nothing. A genuine fence is verify-shaped (witnessFenceRecord), so shape-gating drops
+ *  every real one and none of the impostors.
+ *
+ *  Exported because the auto-compaction reclaim estimate (store.ts) must net out PRECISELY the rows
+ *  this drops. Those two predicates cannot be allowed to drift: a row counted in `kept` but excluded
+ *  from the estimate's input makes `reclaimable` negative, breaking the `0 <= reclaimable <= rows`
+ *  precondition the gate is documented to rely on. One predicate, both call sites. */
+export const isWitnessFence = (r: MemoryRecord): boolean => isMarkerShape(r) && r.id.startsWith('witness_fence_');
+
 /** Reconstruct a marker CANONICALLY — every field whitelisted, constant id, sentinel timestamps. Never
  *  copies an existing row through, so hostile content/provenance/timestamps/extension fields on a
  *  planted marker cannot survive. `kind` is the stable id, so at most one row per kind can ever exist
@@ -408,7 +421,7 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   // the HMAC-aware verify-preserve loop before `keepValidVerify` is ever consulted. The drop is
   // made EXPLICIT here too regardless, so it does not silently depend on the incidental
   // interaction of those two unrelated guards elsewhere in this function.
-  const withoutStaleFences = kept.filter((r) => !r.id.startsWith('witness_fence_'));
+  const withoutStaleFences = kept.filter((r) => !isWitnessFence(r));
   return { kept: withoutStaleFences, droppedForgedVerifies };
 }
 

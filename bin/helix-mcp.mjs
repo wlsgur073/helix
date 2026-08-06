@@ -14280,6 +14280,7 @@ var MARKER_SENTINEL_TX = "1970-01-01T00:00:00.000Z";
 var isMarkerShape = (r) => r != null && r.type === "verify" && r.supersedes === null && !r.mac && typeof r.id === "string";
 var isHorizonMarker = (r) => isMarkerShape(r) && r.id.startsWith("horizon_");
 var isIntegrityMarker = (r) => isMarkerShape(r) && r.id.startsWith("integrity_");
+var isWitnessFence = (r) => isMarkerShape(r) && r.id.startsWith("witness_fence_");
 function canonicalMarker(kind) {
   return {
     id: kind,
@@ -14432,7 +14433,7 @@ function planCompaction(records, opts) {
   if ((records.some(isHorizonMarker) || records.some((r) => (r.type === "assert" || r.type === "supersede") && !live.has(r.id))) && !opts.erasedIds.has("horizon_marker")) {
     kept.push(canonicalMarker("horizon_marker"));
   }
-  const withoutStaleFences = kept.filter((r) => !r.id.startsWith("witness_fence_"));
+  const withoutStaleFences = kept.filter((r) => !isWitnessFence(r));
   return { kept: withoutStaleFences, droppedForgedVerifies };
 }
 function serializedBytes(records) {
@@ -15587,7 +15588,7 @@ var MemoryStore = class {
       const keepValidVerify = this.keepValidVerifyFor(r.subkey);
       const provesKey = this.provesKeyFor(r.subkey);
       const { kept } = planCompaction(records, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify, provesKey });
-      const inputNonFence = records.filter((rec) => !rec.id.startsWith("witness_fence_"));
+      const inputNonFence = records.filter((rec) => !isWitnessFence(rec));
       const reclaimable = inputNonFence.length - kept.length;
       const reclaimableBytes = serializedBytes(inputNonFence) - serializedBytes(kept);
       if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;

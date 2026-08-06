@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
+import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, type CompactionStats, type LedgerPath } from './ledger.js';
 import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
 import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, WitnessBlockedError } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
@@ -481,7 +481,9 @@ export class MemoryStore {
       // breaking the self-limiting invariant (spec §4.5). Measuring reclaim against the NON-fence input
       // rows nets it out (on a fence-free ledger this is identical to `records`, so a genuinely dirty
       // ledger is unaffected). `rows` for the gate stays the total PHYSICAL count (dirtyGate contract).
-      const inputNonFence = records.filter((rec) => !rec.id.startsWith('witness_fence_'));
+      // Same predicate planCompaction drops by — imported, not restated, so the estimate can never
+      // drift from the keep-set it is estimating (see isWitnessFence).
+      const inputNonFence = records.filter((rec) => !isWitnessFence(rec));
       const reclaimable = inputNonFence.length - kept.length;
       const reclaimableBytes = serializedBytes(inputNonFence) - serializedBytes(kept);
       if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
