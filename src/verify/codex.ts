@@ -173,6 +173,15 @@ export function childEnv(parent: NodeJS.ProcessEnv = process.env): Record<string
  *  not reading, so whatever directory this process starts in is a directory the external model can
  *  walk — and the egress guard, which sees only the prompt, would never know. */
 function runCodex(inv: CodexInvocation, args: string[], input: string | null, timeoutMs: number, cwd: string, signal?: AbortSignal): Promise<RunOutcome> {
+  // Checked BEFORE spawn(), not just wired up after it: the caller can already have cancelled
+  // during the window before this call -- dualVerify's checkAvailable() preflight, or
+  // createCodexRunner's own resolveInv/scratch-dir setup, all run first and can take seconds.
+  // AbortSignal's 'abort' event fires exactly once, at abort()-time; a listener registered after
+  // that (the addEventListener call further down) never sees it, so without this check a signal
+  // that was already aborted before runCodex was even called would spawn the metered child anyway
+  // and let it run to its full timeout. Free preflight probes never pass a signal, so `signal` is
+  // always undefined there and this branch is unreachable for them, not merely false.
+  if (signal?.aborted) return Promise.reject(new Error('codex run aborted'));
   return new Promise((resolve, reject) => {
     const child = spawn(inv.file, [...inv.argsPrefix, ...args], {
       stdio: [input === null ? 'ignore' : 'pipe', 'pipe', 'pipe'],

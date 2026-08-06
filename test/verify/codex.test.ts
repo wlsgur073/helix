@@ -139,6 +139,40 @@ process.stdin.on('end', () => {
     for (let i = 0; i < 40 && alive(pid); i++) await new Promise((r) => setTimeout(r, 50));
     expect(alive(pid)).toBe(false); // the metered child did not survive cancellation
   }, 15_000);
+
+  // Review finding: `addEventListener('abort', ...)` is registered AFTER spawn() -- an abort that
+  // already happened BEFORE this call (e.g. during dualVerify's checkAvailable() preflight, or during
+  // createCodexRunner's own resolveInv/scratch-dir setup, all of which run before `run()` is ever
+  // reached) fires the 'abort' event exactly once, at abort() time; a listener added afterward never
+  // sees it. Unlike the test above, this aborts BEFORE the runner is invoked at all -- the child must
+  // never be spawned in the first place, not merely killed after the fact (that would still spend
+  // the user's quota on a run nobody wanted).
+  it('an already-aborted signal is honored before ever spawning the metered child', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'helix-codex-preabort-'));
+    const stub = join(dir, 'codex-hang.mjs');
+    const sentinel = join(dir, 'started.pid');
+    writeFileSync(stub, `
+import { writeFileSync } from 'node:fs';
+let input = '';
+process.stdin.on('data', (d) => { input += d; });
+process.stdin.on('end', () => {
+  writeFileSync(input.trim(), String(process.pid));
+  setInterval(() => {}, 1_000_000);
+});
+`);
+    const runner = createCodexRunner(async () => ({ file: process.execPath, argsPrefix: [stub] }));
+    const ac = new AbortController();
+    ac.abort(); // aborted BEFORE runner() is ever called -- the window the review flagged
+
+    const result = await runner(sentinel, { signal: ac.signal, timeoutMs: 30_000 });
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; error: string }).error).toMatch(/aborted/i);
+
+    // The metered child must never have been spawned at all -- give the OS a moment, then confirm
+    // the sentinel (written the instant the stub starts) never appeared.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(existsSync(sentinel)).toBe(false);
+  }, 15_000);
 });
 
 describe('createCodexRunner (scratch dir corralled under <temp>/helix)', () => {

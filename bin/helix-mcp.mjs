@@ -25206,6 +25206,7 @@ function childEnv(parent = process.env) {
   return out;
 }
 function runCodex(inv, args, input, timeoutMs, cwd, signal) {
+  if (signal?.aborted) return Promise.reject(new Error("codex run aborted"));
   return new Promise((resolve2, reject) => {
     const child = spawn(inv.file, [...inv.argsPrefix, ...args], {
       stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"],
