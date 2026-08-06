@@ -54,16 +54,24 @@ if (existsSync(join(projectRoot, '.helix', 'config.json'))) {
 }
 const metrics = createMetricsSink(join(home, 'metrics.jsonl'), config.metrics.enabled);
 
-// REFUSE to start on a split trust store. Before the store's `home` was pinned, it was derived from
-// the LEDGER's directory, so anyone using HELIX_LEDGER had their signing key, registry and witness
-// created out there. Starting anyway would mint a fresh key beside the pinned home — silently
-// revoking every grade the old key conferred and orphaning a witness that still attests to this
-// scope, so a rollback against the old state would no longer be detectable. That is a trust reset
-// performed on the user's behalf without telling them. This check must precede BOTH the store
-// construction and the integrity scan below: the read path mints a scope nonce as soon as a master
-// exists, so anything that touches the ledger first has already changed the state we are judging.
+// REFUSE to start on a split trust store — but ONLY when there is a genuine migration left to
+// protect. Before the store's `home` was pinned, it was derived from the LEDGER's directory, so
+// anyone using HELIX_LEDGER had their signing key, registry and witness created out there. Starting
+// anyway, on a HOME THAT HAS NO KEY OF ITS OWN YET, would mint a fresh one beside the stray files —
+// silently revoking every grade the old key conferred and orphaning a witness that still attests to
+// this scope, so a rollback against the old state would no longer be detectable. That is a trust
+// reset performed on the user's behalf without telling them, and it is the only scenario this must
+// block: once HELIX_HOME already has its own master key, starting does NOT mint a new one — that key
+// was already established (by an earlier migration, or the re-baseline ceremony), so files still
+// sitting beside the ledger are orphaned leftovers, not a migration in progress. Blocking startup
+// forever over inert leftovers is itself the denial of service this gate must not become (see
+// docs/issues/repros/f1-detector-startup-dos.ts), so that case is downgraded to a warning.
+// This check must precede BOTH the store construction and the integrity scan below: the read path
+// mints a scope nonce as soon as a master exists, so anything that touches the ledger first has
+// already changed the state we are judging.
 const stray = strayTrustFiles(home, globalLedger);
-if (stray.length > 0) {
+const homeHasOwnMasterKey = existsSync(join(home, 'ledger-mac-master.key'));
+if (stray.length > 0 && !homeHasOwnMasterKey) {
   process.stderr.write(                                                             // ASCII only
     `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME.\n` +
     `  found next to the ledger: ${stray.join(', ')}\n` +
@@ -77,6 +85,17 @@ if (stray.length > 0) {
     `     ceremony: node bin/helix-rebaseline.mjs --scope global\n`,
   );
   process.exit(78); // EX_CONFIG
+} else if (stray.length > 0) {
+  process.stderr.write(                                                             // ASCII only
+    `helix: NOTE - trust-store-shaped files were found next to the ledger, but HELIX_HOME already has\n` +
+    `  its own signing key, so starting will NOT touch them and will NOT mint a new key over them.\n` +
+    `  found next to the ledger: ${stray.join(', ')}\n` +
+    `  ledger directory        : ${dirname(globalLedger)}\n` +
+    `  HELIX_HOME              : ${home}\n` +
+    `These are most likely left over from before HELIX_HOME had a key of its own. If they still hold\n` +
+    `state you need, move ${stray.join(', ')} into HELIX_HOME by hand; otherwise it is safe to\n` +
+    `delete them from the ledger directory — this note will keep appearing until they are gone.\n`,
+  );
 }
 
 // Auto-compaction is read GLOBAL-only (never via loadConfig's project layer): it is destructive — it

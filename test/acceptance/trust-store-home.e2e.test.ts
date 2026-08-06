@@ -102,4 +102,22 @@ describe('trust store location vs HELIX_LEDGER', () => {
     expect(stderr, 'the operator needs both directories named to act on this').toContain(ledgerDir);
     expect(stderr).toContain(home);
   }, 30_000);
+
+  it('warns but does NOT refuse when HELIX_HOME already has its own trust state (F1B-DETECTOR-DOS)', async () => {
+    // Once HELIX_HOME has its own master key, starting mints nothing new over it -- there is no
+    // migration left to protect, so files still sitting beside the ledger are inert leftovers, not
+    // a live trust reset in progress. Blocking startup forever over them would itself be the startup
+    // denial of service the detector must not become (docs/issues/repros/f1-detector-startup-dos.ts).
+    const { home, ledgerDir, ledger } = splitLayout();
+    writeFileSync(join(home, 'ledger-mac-master.key'), randomBytes(32), { mode: 0o600 });
+    writeFileSync(join(ledgerDir, 'ledger-mac-master.key'), randomBytes(32), { mode: 0o600 });
+    writeFileSync(ledger, '');
+
+    const { code, stderr } = await startAndWait(home, ledger, home);
+    expect(code, 'a HELIX_HOME with its own trust state must not be blocked by stray leftovers').toBe(0);
+    expect(stderr).not.toContain('REFUSING TO START');
+    expect(stderr).toMatch(/NOTE/);
+    expect(stderr).toContain(ledgerDir);
+    expect(stderr).toContain(home);
+  }, 30_000);
 });

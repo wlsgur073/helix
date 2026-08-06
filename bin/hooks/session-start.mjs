@@ -17,7 +17,7 @@ function isEntryPoint(importMetaUrl) {
 }
 
 // src/memory/trust-store-layout.ts
-import { existsSync as existsSync2, readFileSync as readFileSync4, statSync } from "node:fs";
+import { existsSync as existsSync2, readFileSync as readFileSync4, lstatSync as lstatSync3 } from "node:fs";
 import { dirname as dirname3, join as join3 } from "node:path";
 
 // src/memory/ownership.ts
@@ -456,17 +456,21 @@ function globalScopeNonce(home) {
 
 // src/memory/trust-store-layout.ts
 var TRUST_FILE_NAMES = ["ledger-mac-master.key", "projects.json", "witness.json", "witness-log.jsonl"];
+var MASTER_KEY_LEN = 32;
 function looksLikeOurs(name, path) {
   try {
-    if (name === "ledger-mac-master.key") return statSync(path).isFile() && statSync(path).size > 0;
-    if (name === "witness-log.jsonl") return statSync(path).isFile();
+    const st = lstatSync3(path);
+    if (!st.isFile()) return false;
+    if (name === "ledger-mac-master.key") return st.size === MASTER_KEY_LEN;
+    if (name === "witness-log.jsonl") return st.size > 0;
     const parsed = JSON.parse(readFileSync4(path, "utf8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
-    const values = Object.values(parsed);
+    const obj = parsed;
     if (name === "projects.json") {
-      return values.length > 0 && values.every((v) => typeof v === "object" && v !== null && "stamp" in v && "macNonce" in v);
+      const values = Object.values(obj);
+      return values.length > 0 && values.every((v) => typeof v === "object" && v !== null && typeof v.stamp === "string" && typeof v.macNonce === "string");
     }
-    return "scopes" in parsed || values.length > 0;
+    return typeof obj.scopes === "object" && obj.scopes !== null && !Array.isArray(obj.scopes);
   } catch {
     return false;
   }
@@ -639,7 +643,7 @@ import { dirname as dirname5, join as join5 } from "node:path";
 
 // src/memory/ledger-mac.ts
 import { createHash, createHmac, hkdfSync, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync5, linkSync as linkSync2, unlinkSync as unlinkSync3, statSync as statSync2, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
+import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync5, linkSync as linkSync2, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
 import { dirname as dirname4, join as join4 } from "node:path";
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 var LONE_SURROGATE = new RegExp("\\p{Surrogate}", "u");
@@ -665,7 +669,7 @@ function tryReadMasterStrict(path) {
   }
   if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
   try {
-    if ((statSync2(path).mode & 63) !== 0) chmodSync(path, 384);
+    if ((statSync(path).mode & 63) !== 0) chmodSync(path, 384);
   } catch {
   }
   return buf;
@@ -815,7 +819,7 @@ function aliasesGlobalLedger(projectLedger, globalLedger) {
 }
 
 // src/memory/ledger.ts
-import { readFileSync as readFileSync7, mkdirSync as mkdirSync4, statSync as statSync3 } from "node:fs";
+import { readFileSync as readFileSync7, mkdirSync as mkdirSync4, statSync as statSync2 } from "node:fs";
 
 // src/memory/projection.ts
 function buildProjection(records) {

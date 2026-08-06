@@ -16088,20 +16088,24 @@ function aliasesGlobalLedger(projectLedger2, globalLedger2) {
 }
 
 // src/memory/trust-store-layout.ts
-import { existsSync as existsSync4, readFileSync as readFileSync9, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync4, readFileSync as readFileSync9, lstatSync as lstatSync4 } from "node:fs";
 import { dirname as dirname9, join as join7 } from "node:path";
 var TRUST_FILE_NAMES = ["ledger-mac-master.key", "projects.json", "witness.json", "witness-log.jsonl"];
+var MASTER_KEY_LEN = 32;
 function looksLikeOurs(name, path) {
   try {
-    if (name === "ledger-mac-master.key") return statSync4(path).isFile() && statSync4(path).size > 0;
-    if (name === "witness-log.jsonl") return statSync4(path).isFile();
+    const st = lstatSync4(path);
+    if (!st.isFile()) return false;
+    if (name === "ledger-mac-master.key") return st.size === MASTER_KEY_LEN;
+    if (name === "witness-log.jsonl") return st.size > 0;
     const parsed = JSON.parse(readFileSync9(path, "utf8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
-    const values = Object.values(parsed);
+    const obj = parsed;
     if (name === "projects.json") {
-      return values.length > 0 && values.every((v) => typeof v === "object" && v !== null && "stamp" in v && "macNonce" in v);
+      const values = Object.values(obj);
+      return values.length > 0 && values.every((v) => typeof v === "object" && v !== null && typeof v.stamp === "string" && typeof v.macNonce === "string");
     }
-    return "scopes" in parsed || values.length > 0;
+    return typeof obj.scopes === "object" && obj.scopes !== null && !Array.isArray(obj.scopes);
   } catch {
     return false;
   }
@@ -25035,7 +25039,7 @@ import { join as join10, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync6, readdirSync as readdirSync4, lstatSync as lstatSync4, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync3 } from "node:fs";
+import { existsSync as existsSync6, readdirSync as readdirSync4, lstatSync as lstatSync5, statSync as statSync4, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync3 } from "node:fs";
 import { randomBytes as randomBytes7 } from "node:crypto";
 import { join as join9 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
@@ -25056,7 +25060,7 @@ function ensureScratchRoot(root) {
   } catch {
   }
   try {
-    const st = lstatSync4(root);
+    const st = lstatSync5(root);
     if (!st.isDirectory()) return null;
     if (typeof process.getuid === "function" && st.uid !== process.getuid()) return null;
     if ((st.mode & 63) !== 0) chmodSync3(root, 448);
@@ -25083,7 +25087,7 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     const stampPath = join9(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
-      stampMtimeMs = statSync5(stampPath).mtimeMs;
+      stampMtimeMs = statSync4(stampPath).mtimeMs;
     } catch {
       stampMtimeMs = null;
     }
@@ -25092,7 +25096,7 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     for (const d of readdirSync4(root, { withFileTypes: true })) {
       if (!d.name.startsWith(SCRATCH_PREFIX)) continue;
       try {
-        const st = lstatSync4(join9(root, d.name));
+        const st = lstatSync5(join9(root, d.name));
         entries.push({ name: d.name, isDir: st.isDirectory(), mtimeMs: st.mtimeMs });
       } catch {
       }
@@ -25646,7 +25650,8 @@ if (existsSync8(join12(projectRoot, ".helix", "config.json"))) {
 }
 var metrics = createMetricsSink(join12(home, "metrics.jsonl"), config2.metrics.enabled);
 var stray = strayTrustFiles(home, globalLedger);
-if (stray.length > 0) {
+var homeHasOwnMasterKey = existsSync8(join12(home, "ledger-mac-master.key"));
+if (stray.length > 0 && !homeHasOwnMasterKey) {
   process.stderr.write(
     // ASCII only
     `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME.
@@ -25662,6 +25667,19 @@ drop every trust grade the old one conferred. Two ways out, both deliberate:
 `
   );
   process.exit(78);
+} else if (stray.length > 0) {
+  process.stderr.write(
+    // ASCII only
+    `helix: NOTE - trust-store-shaped files were found next to the ledger, but HELIX_HOME already has
+  its own signing key, so starting will NOT touch them and will NOT mint a new key over them.
+  found next to the ledger: ${stray.join(", ")}
+  ledger directory        : ${dirname13(globalLedger)}
+  HELIX_HOME              : ${home}
+These are most likely left over from before HELIX_HOME had a key of its own. If they still hold
+state you need, move ${stray.join(", ")} into HELIX_HOME by hand; otherwise it is safe to
+delete them from the ledger directory \u2014 this note will keep appearing until they are gone.
+`
+  );
 }
 var store = new MemoryStore(globalLedger, { home, sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
 store.healWitness();
