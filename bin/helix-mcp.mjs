@@ -24680,7 +24680,8 @@ async function dualVerify(params, deps) {
   const res = await deps.runner(prompt, {
     model: deps.config.dualVerify.model,
     effort: deps.config.dualVerify.effort,
-    timeoutMs: deps.config.dualVerify.timeoutMs
+    timeoutMs: deps.config.dualVerify.timeoutMs,
+    signal: params.signal
   });
   if (!res.ok) {
     return { ran: false, attempted: true, outcome: "error", reason: `codex run failed: ${res.error}`, egress: verdict };
@@ -24945,9 +24946,9 @@ function egressLine(v) {
   if (v.auditOnlyLegs.length > 0) return `egress: pass (audit-only; legs: ${v.auditOnlyLegs.join(", ")})`;
   return "egress: pass";
 }
-async function handleDualVerify(args, deps) {
+async function handleDualVerify(args, deps, signal) {
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
-  const result = await dualVerify(args, deps);
+  const result = await dualVerify({ ...args, signal }, deps);
   const persisted = persistedReason(result);
   const egress = result.egress;
   const decided = egress && egress.decision !== "pass";
@@ -25204,7 +25205,7 @@ function childEnv(parent = process.env) {
   }
   return out;
 }
-function runCodex(inv, args, input, timeoutMs, cwd) {
+function runCodex(inv, args, input, timeoutMs, cwd, signal) {
   return new Promise((resolve2, reject) => {
     const child = spawn(inv.file, [...inv.argsPrefix, ...args], {
       stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"],
@@ -25213,7 +25214,7 @@ function runCodex(inv, args, input, timeoutMs, cwd) {
     });
     let stdout = "";
     let stderr = "";
-    const timer = setTimeout(() => {
+    const killChild = () => {
       const spec = treeKillSpec(process.platform, child.pid ?? -1);
       if (spec && child.pid !== void 0) {
         try {
@@ -25230,8 +25231,22 @@ function runCodex(inv, args, input, timeoutMs, cwd) {
         } catch {
         }
       }
+    };
+    const timer = setTimeout(() => {
+      killChild();
+      cleanup();
       reject(new Error(`codex timed out after ${timeoutMs}ms`));
     }, timeoutMs);
+    const onAbort = () => {
+      killChild();
+      cleanup();
+      reject(new Error("codex run aborted"));
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    signal?.addEventListener("abort", onAbort);
     child.stdout?.on("data", (d) => {
       if (stdout.length < 65536) stdout += String(d);
     });
@@ -25239,11 +25254,11 @@ function runCodex(inv, args, input, timeoutMs, cwd) {
       if (stderr.length < 8192) stderr += String(d);
     });
     child.on("error", (e) => {
-      clearTimeout(timer);
+      cleanup();
       reject(e);
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
+      cleanup();
       resolve2({ code, stdout, stderr });
     });
     if (input !== null && child.stdin) {
@@ -25342,7 +25357,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
     const outFile = join10(dir, "out.txt");
     try {
       const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
-      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir);
+      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir, opts.signal);
       if (code !== 0) {
         return { ok: false, error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ""}` };
       }
@@ -25537,6 +25552,7 @@ function buildServer(store2, dualDeps, metrics2) {
     description: "Promote a memory item to the Verified state because THE USER explicitly vouched for it this turn. Requires explicit user approval; never self-confirm \u2014 call ONLY when the user directly confirmed the fact, never to confirm your own inference or a relayed claim. Only items committed with source=user are eligible (re-commit a relayed/inferred fact as source=user first). The user, not Helix, is the authority \u2014 do not allow-list this tool.",
     inputSchema: { id: external_exports.string() }
   }, async (args) => m.runOp("helix_memory_confirm", () => handleConfirm(store2, args, { auditPath: dv.auditPath, now: dv.now })));
+  const dualVerifyInFlight = /* @__PURE__ */ new Set();
   server2.registerTool("helix_dual_verify", {
     title: "Dual-verify with Codex",
     description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor.",
@@ -25545,7 +25561,15 @@ function buildServer(store2, dualDeps, metrics2) {
       helixAnswer: external_exports.string(),
       stakes: external_exports.enum(["low", "medium", "high", "xhigh"]).optional()
     }
-  }, async (args) => m.runOp("helix_dual_verify", () => handleDualVerify(args, dv)));
+  }, async (args, extra) => {
+    const call = m.runOp("helix_dual_verify", () => handleDualVerify(args, dv, extra?.signal));
+    dualVerifyInFlight.add(call);
+    try {
+      return await call;
+    } finally {
+      dualVerifyInFlight.delete(call);
+    }
+  });
   server2.registerTool("helix_codex_status", {
     title: "Codex status",
     description: "Show whether Helix is connected to Codex (CLI/version, login, auth mode), the dual-verify config, and the content-log state. Free \u2014 no metered Codex call.",
@@ -25556,7 +25580,23 @@ function buildServer(store2, dualDeps, metrics2) {
     description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean; a root that is not the active scope is refused and adopts nothing. This moves a trust boundary \u2014 everything in that ledger becomes recallable \u2014 so the user, not Helix, is the authority: do not allow-list this tool.",
     inputSchema: { projectRoot: external_exports.string() }
   }, async (args) => m.runOp("helix_memory_adopt", () => handleAdopt(store2, args, { auditPath: dv.auditPath, now: dv.now })));
-  return server2;
+  return Object.assign(server2, {
+    // Bounded by construction: resolves once every tracked call has settled OR budgetMs elapses,
+    // whichever comes first -- never waits indefinitely, so a hung handler cannot turn a shutdown
+    // into a hang (that would just trade one defect for a worse one).
+    async drainInFlight(budgetMs) {
+      if (dualVerifyInFlight.size === 0) return;
+      let timer;
+      const timedOut = new Promise((resolve2) => {
+        timer = setTimeout(resolve2, budgetMs);
+      });
+      try {
+        await Promise.race([Promise.allSettled([...dualVerifyInFlight]), timedOut]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  });
 }
 
 // src/server/lifecycle.ts
@@ -25574,7 +25614,7 @@ function installSelfTermination(deps) {
       deps.exit(0);
     };
     deps.setTimer(finish, fallbackMs).unref();
-    Promise.resolve().then(() => deps.closeServer()).then(finish, finish);
+    Promise.resolve().then(() => deps.closeServer()).then(() => deps.drainInFlight?.(fallbackMs), () => deps.drainInFlight?.(fallbackMs)).then(finish, finish);
   };
   deps.stdin.on("end", () => shutdown("stdin-end"));
   deps.stdin.on("close", () => shutdown("stdin-close"));
@@ -25652,6 +25692,7 @@ installSelfTermination({
   stdout: process.stdout,
   transport,
   closeServer: () => server.close(),
+  drainInFlight: (budgetMs) => server.drainInFlight(budgetMs),
   onSignal: (sig, handler) => {
     process.on(sig, handler);
   },

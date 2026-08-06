@@ -10,8 +10,10 @@ import { loadConfig } from '../config.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus, checkCodexModel } from '../verify/codex.js';
 import { noopMetricsSink, type MetricsSink } from '../metrics.js';
 
-/** Build a Helix MCP server with the memory tools registered against `store`. */
-export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps, metrics?: MetricsSink): McpServer {
+/** Build a Helix MCP server with the memory tools registered against `store`. The returned object
+ *  IS the McpServer (every existing caller keeps working unchanged) plus `drainInFlight`, so
+ *  lifecycle.ts can wait out an in-flight helix_dual_verify handler before force-exiting. */
+export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps, metrics?: MetricsSink): McpServer & { drainInFlight: (budgetMs: number) => Promise<void> } {
   // Single dispatch seam: every tool handler runs inside m.runOp so store.emitReplay calls made
   // synchronously inside self-stamp the current op id (spec §5). Default noop = zero behavior change.
   const m = metrics ?? noopMetricsSink;
@@ -102,6 +104,13 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     inputSchema: { id: z.string() },
   }, async (args) => m.runOp('helix_memory_confirm', () => handleConfirm(store, args, { auditPath: dv.auditPath, now: dv.now })));
 
+  // The ONLY tool that spawns a metered child, so it is the only one that gains the `extra`
+  // parameter: the SDK's per-request AbortSignal (extra.signal), fired on both an explicit client
+  // cancel and a transport close (protocol.js's _onclose aborts every pending request). Forwarded to
+  // handleDualVerify so a cancel reaches codex.ts's kill wiring instead of being dropped on the floor.
+  // The call is also tracked in `dualVerifyInFlight` so drainInFlight (below) can wait for its
+  // completion audit row before lifecycle.ts force-exits.
+  const dualVerifyInFlight = new Set<Promise<unknown>>();
   server.registerTool('helix_dual_verify', {
     title: 'Dual-verify with Codex',
     description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor.",
@@ -110,7 +119,15 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       helixAnswer: z.string(),
       stakes: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
     },
-  }, async (args) => m.runOp('helix_dual_verify', () => handleDualVerify(args, dv)));
+  }, async (args, extra) => {
+    const call = m.runOp('helix_dual_verify', () => handleDualVerify(args, dv, extra?.signal));
+    dualVerifyInFlight.add(call);
+    try {
+      return await call;
+    } finally {
+      dualVerifyInFlight.delete(call);
+    }
+  });
 
   server.registerTool('helix_codex_status', {
     title: 'Codex status',
@@ -129,5 +146,19 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     inputSchema: { projectRoot: z.string() },
   }, async (args) => m.runOp('helix_memory_adopt', () => handleAdopt(store, args, { auditPath: dv.auditPath, now: dv.now })));
 
-  return server;
+  return Object.assign(server, {
+    // Bounded by construction: resolves once every tracked call has settled OR budgetMs elapses,
+    // whichever comes first -- never waits indefinitely, so a hung handler cannot turn a shutdown
+    // into a hang (that would just trade one defect for a worse one).
+    async drainInFlight(budgetMs: number): Promise<void> {
+      if (dualVerifyInFlight.size === 0) return;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = new Promise<void>((resolve) => { timer = setTimeout(resolve, budgetMs); });
+      try {
+        await Promise.race([Promise.allSettled([...dualVerifyInFlight]), timedOut]);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  });
 }

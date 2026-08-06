@@ -334,9 +334,12 @@ function egressLine(v: EgressVerdict | undefined): string {
 export async function handleDualVerify(
   args: { question: string; helixAnswer: string; stakes?: 'low' | 'medium' | 'high' | 'xhigh' },
   deps: DualVerifyHandlerDeps,
+  /** MCP request cancellation (the SDK's extra.signal), NOT a tool argument -- kept out of `args`
+   *  so it can never be smuggled through the zod-validated user input. */
+  signal?: AbortSignal,
 ): Promise<ToolResult> {
   const ts = (deps.now ?? (() => new Date().toISOString()))();
-  const result = await dualVerify(args, deps);
+  const result = await dualVerify({ ...args, signal }, deps);
   // Content-free reason for the persisted sinks (audit + opt-in content log). The live ToolResult
   // below still uses the full result.reason; only the durable records are constrained to enum/label.
   const persisted = persistedReason(result);

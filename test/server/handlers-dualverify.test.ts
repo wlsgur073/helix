@@ -25,6 +25,27 @@ function deps(over: Partial<DualVerifyHandlerDeps>): DualVerifyHandlerDeps {
   };
 }
 
+describe('handleDualVerify (cancel wiring: LEAD-CODEX-CANCEL)', () => {
+  it('forwards a caller-provided AbortSignal through dualVerify to the runner', async () => {
+    let seenSignal: AbortSignal | undefined;
+    const d = deps({
+      runner: async (_q, opts) => { seenSignal = opts?.signal; return { ok: true, answer: 'use postgres' }; },
+    });
+    const ac = new AbortController();
+    await handleDualVerify({ question: 'db?', helixAnswer: 'use postgres' }, d, ac.signal);
+    expect(seenSignal).toBe(ac.signal);
+  });
+
+  it('omits signal entirely when the caller passes none (no behavior change)', async () => {
+    let seenSignal: AbortSignal | undefined = {} as AbortSignal;
+    const d = deps({
+      runner: async (_q, opts) => { seenSignal = opts?.signal; return { ok: true, answer: 'use postgres' }; },
+    });
+    await handleDualVerify({ question: 'db?', helixAnswer: 'use postgres' }, d);
+    expect(seenSignal).toBeUndefined();
+  });
+});
+
 describe('handleDualVerify', () => {
   it('returns a DATA-framed agreement map and audit-logs the spawn', async () => {
     const d = deps({});

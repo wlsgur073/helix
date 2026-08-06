@@ -124,6 +124,7 @@ installSelfTermination({
   stdout: process.stdout,
   transport,
   closeServer: () => server.close(),
+  drainInFlight: (budgetMs) => server.drainInFlight(budgetMs),
   onSignal: (sig, handler) => { process.on(sig, handler); },
   exit: (code) => process.exit(code),
   setTimer: (fn, ms) => setTimeout(fn, ms),

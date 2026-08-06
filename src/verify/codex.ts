@@ -9,7 +9,16 @@ import { sweepScratchRoot, ensureScratchRoot } from './scratch-gc.js';
 const execFileAsync = promisify(execFile);
 
 export type CodexResult = { ok: true; answer: string } | { ok: false; error: string };
-export interface CodexRunOptions { model?: string | null; effort?: string | null; timeoutMs?: number }
+export interface CodexRunOptions {
+  model?: string | null;
+  effort?: string | null;
+  timeoutMs?: number;
+  /** Caller cancellation (MCP request cancel / transport close). Wired on the EXEC path only — the
+   *  free preflight probes (checkCodexAvailable/checkCodexStatus/checkCodexModel) call runCodex
+   *  directly without a signal, so an abort here can never kill a preflight and mask an available
+   *  Codex as 'unavailable'. */
+  signal?: AbortSignal;
+}
 export type CodexRunner = (question: string, opts?: CodexRunOptions) => Promise<CodexResult>;
 export interface Availability { available: boolean; reason?: string }
 
@@ -163,7 +172,7 @@ export function childEnv(parent: NodeJS.ProcessEnv = process.env): Record<string
  *  `cwd` is REQUIRED and is never the caller's directory. `-s read-only` stops the sandbox writing,
  *  not reading, so whatever directory this process starts in is a directory the external model can
  *  walk — and the egress guard, which sees only the prompt, would never know. */
-function runCodex(inv: CodexInvocation, args: string[], input: string | null, timeoutMs: number, cwd: string): Promise<RunOutcome> {
+function runCodex(inv: CodexInvocation, args: string[], input: string | null, timeoutMs: number, cwd: string, signal?: AbortSignal): Promise<RunOutcome> {
   return new Promise((resolve, reject) => {
     const child = spawn(inv.file, [...inv.argsPrefix, ...args], {
       stdio: [input === null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
@@ -172,19 +181,37 @@ function runCodex(inv: CodexInvocation, args: string[], input: string | null, ti
     });
     let stdout = '';
     let stderr = '';
-    const timer = setTimeout(() => {
+    // Shared by the timeout path and abort below: a metered child must die the same way whether it
+    // ran too long or the caller cancelled it. See treeKillSpec's own comment for why win32 needs the
+    // tree kill (the resolved launcher is `node codex.js`, which spawns native codex as a grandchild).
+    const killChild = (): void => {
       const spec = treeKillSpec(process.platform, child.pid ?? -1);
       if (spec && child.pid !== undefined) {
         try { execFileSync(spec.cmd, spec.args, { stdio: 'ignore' }); } catch { try { child.kill(); } catch { /* gone */ } }
       } else {
         try { child.kill(); } catch { /* gone */ }
       }
+    };
+    const timer = setTimeout(() => {
+      killChild();
+      cleanup();
       reject(new Error(`codex timed out after ${timeoutMs}ms`));
     }, timeoutMs);
+    // Caller cancellation (MCP request cancel / transport close, wired through createCodexRunner's
+    // opts.signal). Never on the free preflight probes: those call runCodex without a signal.
+    const onAbort = (): void => {
+      killChild();
+      cleanup();
+      reject(new Error('codex run aborted'));
+    };
+    // Runs on every exit path, not just abort's own -- otherwise a long-lived per-process signal
+    // that outlives this one call accumulates a listener per codex invocation.
+    const cleanup = (): void => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); };
+    signal?.addEventListener('abort', onAbort);
     child.stdout?.on('data', (d: Buffer) => { if (stdout.length < 65_536) stdout += String(d); });
     child.stderr?.on('data', (d: Buffer) => { if (stderr.length < 8_192) stderr += String(d); });
-    child.on('error', (e) => { clearTimeout(timer); reject(e); });
-    child.on('close', (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+    child.on('error', (e) => { cleanup(); reject(e); });
+    child.on('close', (code) => { cleanup(); resolve({ code, stdout, stderr }); });
     if (input !== null && child.stdin) {
       child.stdin.on('error', () => { /* EPIPE if codex exits early — surfaced via close code */ });
       child.stdin.end(input);
@@ -320,7 +347,7 @@ export async function checkCodexModel(invocation?: CodexInvocation | null): Prom
 /** Build a runner that spawns `codex exec` with the prompt on stdin and reads -o's file. */
 export function createCodexRunner(
   resolveInv: () => Promise<CodexInvocation | null> = resolveCodexInvocation,
-  run: (inv: CodexInvocation, args: string[], input: string | null, timeoutMs: number, cwd: string) => Promise<RunOutcome> = runCodex,
+  run: (inv: CodexInvocation, args: string[], input: string | null, timeoutMs: number, cwd: string, signal?: AbortSignal) => Promise<RunOutcome> = runCodex,
 ): CodexRunner {
   return async (question, opts = {}) => {
     const inv = await resolveInv();
@@ -340,7 +367,7 @@ export function createCodexRunner(
       // timeout is configurable (dualVerify.timeoutMs via opts), hard-clamped to MAX_TIMEOUT_MS so the
       // scratch-gc floor stays safe even for direct callers. 120s is the fallback default.
       const timeoutMs = Math.min(opts.timeoutMs ?? 120_000, MAX_TIMEOUT_MS);
-      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir);
+      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir, opts.signal);
       if (code !== 0) {
         return { ok: false, error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ''}` };
       }

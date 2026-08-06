@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { basename, dirname } from 'node:path';
-import { existsSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { buildCodexExecArgs, createCodexRunner, interpretDoctorModel, interpretPreflight, interpretStatus, interpretWhereOutput, treeKillSpec } from '../../src/verify/codex.js';
 
 describe('buildCodexExecArgs (prompt-via-stdin contract)', () => {
@@ -76,6 +77,68 @@ describe('createCodexRunner (configurable timeout)', () => {
     await runner('q', { timeoutMs: 7_200_000 }); // 2h -> clamped to 1h
     expect(seen).toEqual([3_600_000]);
   });
+});
+
+describe('createCodexRunner (cancel wiring: LEAD-CODEX-CANCEL)', () => {
+  it('passes the caller\'s AbortSignal through to the run seam', async () => {
+    const inv = { file: 'codex', argsPrefix: [] };
+    let seenSignal: AbortSignal | undefined;
+    const fakeRun = async (_i: unknown, _a: string[], _in: string | null, _t: number, _c: string, signal?: AbortSignal) => {
+      seenSignal = signal;
+      return { code: 0, stderr: '' } as never;
+    };
+    const ac = new AbortController();
+    const runner = createCodexRunner(async () => inv, fakeRun as never);
+    await runner('q', { signal: ac.signal });
+    expect(seenSignal).toBe(ac.signal);
+  });
+
+  it('a runner called without a signal behaves exactly as before', async () => {
+    const inv = { file: 'codex', argsPrefix: [] };
+    let seenSignal: AbortSignal | undefined = {} as AbortSignal;
+    const fakeRun = async (..._a: unknown[]) => { seenSignal = (_a[5] as AbortSignal | undefined); return { code: 0, stderr: '' } as never; };
+    await createCodexRunner(async () => inv, fakeRun as never)('q');
+    expect(seenSignal).toBeUndefined();
+  });
+});
+
+describe('runCodex (real spawn): abort actually kills the metered child', () => {
+  // Beyond the fake-run seam above: this is the behavior the bug report is actually about
+  // ("cancelling leaves the metered child alive"). Only the launcher resolution is stubbed — the
+  // thing under test, runCodex's abort listener, is the production one (default `run`, not a fake).
+  it('rejects with an "aborted" error and the process is no longer alive', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'helix-codex-abortkill-'));
+    const stub = join(dir, 'codex-hang.mjs');
+    const sentinel = join(dir, 'started.pid');
+    // Records its own pid (keyed off the prompt it reads from stdin, per the stdin-prompt contract)
+    // then hangs, standing in for an in-flight metered `codex exec`.
+    writeFileSync(stub, `
+import { writeFileSync } from 'node:fs';
+let input = '';
+process.stdin.on('data', (d) => { input += d; });
+process.stdin.on('end', () => {
+  writeFileSync(input.trim(), String(process.pid));
+  setInterval(() => {}, 1_000_000);
+});
+`);
+    const runner = createCodexRunner(async () => ({ file: process.execPath, argsPrefix: [stub] }));
+    const ac = new AbortController();
+    const resultP = runner(sentinel, { signal: ac.signal, timeoutMs: 30_000 });
+
+    for (let i = 0; i < 100 && !existsSync(sentinel); i++) await new Promise((r) => setTimeout(r, 50));
+    expect(existsSync(sentinel)).toBe(true);
+    const pid = Number(readFileSync(sentinel, 'utf8').trim());
+    const alive = (p: number): boolean => { try { process.kill(p, 0); return true; } catch { return false; } };
+    expect(alive(pid)).toBe(true); // sanity: the metered child really is running before we abort
+
+    ac.abort();
+    const result = await resultP; // CodexRunner never rejects -- it degrades to {ok:false, error}
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; error: string }).error).toMatch(/aborted/i);
+
+    for (let i = 0; i < 40 && alive(pid); i++) await new Promise((r) => setTimeout(r, 50));
+    expect(alive(pid)).toBe(false); // the metered child did not survive cancellation
+  }, 15_000);
 });
 
 describe('createCodexRunner (scratch dir corralled under <temp>/helix)', () => {
