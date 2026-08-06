@@ -132,6 +132,8 @@ function isOwned(projectRoot, home) {
 }
 
 // src/memory/ledger-mac.ts
+var LONE_SURROGATE = new RegExp("\\p{Surrogate}", "u");
+var ILL_FORMED_DOMAIN = Buffer.from("helix.digestContent.ill-formed.v1\0", "utf8");
 var DOMAIN = Buffer.from("helix-ledger-mac");
 var NULL_FIELD = Buffer.from([0, 0, 0, 0, 0]);
 

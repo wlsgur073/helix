@@ -9,8 +9,32 @@ import type { MemoryRecord } from '../types.js';
 export const MAC_VERSION = 2;                             // version NEW signatures carry
 const ACCEPTED_MAC_VERSIONS = new Set<number>([1, 2]);   // versions verifyVerify treats as valid
 
-/** Lowercase hex SHA-256 over the UTF-8 bytes of `content`. Used for the content binding. */
+/** Matches a string carrying a LONE surrogate. Under `u` a valid surrogate pair is a single code
+ *  point outside the Surrogate category, so this is exactly the set of strings whose UTF-8 encoding
+ *  is lossy — every unpaired surrogate becomes U+FFFD. A genuine U+FFFD in the content does not
+ *  match, so it is not swept into the ill-formed lane. */
+const LONE_SURROGATE = /\p{Surrogate}/u;
+
+/** Domain tag for the ill-formed lane. Without it a UTF-16LE digest of one string could equal the
+ *  UTF-8 digest of another, which would reintroduce the collision one lane over. */
+const ILL_FORMED_DOMAIN = Buffer.from('helix.digestContent.ill-formed.v1\0', 'utf8');
+
+/** Lowercase hex SHA-256 over the UTF-8 bytes of `content`. Used for the content binding.
+ *
+ *  Ill-formed content takes a separate, LOSSLESS lane. `Buffer.from(s, 'utf8')` maps every unpaired
+ *  surrogate to U+FFFD, so `'x\uD800y'` and `'x\uD801y'` hashed that way are indistinguishable — and
+ *  the binding this feeds is a bare `targetDigest === liveDigest` equality (verified-projection.ts),
+ *  so a collision is enough for changed content to inherit a signed grade it was never granted. That
+ *  breaks the invariant the grade rests on: any change to the content drops it.
+ *
+ *  Well-formed content — everything a real caller produces — keeps the original UTF-8 path and
+ *  therefore its existing digest, so no already-signed `targetDigest` is invalidated. Re-encoding
+ *  wholesale would have invalidated all of them at once, and since `targetDigest` is MAC-covered and
+ *  cannot be re-signed, every promotion would have become inapplicable and every Corroborated or
+ *  Verified fact would have silently dropped to Fresh. */
 export function digestContent(content: string): string {
+  if (LONE_SURROGATE.test(content))
+    return createHash('sha256').update(ILL_FORMED_DOMAIN).update(Buffer.from(content, 'utf16le')).digest('hex');
   return createHash('sha256').update(Buffer.from(content, 'utf8')).digest('hex');
 }
 

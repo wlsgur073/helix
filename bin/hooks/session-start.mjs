@@ -642,7 +642,11 @@ import { createHash, createHmac, hkdfSync, randomBytes as randomBytes4, timingSa
 import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync5, linkSync as linkSync2, unlinkSync as unlinkSync3, statSync as statSync2, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
 import { dirname as dirname4, join as join4 } from "node:path";
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
+var LONE_SURROGATE = new RegExp("\\p{Surrogate}", "u");
+var ILL_FORMED_DOMAIN = Buffer.from("helix.digestContent.ill-formed.v1\0", "utf8");
 function digestContent(content) {
+  if (LONE_SURROGATE.test(content))
+    return createHash("sha256").update(ILL_FORMED_DOMAIN).update(Buffer.from(content, "utf16le")).digest("hex");
   return createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex");
 }
 var LedgerMacError = class extends Error {

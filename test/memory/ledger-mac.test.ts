@@ -10,6 +10,12 @@ describe('digestContent', () => {
   it('is byte-sensitive: any change flips the digest', () => {
     expect(digestContent('a')).not.toBe(digestContent('A'));
   });
+  it('distinguishes contents that differ only by an unpaired surrogate', () => {
+    // Buffer.from(s,'utf8') maps EVERY unpaired surrogate to U+FFFD, so a lossy digest cannot
+    // tell these apart — and the content binding at verified-projection.ts is exactly
+    // `targetDigest === liveDigest`, so a collision lets changed content inherit a signed grade.
+    expect(digestContent('secret-\uD800-tail')).not.toBe(digestContent('secret-\uD801-tail'));
+  });
 });
 
 import { mkdtempSync, writeFileSync, statSync, readFileSync, readdirSync } from 'node:fs';

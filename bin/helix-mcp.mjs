@@ -13919,7 +13919,11 @@ import { openSync as openSync3, fsyncSync as fsyncSync3, closeSync as closeSync3
 import { dirname as dirname4, join as join4 } from "node:path";
 var MAC_VERSION = 2;
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
+var LONE_SURROGATE = new RegExp("\\p{Surrogate}", "u");
+var ILL_FORMED_DOMAIN = Buffer.from("helix.digestContent.ill-formed.v1\0", "utf8");
 function digestContent(content) {
+  if (LONE_SURROGATE.test(content))
+    return createHash2("sha256").update(ILL_FORMED_DOMAIN).update(Buffer.from(content, "utf16le")).digest("hex");
   return createHash2("sha256").update(Buffer.from(content, "utf8")).digest("hex");
 }
 var LedgerMacError = class extends Error {

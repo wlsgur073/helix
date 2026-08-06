@@ -407,6 +407,8 @@ function projectLedgerPath(projectRoot) {
 import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
 import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync } from "node:fs";
 import { dirname as dirname4, join as join4 } from "node:path";
+var LONE_SURROGATE = new RegExp("\\p{Surrogate}", "u");
+var ILL_FORMED_DOMAIN = Buffer.from("helix.digestContent.ill-formed.v1\0", "utf8");
 var LedgerMacError = class extends Error {
 };
 var MASTER_LEN = 32;
