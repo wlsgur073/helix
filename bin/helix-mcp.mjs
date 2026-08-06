@@ -13875,7 +13875,7 @@ function stampOwnership(projectRoot2, home2, opts = {}) {
       throw new Error(`stampOwnership: registry at ${registryPath(home2)} is present but unparseable \u2014 restore it before adopting (refusing to overwrite and lose other projects)`);
     const reg = loaded.kind === "ok" ? loaded.reg : {};
     const existing = reg[key];
-    if (opts.autoAdoptLedger && !existing && existsSync(opts.autoAdoptLedger))
+    if (opts.autoAdoptLedger && existsSync(opts.autoAdoptLedger))
       throw new Error("commit: a project memory file appeared here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it");
     const stamp = existing?.stamp ?? gen();
     const macNonce = existing?.macNonce ?? gen();
