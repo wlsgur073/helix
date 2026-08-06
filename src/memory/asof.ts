@@ -1,7 +1,7 @@
 import type { MemoryRecord, AsOfFact } from '../types.js';
 import { buildProjection } from './projection.js';
 import { digestContent } from './ledger-mac.js';
-import { resolveTargetGrade, isKnownState } from './verified-projection.js';
+import { resolveTargetGrade, isKnownState, forgedFactIds } from './verified-projection.js';
 
 /** Reconstruct the snapshot at system-time `t` with full per-verify evidence (spec C §4). Membership
  *  is DECLARED: filter by raw `tx <= t` (assert/supersede/erase tx is unsigned). Grade + evidence come
@@ -27,10 +27,14 @@ export function buildAsOfEvidence(
     (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)!).push(r);
   }
 
+  // Scoped to the membership window, so a twin appended after `t` cannot retro-taint the snapshot.
+  const forgedIds = forgedFactIds(asOfRecords);
+
   for (const rec of liveAt.values()) {
     const item: MemoryRecord = { ...rec, state: 'Fresh' }; // R1 base clamp
     const verifies = byTarget.get(rec.id) ?? [];
     if (verifies.length === 0) { facts.push({ record: item, grade: 'Fresh', evidence: [], integrity: 'ok' }); continue; }
+    if (forgedIds.has(rec.id)) { facts.push({ record: item, grade: 'Fresh', evidence: [], integrity: 'compromised' }); continue; }
     const { grade, compromised, evidence } = resolveTargetGrade(verifies, digestContent(rec.content));
     facts.push({
       record: grade ? { ...item, state: grade } : item,

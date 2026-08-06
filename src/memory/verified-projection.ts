@@ -101,6 +101,36 @@ export function resolveTargetGrade(
   return { grade: winner ? winner.state : null, compromised: false, evidence: verifies.map((v) => toEvidence(v, v === winner)) };
 }
 
+/** Fact ids carried by two or more DIFFERING records — tamper evidence, never elevated.
+ *
+ *  Ids are minted server-side per commit (store.id -> randomUUID), so a caller cannot choose one and
+ *  a collision is not a state a legitimate write reaches: it takes a boundary append or an adopted
+ *  foreign ledger. buildProjection resolves a collision last-write-wins, and the MAC covers neither
+ *  `provenance` nor any other unauthenticated field — so a twin carrying byte-identical content and
+ *  a forged `provenance.source` clears the digest binding untouched and inherits the grade the
+ *  original earned. Which occurrence is genuine is not knowable from the ledger, so the id confers
+ *  no grade at all, the same way resolveTargetGrade treats two verifies that disagree inside a lane.
+ *
+ *  Byte-identical repeats are EXEMPT. Appends are at-least-once by design — a complete but
+ *  unacknowledged record commits — so a crash can legitimately replay one line verbatim. A repeat
+ *  that carries no difference forges nothing, and clamping it would convert a documented durability
+ *  property into silent grade loss.
+ *
+ *  Shared by the live projection and the as-of reconstruction: a guard on only one of them would
+ *  hand the other back as a bypass, and would break as-of's contract that asOf(now) equals live. */
+export function forgedFactIds(records: MemoryRecord[]): Set<string> {
+  const firstById = new Map<string, string>();
+  const forged = new Set<string>();
+  for (const r of records) {
+    if (r.type === 'verify' || r.type === 'invalidate' || r.type === 'erase') continue; // never live facts
+    const serialized = JSON.stringify(r);
+    const first = firstById.get(r.id);
+    if (first === undefined) firstById.set(r.id, serialized);
+    else if (first !== serialized) forged.add(r.id);
+  }
+  return forged;
+}
+
 export function buildVerifiedProjection(
   records: MemoryRecord[],
   opts: { verify: (r: MemoryRecord) => boolean; keyAvailable: boolean },
@@ -114,6 +144,8 @@ export function buildVerifiedProjection(
   const compromised = new Set<string>();
   if (!opts.keyAvailable) return { live, compromised, keyAvailable: false };
 
+  const forgedIds = forgedFactIds(nonVerify);
+
   // Group valid verifies by target, choose the winning grade by generation (R2/R3).
   const byTarget = new Map<string, MemoryRecord[]>();
   for (const r of records) {
@@ -124,6 +156,7 @@ export function buildVerifiedProjection(
   for (const [target, verifies] of byTarget) {
     const item = live.get(target);
     if (!item) continue; // target not live (superseded/erased) — nothing to elevate
+    if (forgedIds.has(target)) { compromised.add(target); continue; } // stays Fresh (already clamped in `live`)
     const { grade, compromised: c } = resolveTargetGrade(verifies, digestContent(item.content));
     if (c) { compromised.add(target); continue; } // stays Fresh (already clamped in `live`)
     if (grade) live.set(target, { ...item, state: grade });

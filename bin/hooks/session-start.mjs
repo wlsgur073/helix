@@ -969,12 +969,25 @@ function resolveTargetGrade(verifies, liveDigest) {
   }
   return { grade: winner ? winner.state : null, compromised: false, evidence: verifies.map((v) => toEvidence(v, v === winner)) };
 }
+function forgedFactIds(records) {
+  const firstById = /* @__PURE__ */ new Map();
+  const forged = /* @__PURE__ */ new Set();
+  for (const r of records) {
+    if (r.type === "verify" || r.type === "invalidate" || r.type === "erase") continue;
+    const serialized = JSON.stringify(r);
+    const first = firstById.get(r.id);
+    if (first === void 0) firstById.set(r.id, serialized);
+    else if (first !== serialized) forged.add(r.id);
+  }
+  return forged;
+}
 function buildVerifiedProjection(records, opts) {
   const nonVerify = records.filter((r) => r.type !== "verify");
   const live = /* @__PURE__ */ new Map();
   for (const [id, rec] of buildProjection(nonVerify)) live.set(id, { ...rec, state: "Fresh" });
   const compromised = /* @__PURE__ */ new Set();
   if (!opts.keyAvailable) return { live, compromised, keyAvailable: false };
+  const forgedIds = forgedFactIds(nonVerify);
   const byTarget = /* @__PURE__ */ new Map();
   for (const r of records) {
     if (r.type !== "verify" || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue;
@@ -983,6 +996,10 @@ function buildVerifiedProjection(records, opts) {
   for (const [target, verifies] of byTarget) {
     const item = live.get(target);
     if (!item) continue;
+    if (forgedIds.has(target)) {
+      compromised.add(target);
+      continue;
+    }
     const { grade, compromised: c } = resolveTargetGrade(verifies, digestContent(item.content));
     if (c) {
       compromised.add(target);

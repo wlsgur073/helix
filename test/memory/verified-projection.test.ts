@@ -29,6 +29,34 @@ describe('buildVerifiedProjection', () => {
     expect(buildVerifiedProjection(recs, { verify: () => false, keyAvailable: true }).live.get('a')!.state).toBe('Fresh');
     expect(buildVerifiedProjection(recs, { verify: all, keyAvailable: true }).live.get('a')!.state).toBe('Verified');
   });
+  it('a duplicate fact id is tamper evidence: the later occurrence inherits no signed grade', () => {
+    // store.commit mints every id server-side (randomUUID), so two live records sharing one id is
+    // not a state any legitimate write reaches — it takes a boundary append or a foreign ledger.
+    // The forgery keeps the content byte-identical so the digest binding still passes, and changes
+    // only provenance, which the MAC never covers.
+    const recs = [
+      base({ id: 'a', content: 'fact', provenance: { source: 'agent-inference', sessionId: 's' } }),
+      sv2({ id: 'v', supersedes: 'a', state: 'Corroborated', gen: 1, targetDigest: digestContent('fact') }),
+      base({ id: 'a', content: 'fact', provenance: { source: 'user', sessionId: 's' } }),
+    ];
+    const p = buildVerifiedProjection(recs, { verify: V, keyAvailable: true });
+    expect(p.live.get('a')!.state).toBe('Fresh');
+    expect(p.compromised.has('a')).toBe(true);
+  });
+  it('a byte-identical repeat is not tamper evidence: an at-least-once replay keeps its grade', () => {
+    // Appends are at-least-once by design (a complete but unacknowledged record commits), so a
+    // crash can replay one line verbatim. That forges nothing, and clamping it would convert a
+    // documented durability property into silent grade loss.
+    const rec = base({ id: 'a', content: 'fact', provenance: { source: 'agent-inference', sessionId: 's' } });
+    const recs = [
+      rec,
+      sv2({ id: 'v', supersedes: 'a', state: 'Corroborated', gen: 1, targetDigest: digestContent('fact') }),
+      { ...rec },
+    ];
+    const p = buildVerifiedProjection(recs, { verify: V, keyAvailable: true });
+    expect(p.live.get('a')!.state).toBe('Corroborated');
+    expect(p.compromised.has('a')).toBe(false);
+  });
   it('R3 promotion is content-bound: edited content drops the elevation to Fresh', () => {
     const recs = [
       base({ id: 'a', content: 'EDITED' }),
