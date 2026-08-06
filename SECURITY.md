@@ -82,6 +82,11 @@ locally-held key, so:
 - Against an adversary that can write `.helix/memory.jsonl` but **cannot read `~/.helix`**,
   `Corroborated`/`Verified` are **unforgeable at the file/append surface**. This is the same trust
   boundary the ownership registry already relies on.
+- **The content binding is injective.** The digest a `verify` signs is taken over an encoding that
+  distinguishes every JS string, including ill-formed ones. Plain UTF-8 does not: it replaces every
+  lone surrogate with U+FFFD, so unboundedly many distinct contents — including well-formed ones —
+  shared a digest and could be substituted under a signed grade. Well-formed content hashes exactly
+  as before, so every previously signed `verify` still applies.
 - **Verification timing is authenticated (MAC v2).** A `verify` record now also binds its system-time
   `tx` into the MAC, so the *timing* of a genuine verification cannot be edited in place. This is
   **authenticity, not accuracy**: it certifies the bytes the signing clock claimed at mint time, not

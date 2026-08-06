@@ -216,6 +216,13 @@ All notable changes to Helix are documented here. This project follows
   advertises it, so the API rejects it after the metered call is already spent.
 
 ### Fixed
+- **The content digest a `verify` signs is now injective.** It hashed the UTF-8 encoding of the
+  content, and that encoding replaces every lone surrogate with U+FFFD — so unboundedly many
+  distinct contents shared one digest and could be swapped under a signed grade, including
+  well-formed substitutes. Well-formed content hashes exactly as before, so every previously signed
+  `verify` still applies; ill-formed content is bound over a domain-separated UTF-16LE image
+  instead. A pre-existing grade signed over ill-formed content stops applying and its row falls back
+  to `Fresh` — deliberately fail-closed.
 - A witnessed rewrite that fails before its first byte lands no longer strands the scope. Both
   rewrite paths — the re-baseline ceremony and witnessed compaction — publish a write-ahead witness
   journal and only then touch the ledger, so a refusal in between (an unwritable ledger file, a

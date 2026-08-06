@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { createHash } from 'node:crypto';
 import { digestContent } from '../../src/memory/ledger-mac.js';
 
 describe('digestContent', () => {
@@ -9,6 +10,37 @@ describe('digestContent', () => {
   });
   it('is byte-sensitive: any change flips the digest', () => {
     expect(digestContent('a')).not.toBe(digestContent('A'));
+  });
+});
+
+// F2 leg 3. The content binding is the ONLY thing a signed verify says about a fact's bytes, so a
+// non-injective digest is a content-substitution primitive: swap the content, keep the grade.
+// Node's UTF-8 encoder replaces EVERY lone surrogate with U+FFFD, so the pre-fix digest folded an
+// unbounded set of distinct strings onto one hash.
+describe('digestContent is injective over ill-formed content (F2 leg 3)', () => {
+  it('separates two different lone surrogates', () => {
+    expect(digestContent('secret-\uD800-tail')).not.toBe(digestContent('secret-\uD801-tail'));
+  });
+
+  it('separates a lone surrogate from the well-formed U+FFFD it used to fold onto', () => {
+    // The sharper half: the substitute content need not itself be ill-formed, so the attack does
+    // not require the reader to tolerate a malformed string at all.
+    expect(digestContent('\uD800')).not.toBe(digestContent('�'));
+  });
+
+  it('stays byte-identical to sha256(utf8) for every well-formed string', () => {
+    // Backward compatibility is the load-bearing half: every verify signed before this change
+    // carries a targetDigest computed the old way, and all of them are over well-formed content.
+    for (const s of ['', 'hello', 'aÿb', '�', '﻿', '\u{1F600}', 'x'.repeat(10_000)]) {
+      expect(digestContent(s)).toBe(createHash('sha256').update(Buffer.from(s, 'utf8')).digest('hex'));
+    }
+  });
+
+  it('cannot be collided by feeding the ill-formed branch bytes back in as text', () => {
+    // The domain separator only works if no well-formed string can produce those bytes. Reading the
+    // separated image back as latin1 yields a well-formed string, which re-expands on the way in.
+    const image = Buffer.concat([Buffer.from([0xff, 0x01]), Buffer.from('\uD800', 'utf16le')]);
+    expect(digestContent('\uD800')).not.toBe(digestContent(image.toString('latin1')));
   });
 });
 

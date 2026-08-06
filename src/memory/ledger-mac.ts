@@ -9,9 +9,33 @@ import type { MemoryRecord } from '../types.js';
 export const MAC_VERSION = 2;                             // version NEW signatures carry
 const ACCEPTED_MAC_VERSIONS = new Set<number>([1, 2]);   // versions verifyVerify treats as valid
 
-/** Lowercase hex SHA-256 over the UTF-8 bytes of `content`. Used for the content binding. */
+// Domain tag for the ill-formed branch of digestContent. 0xFF is the load-bearing byte: it appears
+// in the UTF-8 encoding of NO code point, so no well-formed string's image can begin with it.
+const ILL_FORMED_TAG = Buffer.from([0xff, 0x01]);
+
+/** Lowercase hex SHA-256 binding `content`. INJECTIVE over arbitrary JS strings.
+ *
+ *  A JS string is a sequence of UTF-16 code units and `Buffer.from(s, 'utf8')` REPLACES every lone
+ *  surrogate with U+FFFD, so the plain UTF-8 form folds an unbounded set of distinct strings onto
+ *  one digest. Since this digest is the ONLY thing a signed `verify` says about a fact's bytes,
+ *  that made it a content-substitution primitive — swap the content, keep the grade — and the
+ *  substitute did not even have to be ill-formed, because '\uD800' folded onto the well-formed
+ *  U+FFFD too.
+ *
+ *  Well-formed content keeps the ORIGINAL expression byte-for-byte, so every verify signed before
+ *  this change still applies: all of them are over well-formed content. Ill-formed content is bound
+ *  over its UTF-16LE image, which is fixed-width and substitution-free and therefore injective.
+ *  Deliberately fail-closed: a legacy promotion signed over ILL-formed content stops applying and
+ *  its row falls back to the R1 Fresh clamp (`compromised` stays false — this is a lost elevation,
+ *  not tamper evidence). */
 export function digestContent(content: string): string {
-  return createHash('sha256').update(Buffer.from(content, 'utf8')).digest('hex');
+  // ES2024 method, present on every runtime package.json's `engines` admits (>=24). The cast is
+  // because tsconfig pins `target: ES2022` with no `lib` override, not because it may be absent.
+  const wellFormed = (content as unknown as { isWellFormed(): boolean }).isWellFormed();
+  const bytes = wellFormed
+    ? Buffer.from(content, 'utf8')
+    : Buffer.concat([ILL_FORMED_TAG, Buffer.from(content, 'utf16le')]);
+  return createHash('sha256').update(bytes).digest('hex');
 }
 
 export class LedgerMacError extends Error {}
