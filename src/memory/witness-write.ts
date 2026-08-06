@@ -1,6 +1,7 @@
 /** Witnessed ledger appends (spec 2026-07-17-high-water-counter-decision §4.2): the append itself
- *  is UNCONDITIONAL (availability — an agent's write always lands), but the witness only advances
- *  from a healthy PRE-append state. A pending transition is resolved (healed, or diagnosed as
+ *  is UNCONDITIONAL (availability — an agent's write always lands) EXCEPT for an elevated verify
+ *  under a `mismatch` verdict (F2-WRITE, step 3b below), and the witness only advances from a
+ *  healthy PRE-append state. A pending transition is resolved (healed, or diagnosed as
  *  interrupted) BEFORE the append is ever attempted, never after.
  *
  *  Protocol (all inside ONE `withFileLock(ledger)` critical section — lock order ledger -> witness,
@@ -17,7 +18,10 @@
  *       it is now in-sync.
  *    3. transition-interrupted -> throw WitnessBlockedError; the ledger is NEVER touched (checked
  *       before step 4 runs).
- *    4. append the record (unconditional; unlocked inner write — we already hold the ledger lock).
+ *    3b. mismatch AND the record is an elevated verify -> throw WitnessBlockedError; the ledger and
+ *       the witness are both NEVER touched, so the alarm survives (F2-WRITE). Narrow on purpose:
+ *       commit, soft erase and reality-check DEMOTIONS still land under the same verdict.
+ *    4. append the record (unlocked inner write — we already hold the ledger lock).
  *    5. re-read bytes (tail-repair safe: appendRecordUnlocked may have prefixed a repair newline for
  *       a torn predecessor tail).
  *    6. advance the witness iff the GATING verdict (step 1, or step 2's post-heal reclassification)
@@ -60,6 +64,30 @@ export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord
     gateVerdict = classifyState(readScopeWitness(home, key), bytes); // bytes unchanged; state moved
   }
   const shouldAdvance = advanceAllowed(gateVerdict);
+
+  // F2-WRITE. The append below is unconditional BY DESIGN (availability) with exactly one exception:
+  // an ELEVATED verify must not be minted while the rollback alarm stands. `mismatch` clamps what a
+  // read DISPLAYS, never what the write path MINTS, and a signed verify carries no record of the
+  // verdict it was minted under — so such a row is indistinguishable from an honest one afterwards.
+  // Two consequences made that fatal rather than untidy: the asOf surface is deliberately NOT clamped
+  // (store.ts), so it serves the new grade immediately, and the re-baseline ceremony adopts the
+  // current bytes wholesale, so the operator's own documented recovery promotes it everywhere.
+  // Refusing HERE — after the heal reclassification, before the append — leaves the ledger and the
+  // witness both untouched, so the alarm survives to be investigated instead of being written over.
+  //
+  // Deliberately NARROW, in two ways that are each load-bearing. It reads the RECORD rather than the
+  // `op` discriminator, because signVerify does not assert `type` and a mislabelled caller must not
+  // be able to route an elevated verify past this. And it keys on the STATE, so a reality-check
+  // DEMOTION still lands: refusing every verify would suppress exactly the evidence a scope under
+  // suspicion most needs to record. commit and soft erase are untouched.
+  const elevatedVerify = record.type === 'verify'
+    && (record.state === 'Verified' || record.state === 'Corroborated');
+  if (gateVerdict.kind === 'mismatch' && elevatedVerify) {
+    throw new WitnessBlockedError(
+      op,
+      `${op}: scope '${key}' is in a MISMATCH (rollback-alarm) state — refusing to mint an elevated grade over a ledger that does not descend from its witnessed head; establish that the current bytes are yours, then re-baseline the scope (helix-rebaseline) before retrying`,
+    );
+  }
 
   appendRecordUnlocked(ledger, record);
   const after = readLedgerBytes(ledger); // re-read under the same lock — tail-repair safe

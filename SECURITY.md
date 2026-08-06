@@ -89,6 +89,14 @@ locally-held key, so:
   which any MAC covers. Position, not `tx` or `gen`, decides ownership: a non-`verify` row carries no
   MAC at all, so those fields are adversary-chosen, whereas getting *in front* of the genuine row
   means rewriting the witnessed prefix, which the rollback witness reports as `mismatch`.
+- **A grade cannot be minted while the rollback alarm stands.** The witness verdict used to gate
+  what a read *displayed* but not what the write path *signed*, and a signed `verify` records
+  nothing about the verdict it was minted under — so it was indistinguishable from an honest one
+  afterwards. An elevated `verify` is now refused under a `mismatch` verdict, before anything is
+  appended, so the alarm survives to be investigated rather than written over. The refusal is
+  narrow: ordinary commits, soft erases, and reality-check **demotions** still land, because a scope
+  under suspicion must stay able to record that something failed. Note what this does *not* claim:
+  it stops Helix from being used as the signer, not an adversary who already holds the master key.
 - **The content binding is injective.** The digest a `verify` signs is taken over an encoding that
   distinguishes every JS string, including ill-formed ones. Plain UTF-8 does not: it replaces every
   lone surrogate with U+FFFD, so unboundedly many distinct contents — including well-formed ones —

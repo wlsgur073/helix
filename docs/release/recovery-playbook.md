@@ -186,7 +186,13 @@ fixed quiet slot per week.
   `~/.helix/witness-log.jsonl` regardless of the metrics setting — §2.)
 - Restoring an older ledger clamps that scope's elevated grades to `Fresh` on the live views,
   with a disclosure note — by design. (A point-in-time `asOf` snapshot is not clamped; it reports
-  what was true then.) The sanctioned way to adopt an old backup deliberately is the re-baseline
+  what was true then, and says so in its own note.) **While that alarm stands you also cannot
+  promote anything in that scope:** `helix_memory_confirm` and a passing `helix_memory_recheck` are
+  refused, because a grade minted during an alarm is indistinguishable afterwards from an honest
+  one and the re-baseline below would adopt it wholesale. Ordinary commits, soft erases and
+  *demotions* still work — a scope under suspicion must stay able to record that something failed.
+  Establish that the current bytes are the ones you want before re-baselining; the refusal is there
+  to stop the recovery from blessing whatever is in the file. The sanctioned way to adopt an old backup deliberately is the re-baseline
   ceremony: `node bin/helix-rebaseline.mjs --scope global` (or `--scope <absoluteProjectRoot>`),
   which is interactive and TTY-only — it prints the scope, byte count and hash, and waits for you
   to type `bless`. It cannot be scripted away with a flag.

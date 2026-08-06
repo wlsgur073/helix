@@ -215,3 +215,58 @@ describe('WitnessBlockedError propagation out of store.erase (context point 6)',
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });
+
+// F2-WRITE. A `mismatch` verdict used to suppress DISPLAY without suppressing MINTING: the append
+// was unconditional, so an elevated verify signed while the rollback alarm stood landed in the
+// ledger as an ordinary valid signature. Nothing records that it was minted during an alarm, so the
+// asOf surface served it immediately (asOf is deliberately not clamped) and a later authorized
+// re-baseline made it authoritative everywhere. The gate is deliberately NARROW: only an ELEVATED
+// verify is refused, because the availability policy for ordinary writes is intentional.
+describe('an elevated verify is refused while the rollback alarm stands (F2-WRITE)', () => {
+  /** Fork the witnessed prefix so the scope classifies as `mismatch`. */
+  function forked() {
+    const t = tmpStore();
+    const a = t.store.commit({ content: 'alpha target deploy fact', source: 'user' });
+    const rows = readFileSync(t.ledger, 'utf8').trim().split('\n');
+    rows[0] = JSON.stringify({ ...JSON.parse(rows[0]!), content: 'alpha target deploy FORKED' });
+    writeFileSync(t.ledger, rows.join('\n') + '\n');
+    expect(classifyScope(t.home, scopeKeyOf(t.home), readFileSync(t.ledger)).kind).toBe('mismatch');
+    return { ...t, id: a.id };
+  }
+
+  it('confirm() is blocked, and the ledger is left byte-identical', () => {
+    const { store, ledger, home, id } = forked();
+    try {
+      const before = readFileSync(ledger, 'utf8');
+      let caught: unknown;
+      try { store.confirm(id); } catch (e) { caught = e; }
+      expect(caught).toBeInstanceOf(WitnessBlockedError);
+      expect(readFileSync(ledger, 'utf8')).toBe(before);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('POLICY PRESERVED: an ordinary commit still lands under the same alarm', () => {
+    const { store, ledger, home } = forked();
+    try {
+      const before = readFileSync(ledger, 'utf8').length;
+      store.commit({ content: 'a later unrelated fact', source: 'user' });
+      expect(readFileSync(ledger, 'utf8').length).toBeGreaterThan(before);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('POLICY PRESERVED: a reality-check DEMOTION still lands under the same alarm', () => {
+    // The gate keys on the state, not on the record type: refusing every verify would also refuse
+    // the demotion a failing reality-check must be able to record, which is the opposite of safe.
+    const { store, ledger, home } = forked();
+    const cwd = process.cwd();
+    process.chdir(home);
+    try {
+      writeFileSync(join(home, 'app.json'), 'base /v1/users');   // present, pattern absent -> FAIL
+      const b = store.commit({ content: 'api base /v2/users in app.json', source: 'user' });
+      const before = readFileSync(ledger, 'utf8').length;
+      const r = store.recheck(b.id, { kind: 'file-contains', path: 'app.json', pattern: '/v2/users' });
+      expect(r.result).toEqual({ kind: 'state', state: 'Suspect' });
+      expect(readFileSync(ledger, 'utf8').length).toBeGreaterThan(before);
+    } finally { process.chdir(cwd); rmSync(home, { recursive: true, force: true }); }
+  });
+});

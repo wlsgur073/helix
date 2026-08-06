@@ -216,6 +216,17 @@ All notable changes to Helix are documented here. This project follows
   advertises it, so the API rejects it after the metered call is already spent.
 
 ### Fixed
+- **An elevated `verify` is refused while a scope's rollback alarm stands.** A `mismatch` verdict
+  clamped what reads *displayed* but never what the write path *minted*, and a signed verify records
+  nothing about the verdict it was minted under — so one signed during an alarm was indistinguishable
+  from an honest one afterwards. Two things made that decisive rather than untidy: `--asOf` is
+  deliberately not clamped, so it served the new grade immediately, and the re-baseline ceremony
+  adopts the current bytes wholesale, so the operator's own documented recovery promoted it
+  everywhere. The refusal happens before anything is appended, so the ledger and the witness are both
+  left untouched and the alarm survives. Deliberately narrow: ordinary commits, soft erases and
+  reality-check **demotions** still land under the same verdict — a scope under suspicion must stay
+  able to record that something failed. It keys on the record rather than the caller's operation
+  label, because `signVerify` does not itself assert the record type.
 - **A fact id is now owned by the first ledger row that claims it**, so a row appended with an
   existing id is inert. A signed `verify` binds only `(id, contentDigest)`, so a duplicate row with
   the same id and content satisfied it as well as the row it was signed for — and rode the grade up
