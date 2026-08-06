@@ -15,6 +15,23 @@ const journalFor = (expected: Buffer, over: Partial<JournalEntry> = {}): Journal
 });
 
 describe('classifyWitness — journal-first (§4.4)', () => {
+  it('bytes on neither the pre- nor the post-transition lineage are a mismatch, not an interruption', () => {
+    // A pending journal knows both ends of the transition it opened: `predecessor` is what the
+    // ledger held when it opened, `expected` is what the rewrite would produce. Bytes that diverge
+    // from BOTH prefixes are neither the before nor the after — they are a fork, and calling that
+    // an interruption hands it to the rewrite gate, which refuses only 'mismatch'.
+    const before = B('r1\nr2\n');
+    const after = B('r1\nr2\nr3\n');
+    const fork = B('r1\nPOISON\n');
+    const j = journalFor(after, { predecessor: { byteLength: before.length, prefixHash: sha256Hex(before) } });
+    expect(classifyWitness(fork, entryFor(before), j).kind).toBe('mismatch');
+  });
+  it('bytes still at the predecessor are an interruption: the legitimate re-drive must not be refused', () => {
+    const before = B('r1\nr2\n');
+    const after = B('r1\nr2\nr3\n');
+    const j = journalFor(after, { predecessor: { byteLength: before.length, prefixHash: sha256Hex(before) } });
+    expect(classifyWitness(before, entryFor(before), j).kind).toBe('transition-interrupted');
+  });
   it('no entry, no journal → first-contact/no-entry', () => {
     expect(classifyWitness(B('a\n'), null, null)).toEqual({ kind: 'first-contact', reason: 'no-entry' });
   });

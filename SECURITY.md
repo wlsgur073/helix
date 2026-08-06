@@ -201,7 +201,12 @@ adversary cannot read or write, so a ledger's current bytes are checked against 
   never advances over a mismatch. Only an explicit re-baseline (below) clears the signal, so the
   very next ordinary append after a rollback can never silently launder the alarm away. (A
   separate, narrower state — a ledger rewrite caught mid-transition — always excludes reads and
-  blocks writes for that scope until resolved, independent of this policy.)
+  blocks appends for that scope until resolved, independent of this policy. A *rewrite* is still
+  permitted there, because re-driving an interrupted transition is how that state is meant to
+  resolve. So that this does not become a second laundering route, the mid-transition state is
+  itself discriminated: a pending transition records the bytes it opened over as well as the bytes
+  it would produce, and a ledger carrying NEITHER as a prefix is neither the before nor the after.
+  It is classified a mismatch, not an interruption, and the rewrite is refused.)
 - **Fenced current-head-only witness, user-only ceremony.** The witness keeps only each scope's
   live head, never a history of erased-era bytes, kept honest by a content-free marker row planted
   at the end of every legitimate rewrite (compaction, erase, an authorized re-baseline) — so a
