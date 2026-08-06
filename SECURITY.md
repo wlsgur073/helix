@@ -48,6 +48,16 @@ acknowledgement within a few days.
   an interior `label:<secret>` pair. The residual limit, stated plainly: a token
   syntactically indistinguishable from a citation is released, and no local test can
   separate the two.
+- **The egress scan fails closed on size, and the caps are hard.** A payload whose raw or
+  outbound form exceeds **200,000 characters**, or an aggregate ledger exceeding
+  **8,000,000 characters**, is REFUSED unscanned rather than sent — the decision is
+  `blocked` with `decidedBy: 'scan_limit'`. No policy key releases either cap; they sit
+  upstream of `dualVerify.egressPolicy` entirely. The direction is deliberate: an
+  adversary who can grow the ledger can therefore cause **availability** loss on
+  dual-verify, which is far cheaper than unbounded scanning of adversary-sized input.
+  The ledger cap is sized well above the point at which the persistent-index migration
+  trigger fires, so no legitimate ledger reaches it — but a user whose corpus does grow
+  past it sees every dual-verify call refused, and this is the only place that says so.
 - **Untrusted content** (recalled memory, external-model output) is treated as DATA,
   never instructions: NFKC/control/bidi normalization + per-line datamarking + a
   per-call nonce frame.
@@ -244,9 +254,14 @@ same one-time path as before; nothing about the key's secrecy changes, only when
 - **Hard-linked ledgers are refused:** every write path throws when the ledger's link count is not
   one — two alias names would carry two independent locks (no mutual exclusion) and a compaction
   through one name would leave the other name holding the entire pre-rewrite plaintext.
-- **Appends are durable:** every append fsyncs the line and the directory before success is
-  reported; a torn tail (power cut mid-append) is isolated by the next writer's tail repair and
-  counted by parse health, and a complete-but-unacknowledged record commits (at-least-once).
+- **Appends are durable:** every append fsyncs the line before success is reported; a torn tail
+  (power cut mid-append) is isolated by the next writer's tail repair and counted by parse health,
+  and a complete-but-unacknowledged record commits (at-least-once). The **directory** fsync that
+  makes a new file's name durable is attempted on the same path but is **best-effort**: it is
+  suppressed if the directory cannot be opened or the fsync itself fails, and success is still
+  reported. This is deliberate — some filesystems reject it outright — but it means an acknowledged
+  append could, after power loss, be found under a directory entry that never reached the platter.
+  The line's own bytes are unaffected.
 - **Rollout launch barrier (normative):** old bundles age-steal locks and do not sweep — while any
   old helix-mcp process runs, the new guarantees do not hold. Upgrade procedure: close every Claude
   session, verify no helix-mcp processes remain, reinstall the plugin, then reopen sessions. The

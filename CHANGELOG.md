@@ -36,8 +36,12 @@ All notable changes to Helix are documented here. This project follows
   from the in-process recall cache (unchanged ledger bytes) skips the check entirely. The attempt is
   counted whether it **succeeds or fails**: a compaction that throws is swallowed (it never breaks the
   recall) but still consumes the session's single attempt, and is not retried until a new session. It
-  surfaces as an `ok: false` metric row *if metrics are enabled* (see below). On that failure path the
-  ledger is byte-identical — `compactLedger` writes a tmp file and renames — so nothing was dropped.
+  surfaces as an `ok: false` metric row *if metrics are enabled* (see below). That failure path splits at
+  the rename. A throw **before** it leaves the ledger byte-identical — `compactLedger` writes a tmp file
+  and renames — and the writer retracts its own journal, so nothing was dropped. A throw **after** it
+  (the directory fsync, or completing the witness transition) is a failure over a ledger that has
+  already been replaced: the live projection survives by construction, but the soft-erase undo window
+  does not, and the scope recovers through `transition-heal` on the next read.
 
   **The consequence you are opting into.** Compaction drops *every* dead record, however recently it
   died — it has no per-record age filter. So once a ledger goes quiescent past the grace window

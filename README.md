@@ -71,6 +71,8 @@ at startup saying it is being ignored.)
 
 - `mode` — `compare` (independent answer + an agreement map) or `critique` (Codex reviews your answer).
 - `stakesFloor` — skip the metered Codex call below this stakes level (`low` / `medium` / `high` / `xhigh`).
+  It gates only calls that **declare** `stakes`. A call that omits the argument bypasses the floor and
+  spends quota at any setting — omitting it is read as an explicit request, not as the lowest tier.
 - `model` / `effort` — omit (or `null`) to inherit your `~/.codex/config.toml`; set to override for
   dual-verify only. Valid efforts are `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. Support varies
   by model — `codex debug models` lists what yours accepts.
@@ -133,9 +135,13 @@ off unless you turn it on:
   rebuilds its index (a recall served from the in-process cache, i.e. unchanged ledger bytes, skips the
   check) and whose ledger passes every gate below. It never runs on a write, on a timer, or in the
   background. That single attempt is spent whether it **succeeds or fails**: a compaction that throws is
-  swallowed (your recall still answers normally, and the ledger is left byte-identical) but it is not
-  retried until a new session. A failure surfaces as an `"ok": false` metric row *if metrics are enabled*
-  (see Observability below) — never as a retry.
+  swallowed (your recall still answers normally) but it is not retried until a new session. Whether the
+  ledger is left byte-identical depends on **where** it failed. A failure before the atomic rename
+  changes nothing and the writer retracts its own journal. A failure after the rename — the durability
+  fsync or the transition completion — has already replaced the file: the live projection is preserved
+  by construction, but soft-erased plaintext is gone and the undo window with it, and the scope
+  self-heals on the next read rather than staying dark. Either way a failure surfaces as an
+  `"ok": false` metric row *if metrics are enabled* (see Observability below) — never as a retry.
 - `auto` (bool, default `false`) — the master switch.
 - `dirtyRatio` — `(0, 1]`, default `0.5`. Fire when reclaimable rows / total rows reaches this.
 - `minDirtyBytes` — integer ≥ 1, default `1048576` (1 MiB). Alternative trigger: fire when the exact
@@ -218,7 +224,7 @@ Partial-removal note: deleting only the signing key (`ledger-mac-master.key`) is
   > **Tamper-evident at the file surface.** Trust is conferred only by `verify` records, each HMAC-SHA256-authenticated with a key held only in `~/.helix` (never written to the repo ledger). A forged or hand-edited ledger record replays as `Fresh`, so `Corroborated`/`Verified` are **unforgeable at the file surface against an adversary that cannot read `~/.helix`** — minting a grade by appending raw JSON to the ledger no longer works. This is *not* the tool surface: a `helix_memory_confirm` call still carries no enforceable human-approval signal, so do **not** add `helix_memory_confirm` to `permissions.allow` — it must prompt for your explicit approval. (Residuals: an adversary that can read `~/.helix` can mint valid MACs; rollback-by-suppression is undetected; trust is machine-local. See [SECURITY.md](./SECURITY.md).)
 - **Re-verify before use.** A `Suspect` item on a high-blast-radius path must be re-checked before it is acted on.
 - **Content quarantine.** Recalled memory and external-model output are framed as labeled DATA; forged frame markers are neutralized so stored text can never act as an instruction.
-- **Secret hygiene.** Common credential formats and high-entropy tokens are redacted before anything is written, and dual-verify refuses to send a payload containing a secret to the external model.
+- **Secret hygiene.** Common credential formats and high-entropy tokens are redacted before anything is written. Dual-verify refuses to send a payload containing a secret to the external model, with one documented exemption on the egress side — hex-shaped and low-entropy-chain tokens are released by default unless you close the `secretEntropyExempt` leg. The write-path redaction has no such exemption.
 - **Right-to-erasure (two-stage).** The `helix_memory_erase` tool is a **soft** erase: it appends a content-free tombstone to the ledger and records the erase in `audit.jsonl` (the id only, never the text), so the fact leaves every live surface — recall, inspect, SessionStart — immediately, while the original line stays in the ledger file until a compaction rewrites it. That surviving line is the undo window: it is what makes an erroneous or poisoned erase both detectable and recoverable (see [the recovery playbook](./docs/release/recovery-playbook.md)). Physical destruction — rewriting the ledger without the record — is the operator-run `permanent` path, deliberately kept off the agent tool surface so a prompt-injected agent cannot reach it; enabling [automatic compaction](#automatic-compaction-opt-in-off-by-default) destroys it too, which is exactly why compaction is opt-in and off by default. Either way, "physical" means durable namespace removal by Helix's own write paths, not media sanitization (see [SECURITY.md](./SECURITY.md)) — and the ledger is locked across processes, so concurrent sessions can't corrupt it or resurrect erased data.
 
 ## Trust & data flow (what runs on your machine)
@@ -251,7 +257,8 @@ Helix is local-first. Installing it lets Claude Code run code on your machine �
   connection, which Helix never sees. The egress guard governs the payload Helix builds; it is not a
   sandbox around the CLI. If that residue matters for your data, run Codex under an OS-level sandbox
   or leave dual-verify off.
-- **Blocked before sending:** an egress guard refuses the call if the payload contains a named provider credential (override-proof), a heuristic- or entropy-detected secret (blocked by default, per-leg overridable), high-severity or bulk PII, or a verbatim copy of a stored memory.
+- **Blocked before sending:** an egress guard refuses the call if the payload contains a named provider credential (override-proof), a heuristic- or entropy-detected secret (blocked by default, per-leg overridable), high-severity or bulk PII, or a verbatim copy of a stored memory. One entropy subclass is **released** by default — a token whose stripped core is pure hex (git SHA, digest) or a chain of individually low-entropy segments, with no credential keyword in the same statement. Close it with the `secretEntropyExempt` leg; the write path redacts those bytes regardless. See [SECURITY.md](./SECURITY.md) for why the exemption exists.
+- **Refused rather than scanned:** the guard fails closed on size. A payload over 200,000 characters, or an aggregate ledger over 8,000,000 characters, is refused unscanned rather than sent — so a large enough call or a large enough ledger makes dual-verify unavailable, which is the intended failure direction.
 - **Logging:** off by default. The exact prompt/response are written to `~/.helix/codex-log.jsonl` (`0o600`) only if you set `dualVerify.logContent: true`; the audit log stays content-free regardless.
 - **Disable:** set `dualVerify.enabled: false` (the default) — or never create the config.
 
@@ -262,7 +269,7 @@ Helix is a defense kit for **memory & context poisoning** (OWASP Agentic Top 10 
 - **Provenance firewall (fail-closed):** a reality-check raises a fact only to `Corroborated`; only you can promote it to `Verified`; external agreement never can. `Corroborated`/`Verified` are tamper-evident at the file surface — conferred only by HMAC-authenticated `verify` records (key held only in `~/.helix`), so a forged or edited ledger record replays as `Fresh`. Unforgeable at the file surface against an adversary that cannot read `~/.helix`; still not an enforceable tool-surface approval (do **not** allow-list `helix_memory_confirm`).
 - **Trust states & re-verify:** `Fresh / Corroborated / Verified / Suspect`, with re-verification required before a `Suspect` item is used on a high-blast-radius path.
 - **Quarantine:** untrusted text is normalized and datamarked inside a nonce-framed DATA block, so it cannot act as an instruction.
-- **Egress guard:** the only outbound path (dual-verify) is gated for secrets / PII / memory echo.
+- **Egress guard:** the only outbound path (dual-verify) is gated for secrets / PII / memory echo, and fails closed on size — an oversized payload or ledger is refused unscanned, never sent.
 
 **Out of scope:** the dual-verify echo check is a verbatim-copy tripwire, not a robust exfiltration guard against a host model that transforms content. The primary boundary is the provenance firewall + secret-scan + DATA-quarantine.
 
