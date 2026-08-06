@@ -6887,7 +6887,7 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join11, dirname as dirname13 } from "node:path";
+import { join as join12, dirname as dirname13 } from "node:path";
 import { existsSync as existsSync8 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
@@ -13030,14 +13030,14 @@ function canCommit(record2) {
   return Boolean(record2.provenance && record2.provenance.source);
 }
 function resolveTransition(input) {
-  const { targetSource, targetState, evidenceSource, outcome } = input;
+  const { targetState, evidenceSource, outcome } = input;
   if (evidenceSource === "user") return { kind: "state", state: "Verified" };
   if (evidenceSource !== "reality-check") return { kind: "no-change" };
   if (!outcome.ran || outcome.indeterminate) return { kind: "no-change" };
   if (outcome.passed) {
     return targetState === "Verified" || targetState === "Corroborated" ? { kind: "no-change" } : { kind: "state", state: "Corroborated" };
   }
-  if (targetState === "Verified" || targetSource === "user") return { kind: "contested" };
+  if (targetState === "Verified") return { kind: "contested" };
   if (targetState === "Suspect") return { kind: "no-change" };
   return { kind: "state", state: "Suspect" };
 }
@@ -13488,7 +13488,7 @@ function acquireFileLock(target, opts = {}) {
   for (; ; ) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString("hex")}.tmp`;
     try {
-      writeFileSync(srcTmp, payloadText, { flag: "wx" });
+      writeFileSync(srcTmp, payloadText, { flag: "wx", mode: 384 });
       try {
         linkSync(srcTmp, lockPath);
         break;
@@ -13591,7 +13591,7 @@ function stealUnderGate(lockPath, probe) {
   const gateToken = randomBytes(16).toString("hex");
   const gateSrc = `${gatePath}.src-${gateToken}.tmp`;
   try {
-    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: "wx" });
+    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: "wx", mode: 384 });
     try {
       linkSync(gateSrc, gatePath);
     } finally {
@@ -14313,7 +14313,7 @@ function appendRecordUnlocked(rawPath, record2, fsOps = realFsOps) {
   mkdirSync4(dirname6(rawPath), { recursive: true });
   const path = canonical(rawPath);
   sweepOrphanTmps(path, { fsOps });
-  const fd = fsOps.openSync(path, "a+");
+  const fd = fsOps.openSync(path, "a+", 384);
   try {
     const st = fsOps.fstatSync(fd);
     if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
@@ -14456,8 +14456,8 @@ function compactLedger(rawPath, opts) {
     let retractNonce = null;
     try {
       if (!ctx.stillOwned()) throw new Error("compactLedger: lock lost after tmp creation");
-      const mode = modeOf(path);
-      if (mode !== null) fsOps.fchmodSync(fd, mode);
+      const mode = modeOf(path) ?? 384;
+      fsOps.fchmodSync(fd, mode);
       const beforeBytes = fileSize(path);
       const records = parseLedger(path);
       const { kept, droppedForgedVerifies } = planCompaction(records, opts);
@@ -14824,8 +14824,12 @@ function stripWrapper(t) {
 function isHexCore(t) {
   return /^[0-9a-fA-F]{24,}$/.test(stripWrapper(t));
 }
+var CITATION_LINE_REF = /^(.*\.[A-Za-z][A-Za-z0-9]{0,4}):\d{1,5}(?:[-:]\d{1,5})?$/;
+function stripLineRef(t) {
+  return CITATION_LINE_REF.exec(t)?.[1] ?? t;
+}
 function isBenignWordChain(t) {
-  const segments = stripWrapper(t).split(/[-._/]+/).filter((s) => s !== "");
+  const segments = stripLineRef(stripWrapper(t)).split(/[-._/]+/).filter((s) => s !== "");
   if (segments.length < 2) return false;
   return segments.every(
     (s) => /^[A-Za-z]+$/.test(s) || /^[0-9]{1,4}$/.test(s) || s.length <= 8 && /^[A-Za-z]+[0-9]{1,3}$/.test(s)
@@ -14838,13 +14842,44 @@ function mergeSpans(spans) {
     const last = out[out.length - 1];
     if (last && s.start < last.end) {
       last.end = Math.max(last.end, s.end);
+      for (const t of s.tiers) if (!last.tiers.includes(t)) last.tiers.push(t);
       if (TIER_RANK[s.tier] > TIER_RANK[last.tier]) {
         last.tier = s.tier;
         last.kind = s.kind;
       }
     } else {
-      out.push({ ...s });
+      out.push({ ...s, tiers: [...s.tiers] });
     }
+  }
+  return out;
+}
+function foldedTokenSpans(content) {
+  const out = [];
+  const tok = /\S+/g;
+  for (let m = tok.exec(content); m !== null; m = tok.exec(content)) {
+    const folded = m[0].normalize("NFKC");
+    if (folded === m[0]) continue;
+    let hit = null;
+    for (const { kind, tier, re } of PATTERNS) {
+      if (new RegExp(re.source, re.flags.replace("g", "")).test(folded)) {
+        hit = { kind, tier };
+        break;
+      }
+    }
+    if (hit === null && isHighEntropyToken(folded)) hit = { kind: "high-entropy", tier: "entropy" };
+    if (hit === null) continue;
+    const span = {
+      start: m.index,
+      end: m.index + m[0].length,
+      kind: hit.kind,
+      tier: hit.tier,
+      tiers: [hit.tier]
+    };
+    if (hit.tier === "entropy") {
+      span.entropyHex = isHexCore(folded);
+      span.entropyWordChain = isBenignWordChain(folded);
+    }
+    out.push(span);
   }
   return out;
 }
@@ -14853,7 +14888,7 @@ function findSecrets(content) {
   for (const { kind, tier, re } of PATTERNS) {
     const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
     for (let m = g.exec(content); m !== null; m = g.exec(content)) {
-      spans.push({ start: m.index, end: m.index + m[0].length, kind, tier });
+      spans.push({ start: m.index, end: m.index + m[0].length, kind, tier, tiers: [tier] });
       if (g.lastIndex === m.index) g.lastIndex++;
     }
   }
@@ -14865,11 +14900,13 @@ function findSecrets(content) {
         end: m.index + m[0].length,
         kind: "high-entropy",
         tier: "entropy",
+        tiers: ["entropy"],
         entropyHex: isHexCore(m[0]),
         entropyWordChain: isBenignWordChain(m[0])
       });
     }
   }
+  spans.push(...foldedTokenSpans(content));
   return mergeSpans(spans);
 }
 function redactSecrets(content, spans) {
@@ -15950,6 +15987,60 @@ function scanLegacyElevated(records, verify) {
   return { ok: offenders.length === 0, offenders };
 }
 
+// src/memory/home-permissions.ts
+import { lstatSync as lstatSync3, chmodSync as chmodSync2, readdirSync as readdirSync3 } from "node:fs";
+import { join as join6 } from "node:path";
+var OWNED_FILES = [
+  "memory.jsonl",
+  "audit.jsonl",
+  "sessions.jsonl",
+  "metrics.jsonl",
+  "trigger.jsonl",
+  "codex-log.jsonl",
+  "witness.json",
+  "witness-log.jsonl",
+  "projects.json",
+  "ledger-mac-master.key",
+  "config.json"
+];
+function hardenHomePermissions(home2, deps) {
+  if (process.platform === "win32") return;
+  try {
+    const dir = lstatSync3(home2);
+    if (dir.isDirectory() && (dir.mode & 63) !== 0) {
+      chmodSync2(home2, 448);
+      deps.warn(`helix: tightened HELIX_HOME ${home2} from 0${(dir.mode & 511).toString(8)} to 0700 (a group- or world-writable directory lets another local user replace files inside it, whatever their own mode)`);
+    }
+  } catch {
+  }
+  let present;
+  try {
+    present = new Set(readdirSync3(home2));
+  } catch {
+    return;
+  }
+  for (const name of OWNED_FILES) {
+    if (!present.has(name)) continue;
+    const path = join6(home2, name);
+    try {
+      const st = lstatSync3(path);
+      if (st.isSymbolicLink()) {
+        deps.warn(`helix: ${path} is a symlink \u2014 refusing to change permissions through it (repair or remove it by hand)`);
+        continue;
+      }
+      if (!st.isFile()) {
+        deps.warn(`helix: ${path} is not a regular file \u2014 refusing to change its permissions`);
+        continue;
+      }
+      if ((st.mode & 63) === 0) continue;
+      chmodSync2(path, 384);
+      deps.warn(`helix: tightened ${path} from 0${(st.mode & 511).toString(8)} to 0600`);
+    } catch {
+      deps.warn(`helix: could not repair permissions on ${path} \u2014 leaving it as it is`);
+    }
+  }
+}
+
 // src/memory/scope-target.ts
 function aliasesGlobalLedger(projectLedger2, globalLedger2) {
   return canonicalRoot(projectLedger2) === canonicalRoot(globalLedger2);
@@ -15957,7 +16048,7 @@ function aliasesGlobalLedger(projectLedger2, globalLedger2) {
 
 // src/memory/trust-store-layout.ts
 import { existsSync as existsSync4, readFileSync as readFileSync9, statSync as statSync4 } from "node:fs";
-import { dirname as dirname9, join as join6 } from "node:path";
+import { dirname as dirname9, join as join7 } from "node:path";
 var TRUST_FILE_NAMES = ["ledger-mac-master.key", "projects.json", "witness.json", "witness-log.jsonl"];
 function looksLikeOurs(name, path) {
   try {
@@ -15978,13 +16069,13 @@ function strayTrustFiles(home2, globalLedger2) {
   const ledgerDir = dirname9(globalLedger2);
   if (canonicalRoot(ledgerDir) === canonicalRoot(home2)) return [];
   return TRUST_FILE_NAMES.filter((name) => {
-    const p = join6(ledgerDir, name);
+    const p = join7(ledgerDir, name);
     return existsSync4(p) && looksLikeOurs(name, p);
   });
 }
 
 // src/server/helix-server.ts
-import { join as join10 } from "node:path";
+import { join as join11 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // node_modules/zod/v3/external.js
@@ -24081,8 +24172,8 @@ var EMPTY_COMPLETION_RESULT = {
 // src/config.ts
 import { readFileSync as readFileSync10 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join7 } from "node:path";
-var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
+import { join as join8 } from "node:path";
+var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy", "secretEntropyExempt"];
 var DEFAULT_COMPACTION = {
   auto: false,
   dirtyRatio: 0.5,
@@ -24123,7 +24214,9 @@ var DEFAULT_CONFIG = {
     // Block every non-named egress leg to the external Codex model by default. User opts into risk
     // per-leg (a human edit, outside model control). Invalid/unknown => 'block'. Named secrets are
     // override-proof regardless of this map.
-    egressPolicy: { memoryEcho: "block", piiHigh: "block", piiBulk: "block", secretHeuristic: "block", secretEntropy: "block" },
+    // secretEntropyExempt defaults to 'allow' so the shipped behaviour is byte-for-byte unchanged:
+    // a git SHA in design prose still does not block. What changes is that it is now REACHABLE.
+    egressPolicy: { memoryEcho: "block", piiHigh: "block", piiBulk: "block", secretHeuristic: "block", secretEntropy: "block", secretEntropyExempt: "allow" },
     // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
     logContent: false
   },
@@ -24138,7 +24231,7 @@ function readJson(path) {
   }
 }
 function loadConfig(opts = {}) {
-  const globalPath = opts.globalPath ?? join7(homedir(), ".helix", "config.json");
+  const globalPath = opts.globalPath ?? join8(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
   const seen = /* @__PURE__ */ new Set();
   const warn = (msg) => {
@@ -24209,7 +24302,7 @@ function mergeCompaction(raw) {
   return c;
 }
 function compactionConfigFromGlobal(home2) {
-  return mergeCompaction(readJson(join7(home2, "config.json"))?.compaction);
+  return mergeCompaction(readJson(join8(home2, "config.json"))?.compaction);
 }
 
 // src/verify/agreement-map.ts
@@ -24355,7 +24448,7 @@ function detectEcho(forms, ledger, opts = {}) {
   }
   return { memoryIds: ids };
 }
-var EGRESS_LEG_ORDER = ["memoryEcho", "piiHigh", "secretHeuristic", "secretEntropy", "piiBulk"];
+var EGRESS_LEG_ORDER = ["memoryEcho", "piiHigh", "secretHeuristic", "secretEntropy", "secretEntropyExempt", "piiBulk"];
 var AUDIT_LEG_ORDER = ["secret", "pii", "memory_echo"];
 var BULK_PII_N = 3;
 var CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[_-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token)/i;
@@ -24376,10 +24469,17 @@ function scanText(text) {
   const highHits = piiHits.filter((h) => h.severity === "high");
   return {
     secretHit: secretSpans.length > 0,
-    secretNamed: secretSpans.some((s) => s.tier === "named"),
-    secretHeuristic: secretSpans.some((s) => s.tier === "heuristic"),
+    // Read `tiers` (every tier that matched these bytes), NOT `tier` (the highest-CONFIDENCE one).
+    // `tier` is for display and redaction kinds; gating on it let a merge decide policy, because
+    // confidence rank is not blocking strength — see SecretSpan.tiers.
+    secretNamed: secretSpans.some((s) => s.tiers.includes("named")),
+    secretHeuristic: secretSpans.some((s) => s.tiers.includes("heuristic")),
     secretEntropy: secretSpans.some(
-      (s) => s.tier === "entropy" && (!(s.entropyHex || s.entropyWordChain) || nearCredential(text, s.start, s.end))
+      (s) => s.tiers.includes("entropy") && (!(s.entropyHex || s.entropyWordChain) || nearCredential(text, s.start, s.end))
+    ),
+    // The exact complement of the line above: report the exempt subclass, do not silently drop it.
+    secretEntropyExempt: secretSpans.some(
+      (s) => s.tiers.includes("entropy") && (s.entropyHex || s.entropyWordChain) && !nearCredential(text, s.start, s.end)
     ),
     piiKinds: [...new Set(piiHits.map((h) => h.kind))],
     highKinds: [...new Set(highHits.map((h) => h.kind))],
@@ -24427,6 +24527,7 @@ function classifyEgress(input) {
   const secretNamed = any((s) => s.secretNamed);
   const secretHeuristic = any((s) => s.secretHeuristic);
   const secretEntropy = any((s) => s.secretEntropy);
+  const secretEntropyExempt = any((s) => s.secretEntropyExempt);
   const piiKinds = [...new Set(scans.flatMap((s) => s.piiKinds))];
   const highKinds = [...new Set(scans.flatMap((s) => s.highKinds))];
   const highPii = any((s) => s.highPii);
@@ -24445,6 +24546,14 @@ function classifyEgress(input) {
     { hit: highPii, key: "piiHigh", label: `high-severity PII (${highKinds.length} kinds)` },
     { hit: secretHeuristic, key: "secretHeuristic", label: "secret keyword-assignment (low-confidence)" },
     { hit: secretEntropy, key: "secretEntropy", label: "high-entropy token (low-confidence)" },
+    // OPT-IN leg (deliberately unlike the four above, which are applicable whenever they hit). The
+    // exemption ships released, so making it applicable by default would relabel every design-prose
+    // SHA from `pass` to `allowed_override` and move the coarse `secret` leg out of auditOnlyLegs —
+    // churn on the exact false-positive class the exemption exists to serve, with nothing new
+    // transmitted. Applicable only when the operator asks for it, so `allow` reproduces the pre-D2
+    // audit-only pass byte-for-byte and `block` makes it a first-class blocking leg. Consulting the
+    // policy HERE is sound; the D2 defect was consulting it in the detector, where no leg can reach.
+    { hit: secretEntropyExempt && input.policy.secretEntropyExempt === "block", key: "secretEntropyExempt", label: "hex/word-chain entropy token (exemption closed by policy)" },
     { hit: bulkLowPii, key: "piiBulk", label: `bulk low-severity PII (${lowPiiCount} hits)` }
   ];
   const applicable = gated.filter((g) => g.hit);
@@ -24548,7 +24657,7 @@ import { dirname as dirname10 } from "node:path";
 function appendAudit(path, event) {
   mkdirSync6(dirname10(path), { recursive: true });
   const isNew = !existsSync5(path);
-  const fd = openSync5(path, "a");
+  const fd = openSync5(path, "a", 384);
   try {
     writeAll(realFsOps, fd, JSON.stringify(event) + "\n");
     fsyncSync4(fd);
@@ -24878,13 +24987,13 @@ async function handleDualVerify(args, deps) {
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync as existsSync7, mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join9, win32 as winPath } from "node:path";
+import { join as join10, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync6, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync2 } from "node:fs";
+import { existsSync as existsSync6, readdirSync as readdirSync4, lstatSync as lstatSync4, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync3 } from "node:fs";
 import { randomBytes as randomBytes7 } from "node:crypto";
-import { join as join8 } from "node:path";
+import { join as join9 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
 var SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
@@ -24903,10 +25012,10 @@ function ensureScratchRoot(root) {
   } catch {
   }
   try {
-    const st = lstatSync3(root);
+    const st = lstatSync4(root);
     if (!st.isDirectory()) return null;
     if (typeof process.getuid === "function" && st.uid !== process.getuid()) return null;
-    if ((st.mode & 63) !== 0) chmodSync2(root, 448);
+    if ((st.mode & 63) !== 0) chmodSync3(root, 448);
     return root;
   } catch {
     return null;
@@ -24927,7 +25036,7 @@ function publishStamp(stampPath) {
 function sweepScratchRoot(root, nowMs = Date.now()) {
   try {
     if (!existsSync6(root)) return;
-    const stampPath = join8(root, STAMP_NAME);
+    const stampPath = join9(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
       stampMtimeMs = statSync5(stampPath).mtimeMs;
@@ -24936,17 +25045,17 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     }
     if (!shouldSweep(stampMtimeMs, nowMs, SWEEP_INTERVAL_MS)) return;
     const entries = [];
-    for (const d of readdirSync3(root, { withFileTypes: true })) {
+    for (const d of readdirSync4(root, { withFileTypes: true })) {
       if (!d.name.startsWith(SCRATCH_PREFIX)) continue;
       try {
-        const st = lstatSync3(join8(root, d.name));
+        const st = lstatSync4(join9(root, d.name));
         entries.push({ name: d.name, isDir: st.isDirectory(), mtimeMs: st.mtimeMs });
       } catch {
       }
     }
     for (const name of selectStaleScratch(entries, nowMs, FLOOR_MS)) {
       try {
-        rmSync2(join8(root, name), { recursive: true, force: true });
+        rmSync2(join9(root, name), { recursive: true, force: true });
       } catch {
       }
     }
@@ -25184,10 +25293,10 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
-    const scratchRoot = ensureScratchRoot(join9(tmpdir(), "helix"));
+    const scratchRoot = ensureScratchRoot(join10(tmpdir(), "helix"));
     if (scratchRoot !== null) sweepScratchRoot(scratchRoot);
-    const dir = mkdtempSync(scratchRoot !== null ? join9(scratchRoot, "codex-") : join9(tmpdir(), "helix-codex-"));
-    const outFile = join9(dir, "out.txt");
+    const dir = mkdtempSync(scratchRoot !== null ? join10(scratchRoot, "codex-") : join10(tmpdir(), "helix-codex-"));
+    const outFile = join10(dir, "out.txt");
     try {
       const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
       const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir);
@@ -25324,14 +25433,14 @@ function createMetricsSink(path, enabled, deps = {}) {
 function buildServer(store2, dualDeps, metrics2) {
   const m = metrics2 ?? noopMetricsSink;
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
-  const home2 = process.env.HELIX_HOME ?? join10(homedir2(), ".helix");
+  const home2 = process.env.HELIX_HOME ?? join11(homedir2(), ".helix");
   const dv = dualDeps ?? {
-    config: loadConfig({ globalPath: join10(home2, "config.json") }),
+    config: loadConfig({ globalPath: join11(home2, "config.json") }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
     echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-    auditPath: join10(home2, "audit.jsonl"),
-    codexLogPath: join10(home2, "codex-log.jsonl")
+    auditPath: join11(home2, "audit.jsonl"),
+    codexLogPath: join11(home2, "codex-log.jsonl")
   };
   const codexStatusDeps = {
     inspect: () => checkCodexStatus(),
@@ -25438,18 +25547,20 @@ function installSelfTermination(deps) {
 }
 
 // src/server/index.ts
-var home = process.env.HELIX_HOME ?? join11(homedir3(), ".helix");
-var globalLedger = process.env.HELIX_LEDGER ?? join11(home, "memory.jsonl");
+var home = process.env.HELIX_HOME ?? join12(homedir3(), ".helix");
+var globalLedger = process.env.HELIX_LEDGER ?? join12(home, "memory.jsonl");
 var projectRoot = process.cwd();
-var projectLedger = join11(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync8(join11(projectRoot, ".helix")) && !aliasesGlobalLedger(projectLedger, globalLedger);
+var projectLedger = join12(projectRoot, ".helix", "memory.jsonl");
+var projectActive = existsSync8(join12(projectRoot, ".helix")) && !aliasesGlobalLedger(projectLedger, globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot } : void 0;
-var config2 = loadConfig({ globalPath: join11(home, "config.json") });
-if (existsSync8(join11(projectRoot, ".helix", "config.json"))) {
-  process.stderr.write(`helix: NOTE - ${join11(projectRoot, ".helix", "config.json")} is not read; dual-verify, egress and logging settings come only from ${join11(home, "config.json")}
+hardenHomePermissions(home, { warn: (m) => process.stderr.write(`${m}
+`) });
+var config2 = loadConfig({ globalPath: join12(home, "config.json") });
+if (existsSync8(join12(projectRoot, ".helix", "config.json"))) {
+  process.stderr.write(`helix: NOTE - ${join12(projectRoot, ".helix", "config.json")} is not read; dual-verify, egress and logging settings come only from ${join12(home, "config.json")}
 `);
 }
-var metrics = createMetricsSink(join11(home, "metrics.jsonl"), config2.metrics.enabled);
+var metrics = createMetricsSink(join12(home, "metrics.jsonl"), config2.metrics.enabled);
 var stray = strayTrustFiles(home, globalLedger);
 if (stray.length > 0) {
   process.stderr.write(
@@ -25488,8 +25599,8 @@ var server = buildServer(store, {
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
   echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-  auditPath: join11(home, "audit.jsonl"),
-  codexLogPath: join11(home, "codex-log.jsonl")
+  auditPath: join12(home, "audit.jsonl"),
+  codexLogPath: join12(home, "codex-log.jsonl")
 }, metrics);
 var transport = new StdioServerTransport();
 await server.connect(transport);

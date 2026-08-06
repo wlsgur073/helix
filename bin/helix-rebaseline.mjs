@@ -134,7 +134,7 @@ function acquireFileLock(target, opts = {}) {
   for (; ; ) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString("hex")}.tmp`;
     try {
-      writeFileSync(srcTmp, payloadText, { flag: "wx" });
+      writeFileSync(srcTmp, payloadText, { flag: "wx", mode: 384 });
       try {
         linkSync(srcTmp, lockPath);
         break;
@@ -245,7 +245,7 @@ function stealUnderGate(lockPath, probe) {
   const gateToken = randomBytes(16).toString("hex");
   const gateSrc = `${gatePath}.src-${gateToken}.tmp`;
   try {
-    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: "wx" });
+    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: "wx", mode: 384 });
     try {
       linkSync(gateSrc, gatePath);
     } finally {
@@ -701,7 +701,7 @@ function appendRecordUnlocked(rawPath, record, fsOps = realFsOps) {
   mkdirSync3(dirname6(rawPath), { recursive: true });
   const path = canonical(rawPath);
   sweepOrphanTmps(path, { fsOps });
-  const fd = fsOps.openSync(path, "a+");
+  const fd = fsOps.openSync(path, "a+", 384);
   try {
     const st = fsOps.fstatSync(fd);
     if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);

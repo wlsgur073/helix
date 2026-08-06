@@ -155,7 +155,7 @@ function acquireFileLock(target, opts = {}) {
   for (; ; ) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString("hex")}.tmp`;
     try {
-      writeFileSync(srcTmp, payloadText, { flag: "wx" });
+      writeFileSync(srcTmp, payloadText, { flag: "wx", mode: 384 });
       try {
         linkSync(srcTmp, lockPath);
         break;
@@ -258,7 +258,7 @@ function stealUnderGate(lockPath, probe) {
   const gateToken = randomBytes(16).toString("hex");
   const gateSrc = `${gatePath}.src-${gateToken}.tmp`;
   try {
-    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: "wx" });
+    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: "wx", mode: 384 });
     try {
       linkSync(gateSrc, gatePath);
     } finally {
