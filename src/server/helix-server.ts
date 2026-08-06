@@ -120,9 +120,14 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   server.registerTool('helix_memory_adopt', {
     title: 'Adopt project memory',
-    description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted.",
-    inputSchema: {},
-  }, async () => m.runOp('helix_memory_adopt', () => handleAdopt(store, {})));
+    description:
+      "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a " +
+      'team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted. Pass ' +
+      'the project root you mean; a root that is not the active scope is refused and adopts nothing. ' +
+      'This moves a trust boundary — everything in that ledger becomes recallable — so the user, not ' +
+      'Helix, is the authority: do not allow-list this tool.',
+    inputSchema: { projectRoot: z.string() },
+  }, async (args) => m.runOp('helix_memory_adopt', () => handleAdopt(store, args, { auditPath: dv.auditPath, now: dv.now })));
 
   return server;
 }

@@ -23,7 +23,12 @@ acknowledgement within a few days.
   **tamper-evident at the file surface** (see *Ledger integrity* below): a forged or hand-edited
   ledger record replays as `Fresh`. The grade is still **not** an enforceable human-approval
   signal at the *tool* surface, so do **not** allow-list `helix_memory_confirm` — it must prompt
-  for your explicit approval.
+  for your explicit approval. The same holds for **`helix_memory_adopt`**, the only other tool that
+  moves what Helix trusts: adopting a project ledger makes everything already in it recallable, and
+  no grade check stands between the adoption and the next recall. It names the project root it is
+  adopting so the prompt has something to review, and refuses a root that is not the active scope,
+  but neither substitutes for the prompt — do **not** allow-list it either. Every adoption is
+  recorded in `audit.jsonl`.
 - **Trust states:** `Fresh / Corroborated / Verified / Suspect`, with re-verify-before-use on
   high-blast-radius paths.
 - **Secret handling:** memory is secret-scanned and redacted before it is persisted.
@@ -91,7 +96,7 @@ locally-held key, so:
 
 **This authenticates the file surface, not the tool surface.** A legitimate `helix_memory_confirm`
 call still carries no enforceable human-approval signal, so the guidance above stands: do **not**
-allow-list `helix_memory_confirm`.
+allow-list `helix_memory_confirm`, and do **not** allow-list `helix_memory_adopt`.
 
 ### Compaction integrity/horizon markers (F5) — clearing a planted marker is an operator procedure
 

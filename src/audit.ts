@@ -57,7 +57,19 @@ export interface VerifyAudit {
   outcome?: { ran: boolean; indeterminate: boolean; passed: boolean };
 }
 
-export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit;
+/** Adopt audit: every helix_memory_adopt is recorded — best-effort, like the others. Adoption is one
+ *  of only two operations that move what Helix trusts (confirm is the other), and it was previously
+ *  the only one that left no trace at all: a foreign project ledger became trusted with nothing in
+ *  audit.jsonl to show for it. `scope` is the canonical project root — an IDENTITY, not content. It
+ *  discloses nothing that `projects.json` beside it does not already hold, and the content-free rule
+ *  this file keeps is about memory text, which never appears here. */
+export interface AdoptAudit {
+  kind: 'adopt';
+  ts: string;
+  scope: string;
+}
+
+export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit | AdoptAudit;
 
 /** Append one audit event as a JSONL line, fsync'd so a written row survives power loss. Creates
  *  parent dirs as needed. Completeness is best-effort, NOT transactional: the row is appended AFTER

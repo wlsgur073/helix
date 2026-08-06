@@ -32,7 +32,7 @@ describe('project disposition snapshot (B1)', () => {
       const ledger = join(root, '.helix', 'memory.jsonl');
       const store = new MemoryStore(join(home, 'memory.jsonl'),
         { home, sessionId: 't', project: { ledger, root } });
-      store.adopt(); // stamps ownership explicitly (team-shared-ledger flow)
+      store.adopt(root); // stamps ownership explicitly (team-shared-ledger flow)
       store.commit({ content: 'bravo project fact', source: 'user', scope: 'project' });
       const items = store.recall('bravo project fact').items;
       expect(items.length).toBe(1);

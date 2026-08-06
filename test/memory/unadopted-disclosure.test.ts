@@ -69,7 +69,7 @@ describe('unadopted-ledger disclosure note (B2)', () => {
       const home = newHome(), root = newProjectRoot();
       try {
         const store = layeredStore(root, home);
-        store.adopt();
+        store.adopt(root);
         store.commit({ content: 'hello galaxy global fact', source: 'user', scope: 'global' });
         const out = text(handleRecall(store, { query: 'hello galaxy' }));
         expect(out).not.toContain(UNADOPTED_LEDGER_NOTE);
@@ -130,7 +130,7 @@ describe('unadopted-ledger disclosure note (B2)', () => {
       const home = newHome(), root = newProjectRoot();
       try {
         const store = layeredStore(root, home);
-        store.adopt();
+        store.adopt(root);
         const out = text(handleInspect(store, {}));
         expect(out).not.toContain(UNADOPTED_LEDGER_NOTE);
       } finally { cleanup(home, root); }
@@ -164,7 +164,7 @@ describe('unadopted-ledger disclosure note (B2)', () => {
       const home = newHome(), root = newProjectRoot();
       try {
         const store = layeredStore(root, home);
-        store.adopt();
+        store.adopt(root);
         const out = text(handleInspect(store, { history: true }));
         expect(out).not.toContain(UNADOPTED_LEDGER_NOTE);
       } finally { cleanup(home, root); }
@@ -199,7 +199,7 @@ describe('unadopted-ledger disclosure note (B2)', () => {
       const home = newHome(), root = newProjectRoot();
       try {
         const store = layeredStore(root, home);
-        store.adopt();
+        store.adopt(root);
         const out = text(handleInspect(store, { asOf: new Date().toISOString() }));
         expect(out).not.toContain(UNADOPTED_LEDGER_NOTE);
       } finally { cleanup(home, root); }
@@ -265,7 +265,7 @@ describe('unadopted-ledger disclosure note (B2)', () => {
         expect(before).toContain(UNADOPTED_LEDGER_NOTE);
         expect(before).not.toContain('juniper foreign phrase'); // excluded pre-adopt
 
-        store.adopt();
+        store.adopt(root);
 
         const after = text(handleRecall(store, { query: 'juniper foreign phrase' }));
         expect(after).not.toContain(UNADOPTED_LEDGER_NOTE);

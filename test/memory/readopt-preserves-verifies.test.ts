@@ -19,12 +19,12 @@ describe('re-adoption preserves signed verifies through compaction (PR-1 deletio
     const store = new MemoryStore(join(home, 'memory.jsonl'), {
       sessionId: 's', home, project: { ledger: projLedger, root },
     });
-    store.adopt();                                          // mint the project nonce (call it N1)
+    store.adopt(root);                                          // mint the project nonce (call it N1)
     const keep = store.commit({ content: 'keep me alpha', source: 'user' });
     store.confirm(keep.id);                                 // a genuine signed verify under N1
     const gone = store.commit({ content: 'erase me beta', source: 'user' });
 
-    store.adopt();                                          // RE-adopt: must NOT rotate N1 -> a new nonce
+    store.adopt(root);                                          // RE-adopt: must NOT rotate N1 -> a new nonce
     store.erase(gone.id, { permanent: true });             // permanent-erase compacts the project ledger
 
     const after = parseLedger(projLedger);

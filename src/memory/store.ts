@@ -17,7 +17,7 @@ import { rankWithArtifacts, buildRankArtifacts, assertQueryWithinBounds, type Ex
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce, collectWitnessNotes } from './content-frame.js';
-import { isOwned, stampOwnership, projectDispositionOf, type ProjectDisposition } from './ownership.js';
+import { isOwned, stampOwnership, projectDispositionOf, canonicalRoot, type ProjectDisposition } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedLiveWitnessed, verifiedProjectionWithSubkey } from './verified-read.js';
@@ -783,16 +783,28 @@ export class MemoryStore {
   }
 
   /** Explicitly adopt the active project ledger (trust its current contents). For team-shared
-   *  ledgers. Throws if no project layer is active. */
-  adopt(): void {
+   *  ledgers. Throws if no project layer is active, or if `expectedRoot` names a different one.
+   *
+   *  The caller must NAME the root it means. Adoption moves a trust boundary — it is the only other
+   *  tool besides confirm that changes what Helix trusts — and a zero-argument call gives the
+   *  approval prompt nothing to show, so a user could only ever approve the ACT, never the target.
+   *  Requiring the root means the prompt names the ledger, and an agent that guessed wrong adopts
+   *  nothing instead of silently adopting whatever scope happened to be active. The check lives
+   *  here rather than in the handler because this is where the authority is: a caller reaching the
+   *  store directly must clear the same gate. Returns the canonical scope for the audit row. */
+  adopt(expectedRoot: string): string {
     const p = this.opts.project;
     if (!p) throw new Error('adopt: no project scope is active');
+    const active = canonicalRoot(p.root);
+    if (canonicalRoot(expectedRoot) !== active)
+      throw new Error(`adopt: the named project root is not the active project scope (${active})`);
     stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp });
     // Make signing possible going forward (future confirm/recheck can mint signed verifies), but
     // do NOT sign or bless any pre-existing record: adoption must never launder an unsigned,
     // pre-seeded elevated assert into a Verified one. R1's replay clamp already demotes such a
     // record to Fresh — this only ensures the master exists, it signs nothing that already exists.
     ensureMaster(this.homeDir());
+    return active;
   }
 
   /** Which marker family an id belongs to, or null for a normal id. `integrity_marker`/

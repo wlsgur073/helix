@@ -155,9 +155,17 @@ export function handleErase(store: MemoryStore, args: { id: string }, deps: Eras
   return ok(`erased ${args.id}`);
 }
 
-export function handleAdopt(store: MemoryStore, _args: Record<string, never>): ToolResult {
-  store.adopt();
-  return ok('adopted: this project ledger is now trusted by this Helix install');
+export function handleAdopt(
+  store: MemoryStore,
+  args: { projectRoot: string },
+  deps: { auditPath: string; now?: () => string },
+): ToolResult {
+  const ts = (deps.now ?? (() => new Date().toISOString()))();
+  // A refusal writes nothing: the store threw before any trust moved, so there is no event to
+  // record — unlike confirm, whose 'rejected' row marks an attempt against a real target id.
+  const scope = store.adopt(args.projectRoot);
+  appendAudit(deps.auditPath, { kind: 'adopt', ts, scope });
+  return ok(`adopted ${scope}: this project ledger is now trusted by this Helix install`);
 }
 
 export interface RecheckConfirmDeps {

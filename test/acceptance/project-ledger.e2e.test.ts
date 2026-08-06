@@ -117,8 +117,9 @@ describe('project-ledger e2e (over bin/)', () => {
     }));
     expect(outBefore).not.toContain('foreign secret blueprint');
 
-    // (d) adopt: after explicit adoption the ledger is trusted and content appears on recall.
-    await client.callTool({ name: 'helix_memory_adopt', arguments: {} });
+    // (d) adopt: after explicit adoption the ledger is trusted and content appears on recall. The
+    // root is named so the approval prompt can show WHICH ledger is about to be trusted.
+    await client.callTool({ name: 'helix_memory_adopt', arguments: { projectRoot: projDir } });
 
     const outAfter = text(await client.callTool({
       name: 'helix_memory_recall',

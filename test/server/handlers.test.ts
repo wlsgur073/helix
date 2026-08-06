@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, appendFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -250,7 +250,39 @@ describe('scope + adopt handlers', () => {
     mkdirSync(join(proj, '.helix'), { recursive: true });
     writeFileSync(join(proj, '.helix', 'memory.jsonl'), '{}\n');
     expect(isOwned(proj, home)).toBe(false);
-    handleAdopt(store, {});
+    handleAdopt(store, { projectRoot: proj }, { auditPath: join(home, 'audit.jsonl') });
     expect(isOwned(proj, home)).toBe(true);
+  });
+
+  it('handleAdopt refuses a projectRoot that is not the active scope, and adopts nothing', () => {
+    // The tool takes no argument today, so the client's approval prompt shows the user nothing to
+    // review — it cannot say WHICH ledger is about to be trusted. Naming the root makes the prompt
+    // reviewable, and checking it means a blind call cannot adopt whatever scope happens to be live.
+    const { store, proj, home } = layeredStore();
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), '{}\n');
+    expect(() =>
+      handleAdopt(store, { projectRoot: join(proj, 'some-other-place') }, { auditPath: join(home, 'audit.jsonl') }),
+    ).toThrow(/project root/i);
+    expect(isOwned(proj, home)).toBe(false);
+  });
+
+  it('handleAdopt records the adoption, and a refusal records nothing', () => {
+    // Adoption and confirm are the only two operations that move what Helix trusts. confirm has
+    // always been audited; this one left no trace at all, so a foreign ledger could become trusted
+    // with nothing in audit.jsonl to show for it.
+    const { store, proj, home } = layeredStore();
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), '{}\n');
+    const auditPath = join(home, 'audit.jsonl');
+    const now = () => '2026-06-09T00:00:00.000Z';
+
+    expect(() => handleAdopt(store, { projectRoot: join(proj, 'nope') }, { auditPath, now })).toThrow();
+    expect(existsSync(auditPath)).toBe(false); // refused before any trust moved: no event to record
+
+    handleAdopt(store, { projectRoot: proj }, { auditPath, now });
+    const rows = readFileSync(auditPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: 'adopt', ts: '2026-06-09T00:00:00.000Z' });
   });
 });

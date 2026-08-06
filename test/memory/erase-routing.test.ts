@@ -11,11 +11,11 @@ function projectStore() {
   const global = join(home, 'memory.jsonl');
   const projLedger = join(root, '.helix', 'memory.jsonl');
   const store = new MemoryStore(global, { sessionId: 's', home, project: { ledger: projLedger, root } });
-  store.adopt();
+  store.adopt(root);
   return { store, global, projLedger, home };
 }
 
-/** Same shape as projectStore(), but WITHOUT the store.adopt() call — the project layer is active
+/** Same shape as projectStore(), but WITHOUT the store.adopt(root) call — the project layer is active
  *  (an `opts.project` is configured) but unowned, for testing the unowned-project throw path. */
 function unownedProjectStore() {
   const home = mkdtempSync(join(tmpdir(), 'helix-er-'));

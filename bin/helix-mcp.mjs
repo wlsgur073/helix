@@ -15858,12 +15858,24 @@ var MemoryStore = class {
     return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: collectWitnessNotes(verdicts) };
   }
   /** Explicitly adopt the active project ledger (trust its current contents). For team-shared
-   *  ledgers. Throws if no project layer is active. */
-  adopt() {
+   *  ledgers. Throws if no project layer is active, or if `expectedRoot` names a different one.
+   *
+   *  The caller must NAME the root it means. Adoption moves a trust boundary — it is the only other
+   *  tool besides confirm that changes what Helix trusts — and a zero-argument call gives the
+   *  approval prompt nothing to show, so a user could only ever approve the ACT, never the target.
+   *  Requiring the root means the prompt names the ledger, and an agent that guessed wrong adopts
+   *  nothing instead of silently adopting whatever scope happened to be active. The check lives
+   *  here rather than in the handler because this is where the authority is: a caller reaching the
+   *  store directly must clear the same gate. Returns the canonical scope for the audit row. */
+  adopt(expectedRoot) {
     const p = this.opts.project;
     if (!p) throw new Error("adopt: no project scope is active");
+    const active = canonicalRoot(p.root);
+    if (canonicalRoot(expectedRoot) !== active)
+      throw new Error(`adopt: the named project root is not the active project scope (${active})`);
     stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp });
     ensureMaster(this.homeDir());
+    return active;
   }
   /** Which marker family an id belongs to, or null for a normal id. `integrity_marker`/
    *  `horizon_marker` are single canonical fixpoint ids (exact match); a witness fence has no
@@ -24824,9 +24836,11 @@ function handleErase(store2, args, deps) {
   appendAudit(deps.auditPath, { kind: "erase", ts, id: args.id, soft: true });
   return ok(`erased ${args.id}`);
 }
-function handleAdopt(store2, _args) {
-  store2.adopt();
-  return ok("adopted: this project ledger is now trusted by this Helix install");
+function handleAdopt(store2, args, deps) {
+  const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
+  const scope = store2.adopt(args.projectRoot);
+  appendAudit(deps.auditPath, { kind: "adopt", ts, scope });
+  return ok(`adopted ${scope}: this project ledger is now trusted by this Helix install`);
 }
 function handleRecheck(store2, args, deps) {
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
@@ -25536,9 +25550,9 @@ function buildServer(store2, dualDeps, metrics2) {
   }, async () => m.runOp("helix_codex_status", () => handleCodexStatus(codexStatusDeps)));
   server2.registerTool("helix_memory_adopt", {
     title: "Adopt project memory",
-    description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted.",
-    inputSchema: {}
-  }, async () => m.runOp("helix_memory_adopt", () => handleAdopt(store2, {})));
+    description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean; a root that is not the active scope is refused and adopts nothing. This moves a trust boundary \u2014 everything in that ledger becomes recallable \u2014 so the user, not Helix, is the authority: do not allow-list this tool.",
+    inputSchema: { projectRoot: external_exports.string() }
+  }, async (args) => m.runOp("helix_memory_adopt", () => handleAdopt(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   return server2;
 }
 

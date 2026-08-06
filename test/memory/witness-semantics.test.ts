@@ -98,7 +98,7 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
         // witnessing it — unlike an ordinary commit, which stamps ownership AND witnesses atomically
         // within one call, this is the genuine "a scope newly participates, unwitnessed" window
         // (the team-shared-ledger precedent, store.ts adopt() doc-comment).
-        store.adopt();
+        store.adopt(root);
         expect(readScopeWitness(home, scopeKeyOf(home, root)).entry).toBeNull(); // never witnessed
 
         const res = store.recall('global already');

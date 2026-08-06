@@ -98,7 +98,7 @@ describe('recall cache invalidation matrix', () => {
       const store = new MemoryStore(join(home, 'memory.jsonl'),
         { home, sessionId: 't', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj } });
       expect(ids(store, 'timeout')).toEqual([]);           // warm: unowned project ignored on read
-      store.adopt();                                       // trust the project ledger's current contents
+      store.adopt(proj);                                       // trust the project ledger's current contents
       expect(ids(store, 'timeout').length).toBe(1);        // key grows to include project -> MISS -> row included
     } finally { rmSync(home, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
   });

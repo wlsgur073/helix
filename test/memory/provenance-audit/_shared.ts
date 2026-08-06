@@ -16,7 +16,7 @@ export function projectStore() {
     sessionId: 's', home, now: () => CLK, genId: () => `m_${++n}`,
     project: { ledger: projLedger, root },
   });
-  store.adopt();
+  store.adopt(root);
   return { store, global, projLedger, home, root };
 }
 
