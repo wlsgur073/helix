@@ -175,6 +175,62 @@ describe('compactLedger — a failure AFTER the rename lands still reports the R
     expect(statSync(p).size).toBe(before);                  // and the ledger really is untouched
   });
 
+  // Fix round 1 (review Important 1): the attach was a bare assignment. ESM is strict mode, so
+  // assigning a NEW property to a non-extensible (e.g. frozen) object throws instead of landing —
+  // and that throw would replace the real failure with a TypeError, reachable via the public
+  // `opts.fsOps` seam (not just an internal invariant). The attach must never destroy the error it
+  // is trying to enrich.
+  it('a frozen (non-extensible) error thrown post-rename reaches the caller UNCHANGED — no TypeError from the attach', () => {
+    const p = tmpLedger();
+    appendRecord(p, rec({ id: 'm_1', content: 'old fact with some length to it' }));
+    appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
+    appendRecord(p, rec({ id: 'm_3', content: 'another fact that will be superseded' }));
+    appendRecord(p, rec({ id: 'm_4', type: 'supersede', supersedes: 'm_3', content: 'newer' }));
+
+    const frozen = Object.freeze(new Error('injected dir fsync failure (frozen, post-rename)'));
+    const faultyFs: DurableFsOps = { ...realFsOps, fsyncDir: () => { throw frozen; } };
+
+    let caught: unknown = null;
+    try {
+      compactLedger(p, { erasedIds: new Set(), fsOps: faultyFs });
+    } catch (e) { caught = e; }
+
+    expect(caught).toBe(frozen);                                              // the SAME object, not a TypeError
+    expect((caught as Error).message).toBe('injected dir fsync failure (frozen, post-rename)');
+  });
+
+  // Fix round 1 (review Important 2): landedCompactionStats must never report stale stats from an
+  // EARLIER call on a REUSED error object. No throw site in this codebase reuses one today, but the
+  // channel's own contract (":undefined for every other throw... a pre-rename failure") must hold
+  // even against a future module-level sentinel error a caller reuses across calls — otherwise a
+  // pre-rename (nothing-happened) failure could read back a PRIOR call's real, nonzero counts: this
+  // task's own defect class, inverted.
+  it('a REUSED error object does not leak stale landed stats into a later PRE-rename failure', () => {
+    const shared = new Error('shared sentinel error, reused across two compactLedger calls');
+
+    // Call 1: a genuine post-rename landing -> shared SHOULD carry real stats afterward.
+    const landedLedger = tmpLedger();
+    appendRecord(landedLedger, rec({ id: 'm_1', content: 'old fact with some length to it' }));
+    appendRecord(landedLedger, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
+    appendRecord(landedLedger, rec({ id: 'm_3', content: 'another fact that will be superseded' }));
+    appendRecord(landedLedger, rec({ id: 'm_4', type: 'supersede', supersedes: 'm_3', content: 'newer' }));
+    const faultyFsLanded: DurableFsOps = { ...realFsOps, fsyncDir: () => { throw shared; } };
+    let caught1: unknown = null;
+    try { compactLedger(landedLedger, { erasedIds: new Set(), fsOps: faultyFsLanded }); } catch (e) { caught1 = e; }
+    expect(caught1).toBe(shared);
+    expect(landedCompactionStats(shared)).toBeDefined(); // sanity: the first call really did attach
+
+    // Call 2: the SAME error object, but this time a PRE-rename failure — the stale stats from call 1
+    // must be cleared, not carried forward onto an unrelated ledger that never landed anything.
+    const untouchedLedger = tmpLedger();
+    appendRecord(untouchedLedger, rec({ id: 'x_1', content: 'unrelated fact' }));
+    const faultyFsPre: DurableFsOps = { ...realFsOps, renameSync: () => { throw shared; } };
+    let caught2: unknown = null;
+    try { compactLedger(untouchedLedger, { erasedIds: new Set(), fsOps: faultyFsPre }); } catch (e) { caught2 = e; }
+    expect(caught2).toBe(shared);
+    expect(landedCompactionStats(shared)).toBeUndefined(); // must NOT still report call 1's stats
+  });
+
   // The other post-rename throw site (spec §4.9): completeTransition runs AFTER the rename too. Models
   // the exact fault docs/issues/repros/lead-rename-then-witness-throw-metric.ts uses (delete
   // witness.json between rename and completeTransition), so both post-rename failure sites are proven,

@@ -621,9 +621,21 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       // landedStats is non-null only when the rename above already succeeded before this failure hit —
       // attach the real counts so a caller that swallows this throw (store.ts's maybeAutoCompact) can
       // report what actually happened instead of the "nothing happened" zero a bare swallow implies.
-      // Every failure BEFORE the rename leaves landedStats null, so nothing is attached and every
-      // existing caller/test sees exactly today's error (same message, same type, same stack).
-      if (landedStats !== null && e !== null && typeof e === 'object') (e as LandedStatsCarrier)[LANDED_STATS] = landedStats;
+      // Every failure BEFORE the rename leaves landedStats null, so any stats a REUSED error object
+      // might already carry from an earlier landed call (no in-tree throw site reuses one today, but
+      // `opts.fsOps` is a public seam a caller could point at a shared sentinel) are explicitly
+      // cleared here, never left to leak into this unrelated pre-rename failure. Both branches are
+      // try-wrapped like every other side effect in this catch: `e` may be non-extensible/frozen
+      // (also reachable via `opts.fsOps`, not just internal callers), and a mutation attempt failing
+      // must not destroy the real error we are about to rethrow — the bookkeeping is expendable, the
+      // original failure is not. Net effect: every caller/test still sees exactly today's error
+      // (same message, same type, same stack, same object identity), with or without this attach.
+      if (e !== null && typeof e === 'object') {
+        try {
+          if (landedStats !== null) (e as LandedStatsCarrier)[LANDED_STATS] = landedStats;
+          else delete (e as LandedStatsCarrier)[LANDED_STATS];
+        } catch { /* e resists mutation (frozen/non-extensible/exotic) — leave it exactly as thrown */ }
+      }
       throw e;
     }
   });

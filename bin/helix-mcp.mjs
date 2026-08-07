@@ -14533,7 +14533,13 @@ function compactLedger(rawPath, opts) {
         } catch {
         }
       }
-      if (landedStats !== null && e !== null && typeof e === "object") e[LANDED_STATS] = landedStats;
+      if (e !== null && typeof e === "object") {
+        try {
+          if (landedStats !== null) e[LANDED_STATS] = landedStats;
+          else delete e[LANDED_STATS];
+        } catch {
+        }
+      }
       throw e;
     }
   });
