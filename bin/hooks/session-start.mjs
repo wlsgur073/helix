@@ -17,8 +17,8 @@ function isEntryPoint(importMetaUrl) {
 }
 
 // src/memory/trust-store-layout.ts
-import { existsSync as existsSync2, readFileSync as readFileSync4, lstatSync as lstatSync3 } from "node:fs";
-import { dirname as dirname3, join as join3 } from "node:path";
+import { existsSync as existsSync2, readFileSync as readFileSync5, lstatSync as lstatSync3 } from "node:fs";
+import { dirname as dirname4, join as join4 } from "node:path";
 
 // src/memory/ownership.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
@@ -454,6 +454,100 @@ function globalScopeNonce(home) {
   }
 }
 
+// src/memory/ledger-mac.ts
+import { createHash, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
+import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync4, linkSync as linkSync2, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
+import { dirname as dirname3, join as join3 } from "node:path";
+var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
+var LONE_SURROGATE = new RegExp("\\p{Surrogate}", "u");
+var ILL_FORMED_DOMAIN = Buffer.from("helix.digestContent.ill-formed.v1\0", "utf8");
+function digestContent(content) {
+  if (LONE_SURROGATE.test(content))
+    return createHash("sha256").update(ILL_FORMED_DOMAIN).update(Buffer.from(content, "utf16le")).digest("hex");
+  return createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex");
+}
+var LedgerMacError = class extends Error {
+};
+var MASTER_LEN = 32;
+function masterPath(home) {
+  return join3(home, "ledger-mac-master.key");
+}
+function tryReadMasterStrict(path) {
+  let buf;
+  try {
+    buf = readFileSync4(path);
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+  if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
+  try {
+    if ((statSync(path).mode & 63) !== 0) chmodSync(path, 384);
+  } catch {
+  }
+  return buf;
+}
+function tryReadMaster(home) {
+  return tryReadMasterStrict(masterPath(home));
+}
+function deriveSubkey(master, nonce) {
+  return Buffer.from(hkdfSync("sha256", master, Buffer.from(nonce, "utf8"), Buffer.from("helix-ledger-mac-v1", "utf8"), 32));
+}
+function keyIdOf(subkey) {
+  return createHash("sha256").update(Buffer.concat([Buffer.from("keyid"), subkey])).digest().subarray(0, 8).toString("hex");
+}
+var DOMAIN = Buffer.from("helix-ledger-mac");
+function field(buf) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(buf.length, 0);
+  return Buffer.concat([Buffer.from([1]), len, buf]);
+}
+var NULL_FIELD = Buffer.from([0, 0, 0, 0, 0]);
+var str = (s) => s === null ? NULL_FIELD : field(Buffer.from(s, "utf8"));
+var int = (n) => {
+  const b = Buffer.alloc(8);
+  b.writeBigUInt64BE(BigInt(n));
+  return field(b);
+};
+function macCommon(r, keyId) {
+  return [
+    field(Buffer.from(keyId, "hex")),
+    str(r.type),
+    str(r.id),
+    str(r.supersedes),
+    str(r.state),
+    int(r.gen ?? 0),
+    str(r.targetDigest ?? null)
+  ];
+}
+function macInputV1(r, keyId) {
+  return Buffer.concat([DOMAIN, Buffer.from([1]), ...macCommon(r, keyId)]);
+}
+function macInputV2(r, keyId) {
+  return Buffer.concat([DOMAIN, Buffer.from([2]), ...macCommon(r, keyId), str(r.tx)]);
+}
+function macInputFor(version, r, keyId) {
+  return version === 1 ? macInputV1(r, keyId) : macInputV2(r, keyId);
+}
+function verifyVerify(record, subkey) {
+  if (!record.mac || !record.keyId) return false;
+  if (typeof record.macVersion !== "number" || !ACCEPTED_MAC_VERSIONS.has(record.macVersion)) return false;
+  if (record.keyId !== keyIdOf(subkey)) return false;
+  let want;
+  try {
+    want = createHmac("sha256", subkey).update(macInputFor(record.macVersion, record, record.keyId)).digest();
+  } catch {
+    return false;
+  }
+  let got;
+  try {
+    got = Buffer.from(record.mac, "hex");
+  } catch {
+    return false;
+  }
+  return got.length === want.length && timingSafeEqual(got, want);
+}
+
 // src/memory/trust-store-layout.ts
 var TRUST_FILE_NAMES = ["ledger-mac-master.key", "projects.json", "witness.json", "witness-log.jsonl"];
 var MASTER_KEY_LEN = 32;
@@ -463,7 +557,7 @@ function looksLikeOurs(name, path) {
     if (!st.isFile()) return false;
     if (name === "ledger-mac-master.key") return st.size === MASTER_KEY_LEN;
     if (name === "witness-log.jsonl") return st.size > 0;
-    const parsed = JSON.parse(readFileSync4(path, "utf8"));
+    const parsed = JSON.parse(readFileSync5(path, "utf8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
     const obj = parsed;
     if (name === "projects.json") {
@@ -476,10 +570,10 @@ function looksLikeOurs(name, path) {
   }
 }
 function strayTrustFiles(home, globalLedger) {
-  const ledgerDir = dirname3(globalLedger);
+  const ledgerDir = dirname4(globalLedger);
   if (canonicalRoot(ledgerDir) === canonicalRoot(home)) return [];
   return TRUST_FILE_NAMES.filter((name) => {
-    const p = join3(ledgerDir, name);
+    const p = join4(ledgerDir, name);
     return existsSync2(p) && looksLikeOurs(name, p);
   });
 }
@@ -500,9 +594,9 @@ function requiresReverifyBeforeUse(item) {
 }
 
 // src/memory/content-frame.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
+import { randomBytes as randomBytes4 } from "node:crypto";
 function newNonce() {
-  return randomBytes3(16).toString("hex");
+  return randomBytes4(16).toString("hex");
 }
 var FENCE_RUN = /[=\-~`*_‐‑‒–—―−─-╿]{3,}/gu;
 function breakFenceRuns(s) {
@@ -640,100 +734,6 @@ function formatSessionStartContext(records, nonce, opts = {}) {
 import { randomBytes as randomBytes5, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { mkdirSync as mkdirSync3, readFileSync as readFileSync6 } from "node:fs";
 import { dirname as dirname5, join as join5 } from "node:path";
-
-// src/memory/ledger-mac.ts
-import { createHash, createHmac, hkdfSync, randomBytes as randomBytes4, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync5, linkSync as linkSync2, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
-import { dirname as dirname4, join as join4 } from "node:path";
-var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
-var LONE_SURROGATE = new RegExp("\\p{Surrogate}", "u");
-var ILL_FORMED_DOMAIN = Buffer.from("helix.digestContent.ill-formed.v1\0", "utf8");
-function digestContent(content) {
-  if (LONE_SURROGATE.test(content))
-    return createHash("sha256").update(ILL_FORMED_DOMAIN).update(Buffer.from(content, "utf16le")).digest("hex");
-  return createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex");
-}
-var LedgerMacError = class extends Error {
-};
-var MASTER_LEN = 32;
-function masterPath(home) {
-  return join4(home, "ledger-mac-master.key");
-}
-function tryReadMasterStrict(path) {
-  let buf;
-  try {
-    buf = readFileSync5(path);
-  } catch (e) {
-    if (e.code === "ENOENT") return null;
-    throw e;
-  }
-  if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
-  try {
-    if ((statSync(path).mode & 63) !== 0) chmodSync(path, 384);
-  } catch {
-  }
-  return buf;
-}
-function tryReadMaster(home) {
-  return tryReadMasterStrict(masterPath(home));
-}
-function deriveSubkey(master, nonce) {
-  return Buffer.from(hkdfSync("sha256", master, Buffer.from(nonce, "utf8"), Buffer.from("helix-ledger-mac-v1", "utf8"), 32));
-}
-function keyIdOf(subkey) {
-  return createHash("sha256").update(Buffer.concat([Buffer.from("keyid"), subkey])).digest().subarray(0, 8).toString("hex");
-}
-var DOMAIN = Buffer.from("helix-ledger-mac");
-function field(buf) {
-  const len = Buffer.alloc(4);
-  len.writeUInt32BE(buf.length, 0);
-  return Buffer.concat([Buffer.from([1]), len, buf]);
-}
-var NULL_FIELD = Buffer.from([0, 0, 0, 0, 0]);
-var str = (s) => s === null ? NULL_FIELD : field(Buffer.from(s, "utf8"));
-var int = (n) => {
-  const b = Buffer.alloc(8);
-  b.writeBigUInt64BE(BigInt(n));
-  return field(b);
-};
-function macCommon(r, keyId) {
-  return [
-    field(Buffer.from(keyId, "hex")),
-    str(r.type),
-    str(r.id),
-    str(r.supersedes),
-    str(r.state),
-    int(r.gen ?? 0),
-    str(r.targetDigest ?? null)
-  ];
-}
-function macInputV1(r, keyId) {
-  return Buffer.concat([DOMAIN, Buffer.from([1]), ...macCommon(r, keyId)]);
-}
-function macInputV2(r, keyId) {
-  return Buffer.concat([DOMAIN, Buffer.from([2]), ...macCommon(r, keyId), str(r.tx)]);
-}
-function macInputFor(version, r, keyId) {
-  return version === 1 ? macInputV1(r, keyId) : macInputV2(r, keyId);
-}
-function verifyVerify(record, subkey) {
-  if (!record.mac || !record.keyId) return false;
-  if (typeof record.macVersion !== "number" || !ACCEPTED_MAC_VERSIONS.has(record.macVersion)) return false;
-  if (record.keyId !== keyIdOf(subkey)) return false;
-  let want;
-  try {
-    want = createHmac("sha256", subkey).update(macInputFor(record.macVersion, record, record.keyId)).digest();
-  } catch {
-    return false;
-  }
-  let got;
-  try {
-    got = Buffer.from(record.mac, "hex");
-  } catch {
-    return false;
-  }
-  return got.length === want.length && timingSafeEqual(got, want);
-}
 
 // src/memory/witness-core.ts
 import { createHash as createHash2 } from "node:crypto";
@@ -1259,7 +1259,7 @@ async function main() {
     const globalLedger = process.env.HELIX_LEDGER ?? join7(home, "memory.jsonl");
     const stray = strayTrustFiles(home, globalLedger);
     if (stray.length > 0) {
-      writeSync2(1, `helix: memory is unavailable - trust-store files (${stray.join(", ")}) sit next to the ledger instead of under HELIX_HOME (${home}); the server refuses to start until they are moved. Run the MCP server directly to see the full instructions.
+      writeSync2(1, `helix: NOTE - trust-store files (${stray.join(", ")}) sit next to the ledger instead of under HELIX_HOME (${home}); if memory tools are not working, this is why. Run the MCP server directly to see whether it refuses to start or just warns, and the full instructions either way.
 `);
     }
     let cwd;

@@ -103,20 +103,42 @@ describe('trust store location vs HELIX_LEDGER', () => {
     expect(stderr).toContain(home);
   }, 30_000);
 
-  it('warns but does NOT refuse when HELIX_HOME already has its own trust state (F1B-DETECTOR-DOS)', async () => {
-    // Once HELIX_HOME has its own master key, starting mints nothing new over it -- there is no
-    // migration left to protect, so files still sitting beside the ledger are inert leftovers, not
-    // a live trust reset in progress. Blocking startup forever over them would itself be the startup
-    // denial of service the detector must not become (docs/issues/repros/f1-detector-startup-dos.ts).
+  it('warns but does NOT refuse when the stray key is byte-identical to HELIX_HOME\'s own (F1B-DETECTOR-DOS)', async () => {
+    // The stray key is the SAME key as HOME's -- a genuine, inert leftover. Re-grading the ledger
+    // under HOME's key is a no-op because HOME's key IS the key that signed it, so there is no
+    // migration left to protect and nothing to lose. Blocking startup forever over it would itself
+    // be the startup denial of service the detector must not become
+    // (docs/issues/repros/f1-detector-startup-dos.ts).
+    const { home, ledgerDir, ledger } = splitLayout();
+    const key = randomBytes(32);
+    writeFileSync(join(home, 'ledger-mac-master.key'), key, { mode: 0o600 });
+    writeFileSync(join(ledgerDir, 'ledger-mac-master.key'), key, { mode: 0o600 });
+    writeFileSync(ledger, '');
+
+    const { code, stderr } = await startAndWait(home, ledger, home);
+    expect(code, 'a HELIX_HOME whose key matches the stray leftover must not be blocked').toBe(0);
+    expect(stderr).not.toContain('REFUSING TO START');
+    expect(stderr).toMatch(/NOTE/);
+    expect(stderr).toContain(ledgerDir);
+    expect(stderr).toContain(home);
+  }, 30_000);
+
+  it('still refuses when the stray key DIFFERS from HELIX_HOME\'s own (F1 preserved)', async () => {
+    // The Critical this closes: a user runs Helix normally (a key mints under HOME); later they set
+    // HELIX_LEDGER on a pre-pin version, which builds a SECOND trust store beside the relocated
+    // ledger. HOME has *a* key, so a presence-only gate would wave this through -- but starting
+    // would then re-grade the ledger under HOME's key, which is NOT the key that signed those
+    // records, silently clamping every elevated grade to Fresh (store.ts's mismatch guard). Two
+    // distinct keys beside/under each directory is exactly that setup: the refusal must still fire.
     const { home, ledgerDir, ledger } = splitLayout();
     writeFileSync(join(home, 'ledger-mac-master.key'), randomBytes(32), { mode: 0o600 });
     writeFileSync(join(ledgerDir, 'ledger-mac-master.key'), randomBytes(32), { mode: 0o600 });
     writeFileSync(ledger, '');
 
     const { code, stderr } = await startAndWait(home, ledger, home);
-    expect(code, 'a HELIX_HOME with its own trust state must not be blocked by stray leftovers').toBe(0);
-    expect(stderr).not.toContain('REFUSING TO START');
-    expect(stderr).toMatch(/NOTE/);
+    expect(code, 'a stray key that differs from HELIX_HOME\'s own must still refuse to start').not.toBe(0);
+    expect(stderr).toContain('REFUSING TO START');
+    expect(stderr).toMatch(/ledger-mac-master\.key/);
     expect(stderr).toContain(ledgerDir);
     expect(stderr).toContain(home);
   }, 30_000);

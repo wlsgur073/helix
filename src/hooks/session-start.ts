@@ -125,7 +125,7 @@ async function main(): Promise<void> {
     // reason anywhere. Read-only and advisory by construction: a hook must never break session start.
     const stray = strayTrustFiles(home, globalLedger);
     if (stray.length > 0) {
-      writeSync(1, `helix: memory is unavailable - trust-store files (${stray.join(', ')}) sit next to the ledger instead of under HELIX_HOME (${home}); the server refuses to start until they are moved. Run the MCP server directly to see the full instructions.\n`); // ASCII only
+      writeSync(1, `helix: NOTE - trust-store files (${stray.join(', ')}) sit next to the ledger instead of under HELIX_HOME (${home}); if memory tools are not working, this is why. Run the MCP server directly to see whether it refuses to start or just warns, and the full instructions either way.\n`); // ASCII only
     }
 
     let cwd: string | undefined;

@@ -16089,6 +16089,7 @@ function aliasesGlobalLedger(projectLedger2, globalLedger2) {
 
 // src/memory/trust-store-layout.ts
 import { existsSync as existsSync4, readFileSync as readFileSync9, lstatSync as lstatSync4 } from "node:fs";
+import { timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 import { dirname as dirname9, join as join7 } from "node:path";
 var TRUST_FILE_NAMES = ["ledger-mac-master.key", "projects.json", "witness.json", "witness-log.jsonl"];
 var MASTER_KEY_LEN = 32;
@@ -16117,6 +16118,22 @@ function strayTrustFiles(home2, globalLedger2) {
     const p = join7(ledgerDir, name);
     return existsSync4(p) && looksLikeOurs(name, p);
   });
+}
+function compareStrayMasterKey(home2, ledgerDir) {
+  let homeKey;
+  try {
+    homeKey = tryReadMaster(home2);
+  } catch {
+    homeKey = null;
+  }
+  if (!homeKey) return "no-home-key";
+  let strayKey;
+  try {
+    strayKey = tryReadMaster(ledgerDir);
+  } catch {
+    strayKey = null;
+  }
+  return strayKey !== null && timingSafeEqual3(homeKey, strayKey) ? "match" : "mismatch";
 }
 
 // src/server/helix-server.ts
@@ -25650,36 +25667,52 @@ if (existsSync8(join12(projectRoot, ".helix", "config.json"))) {
 }
 var metrics = createMetricsSink(join12(home, "metrics.jsonl"), config2.metrics.enabled);
 var stray = strayTrustFiles(home, globalLedger);
-var homeHasOwnMasterKey = existsSync8(join12(home, "ledger-mac-master.key"));
-if (stray.length > 0 && !homeHasOwnMasterKey) {
-  process.stderr.write(
-    // ASCII only
-    `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME.
+if (stray.length > 0) {
+  const ledgerDir = dirname13(globalLedger);
+  const keyOutcome = compareStrayMasterKey(home, ledgerDir);
+  if (keyOutcome === "match") {
+    process.stderr.write(
+      // ASCII only
+      `helix: NOTE - trust-store-shaped files were found next to the ledger, but they carry the SAME
+  signing key as HELIX_HOME's own, so starting will NOT touch them and will NOT re-grade
+  anything under a different key.
   found next to the ledger: ${stray.join(", ")}
-  ledger directory        : ${dirname13(globalLedger)}
+  ledger directory        : ${ledgerDir}
   HELIX_HOME              : ${home}
-These were created by an older version, which derived the trust store's location from HELIX_LEDGER.
-The signing key now always lives under HELIX_HOME, so starting would mint a NEW key and silently
-drop every trust grade the old one conferred. Two ways out, both deliberate:
-  1. Move ${stray.join(", ")} from the ledger directory into HELIX_HOME, keeping the ledger where it is.
+They are an inert leftover, most likely from before the trust store's location was pinned to
+HELIX_HOME. If they still hold state you need, move ${stray.join(", ")} into HELIX_HOME by
+hand; otherwise it is safe to delete them from the ledger directory - this note will keep
+appearing until they are gone.
+`
+    );
+  } else {
+    const reason = keyOutcome === "no-home-key" ? `HELIX_HOME has no signing key of its own yet (or its key is unreadable/wrong-sized).
+Starting would mint a NEW key over these files and silently drop every trust grade the old
+one conferred.` : `the signing key beside the ledger does not match HELIX_HOME's own key (or could not be
+confirmed to match). Starting would re-grade this ledger's history under the WRONG key:
+every record signed under the old key would fail verification, and any Verified or
+Corroborated fact would be silently clamped to Fresh.`;
+    const remedy = keyOutcome === "no-home-key" ? `  1. Move ${stray.join(", ")} from the ledger directory into HELIX_HOME, keeping the ledger where it is.
   2. Discard the old trust state (delete those files) and re-establish it with the re-baseline
      ceremony: node bin/helix-rebaseline.mjs --scope global
-`
-  );
-  process.exit(78);
-} else if (stray.length > 0) {
-  process.stderr.write(
-    // ASCII only
-    `helix: NOTE - trust-store-shaped files were found next to the ledger, but HELIX_HOME already has
-  its own signing key, so starting will NOT touch them and will NOT mint a new key over them.
+` : `  1. If the key beside the ledger is the one you trust, back up HELIX_HOME's current key and
+     replace it with that one by hand, then restart.
+  2. Otherwise, delete ${stray.join(", ")} from the ledger directory and re-bless this ledger
+     under HELIX_HOME's own key with the re-baseline ceremony:
+     node bin/helix-rebaseline.mjs --scope global
+`;
+    process.stderr.write(
+      // ASCII only
+      `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME.
   found next to the ledger: ${stray.join(", ")}
-  ledger directory        : ${dirname13(globalLedger)}
+  ledger directory        : ${ledgerDir}
   HELIX_HOME              : ${home}
-These are most likely left over from before HELIX_HOME had a key of its own. If they still hold
-state you need, move ${stray.join(", ")} into HELIX_HOME by hand; otherwise it is safe to
-delete them from the ledger directory \u2014 this note will keep appearing until they are gone.
-`
-  );
+${reason}
+Two ways out, both deliberate:
+${remedy}`
+    );
+    process.exit(78);
+  }
 }
 var store = new MemoryStore(globalLedger, { home, sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
 store.healWitness();

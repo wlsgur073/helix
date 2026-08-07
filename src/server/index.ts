@@ -9,7 +9,7 @@ import { scanLegacyElevated } from '../memory/legacy-scan.js';
 import { hardenHomePermissions } from '../memory/home-permissions.js';
 import { subkeyForScope } from '../memory/verified-read.js';
 import { aliasesGlobalLedger } from '../memory/scope-target.js';
-import { strayTrustFiles } from '../memory/trust-store-layout.js';
+import { strayTrustFiles, compareStrayMasterKey } from '../memory/trust-store-layout.js';
 import { verifyVerify } from '../memory/ledger-mac.js';
 import { buildServer } from './helix-server.js';
 import { installSelfTermination } from './lifecycle.js';
@@ -56,46 +56,68 @@ const metrics = createMetricsSink(join(home, 'metrics.jsonl'), config.metrics.en
 
 // REFUSE to start on a split trust store — but ONLY when there is a genuine migration left to
 // protect. Before the store's `home` was pinned, it was derived from the LEDGER's directory, so
-// anyone using HELIX_LEDGER had their signing key, registry and witness created out there. Starting
-// anyway, on a HOME THAT HAS NO KEY OF ITS OWN YET, would mint a fresh one beside the stray files —
-// silently revoking every grade the old key conferred and orphaning a witness that still attests to
-// this scope, so a rollback against the old state would no longer be detectable. That is a trust
-// reset performed on the user's behalf without telling them, and it is the only scenario this must
-// block: once HELIX_HOME already has its own master key, starting does NOT mint a new one — that key
-// was already established (by an earlier migration, or the re-baseline ceremony), so files still
-// sitting beside the ledger are orphaned leftovers, not a migration in progress. Blocking startup
-// forever over inert leftovers is itself the denial of service this gate must not become (see
-// docs/issues/repros/f1-detector-startup-dos.ts), so that case is downgraded to a warning.
+// anyone using HELIX_LEDGER had their signing key, registry and witness created out there.
+//
+// The gate is a KEY COMPARISON, not key PRESENCE (compareStrayMasterKey; see its doc for the full
+// history). Key presence alone is not the right test: a user can run Helix normally (a master key
+// mints under HOME), then later set HELIX_LEDGER on a pre-pin version, which builds a SECOND trust
+// store beside the relocated ledger. HOME then has *a* key, so a presence-only gate reads that as
+// nothing to migrate and lets the server start — but starting re-grades the ledger under HOME's
+// key, which is NOT the key that signed those records, so every elevated grade MAC-mismatches and
+// store.ts's witness guard clamps it to Fresh. That is a trust reset performed on the user's behalf
+// without telling them. Only when the stray key is BYTE-IDENTICAL to HOME's own is re-grading a
+// no-op — a genuinely inert leftover — safe to downgrade to a warning. Blocking startup forever over
+// inert leftovers is itself the denial of service this gate must not become (see
+// docs/issues/repros/f1-detector-startup-dos.ts), so only the proven-safe case is downgraded.
 // This check must precede BOTH the store construction and the integrity scan below: the read path
 // mints a scope nonce as soon as a master exists, so anything that touches the ledger first has
 // already changed the state we are judging.
 const stray = strayTrustFiles(home, globalLedger);
-const homeHasOwnMasterKey = existsSync(join(home, 'ledger-mac-master.key'));
-if (stray.length > 0 && !homeHasOwnMasterKey) {
-  process.stderr.write(                                                             // ASCII only
-    `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME.\n` +
-    `  found next to the ledger: ${stray.join(', ')}\n` +
-    `  ledger directory        : ${dirname(globalLedger)}\n` +
-    `  HELIX_HOME              : ${home}\n` +
-    `These were created by an older version, which derived the trust store's location from HELIX_LEDGER.\n` +
-    `The signing key now always lives under HELIX_HOME, so starting would mint a NEW key and silently\n` +
-    `drop every trust grade the old one conferred. Two ways out, both deliberate:\n` +
-    `  1. Move ${stray.join(', ')} from the ledger directory into HELIX_HOME, keeping the ledger where it is.\n` +
-    `  2. Discard the old trust state (delete those files) and re-establish it with the re-baseline\n` +
-    `     ceremony: node bin/helix-rebaseline.mjs --scope global\n`,
-  );
-  process.exit(78); // EX_CONFIG
-} else if (stray.length > 0) {
-  process.stderr.write(                                                             // ASCII only
-    `helix: NOTE - trust-store-shaped files were found next to the ledger, but HELIX_HOME already has\n` +
-    `  its own signing key, so starting will NOT touch them and will NOT mint a new key over them.\n` +
-    `  found next to the ledger: ${stray.join(', ')}\n` +
-    `  ledger directory        : ${dirname(globalLedger)}\n` +
-    `  HELIX_HOME              : ${home}\n` +
-    `These are most likely left over from before HELIX_HOME had a key of its own. If they still hold\n` +
-    `state you need, move ${stray.join(', ')} into HELIX_HOME by hand; otherwise it is safe to\n` +
-    `delete them from the ledger directory — this note will keep appearing until they are gone.\n`,
-  );
+if (stray.length > 0) {
+  const ledgerDir = dirname(globalLedger);
+  const keyOutcome = compareStrayMasterKey(home, ledgerDir);
+  if (keyOutcome === 'match') {
+    process.stderr.write(                                                             // ASCII only
+      `helix: NOTE - trust-store-shaped files were found next to the ledger, but they carry the SAME\n` +
+      `  signing key as HELIX_HOME's own, so starting will NOT touch them and will NOT re-grade\n` +
+      `  anything under a different key.\n` +
+      `  found next to the ledger: ${stray.join(', ')}\n` +
+      `  ledger directory        : ${ledgerDir}\n` +
+      `  HELIX_HOME              : ${home}\n` +
+      `They are an inert leftover, most likely from before the trust store's location was pinned to\n` +
+      `HELIX_HOME. If they still hold state you need, move ${stray.join(', ')} into HELIX_HOME by\n` +
+      `hand; otherwise it is safe to delete them from the ledger directory - this note will keep\n` +
+      `appearing until they are gone.\n`,
+    );
+  } else {
+    const reason = keyOutcome === 'no-home-key'
+      ? `HELIX_HOME has no signing key of its own yet (or its key is unreadable/wrong-sized).\n` +
+        `Starting would mint a NEW key over these files and silently drop every trust grade the old\n` +
+        `one conferred.`
+      : `the signing key beside the ledger does not match HELIX_HOME's own key (or could not be\n` +
+        `confirmed to match). Starting would re-grade this ledger's history under the WRONG key:\n` +
+        `every record signed under the old key would fail verification, and any Verified or\n` +
+        `Corroborated fact would be silently clamped to Fresh.`;
+    const remedy = keyOutcome === 'no-home-key'
+      ? `  1. Move ${stray.join(', ')} from the ledger directory into HELIX_HOME, keeping the ledger where it is.\n` +
+        `  2. Discard the old trust state (delete those files) and re-establish it with the re-baseline\n` +
+        `     ceremony: node bin/helix-rebaseline.mjs --scope global\n`
+      : `  1. If the key beside the ledger is the one you trust, back up HELIX_HOME's current key and\n` +
+        `     replace it with that one by hand, then restart.\n` +
+        `  2. Otherwise, delete ${stray.join(', ')} from the ledger directory and re-bless this ledger\n` +
+        `     under HELIX_HOME's own key with the re-baseline ceremony:\n` +
+        `     node bin/helix-rebaseline.mjs --scope global\n`;
+    process.stderr.write(                                                             // ASCII only
+      `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME.\n` +
+      `  found next to the ledger: ${stray.join(', ')}\n` +
+      `  ledger directory        : ${ledgerDir}\n` +
+      `  HELIX_HOME              : ${home}\n` +
+      `${reason}\n` +
+      `Two ways out, both deliberate:\n` +
+      `${remedy}`,
+    );
+    process.exit(78); // EX_CONFIG
+  }
 }
 
 // Auto-compaction is read GLOBAL-only (never via loadConfig's project layer): it is destructive — it

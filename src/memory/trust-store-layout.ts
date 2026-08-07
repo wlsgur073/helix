@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, lstatSync } from 'node:fs';
+import { timingSafeEqual } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { canonicalRoot } from './ownership.js';
+import { tryReadMaster } from './ledger-mac.js';
 
 /** Everything the trust store keeps under `home`. These are the files whose location SECURITY.md
  *  makes a promise about: the signing key, the ownership registry, and the rollback witness pair. */
@@ -76,4 +78,50 @@ export function strayTrustFiles(home: string, globalLedger: string): string[] {
     const p = join(ledgerDir, name);
     return existsSync(p) && looksLikeOurs(name, p);
   });
+}
+
+/** Which of the three key-comparison outcomes decides the split-trust-store refusal in
+ *  `server/index.ts`. Key PRESENCE beside the ledger is not the signal `strayTrustFiles`'s caller
+ *  acts on any more (see `compareStrayMasterKey`'s own doc) — only whether HOME's own master key
+ *  is byte-identical to whatever key, if any, sits beside the ledger. */
+export type StrayKeyOutcome = 'no-home-key' | 'match' | 'mismatch';
+
+/**
+ * Decides whether starting on a split trust store is safe, by KEY COMPARISON rather than key
+ * PRESENCE.
+ *
+ * The harm this exists to catch is not minting — it is the ledger being RE-GRADED under the wrong
+ * key. History that breaks a presence-only gate: a user runs Helix normally (a master key mints
+ * under HOME); later they set HELIX_LEDGER on a pre-pin version, which builds a second trust store
+ * beside the relocated ledger. HOME now has A key, so a presence-only gate reads that as "nothing
+ * to migrate" and lets the server start — but it then re-grades the ledger under HOME's key, which
+ * is NOT the key that signed those records, so every elevated grade MAC-mismatches and
+ * `store.ts`'s witness guard clamps it to Fresh. That is exactly the silent trust reset the
+ * refusal exists to prevent, so key identity — not key presence — is what must gate it.
+ *
+ * - HOME has no valid master key of its own (absent, or unreadable/wrong-sized) → `'no-home-key'`:
+ *   refuse, as before — starting would mint a fresh key over the stray files.
+ * - HOME's key is byte-identical to the key sitting beside the ledger → `'match'`: the stray files
+ *   are a genuine, inert leftover — re-grading under HOME's key is a no-op because it IS the key
+ *   that signed them. Safe to start.
+ * - Anything else (the keys differ, or the file beside the ledger cannot be confirmed to be the
+ *   same key — missing, unreadable, wrong-sized) → `'mismatch'`: re-grading loss is imminent, or
+ *   unproven safe, which this function treats the same way — refuse.
+ *
+ * Reads with `tryReadMaster` (exactly `MASTER_LEN` bytes — ledger-mac.ts's own strict reader,
+ * reused here rather than `existsSync`): a wrong-sized HOME key must not read as "HOME has a key"
+ * — that used to downgrade the refusal to a warning and then throw an uncaught `LedgerMacError`
+ * once the store actually tried to use it. Both reads are wrapped: a corrupt/wrong-sized key at
+ * EITHER path collapses to `null` rather than throwing through this decision. `tryReadMaster`
+ * takes a directory and reads `<dir>/ledger-mac-master.key` from it — its parameter is named
+ * `home` in ledger-mac.ts because that is its only other caller, but nothing about it is
+ * home-specific, so passing `ledgerDir` here reads the stray key with the exact same strictness.
+ */
+export function compareStrayMasterKey(home: string, ledgerDir: string): StrayKeyOutcome {
+  let homeKey: Buffer | null;
+  try { homeKey = tryReadMaster(home); } catch { homeKey = null; }
+  if (!homeKey) return 'no-home-key';
+  let strayKey: Buffer | null;
+  try { strayKey = tryReadMaster(ledgerDir); } catch { strayKey = null; }
+  return strayKey !== null && timingSafeEqual(homeKey, strayKey) ? 'match' : 'mismatch';
 }
