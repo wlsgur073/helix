@@ -19,13 +19,40 @@ export interface DurableFsOps {
   fsyncDir(dir: string): void;
 }
 
-/** Best-effort fsync of a directory fd so a create/rename/unlink is durably persisted. On Windows
- *  (and some FS) a directory cannot be opened/fsynced — skip; never a correctness issue. */
-export function fsyncDir(dir: string): void {
+/** Thin, test-only seam over the three raw syscalls fsyncDir itself makes. Kept separate from
+ *  DurableFsOps — fsyncDir IS one of that interface's members, not a caller of it — so a test can
+ *  drive fsyncDir's OWN errno branch below without a directory or filesystem that actually produces
+ *  the failure. Production always uses the real syscalls (the default). */
+export interface DirFsyncSyscalls {
+  openSync(path: string, flags: string): number;
+  fsyncSync(fd: number): void;
+  closeSync(fd: number): void;
+}
+const realDirFsyncSyscalls: DirFsyncSyscalls = { openSync, fsyncSync, closeSync };
+
+/** Fsync a directory fd so a create/rename/unlink is durably persisted — EXCEPT a genuinely failed
+ *  attempt, which propagates instead of being reported as success (2026-08-06, owner decision).
+ *
+ *  Two classes, split on errno ALONE, never on the message (the discipline ledger-sweep.ts:39-44
+ *  already uses for its own ENOENT check):
+ *  - SWALLOWED: the platform cannot fsync a directory at all. An open() failure (e.g. Windows, which
+ *    cannot open a directory for reading) means fsync was never even attempted, so nothing was
+ *    "tried" — any errno swallows here. EINVAL/EISDIR from the fsync() call itself mean the syscall
+ *    WAS attempted but this filesystem does not support it — a platform limit, not a real failure.
+ *  - PROPAGATED: fsync() was attempted and genuinely failed (EIO and its class) — a real durability
+ *    loss the caller must not silently report as success. See SECURITY.md's "Appends are durable"
+ *    bullet for the caller-facing consequence. */
+export function fsyncDir(dir: string, sys: DirFsyncSyscalls = realDirFsyncSyscalls): void {
   let dfd: number;
-  try { dfd = openSync(dir, 'r'); } catch { return; }
-  try { fsyncSync(dfd); } catch { /* EINVAL/EISDIR on some FS — durability only */ }
-  finally { closeSync(dfd); }
+  try { dfd = sys.openSync(dir, 'r'); } catch { return; }
+  try {
+    sys.fsyncSync(dfd);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code !== 'EINVAL' && code !== 'EISDIR') throw e;
+  } finally {
+    sys.closeSync(dfd);
+  }
 }
 
 export const realFsOps: DurableFsOps = {

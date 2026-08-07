@@ -76,7 +76,16 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit | AdoptAudit
  *  the action it records (the erase/verify, itself fsynced), so a crash in the narrow window between
  *  the two can leave the action durable with its audit row absent. Durable-once-written: the row bytes
  *  are fsync'd, and on FIRST creation the parent directory is fsync'd too, so the new file's directory
- *  entry is durable — not just its inode (a crash could otherwise lose the whole freshly-created file). */
+ *  entry is durable — not just its inode (a crash could otherwise lose the whole freshly-created file).
+ *
+ *  The directory fsync is swallowed UNCONDITIONALLY here — narrower than fs-ops.ts's own fsyncDir
+ *  contract (task 7), which now propagates a genuinely failed attempt (EIO class). Every caller
+ *  (handlers.ts) invokes appendAudit AFTER its primary operation — erase/confirm/adopt/dual-verify —
+ *  has already durably committed via ITS OWN write path, and none of them wrap this call in a catch.
+ *  Letting a directory-fsync failure escape here would report an already-successful primary operation
+ *  as FAILED for a reason unrelated to it, which is worse than the audit row silently missing — a gap
+ *  this docstring already accepts. The row's own bytes stay unconditional: writeAll + fsyncSync(fd)
+ *  above are untouched and still propagate. */
 export function appendAudit(path: string, event: AuditEvent): void {
   mkdirSync(dirname(path), { recursive: true });
   const isNew = !existsSync(path);
@@ -86,5 +95,7 @@ export function appendAudit(path: string, event: AuditEvent): void {
     writeAll(realFsOps, fd, JSON.stringify(event) + '\n');
     fsyncSync(fd);
   } finally { closeSync(fd); }
-  if (isNew) fsyncDir(dirname(path)); // first creation: make the directory entry durable, not just the bytes
+  if (isNew) {
+    try { fsyncDir(dirname(path)); } catch { /* best-effort by design — see docstring above */ }
+  }
 }

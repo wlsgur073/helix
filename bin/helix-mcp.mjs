@@ -13637,18 +13637,21 @@ function readdirSyncSafe(dir) {
 
 // src/memory/fs-ops.ts
 import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, renameSync, unlinkSync as unlinkSync2, linkSync as linkSync2, fchmodSync, readdirSync as readdirSync2 } from "node:fs";
-function fsyncDir(dir) {
+var realDirFsyncSyscalls = { openSync, fsyncSync, closeSync };
+function fsyncDir(dir, sys = realDirFsyncSyscalls) {
   let dfd;
   try {
-    dfd = openSync(dir, "r");
+    dfd = sys.openSync(dir, "r");
   } catch {
     return;
   }
   try {
-    fsyncSync(dfd);
-  } catch {
+    sys.fsyncSync(dfd);
+  } catch (e) {
+    const code = e.code;
+    if (code !== "EINVAL" && code !== "EISDIR") throw e;
   } finally {
-    closeSync(dfd);
+    sys.closeSync(dfd);
   }
 }
 var realFsOps = {
@@ -24794,7 +24797,12 @@ function appendAudit(path, event) {
   } finally {
     closeSync5(fd);
   }
-  if (isNew) fsyncDir(dirname10(path));
+  if (isNew) {
+    try {
+      fsyncDir(dirname10(path));
+    } catch {
+    }
+  }
 }
 
 // src/server/handlers.ts

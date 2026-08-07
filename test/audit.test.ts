@@ -1,10 +1,33 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendAudit, type AuditEvent } from '../src/audit.js';
 
 function tmpAudit() { return join(mkdtempSync(join(tmpdir(), 'helix-audit-')), 'audit.jsonl'); }
+
+// DEVIATION (documented, task-7-report.md): appendAudit has no injectable DurableFsOps seam of its
+// own — audit.jsonl is a single best-effort side channel, not one of the coordinated durable-write
+// paths (ledger/key/witness) that thread `fsOps` through for that purpose. To prove the deliberate
+// audit.ts exemption (task 7: a genuinely failed directory fsync on first creation must NOT abort an
+// already-succeeded primary operation) without adding a production-facing test hook, mock the ONE
+// function audit.ts imports from fs-ops.js and make it throw exactly once, on command — every other
+// test in this file exercises the real, unmocked fsyncDir via the pass-through below (vitest hoists
+// vi.mock above the imports above, so import order here does not matter). This is the ONLY module
+// mock in this suite.
+let throwOnNextFsyncDir: (Error & { code?: string }) | null = null;
+vi.mock('../src/memory/fs-ops.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/memory/fs-ops.js')>();
+  return {
+    ...actual,
+    fsyncDir: (dir: string) => {
+      const err = throwOnNextFsyncDir;
+      throwOnNextFsyncDir = null; // one-shot: only the dedicated test below arms it
+      if (err) throw err;
+      return actual.fsyncDir(dir);
+    },
+  };
+});
 
 describe('appendAudit', () => {
   it('appends one JSON line per event and reads back', () => {
@@ -62,5 +85,22 @@ describe('appendAudit', () => {
     expect(row.kind).toBe('verify');
     expect(row.resultState).toBe('Corroborated');
     expect(JSON.stringify(row)).not.toMatch(/path|pattern/); // content-free
+  });
+
+  // Task 7 (LEAD-DIRFSYNC-SUPPRESSED): fs-ops.ts's fsyncDir now PROPAGATES an attempted-and-failed
+  // directory fsync (EIO class) instead of swallowing it — correct for the ledger/key/witness write
+  // paths. audit.jsonl is deliberately exempted: this file's own docstring says completeness is
+  // best-effort, NOT transactional, and every caller (handlers.ts) calls appendAudit UNWRAPPED,
+  // AFTER its primary operation (erase/confirm/adopt/dual-verify) already durably committed via its
+  // OWN write path. Letting a directory-fsync failure escape here would report an already-successful
+  // primary operation as FAILED for a reason that has nothing to do with it — worse than the audit
+  // row silently missing, which the docstring already accepts. The row content itself (writeAll +
+  // fsyncSync(fd)) is UNCHANGED — still unconditional and still propagates — only the directory fsync
+  // on first creation is swallowed here.
+  it('a genuinely failed directory fsync on FIRST creation does not abort the audit append (best-effort by design)', () => {
+    const p = tmpAudit();
+    throwOnNextFsyncDir = Object.assign(new Error('EIO fake (audit dir fsync)'), { code: 'EIO' });
+    expect(() => appendAudit(p, { kind: 'adopt', ts: '2026-08-07T00:00:00.000Z', scope: '/x' })).not.toThrow();
+    expect(JSON.parse(readFileSync(p, 'utf8').trim()).kind).toBe('adopt'); // the row still landed
   });
 });

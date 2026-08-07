@@ -267,11 +267,20 @@ same one-time path as before; nothing about the key's secrecy changes, only when
 - **Appends are durable:** every append fsyncs the line before success is reported; a torn tail
   (power cut mid-append) is isolated by the next writer's tail repair and counted by parse health,
   and a complete-but-unacknowledged record commits (at-least-once). The **directory** fsync that
-  makes a new file's name durable is attempted on the same path but is **best-effort**: it is
-  suppressed if the directory cannot be opened or the fsync itself fails, and success is still
-  reported. This is deliberate — some filesystems reject it outright — but it means an acknowledged
-  append could, after power loss, be found under a directory entry that never reached the platter.
-  The line's own bytes are unaffected.
+  makes a new file's name durable is attempted on the same path, and splits into two classes on
+  **errno alone, never on the message**: if the directory cannot be opened at all, or the fsync call
+  itself fails with `EINVAL`/`EISDIR`, the platform genuinely cannot fsync a directory (some
+  filesystems, and Windows, reject it outright) and the failure is suppressed — success is still
+  reported, so an acknowledged append could, after power loss, be found under a directory entry that
+  never reached the platter. Any other failure (`EIO` and its class) means the fsync was attempted
+  and genuinely failed, and now **propagates**: the append itself throws rather than reporting a
+  success that isn't true, converting that rare disk-level failure into an availability failure on
+  every write path (append, compaction's post-rename fsync, master-key mint, witness advance, orphan
+  -tmp sweep) at once — a deliberate trade against silently lying about durability. The audit trail
+  (`audit.jsonl`) is the one exception: it is documented best-effort/non-transactional already (see
+  its own docstring), and its directory fsync on first creation stays unconditionally suppressed so a
+  disk hiccup on that side channel never reports an already-succeeded erase/confirm/adopt as failed.
+  The line's own bytes are unaffected either way.
 - **Rollout launch barrier (normative):** old bundles age-steal locks and do not sweep — while any
   old helix-mcp process runs, the new guarantees do not hold. Upgrade procedure: close every Claude
   session, verify no helix-mcp processes remain, reinstall the plugin, then reopen sessions. The
