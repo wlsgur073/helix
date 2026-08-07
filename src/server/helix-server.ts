@@ -5,10 +5,22 @@ import { z } from 'zod';
 import type { MemoryStore } from '../memory/store.js';
 import type { RealityCheck } from '../memory/reality-check.js';
 import { MAX_QUERY_CHARS } from '../memory/retrieval.js';
-import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, MAX_ID_CHARS, ID_CHARSET_RE, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
+import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, MAX_ID_CHARS, isValidId, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus, checkCodexModel } from '../verify/codex.js';
 import { noopMetricsSink, type MetricsSink } from '../metrics.js';
+
+// LEAD-AUDIT-ID-UNCONSTRAINED: mirrors handlers.ts's assertValidId at the MCP tool boundary itself.
+// `.refine(isValidId)` (not a parallel `.min().max().regex()` chain) so the schema and the
+// authoritative handlers.ts check share the SAME predicate, not just its constants (fix round 1
+// Minor: a duplicated `.min(1).max().regex()` chain here could drift from handlers.ts's rule without
+// either side noticing). A malformed id is rejected by the SDK's own schema validation before the
+// handler (and its appendAudit call) ever runs, exactly like MAX_QUERY_CHARS below. Applied to every
+// id-shaped argument (family-unit fix): erase/recheck/confirm's `id`, AND commit's `supersedes`
+// (also an id-lookup value, just never audited). Exported (fix round 1 Minor) per the brief.
+export const ID_SCHEMA = z.string().refine(isValidId, {
+  message: `id must be 1-${MAX_ID_CHARS} printable, non-control characters`,
+});
 
 /** Build a Helix MCP server with the memory tools registered against `store`. The returned object
  *  IS the McpServer (every existing caller keeps working unchanged) plus `drainInFlight`, so
@@ -30,13 +42,6 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     auditPath: join(home, 'audit.jsonl'),
     codexLogPath: join(home, 'codex-log.jsonl'),
   };
-
-  // LEAD-AUDIT-ID-UNCONSTRAINED: mirrors handlers.ts's assertValidId at the MCP tool boundary itself
-  // (same MAX_ID_CHARS/ID_CHARSET_RE — single source of truth), so a malformed id is rejected by the
-  // SDK's own schema validation before the handler (and its appendAudit call) ever runs, exactly like
-  // MAX_QUERY_CHARS above. Applied to every id-shaped argument (family-unit fix): erase/recheck/
-  // confirm's `id`, AND commit's `supersedes` (also an id-lookup value, just never audited).
-  const ID_SCHEMA = z.string().min(1).max(MAX_ID_CHARS).regex(ID_CHARSET_RE);
 
   const codexStatusDeps: CodexStatusDeps = {
     inspect: () => checkCodexStatus(),

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { handleDualVerify, type DualVerifyHandlerDeps } from '../../src/server/handlers.js';
+import { handleDualVerify, MAX_ID_CHARS, type DualVerifyHandlerDeps } from '../../src/server/handlers.js';
 import { DEFAULT_CONFIG, type HelixConfig } from '../../src/config.js';
 import type { EchoSource } from '../../src/verify/dual-verify.js';
 
@@ -198,6 +198,32 @@ describe('handleDualVerify egress audit', () => {
     const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
     expect(audit.egressDecision).toBe('pass');
     expect(audit.decidedLeg).toBeUndefined();
+  });
+
+  // LEAD-AUDIT-ID-UNCONSTRAINED (fix round 1 Important): echoMemoryIds' ids come from LEDGER CONTENT
+  // (store.inspect(), read by detectEcho) -- unlike erase/recheck/confirm's `id`, this is NOT
+  // something the CALLER typed, so it is never gated by the MCP schema. parseLedger enforces only
+  // `typeof id === 'string'`, so a FORGED record in an owned ledger (e.g. planted by a compromised
+  // dependency, or corrupted by hand) can carry an arbitrarily long/injected id; if its content
+  // happens to echo into a dual-verify prompt, that raw id used to land verbatim in the audit row —
+  // the review reproduced a 5022-char forged id producing a 5225-byte audit row via this exact path.
+  it('bounds a forged ledger id before it reaches echoMemoryIds in the audit row', async () => {
+    const secretFreeEcho = 'the deploy uses the blue cluster in us-east-1';
+    const forgedId = 'm_evil\n' + 'x'.repeat(5000) + '(injected marker text)';
+    const d = deps({
+      echo: echoEnforce([{ id: forgedId, content: secretFreeEcho }]),
+      runner: async () => { throw new Error('must not spawn'); },
+    });
+    await handleDualVerify({ question: secretFreeEcho, helixAnswer: 'ok' }, d);
+    const raw = readFileSync(d.auditPath, 'utf8');
+    const audit = JSON.parse(raw.trim());
+    expect(audit.echoMemoryIds).toHaveLength(1);
+    expect(audit.echoMemoryIds[0].length).toBeLessThanOrEqual(MAX_ID_CHARS); // bounded, not the raw 5029-char id
+    expect(audit.echoMemoryIds[0]).not.toContain('\n');
+    expect(audit.echoMemoryIds[0]).not.toContain('injected marker text');
+    // INVARIANT: the forged bytes never reach the audit file at all, bounded or not.
+    expect(raw).not.toContain('injected marker text');
+    expect(raw.length).toBeLessThan(1000); // NOT the ~5225-byte row the review reproduced pre-fix
   });
 });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, appendFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -251,8 +251,14 @@ describe('id bound (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
     for (const bad of [oversized, controlBearing]) {
       const s = store();
       const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');
-      expect(() => handleErase(s, { id: bad }, { auditPath })).toThrow();
+      const eraseSpy = vi.spyOn(s, 'erase');
+      // Matcher (fix round 1 Important): a bare .toThrow() also passes when SOMETHING ELSE throws —
+      // e.g. review found an alternate implementation that moved the guard inside appendAudit itself,
+      // which also satisfies a bare .toThrow() + existsSync===false. Matching the specific message
+      // pins this file's OWN rejection, and the store spy below pins WHERE it happens.
+      expect(() => handleErase(s, { id: bad }, { auditPath })).toThrow(/invalid id/);
       expect(existsSync(auditPath)).toBe(false); // rejected before appendAudit ever ran
+      expect(eraseSpy).not.toHaveBeenCalled(); // rejected before the store is EVER consulted
     }
   });
 
@@ -260,10 +266,12 @@ describe('id bound (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
     for (const bad of [oversized, controlBearing]) {
       const s = store();
       const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');
+      const recheckSpy = vi.spyOn(s, 'recheck');
       expect(() =>
         handleRecheck(s, { id: bad, check: { kind: 'file-contains', path: 'x', pattern: 'y' } }, { auditPath }),
-      ).toThrow();
+      ).toThrow(/invalid id/);
       expect(existsSync(auditPath)).toBe(false);
+      expect(recheckSpy).not.toHaveBeenCalled();
     }
   });
 
@@ -271,8 +279,10 @@ describe('id bound (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
     for (const bad of [oversized, controlBearing]) {
       const s = store();
       const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');
-      expect(() => handleConfirm(s, { id: bad }, { auditPath })).toThrow();
+      const confirmSpy = vi.spyOn(s, 'confirm');
+      expect(() => handleConfirm(s, { id: bad }, { auditPath })).toThrow(/invalid id/);
       expect(existsSync(auditPath)).toBe(false);
+      expect(confirmSpy).not.toHaveBeenCalled();
     }
   });
 
@@ -289,6 +299,37 @@ describe('id bound (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
     expect(rec.id).toMatch(/^m_[0-9a-f-]{36}$/); // sanity: this IS the real production id shape
     expect(text(handleConfirm(s, { id: rec.id }, { auditPath }))).toMatch(/Verified/);
     expect(() => handleErase(s, { id: rec.id }, { auditPath })).not.toThrow();
+  });
+
+  // FIX ROUND 1 (review Critical): the ORIGINAL fix allowlisted [A-Za-z0-9_.:-], reasoning only from
+  // ids HELIX ITSELF mints. That missed adoption's whole premise — an adopted ledger's ids are
+  // AUTHORED BY SOMEONE ELSE, and parseLedger enforces only `typeof id === 'string'`. This is the
+  // review's own repro method (README: "each team member run helix_memory_adopt after cloning"): a
+  // FOREIGN project ledger, forged with a human-authored id carrying a space, a slash, and non-ASCII
+  // (Hangul) — none of which are Helix's own m_<uuid> shape — is adopted, then must remain reachable
+  // by every id-taking tool. This is the discriminating case Step 4 originally missed (it only tested
+  // a CONFORMING id); this one is deliberately chosen to violate the OLD ASCII-only charset.
+  it('accepts a human-authored adopted-ledger id with spaces/slash/non-ASCII (round-1 legacy-ledger fix)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const proj = mkdtempSync(join(tmpdir(), 'helix-p-'));
+    const s = new MemoryStore(join(home, 'memory.jsonl'), {
+      home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => 'm_x',
+      project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj },
+    });
+    const foreignId = 'note/2026 team-shared id'; // space + slash; would have failed the round-1 charset
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    const record: MemoryRecord = {
+      id: foreignId, tx: '2026-06-09T00:00:00.000Z', validFrom: '2026-06-09T00:00:00.000Z', validTo: null,
+      type: 'assert', state: 'Fresh', content: 'team-shared onboarding note',
+      provenance: { source: 'user', sessionId: 'other-dev' },
+      supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+    };
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), JSON.stringify(record) + '\n');
+    const auditPath = join(home, 'audit.jsonl');
+    handleAdopt(s, { projectRoot: proj }, { auditPath, now: () => '2026-06-09T00:00:00.000Z' });
+
+    expect(s.inspect().some((r) => r.record.id === foreignId)).toBe(true); // visible post-adopt
+    expect(() => handleErase(s, { id: foreignId }, { auditPath })).not.toThrow();
   });
 });
 

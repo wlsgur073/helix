@@ -27,7 +27,8 @@ const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] })
  *  BEFORE re-throwing. Either way, an id matching no record let an agent write attacker-chosen text
  *  of attacker-chosen length into a file the README/audit.ts both advertise as content-free.
  *
- *  Mirrored at the MCP tool boundary too (helix-server.ts's ID_SCHEMA imports these same constants),
+ *  Mirrored at the MCP tool boundary too (helix-server.ts's ID_SCHEMA imports `isValidId` from here —
+ *  ONE predicate, not a parallel zod chain that could drift from this file's rule independently),
  *  matching the existing MAX_QUERY_CHARS split (retrieval.ts's assertQueryWithinBounds): the schema
  *  gives every MCP caller a clean, client-facing rejection before the handler runs at all; this
  *  authoritative check protects any caller that reaches these functions directly (as this file's own
@@ -35,24 +36,68 @@ const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] })
  *  ONE clean rejection rather than a masked/secondary error (see appendAudit's own docstring on why
  *  the audit layer must never replace the real error a caller is about to surface).
  *
- *  The bound is deliberately GENEROUS, not tight. Every id Helix itself has ever minted is
- *  `m_<uuid>` (store.ts's `id()`, unchanged since the project's first commit — ~38 chars of hex and
- *  hyphens) or one of the three marker families (`integrity_marker` / `horizon_marker` /
- *  `witness_fence_<epoch>_<nonce>`, store.ts's markerFamilyOf) — all comfortably inside 128 chars of
- *  this charset. parseLedger (ledger.ts) enforces only `typeof id === 'string'`, so a bound tighter
- *  than this risks making a genuinely adopted team-shared ledger's item impossible to
- *  erase/recheck/confirm through MCP — a worse defect than the one this closes. */
+ *  FIX ROUND 1 (review Critical): the first cut allowlisted only `[A-Za-z0-9_.:-]`, reasoning from
+ *  ids Helix ITSELF has minted (`m_<uuid>`). That missed the whole point of ADOPTION: an adopted
+ *  ledger's records are AUTHORED BY SOMEONE ELSE, not minted by this codebase, and `parseLedger`
+ *  enforces only `typeof id === 'string'` — nothing stops a real, human-chosen id like
+ *  `note/2026 team-shared id` (spaces, non-ASCII, slash). The ASCII-only charset locked such an item
+ *  out of every id-taking tool — worse than the original defect, per the brief's own warning. The
+ *  charset is now a DENYLIST, not an allowlist: reject only characters that are dangerous regardless
+ *  of script — Unicode Control (`\p{Cc}`: NUL, tab, newline, ...) and Format (`\p{Cf}`: bidi
+ *  overrides, zero-width joiners, soft hyphen, ...), plus U+2028/U+2029 (LINE/PARAGRAPH SEPARATOR —
+ *  `\p{Cc}\p{Cf}` does NOT cover these; content-frame.ts's own LINE_BREAK regex treats them as line
+ *  breaks for exactly this reason, see its comment). This is the same "invisible/control-shaped is
+ *  the threat, not non-Latin script" rule content-frame.ts's `stripControls` already applies to
+ *  ledger CONTENT — ids now get the equivalent treatment. Any printable script is otherwise welcome.
+ *  The LENGTH bound (128 chars) stays load-bearing regardless of charset: appendAudit JSON-encodes
+ *  (audit.ts), so a control char can never break line framing even unescaped, but nothing bounds
+ *  SIZE except this. A residual is accepted, not hidden: an attacker-chosen id of up to 128 printable
+ *  characters can still be recorded — inherent to recording ids at all, and audit.ts's own promise
+ *  has only ever been "the id only, never the erased text". */
 export const MAX_ID_CHARS = 128;
-export const ID_CHARSET_RE = /^[A-Za-z0-9_.:-]+$/;
+export const ID_CHARSET_RE = /^[^\p{Cc}\p{Cf}\u2028\u2029]+$/u;
 
-/** Throw unless `id` is a non-empty string within MAX_ID_CHARS of ID_CHARSET_RE. REJECTS rather than
- *  truncating or sanitizing: a silently-shortened/stripped id would resolve against a DIFFERENT
- *  record than the caller named (or none at all), and the caller could not tell — the same reasoning
- *  assertQueryWithinBounds already applies to an oversized recall query. */
+/** The single predicate BOTH enforcement layers use (this file's assertValidId, and
+ *  helix-server.ts's ID_SCHEMA via `z.string().refine(isValidId, ...)`) — fix round 1 Minor: before
+ *  this the charset+length RULE, not just its constants, was written out twice and could silently
+ *  drift between the two call sites. */
+export function isValidId(id: string): boolean {
+  return id.length >= 1 && id.length <= MAX_ID_CHARS && ID_CHARSET_RE.test(id);
+}
+
+/** Throw unless `id` passes isValidId. REJECTS rather than truncating or sanitizing: a
+ *  silently-shortened/stripped id would resolve against a DIFFERENT record than the caller named (or
+ *  none at all), and the caller could not tell — the same reasoning assertQueryWithinBounds already
+ *  applies to an oversized recall query. The message names a real, working escape hatch (fix round 1
+ *  Critical): the bound below is enforced ONLY at this MCP-facing layer, never inside MemoryStore
+ *  itself, so an id that is legitimate but still fails this (e.g. from an adopted ledger, longer than
+ *  128 chars) remains reachable the same "operator-only, from a script, never from a conversation"
+ *  way recovery-playbook.md already documents for the permanent-erase path. */
 export function assertValidId(id: string): void {
-  if (id.length < 1 || id.length > MAX_ID_CHARS || !ID_CHARSET_RE.test(id)) {
-    throw new Error(`invalid id: must be 1-${MAX_ID_CHARS} characters of [A-Za-z0-9_.:-] (got ${id.length} characters)`);
+  if (!isValidId(id)) {
+    throw new Error(
+      `invalid id: must be 1-${MAX_ID_CHARS} printable, non-control characters (got ${id.length}). ` +
+      'An id from an adopted ledger that still fails this bound is not reachable through this MCP ' +
+      'tool, but can be erased/rechecked/confirmed directly via the MemoryStore API from a script ' +
+      '(operator-only, outside any conversation) — see docs/release/recovery-playbook.md.',
+    );
   }
+}
+
+/** Bound (never reject) an id sourced from LEDGER CONTENT rather than a caller-supplied lookup key —
+ *  e.g. `echoMemoryIds` below, whose ids come from `store.inspect()` reading a possibly-FORGED record
+ *  (fix round 1 Important: `handleDualVerify`'s echo detector reads real ledger rows, which
+ *  `parseLedger` never bounds — the review reproduced a 5022-char forged id landing verbatim in a
+ *  5225-byte audit row). Rejecting the WHOLE dual-verify call over one unrelated forged record's
+ *  shape would be an availability regression the caller cannot fix (unlike erase/recheck/confirm's
+ *  `id`, this is not something the CALLER typed). And unlike that lookup-key case, mutating this
+ *  value cannot resolve to the WRONG record — `echoMemoryIds` is advisory-only, read nowhere but this
+ *  audit row (never fed back into a lookup) — so truncating/sanitizing only shortens a report, the
+ *  same trade-off `safeId` already makes for every other advisory id `handlers.ts` renders
+ *  (recall/inspect's reverify/egress/conflict notes). Reuses `safeId` rather than `ID_CHARSET_RE`
+ *  deliberately, to stay the SAME sanitizer as those other advisory sites, not a third variant. */
+export function auditSafeId(id: string): string {
+  return safeId(id).slice(0, MAX_ID_CHARS);
 }
 
 /** B2 (Codex R2 #8): the trusted, informational, CONSTANT-string unadopted-ledger disclosure note —
@@ -395,7 +440,13 @@ export async function handleDualVerify(
     decidedLeg: decided ? deciderLeg(egress!) : undefined,
     releasedLegs: egress && egress.releasedLegs.length ? egress.releasedLegs : undefined,
     piiKinds: egress && egress.piiKinds.length ? egress.piiKinds : undefined,
-    echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds : undefined,
+    // LEAD-AUDIT-ID-UNCONSTRAINED (fix round 1 Important): these ids come from LEDGER CONTENT
+    // (store.inspect(), read by detectEcho), not a caller-supplied argument -- bound, don't reject
+    // (see auditSafeId's docstring for why this site can't use assertValidId's reject-outright rule).
+    // LEAD-AUDIT-ID-UNCONSTRAINED (fix round 1 Important): these ids come from LEDGER CONTENT
+    // (store.inspect(), read by detectEcho), not a caller-supplied argument -- bound, don't reject
+    // (see auditSafeId's docstring for why this site can't use assertValidId's reject-outright rule).
+    echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds.map(auditSafeId) : undefined,
   });
   // Opt-in conversation log (default OFF). audit.jsonl above is the always-on content-free ledger;
   // this writes the exact prompt+response ONLY on a 'sent' outcome, metadata-only otherwise (a

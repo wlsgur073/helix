@@ -24833,11 +24833,19 @@ function appendCodexLog(path, entry) {
 // src/server/handlers.ts
 var ok = (text) => ({ content: [{ type: "text", text }] });
 var MAX_ID_CHARS = 128;
-var ID_CHARSET_RE = /^[A-Za-z0-9_.:-]+$/;
+var ID_CHARSET_RE = /^[^\p{Cc}\p{Cf}\u2028\u2029]+$/u;
+function isValidId(id) {
+  return id.length >= 1 && id.length <= MAX_ID_CHARS && ID_CHARSET_RE.test(id);
+}
 function assertValidId(id) {
-  if (id.length < 1 || id.length > MAX_ID_CHARS || !ID_CHARSET_RE.test(id)) {
-    throw new Error(`invalid id: must be 1-${MAX_ID_CHARS} characters of [A-Za-z0-9_.:-] (got ${id.length} characters)`);
+  if (!isValidId(id)) {
+    throw new Error(
+      `invalid id: must be 1-${MAX_ID_CHARS} printable, non-control characters (got ${id.length}). An id from an adopted ledger that still fails this bound is not reachable through this MCP tool, but can be erased/rechecked/confirmed directly via the MemoryStore API from a script (operator-only, outside any conversation) \u2014 see docs/release/recovery-playbook.md.`
+    );
   }
+}
+function auditSafeId(id) {
+  return safeId(id).slice(0, MAX_ID_CHARS);
 }
 function unadoptedNote(disposition) {
   return disposition === "unadopted-present" ? `
@@ -25071,7 +25079,13 @@ async function handleDualVerify(args, deps, signal) {
     decidedLeg: decided ? deciderLeg(egress) : void 0,
     releasedLegs: egress && egress.releasedLegs.length ? egress.releasedLegs : void 0,
     piiKinds: egress && egress.piiKinds.length ? egress.piiKinds : void 0,
-    echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds : void 0
+    // LEAD-AUDIT-ID-UNCONSTRAINED (fix round 1 Important): these ids come from LEDGER CONTENT
+    // (store.inspect(), read by detectEcho), not a caller-supplied argument -- bound, don't reject
+    // (see auditSafeId's docstring for why this site can't use assertValidId's reject-outright rule).
+    // LEAD-AUDIT-ID-UNCONSTRAINED (fix round 1 Important): these ids come from LEDGER CONTENT
+    // (store.inspect(), read by detectEcho), not a caller-supplied argument -- bound, don't reject
+    // (see auditSafeId's docstring for why this site can't use assertValidId's reject-outright rule).
+    echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds.map(auditSafeId) : void 0
   });
   if (deps.config.dualVerify.logContent) {
     const sent = result.outcome === "sent";
@@ -25603,6 +25617,9 @@ function createMetricsSink(path, enabled, deps = {}) {
 }
 
 // src/server/helix-server.ts
+var ID_SCHEMA = external_exports.string().refine(isValidId, {
+  message: `id must be 1-${MAX_ID_CHARS} printable, non-control characters`
+});
 function buildServer(store2, dualDeps, metrics2) {
   const m = metrics2 ?? noopMetricsSink;
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
@@ -25615,7 +25632,6 @@ function buildServer(store2, dualDeps, metrics2) {
     auditPath: join11(home2, "audit.jsonl"),
     codexLogPath: join11(home2, "codex-log.jsonl")
   };
-  const ID_SCHEMA = external_exports.string().min(1).max(MAX_ID_CHARS).regex(ID_CHARSET_RE);
   const codexStatusDeps = {
     inspect: () => checkCodexStatus(),
     resolveModel: () => checkCodexModel(),
