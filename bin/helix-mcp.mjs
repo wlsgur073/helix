@@ -24832,6 +24832,13 @@ function appendCodexLog(path, entry) {
 
 // src/server/handlers.ts
 var ok = (text) => ({ content: [{ type: "text", text }] });
+var MAX_ID_CHARS = 128;
+var ID_CHARSET_RE = /^[A-Za-z0-9_.:-]+$/;
+function assertValidId(id) {
+  if (id.length < 1 || id.length > MAX_ID_CHARS || !ID_CHARSET_RE.test(id)) {
+    throw new Error(`invalid id: must be 1-${MAX_ID_CHARS} characters of [A-Za-z0-9_.:-] (got ${id.length} characters)`);
+  }
+}
 function unadoptedNote(disposition) {
   return disposition === "unadopted-present" ? `
 
@@ -24932,6 +24939,7 @@ ${n}`);
   }) + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
 }
 function handleErase(store2, args, deps) {
+  assertValidId(args.id);
   store2.erase(args.id);
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   appendAudit(deps.auditPath, { kind: "erase", ts, id: args.id, soft: true });
@@ -24944,6 +24952,7 @@ function handleAdopt(store2, args, deps) {
   return ok(`adopted ${scope}: this project ledger is now trusted by this Helix install`);
 }
 function handleRecheck(store2, args, deps) {
+  assertValidId(args.id);
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   try {
     const { outcome, result } = store2.recheck(args.id, args.check);
@@ -24956,6 +24965,7 @@ function handleRecheck(store2, args, deps) {
   }
 }
 function handleConfirm(store2, args, deps) {
+  assertValidId(args.id);
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   try {
     store2.confirm(args.id);
@@ -25605,6 +25615,7 @@ function buildServer(store2, dualDeps, metrics2) {
     auditPath: join11(home2, "audit.jsonl"),
     codexLogPath: join11(home2, "codex-log.jsonl")
   };
+  const ID_SCHEMA = external_exports.string().min(1).max(MAX_ID_CHARS).regex(ID_CHARSET_RE);
   const codexStatusDeps = {
     inspect: () => checkCodexStatus(),
     resolveModel: () => checkCodexModel(),
@@ -25621,7 +25632,7 @@ function buildServer(store2, dualDeps, metrics2) {
       ),
       blastRadius: external_exports.enum(["read-only", "local-reversible", "hard-to-reverse", "external"]).optional(),
       classification: external_exports.enum(["normal", "personal"]).optional(),
-      supersedes: external_exports.string().optional(),
+      supersedes: ID_SCHEMA.optional(),
       scope: external_exports.enum(["project", "global"]).optional()
     }
   }, async (args) => m.runOp("helix_memory_commit", () => handleCommit(store2, args)));
@@ -25642,20 +25653,20 @@ function buildServer(store2, dualDeps, metrics2) {
   server2.registerTool("helix_memory_erase", {
     title: "Erase memory",
     description: "Erase a memory item by id. Soft: the item is removed from the live view (recall/inspect) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool itself never physically destroys content. By default (compaction off) the erased content stays recoverable on disk indefinitely; but if the user has enabled compaction.auto, that recoverability is time-bounded \u2014 an ordinary helix_memory_recall can then compact the ledger and physically destroy it once the grace window (graceMs) has passed.",
-    inputSchema: { id: external_exports.string() }
+    inputSchema: { id: ID_SCHEMA }
   }, async (args) => m.runOp("helix_memory_erase", () => handleErase(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   server2.registerTool("helix_memory_recheck", {
     title: "Recheck memory against reality",
     description: "Run a content-bound mechanical reality-check on a memory item. A pass yields the Corroborated trust state (machine-checked, NOT human-verified \u2014 it can NEVER reach Verified). The check is file-contains and BOTH path and pattern MUST appear in the item content, or the call is rejected (prevents laundering an unrelated passing check into trust). Use for objective, checkable facts.",
     inputSchema: {
-      id: external_exports.string(),
+      id: ID_SCHEMA,
       check: external_exports.object({ kind: external_exports.literal("file-contains"), path: external_exports.string(), pattern: external_exports.string() })
     }
   }, async (args) => m.runOp("helix_memory_recheck", () => handleRecheck(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   server2.registerTool("helix_memory_confirm", {
     title: "Confirm memory (user-vouched)",
     description: "Promote a memory item to the Verified state because THE USER explicitly vouched for it this turn. Requires explicit user approval; never self-confirm \u2014 call ONLY when the user directly confirmed the fact, never to confirm your own inference or a relayed claim. Only items committed with source=user are eligible (re-commit a relayed/inferred fact as source=user first). The user, not Helix, is the authority \u2014 do not allow-list this tool.",
-    inputSchema: { id: external_exports.string() }
+    inputSchema: { id: ID_SCHEMA }
   }, async (args) => m.runOp("helix_memory_confirm", () => handleConfirm(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   const dualVerifyInFlight = /* @__PURE__ */ new Set();
   server2.registerTool("helix_dual_verify", {

@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { MemoryStore } from '../memory/store.js';
 import type { RealityCheck } from '../memory/reality-check.js';
 import { MAX_QUERY_CHARS } from '../memory/retrieval.js';
-import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
+import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, MAX_ID_CHARS, ID_CHARSET_RE, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus, checkCodexModel } from '../verify/codex.js';
 import { noopMetricsSink, type MetricsSink } from '../metrics.js';
@@ -31,6 +31,13 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     codexLogPath: join(home, 'codex-log.jsonl'),
   };
 
+  // LEAD-AUDIT-ID-UNCONSTRAINED: mirrors handlers.ts's assertValidId at the MCP tool boundary itself
+  // (same MAX_ID_CHARS/ID_CHARSET_RE — single source of truth), so a malformed id is rejected by the
+  // SDK's own schema validation before the handler (and its appendAudit call) ever runs, exactly like
+  // MAX_QUERY_CHARS above. Applied to every id-shaped argument (family-unit fix): erase/recheck/
+  // confirm's `id`, AND commit's `supersedes` (also an id-lookup value, just never audited).
+  const ID_SCHEMA = z.string().min(1).max(MAX_ID_CHARS).regex(ID_CHARSET_RE);
+
   const codexStatusDeps: CodexStatusDeps = {
     inspect: () => checkCodexStatus(),
     resolveModel: () => checkCodexModel(),
@@ -53,7 +60,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
         ),
       blastRadius: z.enum(['read-only', 'local-reversible', 'hard-to-reverse', 'external']).optional(),
       classification: z.enum(['normal', 'personal']).optional(),
-      supersedes: z.string().optional(),
+      supersedes: ID_SCHEMA.optional(),
       scope: z.enum(['project', 'global']).optional(),
     },
   }, async (args) => m.runOp('helix_memory_commit', () => handleCommit(store, args)));
@@ -77,7 +84,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   server.registerTool('helix_memory_erase', {
     title: 'Erase memory',
     description: 'Erase a memory item by id. Soft: the item is removed from the live view (recall/inspect) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool itself never physically destroys content. By default (compaction off) the erased content stays recoverable on disk indefinitely; but if the user has enabled compaction.auto, that recoverability is time-bounded — an ordinary helix_memory_recall can then compact the ledger and physically destroy it once the grace window (graceMs) has passed.',
-    inputSchema: { id: z.string() },
+    inputSchema: { id: ID_SCHEMA },
   }, async (args) => m.runOp('helix_memory_erase', () => handleErase(store, args, { auditPath: dv.auditPath, now: dv.now })));
 
   server.registerTool('helix_memory_recheck', {
@@ -88,7 +95,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       'file-contains and BOTH path and pattern MUST appear in the item content, or the call is rejected ' +
       '(prevents laundering an unrelated passing check into trust). Use for objective, checkable facts.',
     inputSchema: {
-      id: z.string(),
+      id: ID_SCHEMA,
       check: z.object({ kind: z.literal('file-contains'), path: z.string(), pattern: z.string() }),
     },
   }, async (args) => m.runOp('helix_memory_recheck', () => handleRecheck(store, args as { id: string; check: RealityCheck }, { auditPath: dv.auditPath, now: dv.now })));
@@ -101,7 +108,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       'fact, never to confirm your own inference or a relayed claim. Only items committed with source=user ' +
       'are eligible (re-commit a relayed/inferred fact as source=user first). The user, not Helix, is the ' +
       'authority — do not allow-list this tool.',
-    inputSchema: { id: z.string() },
+    inputSchema: { id: ID_SCHEMA },
   }, async (args) => m.runOp('helix_memory_confirm', () => handleConfirm(store, args, { auditPath: dv.auditPath, now: dv.now })));
 
   // The ONLY tool that spawns a metered child, so it is the only one that gains the `extra`

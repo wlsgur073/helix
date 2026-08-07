@@ -238,6 +238,60 @@ describe('recheck + confirm handlers', () => {
   });
 });
 
+// LEAD-AUDIT-ID-UNCONSTRAINED: the tool surface took id as an unbounded z.string(), and handlers.ts
+// wrote args.id VERBATIM into audit.jsonl even on a REJECTED (no-match) outcome — an attacker-chosen
+// id of arbitrary length/bytes landed in a file the README/audit.ts both advertise as content-free.
+// erase is the sharpest case: store.erase() is an idempotent no-op for an absent id (never throws),
+// so its audit row was written UNCONDITIONALLY, match or not.
+describe('id bound (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
+  const oversized = 'x'.repeat(5000);
+  const controlBearing = 'm_evil\n(injected)';
+
+  it('refuses an oversized or control-bearing id BEFORE any audit row is written (erase)', () => {
+    for (const bad of [oversized, controlBearing]) {
+      const s = store();
+      const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');
+      expect(() => handleErase(s, { id: bad }, { auditPath })).toThrow();
+      expect(existsSync(auditPath)).toBe(false); // rejected before appendAudit ever ran
+    }
+  });
+
+  it('refuses an oversized or control-bearing id BEFORE any audit row is written (recheck)', () => {
+    for (const bad of [oversized, controlBearing]) {
+      const s = store();
+      const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');
+      expect(() =>
+        handleRecheck(s, { id: bad, check: { kind: 'file-contains', path: 'x', pattern: 'y' } }, { auditPath }),
+      ).toThrow();
+      expect(existsSync(auditPath)).toBe(false);
+    }
+  });
+
+  it('refuses an oversized or control-bearing id BEFORE any audit row is written (confirm)', () => {
+    for (const bad of [oversized, controlBearing]) {
+      const s = store();
+      const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');
+      expect(() => handleConfirm(s, { id: bad }, { auditPath })).toThrow();
+      expect(existsSync(auditPath)).toBe(false);
+    }
+  });
+
+  // Legacy-ledger regression (the brief's own warning): parseLedger enforces only `typeof id ===
+  // 'string'`, and an adopted team-shared ledger could in principle hold ids this fix must not lock
+  // out. Every id Helix has ever minted is `m_<uuid>` (store.ts's id(), unchanged since the project's
+  // first commit) — well inside the new bound. Prove a REAL (non-test-shortened) generated id round-
+  // trips through erase/recheck/confirm untouched, so the fix cannot brick a genuinely adopted item.
+  it('does not reject a real Helix-minted id (m_<uuid>) — the legacy-ledger regression', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const s = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z' }); // default genId => real m_<randomUUID()>
+    const auditPath = join(home, 'audit.jsonl');
+    const rec = s.commit({ content: 'pref', source: 'user' });
+    expect(rec.id).toMatch(/^m_[0-9a-f-]{36}$/); // sanity: this IS the real production id shape
+    expect(text(handleConfirm(s, { id: rec.id }, { auditPath }))).toMatch(/Verified/);
+    expect(() => handleErase(s, { id: rec.id }, { auditPath })).not.toThrow();
+  });
+});
+
 describe('scope + adopt handlers', () => {
   it('handleCommit honors scope=global', () => {
     const { store } = layeredStore();

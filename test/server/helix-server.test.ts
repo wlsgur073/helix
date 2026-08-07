@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -75,6 +75,37 @@ describe('buildServer: helix_dual_verify cancel wiring (LEAD-CODEX-CANCEL)', () 
     const home = mkdtempSync(join(tmpdir(), 'helix-srv-unaffected-'));
     const { client } = await connected(dvDeps({ home }));
     const res = await client.callTool({ name: 'helix_memory_inspect', arguments: {} });
+    expect(res.isError).toBeFalsy();
+  });
+});
+
+describe('buildServer: id bound at the MCP tool boundary (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
+  it('the SDK rejects an oversized/control-bearing id via schema BEFORE the handler (and its appendAudit) ever runs', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-srv-idbound-'));
+    const auditPath = join(home, 'audit.jsonl'); // matches dvDeps' own default auditPath computation
+    const { client } = await connected(dvDeps({ home }));
+    for (const bad of ['x'.repeat(5000), 'm_evil\n(injected)']) {
+      const res = await client.callTool({ name: 'helix_memory_erase', arguments: { id: bad } });
+      expect(res.isError).toBe(true);
+      // Specifically the SDK's OWN schema-validation wording (validateToolInput's "Input validation
+      // error: Invalid arguments for tool ..."), not handlers.ts's assertValidId message ("invalid
+      // id: must be ...") — proves THIS layer (the zod schema), not just the handler-level guard
+      // tested separately in handlers.test.ts, is what stopped the call.
+      const text = (res.content as Array<{ text?: string }>).map((c) => c.text ?? '').join('');
+      expect(text).toMatch(/Input validation error/);
+      expect(existsSync(auditPath)).toBe(false); // the handler (and its appendAudit call) never ran
+    }
+  });
+
+  it('a real Helix-minted id (m_<uuid>) passes the schema untouched — round-trips through erase over MCP', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-srv-idbound-ok-'));
+    const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1' }); // default genId => real m_<randomUUID()>
+    const server = buildServer(store, dvDeps({ home }));
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 't', version: '0' });
+    await Promise.all([client.connect(ct), server.connect(st)]);
+    const rec = store.commit({ content: 'pref', source: 'user' });
+    const res = await client.callTool({ name: 'helix_memory_erase', arguments: { id: rec.id } });
     expect(res.isError).toBeFalsy();
   });
 });

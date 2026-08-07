@@ -20,6 +20,41 @@ export interface ToolResult {
 }
 const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] });
 
+/** Shared identifier bound (LEAD-AUDIT-ID-UNCONSTRAINED). The tool surface took `id` as an unbounded
+ *  z.string(), and handleErase/handleRecheck/handleConfirm wrote `args.id` VERBATIM into audit.jsonl
+ *  even on a REJECTED outcome — erase's audit row is written UNCONDITIONALLY (store.erase() is an
+ *  idempotent no-op for an absent id, never throws), and recheck/confirm's reject branch audits
+ *  BEFORE re-throwing. Either way, an id matching no record let an agent write attacker-chosen text
+ *  of attacker-chosen length into a file the README/audit.ts both advertise as content-free.
+ *
+ *  Mirrored at the MCP tool boundary too (helix-server.ts's ID_SCHEMA imports these same constants),
+ *  matching the existing MAX_QUERY_CHARS split (retrieval.ts's assertQueryWithinBounds): the schema
+ *  gives every MCP caller a clean, client-facing rejection before the handler runs at all; this
+ *  authoritative check protects any caller that reaches these functions directly (as this file's own
+ *  tests do) — and, called BEFORE any store lookup or appendAudit call, guarantees a bad id fails as
+ *  ONE clean rejection rather than a masked/secondary error (see appendAudit's own docstring on why
+ *  the audit layer must never replace the real error a caller is about to surface).
+ *
+ *  The bound is deliberately GENEROUS, not tight. Every id Helix itself has ever minted is
+ *  `m_<uuid>` (store.ts's `id()`, unchanged since the project's first commit — ~38 chars of hex and
+ *  hyphens) or one of the three marker families (`integrity_marker` / `horizon_marker` /
+ *  `witness_fence_<epoch>_<nonce>`, store.ts's markerFamilyOf) — all comfortably inside 128 chars of
+ *  this charset. parseLedger (ledger.ts) enforces only `typeof id === 'string'`, so a bound tighter
+ *  than this risks making a genuinely adopted team-shared ledger's item impossible to
+ *  erase/recheck/confirm through MCP — a worse defect than the one this closes. */
+export const MAX_ID_CHARS = 128;
+export const ID_CHARSET_RE = /^[A-Za-z0-9_.:-]+$/;
+
+/** Throw unless `id` is a non-empty string within MAX_ID_CHARS of ID_CHARSET_RE. REJECTS rather than
+ *  truncating or sanitizing: a silently-shortened/stripped id would resolve against a DIFFERENT
+ *  record than the caller named (or none at all), and the caller could not tell — the same reasoning
+ *  assertQueryWithinBounds already applies to an oversized recall query. */
+export function assertValidId(id: string): void {
+  if (id.length < 1 || id.length > MAX_ID_CHARS || !ID_CHARSET_RE.test(id)) {
+    throw new Error(`invalid id: must be 1-${MAX_ID_CHARS} characters of [A-Za-z0-9_.:-] (got ${id.length} characters)`);
+  }
+}
+
 /** B2 (Codex R2 #8): the trusted, informational, CONSTANT-string unadopted-ledger disclosure note —
  *  never interpolated, never naming the project path (see content-frame.ts). Iff
  *  `disposition === 'unadopted-present'`, rendered in the SAME trusted advisory layer as the
@@ -149,6 +184,7 @@ export interface EraseDeps {
  *  disk and is recorded in audit.jsonl. Physical destruction (right-to-erasure) is the store-level
  *  `erase(id, { permanent: true })` path, deliberately kept off the agent tool surface. */
 export function handleErase(store: MemoryStore, args: { id: string }, deps: EraseDeps): ToolResult {
+  assertValidId(args.id); // LEAD-AUDIT-ID-UNCONSTRAINED: reject before the no-op-on-absent erase() runs
   store.erase(args.id); // soft (default): tombstone only, no compaction
   const ts = (deps.now ?? (() => new Date().toISOString()))();
   appendAudit(deps.auditPath, { kind: 'erase', ts, id: args.id, soft: true });
@@ -177,6 +213,7 @@ export interface RecheckConfirmDeps {
  *  is audited content-free — including the reject path (an unbound/bad check throws but is still
  *  recorded as `rejected`/`bound:false` then re-thrown) and the contested path. */
 export function handleRecheck(store: MemoryStore, args: { id: string; check: RealityCheck }, deps: RecheckConfirmDeps): ToolResult {
+  assertValidId(args.id); // LEAD-AUDIT-ID-UNCONSTRAINED: reject before the reject-path audit below
   const ts = (deps.now ?? (() => new Date().toISOString()))();
   try {
     const { outcome, result } = store.recheck(args.id, args.check);
@@ -194,6 +231,7 @@ export function handleRecheck(store: MemoryStore, args: { id: string; check: Rea
 /** Human out-of-band vouch -> Verified. Target-gated in the store (source=user only). The Verified
  *  promotion and any rejection are both audited content-free. */
 export function handleConfirm(store: MemoryStore, args: { id: string }, deps: RecheckConfirmDeps): ToolResult {
+  assertValidId(args.id); // LEAD-AUDIT-ID-UNCONSTRAINED: reject before the reject-path audit below
   const ts = (deps.now ?? (() => new Date().toISOString()))();
   try {
     store.confirm(args.id);

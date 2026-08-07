@@ -32,7 +32,12 @@ export interface DualVerifyAudit {
  *  after the fsync'd erase, so a crash in the narrow gap can miss it; see appendAudit) — so a
  *  poisoned/erroneous erase that suppresses an authoritative fact is detectable in audit.jsonl. The MCP tool is soft-only
  *  (`soft: true`); `soft: false` marks the out-of-band permanent/compaction path. Content-free
- *  by design — only the id is recorded, never the erased text. */
+ *  by design — only the id is recorded, never the erased text. LEAD-AUDIT-ID-UNCONSTRAINED: `id` used
+ *  to be an unbounded string written here VERBATIM even when it matched no record (erase() is a
+ *  no-op, not a throw, for an absent id) — an attacker-chosen id of unbounded length/bytes could ride
+ *  this "content-free" field. `id` is now bounded (length + charset) before this event is ever
+ *  constructed: handlers.ts's `assertValidId` guards every caller of this interface, mirrored at the
+ *  MCP boundary by helix-server.ts's `ID_SCHEMA`. */
 export interface EraseAudit {
   kind: 'erase';
   ts: string;
@@ -45,7 +50,11 @@ export interface EraseAudit {
  *  after the fsync'd transition; see appendAudit) — so a poisoned/erroneous promotion or a
  *  silently-dropped corroboration is detectable in audit.jsonl. Content-free by design: ids /
  *  enums / booleans ONLY, NEVER a matched span, file path, or check pattern. `outcome` is an INLINE
- *  shape (not firewall's VerifyOutcome) to keep audit decoupled from the check engine. */
+ *  shape (not firewall's VerifyOutcome) to keep audit decoupled from the check engine.
+ *  LEAD-AUDIT-ID-UNCONSTRAINED: the REJECTED branch (recheck/confirm target-not-found or unbound)
+ *  is the sharp case — it audits BEFORE re-throwing, so a garbage id would otherwise be logged on
+ *  every single failed lookup. `id` is bounded (length + charset) before either handler's try block
+ *  runs: see handlers.ts's `assertValidId` / helix-server.ts's `ID_SCHEMA`. */
 export interface VerifyAudit {
   kind: 'verify';
   ts: string;
