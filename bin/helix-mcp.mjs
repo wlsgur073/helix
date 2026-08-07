@@ -16118,25 +16118,23 @@ function strayTrustFiles(home2, globalLedger2) {
     return existsSync4(p) && looksLikeOurs(name, p);
   });
 }
-function peekGlobalScopeNonce(home2) {
+function globalNonceAlreadyEstablished(home2) {
   try {
     const path = join7(home2, "projects.json");
-    if (!lstatSync4(path).isFile()) return null;
+    if (!lstatSync4(path).isFile()) return false;
     const parsed = JSON.parse(readFileSync9(path, "utf8"));
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
     const entry = parsed["@global"];
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
     const nonce = entry.macNonce;
-    return typeof nonce === "string" ? nonce : null;
+    return typeof nonce === "string" && nonce.length > 0;
   } catch {
-    return null;
+    return false;
   }
 }
 function readOnlyGlobalSubkey(home2) {
-  const master = tryReadMaster(home2);
-  if (!master) return null;
-  const nonce = peekGlobalScopeNonce(home2);
-  return nonce ? deriveSubkey(master, nonce) : null;
+  if (!globalNonceAlreadyEstablished(home2)) return null;
+  return subkeyForScope(home2);
 }
 function assessGradeLoss(home2, ledger) {
   const { records, verdict } = readLedgerWitnessed(ledger, home2);

@@ -2,8 +2,8 @@ import { existsSync, readFileSync, lstatSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { canonicalRoot } from './ownership.js';
-import { tryReadMaster, verifyVerify, deriveSubkey } from './ledger-mac.js';
-import { verifiedProjectionWithSubkey } from './verified-read.js';
+import { tryReadMaster, verifyVerify } from './ledger-mac.js';
+import { subkeyForScope, verifiedProjectionWithSubkey } from './verified-read.js';
 import { readLedgerWitnessed } from './witness-read.js';
 import { clampElevatedState } from './verified-projection.js';
 import { scanLegacyElevated } from './legacy-scan.js';
@@ -131,53 +131,74 @@ export function compareStrayMasterKey(home: string, ledgerDir: string): StrayKey
 }
 
 /**
- * Read-only peek at HOME's global-scope MAC nonce (registry key `'@global'`, ownership.ts's own
- * reserved constant) WITHOUT minting one when absent — unlike ownership.ts's `globalScopeNonce`,
- * which mints a fresh nonce and WRITES `projects.json` under a lock on first use. That mint is
- * exactly the state-changing action `assessGradeLoss`'s call site must not perform before deciding
- * whether to refuse (round 3: it must be a genuine pure read, not merely documented as one).
+ * Is HOME's global-scope MAC nonce ALREADY established — i.e. would resolving it read a nonce
+ * rather than MINT one? This is deliberately NOT a registry validator and must never grow into one
+ * (round 4: a hand-copied validator diverged from `ownership.ts`'s and the gate judged a ledger
+ * under a subkey the store would never use). It answers one narrower question, whose only job is to
+ * keep `readOnlyGlobalSubkey` below from delegating INTO a mint.
  *
- * `ownership.ts` is freeze-pinned, and its registry readers (`loadRegistry`/`readRegistry`) are
- * private besides — this cannot call into them, minting or not. It re-derives the SAME read, minus
- * the mint, from the same on-disk shape ownership.ts's own `RegistryEntry` validates (`stamp`/
- * `adoptedAt`/`macNonce` all strings) — the identical shape check `looksLikeOurs` above already
- * duplicates in this file for `projects.json`'s OWN stray-file predicate, for the same reason:
- * staying a read-only content check with no dependency on the module that mints/owns the state.
+ * `ownership.ts` is freeze-pinned and its registry readers (`loadRegistry`/`readRegistry`) are
+ * private, so the validation cannot be imported — but it does not need to be. `globalScopeNonce`
+ * mints only when its own fast-path read finds no non-empty `'@global'` `macNonce` in a registry it
+ * did not already reject as corrupt; both of its non-minting exits return BEFORE its first
+ * `mkdirSync`. So a `true` here — the registry file exists, parses to a plain object, and its
+ * `'@global'` entry carries a non-empty string `macNonce` — is exactly the condition under which
+ * that mint provably cannot happen, whatever the registry's OTHER entries look like: a malformed
+ * sibling entry makes `loadRegistry` report `corrupt`, which returns `null` without writing.
  *
- * Absent, unreadable, symlinked, or wrong-shaped all collapse to `null` — mirroring
- * `globalScopeNonce`'s own corrupt-registry contract (never trust what this reader cannot fully
- * validate). The caller already treats a `null` subkey as key-absent: no nonce means the ledger's
- * grades cannot be VERIFIED under HOME, which is `loses: true` on any content that claims to be
- * elevated. That is the correct verdict, not a gap — a HOME with no established global scope cannot
- * vouch for a graded ledger either way — so this changes no acceptance-matrix outcome, only whether
- * reaching it also mints a nonce as a side effect.
+ * Both directions of error are therefore safe. Stricter than `loadRegistry` → no delegation → a
+ * `null` subkey → `loses: true` → refuse: over-refusal, which is the direction this gate is allowed
+ * to be wrong in. Looser than `loadRegistry` → delegation → `loadRegistry` rejects it itself and
+ * returns `null` without minting: the same answer, still no write. The one case that would mint —
+ * `true` here while the real reader finds nothing to read — requires `projects.json` to change
+ * between this read and that one, the same `lstat`-then-read race already recorded as deferred
+ * for `looksLikeOurs` above.
  */
-function peekGlobalScopeNonce(home: string): string | null {
+function globalNonceAlreadyEstablished(home: string): boolean {
   try {
     const path = join(home, 'projects.json');
-    if (!lstatSync(path).isFile()) return null;   // never follow a symlinked registry
+    if (!lstatSync(path).isFile()) return false;   // absent, or a symlink we will not follow
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
     const entry = (parsed as Record<string, unknown>)['@global'];
-    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return false;
     const nonce = (entry as Record<string, unknown>).macNonce;
-    return typeof nonce === 'string' ? nonce : null;
+    return typeof nonce === 'string' && nonce.length > 0;   // '' is falsy to globalScopeNonce too — it would mint
   } catch {
-    return null;   // absent (ENOENT) or unreadable/unparseable -- neither is a nonce to trust
+    return false;   // unreadable/unparseable — nothing here proves a nonce is established
   }
 }
 
-/** Read-only counterpart of `verified-read.ts`'s `subkeyForScope`, GLOBAL scope only, built on
- *  `peekGlobalScopeNonce` above instead of `ownership.ts`'s minting `globalScopeNonce`. Used ONLY by
- *  `assessGradeLoss` — every other subkey resolution in the codebase (the real recall path, the
- *  startup integrity scan below it in server/index.ts) legitimately mints a nonce on first use and
- *  must keep doing so; this one call site is the exception, because it runs BEFORE the refuse/start
- *  decision that gates whether starting — and thus minting — is even safe. */
+/**
+ * The subkey `assessGradeLoss` judges the ledger under: the REAL `subkeyForScope`, called only once
+ * a mint is provably impossible, and `null` otherwise.
+ *
+ * Round 3 removed the mint by re-deriving the subkey here — read the registry, pull `'@global'`'s
+ * `macNonce`, `deriveSubkey`. The derivation matched, but the VALIDATION did not: `loadRegistry`
+ * fails the WHOLE registry when ANY entry has a non-string `stamp`/`adoptedAt`/`macNonce`, so the
+ * real resolver returned `null` where the copy happily returned `'@global'`'s nonce. The gate then
+ * measured the ledger under a subkey the store would never use, found no loss, started — and the
+ * store clamped Verified to Fresh, the exact harm exit 78 exists to prevent, reached by failing
+ * TOWARD starting. A second hand-copy of the validator would only re-arm the same trap.
+ *
+ * So the validation is not copied at all: it is DELEGATED to the same function the store itself
+ * resolves through, and the local check above is reduced to the one question delegation cannot
+ * answer for itself (would this call mint?). Whatever `subkeyForScope` accepts or rejects, this
+ * accepts or rejects identically by construction — including any future tightening of
+ * `ownership.ts`'s shape gate, which no longer has a private copy here to drift away from.
+ *
+ * The residual asymmetry is deliberate and pinned by test: when no nonce is established (no
+ * registry, no `'@global'` entry) the real resolver mints a FRESH nonce, and a freshly minted nonce
+ * verifies nothing that was signed before it. Reporting `null` — cannot verify, `loses: true`,
+ * refuse — is the honest verdict for that state, and it is the only one reachable without writing
+ * into a HOME whose startup may yet be refused. Every OTHER subkey resolution in the codebase (the
+ * real recall path, the startup integrity scan below this gate in server/index.ts) legitimately
+ * mints on first use and must keep doing so; this one call site is the exception, because it runs
+ * BEFORE the decision that gates whether starting — and thus minting — is safe at all.
+ */
 function readOnlyGlobalSubkey(home: string): Buffer | null {
-  const master = tryReadMaster(home);
-  if (!master) return null;
-  const nonce = peekGlobalScopeNonce(home);
-  return nonce ? deriveSubkey(master, nonce) : null;
+  if (!globalNonceAlreadyEstablished(home)) return null;   // never delegate into a mint
+  return subkeyForScope(home);                             // the real resolver decides everything else
 }
 
 /** Measures, not infers, whether starting would lose a trust grade `ledger` currently carries. Key
@@ -221,17 +242,25 @@ export interface GradeLossAssessment {
  * neither path regardless of key or witness state: this is what lets a bare stray file (nothing
  * behind it to lose) start instead of refusing, closing the DoS this measurement replaces.
  *
- * PURE READ, safe to call before any state-changing startup step: `readLedgerWitnessed`
- * (witness-read.ts) never mints a master key or advances a witness transition, and tolerates an
- * absent/empty/torn `ledger` (ENOENT -> empty bytes/records, verdict `first-contact`) without
- * throwing. `readOnlyGlobalSubkey` (above) short-circuits to `null` with NO disk write when HOME
- * has no master key OR no established global-scope nonce yet — deliberately NOT `verified-read.ts`'s
- * `subkeyForScope`, whose `globalScopeNonce` call MINTS a nonce (and writes `projects.json`) on
- * first use; this is the one call site in the codebase where that mint must not happen, because it
- * runs before the very decision that gates whether starting — and thus minting — is safe at all. A
- * null subkey here still correctly reports every existing `verify` record as unverifiable
- * (scanLegacyElevated), since starting would in fact mint a fresh nonce none of them were signed
- * under — round 3 changed HOW that null is reached, not what it means once reached.
+ * MINTS NOTHING AND MOVES NO TRUST STATE, which is what makes it safe to call before the decision
+ * it informs — but it is not literally side-effect-free, and must not be documented as if it were.
+ * What it does NOT do: `readLedgerWitnessed` (witness-read.ts) never mints a master key or advances
+ * a witness transition, and tolerates an absent/empty/torn `ledger` (ENOENT -> empty bytes/records,
+ * verdict `first-contact`) without throwing; `readOnlyGlobalSubkey` (above) returns `null` rather
+ * than let `globalScopeNonce` mint a nonce and write `projects.json` into a HOME whose startup may
+ * yet be refused — the one call site in the codebase where that mint must not happen, since it runs
+ * before the very decision gating whether starting, and thus minting, is safe at all. A null subkey
+ * here still correctly reports every existing `verify` record as unverifiable (scanLegacyElevated),
+ * since starting would in fact mint a fresh nonce none of them were signed under.
+ *
+ * What it DOES do: `tryReadMaster` (ledger-mac.ts) chmods the master key it reads to 0600 whenever
+ * the mode is over-broad — a defense-in-depth tightening it applies on every read, not a choice
+ * made here. Both of this function's key reads go through it (`readLedgerWitnessed` via
+ * `readScopeWitness`, and `readOnlyGlobalSubkey` via `subkeyForScope`), so a call can leave HOME's
+ * own key at a tighter mode than it found it. Benign in practice — startup hardens HOME's
+ * permissions before this runs, and tightening a mode loses no trust state either way — and
+ * recorded as a deferred finding rather than changed here. It is noted because the absolute this
+ * comment used to assert was false, and a future reader must not build on it.
  *
  * Reads `ledger` once (`readLedgerWitnessed`'s single witness-first, retry-once pass) and reuses
  * that one parse for both paths — no second read. It IS a second read of the same bytes the first

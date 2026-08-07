@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, rmSync, existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
@@ -7,6 +7,7 @@ import { strayTrustFiles, TRUST_FILE_NAMES, compareStrayMasterKey, assessGradeLo
 import { MemoryStore } from '../../src/memory/store.js';
 import { ensureMaster } from '../../src/memory/ledger-mac.js';
 import { advanceWitness, witnessPath, scopeKeyOf } from '../../src/memory/witness-store.js';
+import { subkeyForScope } from '../../src/memory/verified-read.js';
 
 const layout = () => {
   const base = mkdtempSync(join(tmpdir(), 'helix-layout-'));
@@ -285,5 +286,38 @@ describe('assessGradeLoss', () => {
     // back to the minting subkeyForScope would silently reintroduce the mint and every other
     // assertion in this file would keep passing.
     expect(existsSync(join(home, 'projects.json')), 'assessGradeLoss must not have minted a nonce').toBe(false);
+  });
+
+  // Round 4: the non-minting nonce peek must agree with ownership.ts's own reader about WHICH
+  // registries are usable, not just about how the nonce is derived from one. loadRegistry validates
+  // the WHOLE registry -- one entry anywhere with a non-string stamp/adoptedAt/macNonce makes it
+  // `corrupt`, so globalScopeNonce (and thus subkeyForScope, and thus the STORE) fails closed to a
+  // null subkey and serves Fresh. A peek that validated only '@global' returned a nonce there, so
+  // the gate judged the ledger under a subkey the store would never use: it reported no loss, let
+  // the server start, and the store then dropped Verified to Fresh -- the exact harm exit 78 exists
+  // to prevent, reached by failing TOWARD starting.
+  it('agrees with subkeyForScope when a malformed OTHER registry entry makes the whole registry corrupt', () => {
+    const { home, elsewhere } = layout();
+    const ledger = join(elsewhere, 'memory.jsonl');
+    let n = 0;
+    const store = new MemoryStore(ledger, { home, sessionId: 's', genId: () => `m_${++n}` });
+    const rec = store.commit({ content: 'confirmed under HOME\'s own real key and nonce', source: 'user' });
+    const { record: verifyRec } = store.confirm(rec.id);
+    expect(assessGradeLoss(home, ledger).loses).toBe(false); // sanity: in-sync, genuinely nothing lost yet
+
+    // '@global' itself stays perfectly valid; ONE unrelated project entry goes off-shape.
+    const registryPath = join(home, 'projects.json');
+    const reg = JSON.parse(readFileSync(registryPath, 'utf8')) as Record<string, unknown>;
+    expect(typeof (reg['@global'] as Record<string, unknown>).macNonce, 'fixture sanity').toBe('string');
+    reg['/some/other/project'] = { stamp: 1, adoptedAt: '2026-01-01T00:00:00.000Z', macNonce: 'abc' };
+    writeFileSync(registryPath, JSON.stringify(reg));
+
+    // The authority: this is what the store will actually resolve a moment later.
+    expect(subkeyForScope(home), 'ownership.ts fails the whole registry closed').toBeNull();
+
+    const result = assessGradeLoss(home, ledger);
+    expect(result.witnessMismatch).toBe(false);          // witness untouched -- this is path (a) alone
+    expect(result.unverifiableRecordIds).toContain(verifyRec.id);
+    expect(result.loses).toBe(true);                     // must agree with the null subkey above
   });
 });
