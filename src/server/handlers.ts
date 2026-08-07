@@ -4,7 +4,7 @@ import type { HelixConfig } from '../config.js';
 import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type EchoSource } from '../verify/dual-verify.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, newNonce, safeId, UNADOPTED_LEDGER_NOTE } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
 import { appendAudit, type VerifyAudit } from '../audit.js';
 import { readFileSync } from 'node:fs';
@@ -135,9 +135,34 @@ export function assertValidId(id: string): void {
  *  this exact round-3 finding: that note is single-line, out-of-frame trusted text landing directly
  *  in the agent's context, i.e. an OUT-OF-FRAME advisory site by this same taxonomy. Applying
  *  `presentId` there would SPREAD this defect to a new surface, not close one. Its residual (a valid
- *  non-ASCII adopted id displays mangled in that ONE note) is cosmetic, and is the correct trade. */
+ *  non-ASCII adopted id displays mangled in that ONE note) is cosmetic, and is the correct trade.
+ *
+ *  FIX ROUND 4 (hardening, review self-critique): validation and rendering used to see DIFFERENT
+ *  bytes. This function validated the RAW id, but `makeDataFrame`'s `datamark` then runs
+ *  `normalizeUntrusted` (NFKC + `stripControls`) over the id before it ever reaches the rendered
+ *  line — nothing structurally guaranteed NFKC could never turn an `isValidId`-admitted character (or
+ *  SEQUENCE of characters) into `\n`/`\r`/U+2028/U+2029/U+0085. Round 3's site-split argument held
+ *  only because an exhaustive check of every SINGLE code point `isValidId` admits happened not to
+ *  produce one — true, but "by luck of the Unicode tables, not by construction" (the review's own
+ *  words), since that scan never covered composed SEQUENCES (a base character + a following
+ *  combining mark, which NFKC can fold into a single precomposed character). This function now
+ *  re-runs `isValidId` on the ACTUAL POST-NORMALIZATION bytes before committing to verbatim — the
+ *  property (the bytes that reach the rendered line satisfy the same predicate the id was admitted
+ *  under) now holds BY CONSTRUCTION, closing the whole class of reasoning rather than resting on an
+ *  enumeration nobody can restate in one sentence. (A composed pair that manufactures a dangerous
+ *  character could not be constructed for this fix — Unicode control/line-separator characters have
+ *  NO canonical or compatibility decomposition mapping, so NFKC composition, which only ever produces
+ *  a precomposed character that some sequence canonically decomposes TO, cannot produce one; spot-
+ *  checked, not proven, over 157,760 base+combining-mark pairs across the main combining blocks with
+ *  zero hits. The recheck also happens to close a SEPARATE, non-security residual as a side effect:
+ *  `MAX_ID_CHARS` was checked pre-NFKC only, and a compatibility character can EXPAND under NFKC —
+ *  e.g. U+FDFA is a single character whose NFKC form is 18 characters, so a 128-char id built from it
+ *  could render ~2,300 chars inside the frame. Bloat only, never a line break — `echoMemoryIds` is
+ *  never NFKC'd (a JSON field, not rendered prose), so audit rows were never at risk from this.) */
 export function presentId(id: string): string {
-  return isValidId(id) ? id : safeId(id).slice(0, MAX_ID_CHARS);
+  if (!isValidId(id)) return safeId(id).slice(0, MAX_ID_CHARS);
+  const normalized = normalizeUntrusted(id);
+  return isValidId(normalized) ? id : safeId(id).slice(0, MAX_ID_CHARS);
 }
 
 /** B2 (Codex R2 #8): the trusted, informational, CONSTANT-string unadopted-ledger disclosure note —

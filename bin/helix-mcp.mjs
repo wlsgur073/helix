@@ -24845,7 +24845,9 @@ function assertValidId(id) {
   }
 }
 function presentId(id) {
-  return isValidId(id) ? id : safeId(id).slice(0, MAX_ID_CHARS);
+  if (!isValidId(id)) return safeId(id).slice(0, MAX_ID_CHARS);
+  const normalized = normalizeUntrusted(id);
+  return isValidId(normalized) ? id : safeId(id).slice(0, MAX_ID_CHARS);
 }
 function unadoptedNote(disposition) {
   return disposition === "unadopted-present" ? `
