@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
@@ -257,5 +257,33 @@ describe('assessGradeLoss', () => {
     expect(result.witnessMismatch).toBe(true);
     expect(result.clampedRecordIds).toEqual([]); // nothing live was elevated, so the clamp is a no-op
     expect(result.loses).toBe(false);
+  });
+
+  // Round 3: assessGradeLoss must be a genuine pure read, not merely documented as one.
+  // subkeyForScope (verified-read.ts) resolves the global subkey via ownership.ts's
+  // globalScopeNonce, which MINTS a nonce and WRITES projects.json under a lock when one is not
+  // already established -- exactly the state-changing action this call site (which runs BEFORE the
+  // refuse/start decision) must not perform. A refused startup must leave HOME exactly as it found
+  // it, not write into it on the way to exit 78.
+  it('never mints HOME\'s global-scope nonce: master key present, projects.json absent, stray files at risk', () => {
+    const { home, elsewhere } = layout();
+    ensureMaster(home); // HOME has its own master key...
+    expect(existsSync(join(home, 'projects.json')), 'fixture sanity: no established global scope yet').toBe(false);
+
+    // A genuinely elevated record HOME cannot verify without a nonce to derive its subkey from --
+    // exercises the real predicate, not a vacuous empty-ledger pass.
+    const foreignHome = mkdtempSync(join(tmpdir(), 'helix-foreign-home-'));
+    const ledger = join(elsewhere, 'memory.jsonl');
+    let n = 0;
+    const foreign = new MemoryStore(ledger, { home: foreignHome, sessionId: 'foreign', genId: () => `p_${++n}` });
+    const rec = foreign.commit({ content: 'confirmed elsewhere; HOME has no nonce to verify it with', source: 'user' });
+    foreign.confirm(rec.id);
+
+    const result = assessGradeLoss(home, ledger);
+    expect(result.loses).toBe(true); // no nonce -> cannot verify -> cannot vouch for this ledger either
+    // The purity assertion: still absent AFTER the call. Without this, a future refactor that swaps
+    // back to the minting subkeyForScope would silently reintroduce the mint and every other
+    // assertion in this file would keep passing.
+    expect(existsSync(join(home, 'projects.json')), 'assessGradeLoss must not have minted a nonce').toBe(false);
   });
 });

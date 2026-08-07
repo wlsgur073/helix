@@ -2,8 +2,8 @@ import { existsSync, readFileSync, lstatSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { canonicalRoot } from './ownership.js';
-import { tryReadMaster, verifyVerify } from './ledger-mac.js';
-import { subkeyForScope, verifiedProjectionWithSubkey } from './verified-read.js';
+import { tryReadMaster, verifyVerify, deriveSubkey } from './ledger-mac.js';
+import { verifiedProjectionWithSubkey } from './verified-read.js';
 import { readLedgerWitnessed } from './witness-read.js';
 import { clampElevatedState } from './verified-projection.js';
 import { scanLegacyElevated } from './legacy-scan.js';
@@ -130,6 +130,56 @@ export function compareStrayMasterKey(home: string, ledgerDir: string): StrayKey
   return strayKey !== null && timingSafeEqual(homeKey, strayKey) ? 'match' : 'mismatch';
 }
 
+/**
+ * Read-only peek at HOME's global-scope MAC nonce (registry key `'@global'`, ownership.ts's own
+ * reserved constant) WITHOUT minting one when absent — unlike ownership.ts's `globalScopeNonce`,
+ * which mints a fresh nonce and WRITES `projects.json` under a lock on first use. That mint is
+ * exactly the state-changing action `assessGradeLoss`'s call site must not perform before deciding
+ * whether to refuse (round 3: it must be a genuine pure read, not merely documented as one).
+ *
+ * `ownership.ts` is freeze-pinned, and its registry readers (`loadRegistry`/`readRegistry`) are
+ * private besides — this cannot call into them, minting or not. It re-derives the SAME read, minus
+ * the mint, from the same on-disk shape ownership.ts's own `RegistryEntry` validates (`stamp`/
+ * `adoptedAt`/`macNonce` all strings) — the identical shape check `looksLikeOurs` above already
+ * duplicates in this file for `projects.json`'s OWN stray-file predicate, for the same reason:
+ * staying a read-only content check with no dependency on the module that mints/owns the state.
+ *
+ * Absent, unreadable, symlinked, or wrong-shaped all collapse to `null` — mirroring
+ * `globalScopeNonce`'s own corrupt-registry contract (never trust what this reader cannot fully
+ * validate). The caller already treats a `null` subkey as key-absent: no nonce means the ledger's
+ * grades cannot be VERIFIED under HOME, which is `loses: true` on any content that claims to be
+ * elevated. That is the correct verdict, not a gap — a HOME with no established global scope cannot
+ * vouch for a graded ledger either way — so this changes no acceptance-matrix outcome, only whether
+ * reaching it also mints a nonce as a side effect.
+ */
+function peekGlobalScopeNonce(home: string): string | null {
+  try {
+    const path = join(home, 'projects.json');
+    if (!lstatSync(path).isFile()) return null;   // never follow a symlinked registry
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const entry = (parsed as Record<string, unknown>)['@global'];
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    const nonce = (entry as Record<string, unknown>).macNonce;
+    return typeof nonce === 'string' ? nonce : null;
+  } catch {
+    return null;   // absent (ENOENT) or unreadable/unparseable -- neither is a nonce to trust
+  }
+}
+
+/** Read-only counterpart of `verified-read.ts`'s `subkeyForScope`, GLOBAL scope only, built on
+ *  `peekGlobalScopeNonce` above instead of `ownership.ts`'s minting `globalScopeNonce`. Used ONLY by
+ *  `assessGradeLoss` — every other subkey resolution in the codebase (the real recall path, the
+ *  startup integrity scan below it in server/index.ts) legitimately mints a nonce on first use and
+ *  must keep doing so; this one call site is the exception, because it runs BEFORE the refuse/start
+ *  decision that gates whether starting — and thus minting — is even safe. */
+function readOnlyGlobalSubkey(home: string): Buffer | null {
+  const master = tryReadMaster(home);
+  if (!master) return null;
+  const nonce = peekGlobalScopeNonce(home);
+  return nonce ? deriveSubkey(master, nonce) : null;
+}
+
 /** Measures, not infers, whether starting would lose a trust grade `ledger` currently carries. Key
  *  presence (round 1) and key identity (`compareStrayMasterKey`, round 1's revision) are both
  *  PROXIES for this — and the second one is still too conservative: a healthy install with its own
@@ -174,10 +224,14 @@ export interface GradeLossAssessment {
  * PURE READ, safe to call before any state-changing startup step: `readLedgerWitnessed`
  * (witness-read.ts) never mints a master key or advances a witness transition, and tolerates an
  * absent/empty/torn `ledger` (ENOENT -> empty bytes/records, verdict `first-contact`) without
- * throwing. `subkeyForScope` short-circuits to `null` (no scope-nonce lookup, no side effects at
- * all) when HOME has no master key yet — scanLegacyElevated then correctly reports every existing
- * `verify` record as unverifiable, since starting would in fact mint a fresh key none of them were
- * signed under.
+ * throwing. `readOnlyGlobalSubkey` (above) short-circuits to `null` with NO disk write when HOME
+ * has no master key OR no established global-scope nonce yet — deliberately NOT `verified-read.ts`'s
+ * `subkeyForScope`, whose `globalScopeNonce` call MINTS a nonce (and writes `projects.json`) on
+ * first use; this is the one call site in the codebase where that mint must not happen, because it
+ * runs before the very decision that gates whether starting — and thus minting — is safe at all. A
+ * null subkey here still correctly reports every existing `verify` record as unverifiable
+ * (scanLegacyElevated), since starting would in fact mint a fresh nonce none of them were signed
+ * under — round 3 changed HOW that null is reached, not what it means once reached.
  *
  * Reads `ledger` once (`readLedgerWitnessed`'s single witness-first, retry-once pass) and reuses
  * that one parse for both paths — no second read. It IS a second read of the same bytes the first
@@ -189,7 +243,7 @@ export interface GradeLossAssessment {
  */
 export function assessGradeLoss(home: string, ledger: string): GradeLossAssessment {
   const { records, verdict } = readLedgerWitnessed(ledger, home);
-  const subkey = subkeyForScope(home);
+  const subkey = readOnlyGlobalSubkey(home);
   const scan = scanLegacyElevated(records, (r) => (subkey ? verifyVerify(r, subkey) : false));
   const clampedRecordIds = verdict.kind === 'mismatch'
     ? [...verifiedProjectionWithSubkey(records, subkey).live.values()]

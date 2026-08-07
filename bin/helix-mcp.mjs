@@ -16118,9 +16118,29 @@ function strayTrustFiles(home2, globalLedger2) {
     return existsSync4(p) && looksLikeOurs(name, p);
   });
 }
+function peekGlobalScopeNonce(home2) {
+  try {
+    const path = join7(home2, "projects.json");
+    if (!lstatSync4(path).isFile()) return null;
+    const parsed = JSON.parse(readFileSync9(path, "utf8"));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const entry = parsed["@global"];
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
+    const nonce = entry.macNonce;
+    return typeof nonce === "string" ? nonce : null;
+  } catch {
+    return null;
+  }
+}
+function readOnlyGlobalSubkey(home2) {
+  const master = tryReadMaster(home2);
+  if (!master) return null;
+  const nonce = peekGlobalScopeNonce(home2);
+  return nonce ? deriveSubkey(master, nonce) : null;
+}
 function assessGradeLoss(home2, ledger) {
   const { records, verdict } = readLedgerWitnessed(ledger, home2);
-  const subkey = subkeyForScope(home2);
+  const subkey = readOnlyGlobalSubkey(home2);
   const scan = scanLegacyElevated(records, (r) => subkey ? verifyVerify(r, subkey) : false);
   const clampedRecordIds = verdict.kind === "mismatch" ? [...verifiedProjectionWithSubkey(records, subkey).live.values()].filter((r) => clampElevatedState(r.state) !== r.state).map((r) => r.id) : [];
   return {
