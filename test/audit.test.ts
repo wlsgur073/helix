@@ -91,12 +91,14 @@ describe('appendAudit', () => {
   // directory fsync instead of swallowing it — correct for the ledger/key/witness write paths.
   // audit.jsonl is deliberately exempted: this file's own docstring says completeness is best-effort,
   // NOT transactional, and no caller (handlers.ts) wraps appendAudit — by the time it runs, every
-  // caller has already COMPLETED its primary operation (successfully at handlers.ts:154/167/186, or
-  // having already FAILED at :189/:201, about to re-throw its own real error). Fix round 1 (review
+  // caller has already COMPLETED its primary operation (successfully at handlers.ts:154/167/186/206,
+  // or having already FAILED at :189/:201, about to re-throw its own real error). Fix round 1 (review
   // Important 3): the primary operation is not always a SUCCESS that "already durably committed" —
-  // see audit.ts's own docstring for the corrected, per-site breakdown. Letting a directory-fsync
-  // failure escape here would, at best, report an already-successful primary operation as FAILED for
-  // an unrelated reason, and at worst — at the reject sites — REPLACE the real rejection error with a
+  // see audit.ts's own docstring for the corrected, per-site breakdown. Fix round 2: that breakdown
+  // itself first undercounted the success sites (three, not four — :206, handleConfirm's own
+  // post-success append, was missing). Letting a directory-fsync failure escape here would, at best,
+  // report an already-successful primary operation as FAILED for an unrelated reason, and at worst —
+  // at the reject sites — REPLACE the real rejection error with a
   // generic fsync error, masking it. Both are worse than the audit row silently missing, which the
   // docstring already accepts. The row content itself (writeAll + fsyncSync(fd)) is UNCHANGED — still
   // unconditional and still propagates — only the directory fsync on first creation is swallowed here.

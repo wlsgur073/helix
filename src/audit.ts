@@ -81,19 +81,20 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit | AdoptAudit
  *  The directory fsync is swallowed UNCONDITIONALLY here — narrower than fs-ops.ts's own fsyncDir
  *  contract (task 7), which now propagates a genuinely failed attempt. No caller (handlers.ts) wraps
  *  this call, and by the time it runs every caller has already COMPLETED its primary operation — not
- *  always successfully. Three of seven call sites (handlers.ts:154,167,186 — erase/adopt/recheck
- *  -success) run it after a SUCCEEDED operation; handlers.ts:189/:201 (recheck-reject/confirm-reject)
- *  run it INSIDE a catch, after the primary operation already FAILED, immediately before re-throwing
- *  that real error; handlers.ts:348 (dual-verify) follows an operation that commits nothing to disk at
- *  all — audit.jsonl IS the durable record there. Fix round 1 (review Important 3): an earlier version
- *  of this comment claimed every caller's primary operation had "already durably committed", which is
- *  false for the reject paths and the dual-verify path. The exemption is correct regardless — it is
- *  *more* clearly correct once stated right: at the reject sites, letting a directory-fsync failure
- *  escape would not just misreport a success as a failure, it would REPLACE the real rejection error
- *  the caller is about to re-throw with an unrelated fsync error, masking the actual diagnosis. Both
- *  outcomes are worse than the audit row silently missing — a gap this docstring already accepts. The
- *  row's own bytes stay unconditional: writeAll + fsyncSync(fd) above are untouched and still
- *  propagate. */
+ *  always successfully. Four of seven call sites (handlers.ts:154,167,186,206 — erase/adopt/recheck
+ *  -success/confirm-success) run it after a SUCCEEDED operation; handlers.ts:189/:201 (recheck-reject/
+ *  confirm-reject) run it INSIDE a catch, after the primary operation already FAILED, immediately
+ *  before re-throwing that real error; handlers.ts:348 (dual-verify) follows an operation that commits
+ *  nothing to disk at all — audit.jsonl IS the durable record there. Fix round 1 (review Important 3):
+ *  an earlier version of this comment claimed every caller's primary operation had "already durably
+ *  committed", which is false for the reject paths and the dual-verify path. Fix round 2: that same
+ *  earlier version also undercounted the success sites (three, not four — :206 was missing). The
+ *  exemption is correct regardless of the count — it is *more* clearly correct once stated right: at
+ *  the reject sites, letting a directory-fsync failure escape would not just misreport a success as a
+ *  failure, it would REPLACE the real rejection error the caller is about to re-throw with an
+ *  unrelated fsync error, masking the actual diagnosis. Both outcomes are worse than the audit row
+ *  silently missing — a gap this docstring already accepts. The row's own bytes stay unconditional:
+ *  writeAll + fsyncSync(fd) above are untouched and still propagate. */
 export function appendAudit(path: string, event: AuditEvent): void {
   mkdirSync(dirname(path), { recursive: true });
   const isNew = !existsSync(path);

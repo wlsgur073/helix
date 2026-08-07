@@ -280,8 +280,9 @@ same one-time path as before; nothing about the key's secrecy changes, only when
   every write path (append, compaction's post-rename fsync, master-key mint, witness advance, orphan
   -tmp sweep) at once — a deliberate trade against silently lying about durability. The audit trail
   (`audit.jsonl`) is the one exception: it is documented best-effort/non-transactional already (see
-  its own docstring), and its directory fsync on first creation stays unconditionally suppressed so a
-  disk hiccup on that side channel never reports an already-succeeded erase/confirm/adopt as failed.
+  its own docstring), and its directory fsync on first creation stays unconditionally suppressed, so a
+  disk hiccup on that side channel never reports an already-succeeded operation as failed — or, at a
+  rejection site, replaces the real rejection error with an unrelated one on its way out.
   The line's own bytes are unaffected either way.
 - **Rollout launch barrier (normative):** old bundles age-steal locks and do not sweep — while any
   old helix-mcp process runs, the new guarantees do not hold. Upgrade procedure: close every Claude
