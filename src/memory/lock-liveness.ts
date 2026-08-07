@@ -88,5 +88,5 @@ export function classifyHolder(recorded: LockPayload, self: LockPayload, probe: 
   }
   const st = probe.stateOf(recorded.pid);
   if (st === 'Z' || st === 'X') return 'dead';                                            // a zombie never resumes
-  return 'alive';
+  return recorded.startTicks === null ? 'alive-unknown' : 'alive';   // no recorded start-time (non-Linux): kill0 alone cannot separate the original holder from a recycled pid
 }

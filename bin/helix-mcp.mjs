@@ -13452,7 +13452,7 @@ function classifyHolder(recorded, self, probe) {
   }
   const st = probe.stateOf(recorded.pid);
   if (st === "Z" || st === "X") return "dead";
-  return "alive";
+  return recorded.startTicks === null ? "alive-unknown" : "alive";
 }
 
 // src/memory/lock.ts
