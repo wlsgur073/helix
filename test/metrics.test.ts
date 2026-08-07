@@ -10,7 +10,7 @@ const replay = (over: Partial<ReplayInput> = {}): ReplayInput => ({
   parseMs: 1.5, projectMs: 0.5, keyAvailable: true, ...over,
 });
 const compaction = (over: Partial<CompactionInput> = {}): CompactionInput => ({
-  scope: 'global', durationMs: 12.5, droppedRows: 40, reclaimedBytes: 4096, droppedForgedVerifies: 2, ok: true, ...over,
+  scope: 'global', durationMs: 12.5, droppedRows: 40, reclaimedBytes: 4096, droppedForgedVerifies: 2, ok: true, landed: true, ...over,
 });
 const lines = (path: string): Record<string, unknown>[] =>
   readFileSync(path, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
@@ -129,13 +129,18 @@ describe('emitCompaction', () => {
     const rec = JSON.parse(out[0]!) as Record<string, unknown>;
     // EXACT key set: toMatchObject is a subset matcher, so only this can catch a future
     // record that adds a content-bearing field (path/query/error) -- HARD RULE, spec section 3.
+    // `landed` (LEAD-METRIC-MISREPORT fix) is content-free by the same standard as `ok`: a boolean,
+    // never a path/id/content fragment — it says whether the physical rewrite landed on disk for this
+    // attempt, so a failure AFTER the rename (dir fsync / witness completion) is distinguishable from
+    // one that never touched the file, and `dropped_rows`/`reclaimed_bytes` can be trusted accordingly.
     expect(Object.keys(rec).sort()).toEqual([
-      'dropped_forged_verifies', 'dropped_rows', 'duration_ms', 'kind', 'ok', 'op_id',
+      'dropped_forged_verifies', 'dropped_rows', 'duration_ms', 'kind', 'landed', 'ok', 'op_id',
       'reclaimed_bytes', 'scope', 'ts', 'v',
     ]);
     expect(rec).toMatchObject({
       v: 1, kind: 'compaction', ts: '2026-07-09T00:00:00.000Z', op_id: null, scope: 'global',
       duration_ms: 12.5, dropped_rows: 40, reclaimed_bytes: 4096, dropped_forged_verifies: 2, ok: true,
+      landed: true,
     });
   });
 

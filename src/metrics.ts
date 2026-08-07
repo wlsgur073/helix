@@ -32,6 +32,13 @@ export interface CompactionInput {
    *  failed/no-op compaction or when no HMAC subkey was available). */
   droppedForgedVerifies: number;
   ok: boolean;
+  /** Whether the atomic rewrite physically landed on disk for this attempt — true on a clean success
+   *  AND on a failure that struck AFTER the rename (dir fsync / witness-transition completion), false
+   *  only when nothing landed (a pre-rename failure, or no compaction was attempted). Disambiguates
+   *  `droppedRows`/`reclaimedBytes` on an `ok:false` row: `landed:false` means they are honestly zero
+   *  (nothing happened); `landed:true` means they are the REAL on-disk deltas from a rewrite that did
+   *  happen despite the later failure. A count/boolean pair, never a path, id, or content fragment. */
+  landed: boolean;
 }
 
 export interface MetricsSink {
@@ -90,7 +97,7 @@ export function createMetricsSink(path: string, enabled: boolean, deps: MetricsS
         const line = JSON.stringify({
           v: 1, kind: 'compaction', ts: now(), op_id: currentOpId, scope: c.scope,
           duration_ms: c.durationMs, dropped_rows: c.droppedRows, reclaimed_bytes: c.reclaimedBytes,
-          dropped_forged_verifies: c.droppedForgedVerifies, ok: c.ok,
+          dropped_forged_verifies: c.droppedForgedVerifies, ok: c.ok, landed: c.landed,
         }) + '\n';
         if (buffer) buffer.push(line); else safeAppend(line);
       } catch { /* never throw into a compaction path */ }

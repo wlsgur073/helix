@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, existsSync, readdirSync, appendFileSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, appendFileSync, mkdirSync, writeFileSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { appendRecord, parseLedger, compactLedger, isHorizonMarker } from '../../src/memory/ledger.js';
+import { appendRecord, parseLedger, compactLedger, isHorizonMarker, landedCompactionStats } from '../../src/memory/ledger.js';
 import { buildHistory } from '../../src/memory/history.js';
 import { buildProjection } from '../../src/memory/projection.js';
 import { MemoryStore } from '../../src/memory/store.js';
 import { digestContent } from '../../src/memory/ledger-mac.js';
+import { realFsOps, type DurableFsOps } from '../../src/memory/fs-ops.js';
+import { witnessPath } from '../../src/memory/witness-store.js';
 import type { MemoryRecord } from '../../src/types.js';
 
 function rec(p: Partial<MemoryRecord> & { id: string }): MemoryRecord {
@@ -107,6 +109,110 @@ describe('compactLedger', () => {
     expect(bytesAfter).toBeGreaterThan(bytesBefore);              // the file really did grow
     expect(stats.reclaimedBytes).toBe(bytesBefore - bytesAfter);  // reported as-is...
     expect(stats.reclaimedBytes).toBeLessThan(0);                 // ...i.e. negative, not clamped to 0
+  });
+});
+
+// LEAD-METRIC-MISREPORT: compactLedger only ever returned CompactionStats on its success path — every
+// throw, including one that hits AFTER the atomic rename has already landed the rewrite, left a caller
+// with nothing but the error. store.ts's maybeAutoCompact swallows that throw and mapped it to
+// {droppedRows: 0, reclaimedBytes: 0, ok: false} unconditionally, misreporting "nothing happened" for a
+// rewrite that DID land and DID drop rows. These lock landedCompactionStats: real counts when the
+// rename already succeeded, nothing attached when it did not.
+describe('compactLedger — a failure AFTER the rename lands still reports the REAL deltas', () => {
+  it('a dir-fsync failure after the rename attaches the REAL dropped-row/byte counts to the thrown error', () => {
+    const p = tmpLedger();
+    // Same fixture as "returns the row and byte deltas it actually wrote" above, so a genuinely
+    // positive drop is guaranteed regardless of fixpoint-marker bookkeeping.
+    appendRecord(p, rec({ id: 'm_1', content: 'old fact with some length to it' }));
+    appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
+    appendRecord(p, rec({ id: 'm_3', content: 'another fact that will be superseded' }));
+    appendRecord(p, rec({ id: 'm_4', type: 'supersede', supersedes: 'm_3', content: 'newer' }));
+    const rowsBefore = parseLedger(p).length;
+    const bytesBefore = statSync(p).size;
+
+    // Same DurableFsOps seam test/memory/witness-rewrite.test.ts:189 uses: fsyncDir throws AFTER a
+    // successful rename, so the new bytes are already on disk when this fires.
+    const faultyFs: DurableFsOps = { ...realFsOps, fsyncDir: () => { throw new Error('injected dir fsync failure (post-rename)'); } };
+
+    let caught: unknown = null;
+    try {
+      compactLedger(p, { erasedIds: new Set(), fsOps: faultyFs });
+    } catch (e) { caught = e; }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toMatch(/injected dir fsync failure/); // original failure preserved verbatim
+
+    // The rewrite really DID land: the ledger genuinely shrank on disk.
+    const rowsAfter = parseLedger(p).length;
+    const bytesAfter = statSync(p).size;
+    expect(rowsAfter).toBeLessThan(rowsBefore);
+
+    const stats = landedCompactionStats(caught);
+    expect(stats).toBeDefined();
+    expect(stats!.droppedRows).toBe(rowsBefore - rowsAfter);      // REAL count, never 0
+    expect(stats!.droppedRows).toBeGreaterThan(0);
+    expect(stats!.reclaimedBytes).toBe(bytesBefore - bytesAfter); // REAL bytes, never 0
+    expect(stats!.reclaimedBytes).toBeGreaterThan(0);
+  });
+
+  // Discrimination check: the mechanism must NOT attach stats to a failure that never landed — a
+  // pre-rename throw is a genuine no-op, and reporting nonzero drops for it would be its own
+  // misreport, in the opposite direction.
+  it('a PRE-rename failure attaches nothing — landedCompactionStats is undefined when nothing landed', () => {
+    const p = tmpLedger();
+    appendRecord(p, rec({ id: 'm_1', content: 'old fact with some length to it' }));
+    appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
+    const before = statSync(p).size;
+
+    const faultyFs: DurableFsOps = { ...realFsOps, renameSync: () => { throw new Error('injected rename failure (pre-landing)'); } };
+    let caught: unknown = null;
+    try {
+      compactLedger(p, { erasedIds: new Set(), fsOps: faultyFs });
+    } catch (e) { caught = e; }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect(landedCompactionStats(caught)).toBeUndefined(); // nothing landed -> nothing attached
+    expect(statSync(p).size).toBe(before);                  // and the ledger really is untouched
+  });
+
+  // The other post-rename throw site (spec §4.9): completeTransition runs AFTER the rename too. Models
+  // the exact fault docs/issues/repros/lead-rename-then-witness-throw-metric.ts uses (delete
+  // witness.json between rename and completeTransition), so both post-rename failure sites are proven,
+  // not just fsyncDir.
+  it('a witness-completion failure after the rename also attaches the REAL counts (the other post-rename throw site)', () => {
+    const { store, ledger, home } = tmpStore();
+    store.commit({ content: 'alpha fact', source: 'user' });
+    store.commit({ content: 'bravo fact', source: 'user' });
+    const c = store.commit({ content: 'charlie fact', source: 'user' });
+    const d = store.commit({ content: 'delta fact', source: 'user' });
+    const rowsBefore = parseLedger(ledger).length;
+    const bytesBefore = statSync(ledger).size;
+
+    const wpath = witnessPath(home);
+    const sabotageFs: DurableFsOps = {
+      ...realFsOps,
+      renameSync: (from: string, to: string) => { realFsOps.renameSync(from, to); unlinkSync(wpath); },
+    };
+
+    let caught: unknown = null;
+    try {
+      compactLedger(ledger, {
+        erasedIds: new Set([c.id, d.id]), // 2 dropped so the net survives the fence row's own drop-cost
+        witness: { home, scopeKey: '@global', now: () => '2026-06-09T00:00:00.000Z', kind: 'erase' },
+        fsOps: sabotageFs,
+      });
+    } catch (e) { caught = e; }
+
+    expect(caught).toBeInstanceOf(Error);
+    const rowsAfter = parseLedger(ledger).length;
+    const bytesAfter = statSync(ledger).size;
+    expect(rowsAfter).toBeLessThan(rowsBefore); // the rewrite DID land
+
+    const stats = landedCompactionStats(caught);
+    expect(stats).toBeDefined();
+    expect(stats!.droppedRows).toBe(rowsBefore - rowsAfter);
+    expect(stats!.droppedRows).toBeGreaterThan(0);
+    expect(stats!.reclaimedBytes).toBe(bytesBefore - bytesAfter);
   });
 });
 

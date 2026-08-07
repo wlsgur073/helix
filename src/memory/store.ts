@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, type CompactionStats, type LedgerPath } from './ledger.js';
+import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, type CompactionStats, type LedgerPath } from './ledger.js';
 import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
 import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, WitnessBlockedError } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
@@ -490,7 +490,8 @@ export class MemoryStore {
       // Eligible: guard on ATTEMPT (before the call), fire, emit a metric, swallow errors.
       this.compactedThisSession = true;
       const started = performance.now();
-      let stats: CompactionStats | null = null;   // null <=> the compaction threw <=> nothing happened
+      let stats: CompactionStats | null = null;        // null <=> the compaction threw <=> did not complete cleanly
+      let landedStats: CompactionStats | null = null;   // set only when a THROWN compaction's rewrite had already landed (post-rename failure) — see ledger.ts's landedCompactionStats
       try {
         stats = compactLedger(r.ledger, {
           erasedIds: new Set(), keepValidVerify, provesKey,
@@ -498,17 +499,25 @@ export class MemoryStore {
           // advances the witness (plants a fence) — otherwise the next witnessed read would false-alarm.
           witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), r.root), now: () => this.now(), kind: 'compaction' },
         });
-      } catch { /* swallowed: compaction must never break a recall */ }
+      } catch (e) {
+        // swallowed: compaction must never break a recall. But a throw AFTER the rename landed still
+        // dropped real rows on disk — recover them so the metric never claims "nothing happened" for a
+        // rewrite that, in fact, already did.
+        landedStats = landedCompactionStats(e) ?? null;
+      }
       const durationMs = performance.now() - started;   // capture BEFORE any metrics I/O
-      // Drop the entry this recall just installed. On SUCCESS the ledger bytes changed, so the
-      // content-identity key would miss anyway (belt and braces). On FAILURE the bytes did NOT change,
-      // and clearing is what forces the next recall to MISS and re-enter this method — where the
-      // once-per-session guard, not a cache hit, then suppresses the retry. Defensive on both paths.
+      // Drop the entry this recall just installed. On a clean SUCCESS the ledger bytes changed, so the
+      // content-identity key would miss anyway (belt and braces). On a FAILURE the bytes usually did NOT
+      // change (a pre-rename throw is a pure no-op) — but a post-rename throw (landedStats set) DID
+      // change them. Either way clearing here is correct: it forces the next recall to MISS and
+      // re-enter this method, where the once-per-session guard, not a cache hit, then suppresses the
+      // retry. Defensive on every path.
       this.rankCache = null;
+      const real = stats ?? landedStats;   // whichever is non-null carries the REAL on-disk deltas
       this.opts.metricsSink?.emitCompaction({
         scope: r.root ? 'project' : 'global', durationMs,
-        droppedRows: stats?.droppedRows ?? 0, reclaimedBytes: stats?.reclaimedBytes ?? 0,
-        droppedForgedVerifies: stats?.droppedForgedVerifies ?? 0, ok: stats !== null,
+        droppedRows: real?.droppedRows ?? 0, reclaimedBytes: real?.reclaimedBytes ?? 0,
+        droppedForgedVerifies: real?.droppedForgedVerifies ?? 0, ok: stats !== null, landed: real !== null,
       });
     }
   }

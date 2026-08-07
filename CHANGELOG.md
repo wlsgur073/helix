@@ -41,7 +41,10 @@ All notable changes to Helix are documented here. This project follows
   and renames — and the writer retracts its own journal, so nothing was dropped. A throw **after** it
   (the directory fsync, or completing the witness transition) is a failure over a ledger that has
   already been replaced: the live projection survives by construction, but the soft-erase undo window
-  does not, and the scope recovers through `transition-heal` on the next read.
+  does not, and the scope recovers through `transition-heal` on the next read. The metric row tells the
+  two apart: `landed` is `false` for a before-the-rename throw (`dropped_rows`/`reclaimed_bytes` are
+  honestly `0`, nothing happened) and `true` for an after-the-rename throw, where `dropped_rows`/
+  `reclaimed_bytes` report the REAL counts the rewrite actually wrote, not a zeroed default.
 
   **The consequence you are opting into.** Compaction drops *every* dead record, however recently it
   died — it has no per-record age filter. So once a ledger goes quiescent past the grace window
@@ -79,9 +82,12 @@ All notable changes to Helix are documented here. This project follows
   carries `dropped_forged_verifies`: a content-free count of forged `verify` rows this compaction
   destroyed under HMAC-aware compaction (`0` when compaction ran without a resolvable subkey, or
   genuinely dropped none) — the forensic counterpart to the integrity marker's mere presence, which is
-  itself forgeable (see below). With `metrics.enabled: false` the sink is a no-op, so **neither a
-  successful nor a failed compaction leaves any trace**: turning compaction on while metrics are off
-  means a destructive operation runs with zero visibility.
+  itself forgeable (see below); and `landed`, a boolean recording whether the rewrite physically reached
+  disk for this attempt (see the rename-split note above) — the field that lets `dropped_rows`/
+  `reclaimed_bytes` be trusted on an `ok: false` row instead of read as an unconditional zero. With
+  `metrics.enabled: false` the sink is a no-op, so **neither a successful nor a failed compaction leaves
+  any trace**: turning compaction on while metrics are off means a destructive operation runs with zero
+  visibility.
 
   Named v1 limitations (spec §7). It does **not** bound total ledger size: preserved audit data (erase
   tombstones, genuine signed verifies on live targets) is never reclaimed. A continuously churny ledger

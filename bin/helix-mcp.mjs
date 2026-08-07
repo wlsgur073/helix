@@ -14448,6 +14448,11 @@ function fileSize(path) {
     return 0;
   }
 }
+var LANDED_STATS = /* @__PURE__ */ Symbol("compactLedger.landedStats");
+function landedCompactionStats(e) {
+  if (e === null || typeof e !== "object") return void 0;
+  return e[LANDED_STATS];
+}
 function compactLedger(rawPath, opts) {
   const fsOps = opts.fsOps ?? realFsOps;
   return withFileLock(rawPath, (ctx) => {
@@ -14461,6 +14466,7 @@ function compactLedger(rawPath, opts) {
     let fenceTx = null;
     let preRewriteHash = null;
     let retractNonce = null;
+    let landedStats = null;
     try {
       if (!ctx.stillOwned()) throw new Error("compactLedger: lock lost after tmp creation");
       const mode = modeOf(path) ?? 384;
@@ -14504,6 +14510,7 @@ function compactLedger(rawPath, opts) {
       assertSingleLink(path);
       if (!ctx.stillOwned()) throw new Error("compactLedger: lock lost before rename");
       fsOps.renameSync(tmp, path);
+      landedStats = { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
       fsOps.fsyncDir(dirname6(path));
       if (w && fenceTx !== null) {
         completeTransition(w.home, w.scopeKey, readLedgerBytes(path), fenceTx);
@@ -14526,6 +14533,7 @@ function compactLedger(rawPath, opts) {
         } catch {
         }
       }
+      if (landedStats !== null && e !== null && typeof e === "object") e[LANDED_STATS] = landedStats;
       throw e;
     }
   });
@@ -15595,6 +15603,7 @@ var MemoryStore = class {
       this.compactedThisSession = true;
       const started = performance.now();
       let stats = null;
+      let landedStats = null;
       try {
         stats = compactLedger(r.ledger, {
           erasedIds: /* @__PURE__ */ new Set(),
@@ -15604,17 +15613,20 @@ var MemoryStore = class {
           // advances the witness (plants a fence) — otherwise the next witnessed read would false-alarm.
           witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), r.root), now: () => this.now(), kind: "compaction" }
         });
-      } catch {
+      } catch (e) {
+        landedStats = landedCompactionStats(e) ?? null;
       }
       const durationMs = performance.now() - started;
       this.rankCache = null;
+      const real = stats ?? landedStats;
       this.opts.metricsSink?.emitCompaction({
         scope: r.root ? "project" : "global",
         durationMs,
-        droppedRows: stats?.droppedRows ?? 0,
-        reclaimedBytes: stats?.reclaimedBytes ?? 0,
-        droppedForgedVerifies: stats?.droppedForgedVerifies ?? 0,
-        ok: stats !== null
+        droppedRows: real?.droppedRows ?? 0,
+        reclaimedBytes: real?.reclaimedBytes ?? 0,
+        droppedForgedVerifies: real?.droppedForgedVerifies ?? 0,
+        ok: stats !== null,
+        landed: real !== null
       });
     }
   }
@@ -25516,7 +25528,8 @@ function createMetricsSink(path, enabled, deps = {}) {
           dropped_rows: c.droppedRows,
           reclaimed_bytes: c.reclaimedBytes,
           dropped_forged_verifies: c.droppedForgedVerifies,
-          ok: c.ok
+          ok: c.ok,
+          landed: c.landed
         }) + "\n";
         if (buffer) buffer.push(line);
         else safeAppend(line);

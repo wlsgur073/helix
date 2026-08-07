@@ -1148,7 +1148,8 @@ function createMetricsSink(path, enabled, deps = {}) {
           dropped_rows: c.droppedRows,
           reclaimed_bytes: c.reclaimedBytes,
           dropped_forged_verifies: c.droppedForgedVerifies,
-          ok: c.ok
+          ok: c.ok,
+          landed: c.landed
         }) + "\n";
         if (buffer) buffer.push(line);
         else safeAppend(line);

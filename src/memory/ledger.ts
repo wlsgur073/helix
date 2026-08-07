@@ -461,6 +461,25 @@ function fileSize(path: LedgerPath): number {
   try { return statSync(path).size; } catch { return 0; }
 }
 
+/** Private channel for handing REAL stats out of a thrown compactLedger error when the failure hit
+ *  AFTER the rewrite had already landed (see the catch in compactLedger below) — a `unique symbol` key
+ *  so it can never collide with a real error property, and it is inherently invisible to
+ *  JSON.stringify/Object.keys (never serialized, never logged verbatim). Content-free: the value is a
+ *  CompactionStats, the exact same shape a clean return already carries — no path/id/content is added. */
+const LANDED_STATS: unique symbol = Symbol('compactLedger.landedStats');
+interface LandedStatsCarrier { [LANDED_STATS]?: CompactionStats }
+
+/** Read back the stats compactLedger attached to a rethrown error when its rewrite had already landed
+ *  on disk before the failure struck (dir fsync or witness-transition completion, both AFTER the
+ *  atomic rename) — undefined for every other throw: a pre-rename failure (nothing landed), or any
+ *  error this module never touched. A caller that swallows a compaction's throw (store.ts's
+ *  maybeAutoCompact) uses this to report the REAL droppedRows/reclaimedBytes instead of the "nothing
+ *  happened" zero a bare swallow would otherwise imply for a rewrite that, in fact, already happened. */
+export function landedCompactionStats(e: unknown): CompactionStats | undefined {
+  if (e === null || typeof e !== 'object') return undefined;
+  return (e as LandedStatsCarrier)[LANDED_STATS];
+}
+
 /**
  * Rewrite the ledger to the canonical current state. Crash-safe + self-fencing: writes
  * `<path>.c-<hex32>.tmp` (created BEFORE the read so a successor's sweep can fence a lost-lock
@@ -496,6 +515,7 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
     let fenceTx: string | null = null;
     let preRewriteHash: string | null = null; // ledger content at journal-open time — the catch's nothing-landed proof
     let retractNonce: string | null = null;   // set from the journal openTransition actually wrote, so a retraction key exists only for OUR landed journal
+    let landedStats: CompactionStats | null = null; // set the instant the rename succeeds (see below) — non-null there means every later throw in this try is a POST-rename failure, so the catch has real numbers to attach instead of reporting "nothing happened"
     try {
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost after tmp creation');
       // Preserve the destination's mode across the rename — a project ledger may be deliberately
@@ -561,6 +581,12 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       assertSingleLink(path);                                      // re-check immediately before the rename
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost before rename');
       fsOps.renameSync(tmp, path);                                 // atomic on the same filesystem
+      // From here on the rewrite has PHYSICALLY LANDED — the ledger already holds the new bytes, so
+      // any later throw in this try (the dir fsync right below, or completeTransition further down)
+      // must not be reported by a swallowing caller as "nothing happened". Snapshot the real deltas
+      // NOW, with the exact same inputs (records/rows/beforeBytes/droppedForgedVerifies) the success
+      // return below would use, so the catch has them ready regardless of which post-rename step fails.
+      landedStats = { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
       fsOps.fsyncDir(dirname(path));                               // rename gives visibility, not durability
       if (w && fenceTx !== null) {
         // New bytes are durable; complete the transition (still under the ledger lock). re-read the
@@ -592,6 +618,12 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
           if (sha256Hex(readLedgerBytes(path)) === preRewriteHash) discardTransition(w.home, w.scopeKey, retractNonce);
         } catch { /* best-effort hygiene; a pending journal stays the honest state */ }
       }
+      // landedStats is non-null only when the rename above already succeeded before this failure hit —
+      // attach the real counts so a caller that swallows this throw (store.ts's maybeAutoCompact) can
+      // report what actually happened instead of the "nothing happened" zero a bare swallow implies.
+      // Every failure BEFORE the rename leaves landedStats null, so nothing is attached and every
+      // existing caller/test sees exactly today's error (same message, same type, same stack).
+      if (landedStats !== null && e !== null && typeof e === 'object') (e as LandedStatsCarrier)[LANDED_STATS] = landedStats;
       throw e;
     }
   });

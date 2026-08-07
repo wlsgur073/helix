@@ -141,7 +141,10 @@ off unless you turn it on:
   fsync or the transition completion — has already replaced the file: the live projection is preserved
   by construction, but soft-erased plaintext is gone and the undo window with it, and the scope
   self-heals on the next read rather than staying dark. Either way a failure surfaces as an
-  `"ok": false` metric row *if metrics are enabled* (see Observability below) — never as a retry.
+  `"ok": false` metric row *if metrics are enabled* (see Observability below) — never as a retry. That
+  row's `"landed"` field tells you which kind of failure it was: `false` for a before-the-rename throw
+  (`dropped_rows`/`reclaimed_bytes` are honestly `0`), `true` for an after-the-rename throw, where
+  `dropped_rows`/`reclaimed_bytes` report what the rewrite actually wrote, not a zeroed default.
 - `auto` (bool, default `false`) — the master switch.
 - `dirtyRatio` — `(0, 1]`, default `0.5`. Fire when reclaimable rows / total rows reaches this.
 - `minDirtyBytes` — integer ≥ 1, default `1048576` (1 MiB). Alternative trigger: fire when the exact
@@ -159,7 +162,9 @@ config typo).
 **Observability.** When metrics are enabled (`metrics.enabled`, the default), every attempt appends a
 content-free `compaction` record to `~/.helix/metrics.jsonl`, failed attempts included (`"ok": false`).
 Its `reclaimed_bytes` can legitimately be **negative** when a compaction drops little but adds a
-content-free audit tombstone, so the file net-grew. If you set `metrics.enabled: false`, the metrics sink
+content-free audit tombstone, so the file net-grew. Its `"landed"` boolean (see above) says whether the
+rewrite reached disk on this attempt, so `dropped_rows`/`reclaimed_bytes` can be trusted on a failed
+row instead of read as an unconditional zero. If you set `metrics.enabled: false`, the metrics sink
 is a no-op, so you lose the operational detail — how much a compaction reclaimed, and whether it failed.
 You do not lose the *fact* that the ledger was rewritten: every rewrite appends a content-free line to
 `~/.helix/witness-log.jsonl` (`{"v":1,"scope":…,"epoch":…,"kind":"compaction","tx":…}`) regardless of the
