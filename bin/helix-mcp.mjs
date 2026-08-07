@@ -24408,7 +24408,11 @@ function jaccard(a, b) {
   return union2 === 0 ? 1 : inter / union2;
 }
 var SENTENCE_SIM = 0.5;
-var NEGATION_MARKER_RE = /\bnot\b|n't\b|\bun-/gi;
+var UNPREFIXED_NEGATIONS = ["unsafe", "unavailable", "unreachable"];
+var NEGATION_MARKER_RE = new RegExp(
+  String.raw`\bnot\b|n't\b|\bno\b|\bnever\b|\bcannot\b|\bun-|\b(?:${UNPREFIXED_NEGATIONS.join("|")})\b`,
+  "gi"
+);
 function negationParity(s) {
   return (s.match(NEGATION_MARKER_RE) ?? []).length % 2;
 }

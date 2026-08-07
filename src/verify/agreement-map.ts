@@ -29,16 +29,39 @@ function jaccard(a: Set<string>, b: Set<string>): number {
  *  treated any rewording as divergence, so the verdict read 'diverge' for almost every real pair. */
 const SENTENCE_SIM = 0.5;
 
+/** Bare (non-hyphenated) un-prefixed negated adjectives worth matching as whole words. A blanket
+ *  \bun[a-z]+\b scan was considered and rejected: "under", "until", "union", "unique", "united"
+ *  are far more common in ordinary prose than genuine un-negated adjectives are, and each one that
+ *  appears on only one side of a pair would flip that pair's parity for free, trading a closed
+ *  false-'agree' hole for an open false-'diverge' one on ordinary vocabulary. A bounded list is
+ *  deliberately narrower — it will miss an un-negated word not on the list (e.g. "unnecessary",
+ *  "uncertain") rather than risk that blast radius. Extend this list, don't switch to a blanket
+ *  scan, when a new miss is found. */
+const UNPREFIXED_NEGATIONS = ['unsafe', 'unavailable', 'unreachable'] as const;
+
 /** Negation markers, scanned on the RAW sentence — never on tokenSet. tokenSet's
  *  /[\p{L}\p{N}]+/gu splits "doesn't" into "doesn" + "t", so a token-based scan would silently
- *  lose the single most common negation form in prose. Deliberately narrow, three markers: bare
- *  "not", the "n't" contraction suffix (isn't/doesn't/won't/...), and the hyphenated "un-" prefix
- *  (not a bare "un" scan, which would false-positive on "under"/"until"/"union"). */
-const NEGATION_MARKER_RE = /\bnot\b|n't\b|\bun-/gi;
+ *  lose the single most common negation form in prose. Covers: bare "not"; the "n't" contraction
+ *  suffix (isn't/doesn't/won't/...); "no"; "never"; "cannot" (its own alternative because "not"
+ *  isn't a separately-\b-bounded token inside "cannot" — the two letters "n" before it block the
+ *  boundary); the hyphenated "un-" prefix (e.g. "un-safe", not a bare "un" scan — see
+ *  UNPREFIXED_NEGATIONS for why); and UNPREFIXED_NEGATIONS's bounded whole-word list.
+ *  Known false-positive source, by design left unguarded rather than chasing an ever-growing
+ *  exclusion list: "no" is a genuine negator in "no race" but an intensifier, not a negator, in
+ *  idioms like "no doubt" or "no wonder" — those would count a marker that isn't semantically
+ *  negating anything, which can only produce a false 'diverge' (the direction that reads as an
+ *  aligner failure the caller notices and re-reads both answers for), never a false 'agree' (the
+ *  direction that reads as false confidence and slips by unnoticed). */
+const NEGATION_MARKER_RE = new RegExp(
+  String.raw`\bnot\b|n't\b|\bno\b|\bnever\b|\bcannot\b|\bun-|\b(?:${UNPREFIXED_NEGATIONS.join('|')})\b`,
+  'gi',
+);
 
 /** Parity (even/odd count) of negation markers in a sentence's raw text. Parity, not presence:
  *  two markers cancel ("not un-safe" reads as affirmative), so a claim with a double negation can
- *  still pair with an unnegated claim asserting the same thing. */
+ *  still pair with an unnegated claim asserting the same thing. Widening the marker set changes
+ *  this arithmetic too — a sentence using both "cannot" and "not" now counts 2, not 1 — so any
+ *  future marker addition must re-run the even-parity guard test, not just its own new case. */
 function negationParity(s: string): number {
   return (s.match(NEGATION_MARKER_RE) ?? []).length % 2;
 }
@@ -52,9 +75,23 @@ function negationParity(s: string): number {
  * vs "is not safe") is a divergence, not an agreement, even though the words otherwise overlap
  * heavily. Original casing is preserved in the lists so the user sees exactly what each side said.
  * v1 used a richer claim extractor's place-holder (verbatim-sentence overlap); this is still a
- * heuristic, and a coarse one: it will false-'diverge' on rhetorical or discourse negation that
- * doesn't invert the claim ("Isn't this obviously safe?"), because the marker count can't tell
- * genuine polarity flips from rhetorical ones.
+ * heuristic, and a coarse one, wrong in BOTH directions — both are load-bearing for the caller to
+ * know about, not just the quieter one:
+ *   - False 'diverge' (over-flagging): rhetorical or discourse negation that doesn't invert the
+ *     claim ("Isn't this obviously safe?", idiomatic "no doubt"/"no wonder") still counts as a
+ *     marker, because marker-counting can't tell a genuine polarity flip from a rhetorical one.
+ *     This direction is comparatively safe — it reads as an aligner failure, and the guidance line
+ *     below tells the caller to go read both answers themselves.
+ *   - False 'agree' (under-flagging, THE MORE DANGEROUS DIRECTION): this is what N-VERDICT was —
+ *     a real contradiction that the marker scan doesn't catch reads as silent agreement, which is
+ *     the one failure mode that produces false confidence instead of visible doubt. Two open
+ *     holes, deliberately not chased further here: (1) NEGATION_MARKER_RE is a bounded list of
+ *     English negators, not a parser — an unlisted negator (e.g. "hardly", "rarely", "seldom")
+ *     still reads as unnegated; (2) TRUE ANTONYM PAIRS with unrelated word roots and no negation
+ *     morphology at all — "safe" vs "dangerous", "safe" vs "risky" — are categorically outside
+ *     what a marker scan can ever catch, negated or not; there is no marker to find. A
+ *     contradiction phrased purely as antonyms renders 'agree' today and will keep doing so under
+ *     this design; see the "true antonym pair" test for a pinned example.
  * No lexical candidates ANYWHERE (jaccard is symmetric, so zero one way implies zero the other)
  * yields 'indeterminate': no comparability was established and no semantic relationship is
  * asserted (empty inputs included; they must not read as vacuous agreement). This is distinct from
