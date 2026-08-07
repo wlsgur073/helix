@@ -155,6 +155,28 @@ describe('trust store location vs HELIX_LEDGER', () => {
     expect(stderr).toContain(home);
   }, 30_000);
 
+  it('(C) refuses with its remedies, rather than crashing, when HELIX_HOME\'s own master key is corrupt', async () => {
+    // Deliberately routed through the SPAWNED SERVER and asserted on its observable contract (exit
+    // 78 + the two documented remedies), naming no decider function on purpose. This exact defect --
+    // a wrong-sized HOME key throwing LedgerMacError instead of deciding -- was closed once in round
+    // 1 and silently REOPENED in round 2, because the test guarding it pinned compareStrayMasterKey,
+    // which was retained but stopped being the gate. A test that names the decider dies quietly when
+    // the decider moves; this one has to keep passing through whatever decides next, or break loudly.
+    const { home, ledgerDir, ledger } = splitLayout();
+    writeFileSync(join(home, 'ledger-mac-master.key'), 'x', { mode: 0o600 });          // 1 byte, want 32
+    writeFileSync(join(ledgerDir, 'ledger-mac-master.key'), randomBytes(32), { mode: 0o600 });
+    writeFileSync(ledger, '');
+
+    const { code, stderr } = await startAndWait(home, ledger, home);
+    expect(stderr, 'an unreadable HOME trust store must not surface as a stack trace').not.toContain('LedgerMacError');
+    expect(code, 'refusal is EX_CONFIG(78), not an uncaught-exception exit').toBe(78);
+    expect(stderr).toContain('REFUSING TO START');
+    expect(stderr, 'the operator must be told the key itself is the problem').toMatch(/corrupt master key|could not be read/i);
+    expect(stderr, 'the remedies are the whole point of exiting 78 instead of crashing').toContain('helix-rebaseline.mjs');
+    expect(stderr).toContain(ledgerDir);
+    expect(stderr).toContain(home);
+  }, 30_000);
+
   const shapeValidPlant: Record<string, () => string | Buffer> = {
     'witness.json': () => JSON.stringify({ v: 1, scopes: {} }),
     'projects.json': () => JSON.stringify({ '/some/project': { stamp: 'x', adoptedAt: '2026-01-01T00:00:00.000Z', macNonce: 'n' } }),

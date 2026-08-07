@@ -16137,6 +16137,19 @@ function readOnlyGlobalSubkey(home2) {
   return subkeyForScope(home2);
 }
 function assessGradeLoss(home2, ledger) {
+  try {
+    return measureGradeLoss(home2, ledger);
+  } catch (e) {
+    return {
+      loses: true,
+      unverifiableRecordIds: [],
+      witnessMismatch: false,
+      clampedRecordIds: [],
+      undecidable: e instanceof Error ? e.message : String(e)
+    };
+  }
+}
+function measureGradeLoss(home2, ledger) {
   const { records, verdict } = readLedgerWitnessed(ledger, home2);
   const subkey = readOnlyGlobalSubkey(home2);
   const scan = scanLegacyElevated(records, (r) => subkey ? verifyVerify(r, subkey) : false);
@@ -16145,7 +16158,8 @@ function assessGradeLoss(home2, ledger) {
     loses: scan.offenders.length > 0 || clampedRecordIds.length > 0,
     unverifiableRecordIds: scan.offenders,
     witnessMismatch: verdict.kind === "mismatch",
-    clampedRecordIds
+    clampedRecordIds,
+    undecidable: null
   };
 }
 
@@ -25700,6 +25714,14 @@ ledger directory - this note will keep appearing until they are gone.
     );
   } else {
     const causes = [];
+    if (loss.undecidable !== null) {
+      causes.push(
+        `  - HELIX_HOME's own trust state could not be read (${loss.undecidable}), so whether starting
+    is lossless could not be established at all. Starting anyway would mint a replacement key
+    and re-grade this ledger under it - the exact silent trust reset this check prevents.
+`
+      );
+    }
     if (loss.unverifiableRecordIds.length > 0) {
       causes.push(
         `  - ${loss.unverifiableRecordIds.length} record(s) (${loss.unverifiableRecordIds.join(", ")}) do not verify
@@ -25718,8 +25740,9 @@ ledger directory - this note will keep appearing until they are gone.
     process.stderr.write(
       // ASCII only
       `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME,
-and starting would lose a trust grade this ledger currently carries:
-  found next to the ledger: ${stray.join(", ")}
+` + (loss.undecidable !== null ? `and whether starting would lose a trust grade this ledger carries could not be determined:
+` : `and starting would lose a trust grade this ledger currently carries:
+`) + `  found next to the ledger: ${stray.join(", ")}
   ledger directory        : ${ledgerDir}
   HELIX_HOME              : ${home}
 ${causes.join("")}Two ways out, both deliberate:

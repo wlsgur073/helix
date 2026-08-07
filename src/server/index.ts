@@ -94,6 +94,13 @@ if (stray.length > 0) {
     );
   } else {
     const causes: string[] = [];
+    if (loss.undecidable !== null) {
+      causes.push(
+        `  - HELIX_HOME's own trust state could not be read (${loss.undecidable}), so whether starting\n` +
+        `    is lossless could not be established at all. Starting anyway would mint a replacement key\n` +
+        `    and re-grade this ledger under it - the exact silent trust reset this check prevents.\n`,
+      );
+    }
     if (loss.unverifiableRecordIds.length > 0) {
       causes.push(
         `  - ${loss.unverifiableRecordIds.length} record(s) (${loss.unverifiableRecordIds.join(', ')}) do not verify\n` +
@@ -109,7 +116,9 @@ if (stray.length > 0) {
     }
     process.stderr.write(                                                             // ASCII only
       `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME,\n` +
-      `and starting would lose a trust grade this ledger currently carries:\n` +
+      (loss.undecidable !== null
+        ? `and whether starting would lose a trust grade this ledger carries could not be determined:\n`
+        : `and starting would lose a trust grade this ledger currently carries:\n`) +
       `  found next to the ledger: ${stray.join(', ')}\n` +
       `  ledger directory        : ${ledgerDir}\n` +
       `  HELIX_HOME              : ${home}\n` +

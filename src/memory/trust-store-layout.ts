@@ -208,7 +208,8 @@ function readOnlyGlobalSubkey(home: string): Buffer | null {
  *  `witness.json`), even though nothing whatsoever is at risk, because there is no stray key to
  *  compare against. That re-opens the startup denial of service this job exists to close. */
 export interface GradeLossAssessment {
-  /** True iff starting would lose at least one already-elevated grade, via EITHER path below. */
+  /** The refuse signal: starting is NOT PROVABLY LOSSLESS. True when a loss was actually measured
+   *  (either path below) AND when the measurement could not be completed at all (`undecidable`). */
   loses: boolean;
   /** Path (a): ids of `verify`-type records that do NOT validate under HOME's own subkey (or a
    *  baked non-Fresh assert/supersede — see scanLegacyElevated) — their elevation never reaches
@@ -220,6 +221,10 @@ export interface GradeLossAssessment {
    *  (store.ts's mismatch guard) — empty even under a witness mismatch if nothing live is elevated,
    *  which is what lets an empty or ungraded ledger start regardless of witness state. */
   clampedRecordIds: string[];
+  /** Why the measurement could not be made at all, or `null` when it completed. Non-null forces
+   *  `loses` true with every id list empty — the caller must report this as "cannot be determined",
+   *  NOT as a measured loss, or the refusal message names records it never actually examined. */
+  undecidable: string | null;
 }
 
 /**
@@ -241,6 +246,10 @@ export interface GradeLossAssessment {
  * A ledger with nothing elevated in play — empty, fresh, or every record still Fresh — takes
  * neither path regardless of key or witness state: this is what lets a bare stray file (nothing
  * behind it to lose) start instead of refusing, closing the DoS this measurement replaces.
+ *
+ * NEVER THROWS. A failure to measure is reported as `undecidable` with `loses` true, not raised —
+ * see the wrapper below for why that direction, and `undecidable`'s own doc for why the caller must
+ * not present it as a measured loss.
  *
  * MINTS NOTHING AND MOVES NO TRUST STATE, which is what makes it safe to call before the decision
  * it informs — but it is not literally side-effect-free, and must not be documented as if it were.
@@ -271,6 +280,34 @@ export interface GradeLossAssessment {
  * never on an ordinary healthy start.
  */
 export function assessGradeLoss(home: string, ledger: string): GradeLossAssessment {
+  try {
+    return measureGradeLoss(home, ledger);
+  } catch (e) {
+    // FAIL CLOSED. A throw here does not mean "no loss" — it means HOME's own trust state could not
+    // be read well enough to answer the question, and an unanswerable question is not a safe one.
+    // Concretely: `tryReadMaster` throws `LedgerMacError` on a master key that is present but not
+    // exactly MASTER_LEN bytes, on BOTH paths this function reads HOME through, so a truncated or
+    // overwritten key used to take the whole server down with a stack trace instead of reaching the
+    // refusal that carries the remedies. Refusing is also the only choice that preserves anything:
+    // starting on an unreadable key mints a fresh one and re-grades the ledger under it, which is
+    // precisely the silent trust reset this gate exists to prevent, and it would be UNRECOVERABLE
+    // once the stray files were then reported as "safe to delete".
+    //
+    // The caller must distinguish this from a measured loss (see `undecidable`): every id list is
+    // empty because nothing was examined, not because nothing was at risk.
+    return {
+      loses: true,
+      unverifiableRecordIds: [],
+      witnessMismatch: false,
+      clampedRecordIds: [],
+      undecidable: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+/** `assessGradeLoss`'s actual measurement — separated only so the fail-closed wrapper above cannot
+ *  accidentally swallow a throw from some LATER, unrelated statement added beside it. */
+function measureGradeLoss(home: string, ledger: string): GradeLossAssessment {
   const { records, verdict } = readLedgerWitnessed(ledger, home);
   const subkey = readOnlyGlobalSubkey(home);
   const scan = scanLegacyElevated(records, (r) => (subkey ? verifyVerify(r, subkey) : false));
@@ -284,5 +321,6 @@ export function assessGradeLoss(home: string, ledger: string): GradeLossAssessme
     unverifiableRecordIds: scan.offenders,
     witnessMismatch: verdict.kind === 'mismatch',
     clampedRecordIds,
+    undecidable: null,
   };
 }

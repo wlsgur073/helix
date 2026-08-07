@@ -123,11 +123,16 @@ describe('strayTrustFiles', () => {
   });
 });
 
-// F1B-DETECTOR-DOS, owner's reversal (2026-08-07): the startup refusal is gated on KEY COMPARISON,
-// not key PRESENCE. Presence-only let a genuine F1 scenario through with silent grade loss (see
-// server/index.ts's comment on this gate for the full repro) -- home having *a* key is not proof
-// that re-grading under it is safe; only a byte-identical stray key is.
-describe('compareStrayMasterKey', () => {
+// SCOPE WARNING -- read before adding to or relying on this block. compareStrayMasterKey was the
+// startup gate for exactly one round (round 1: refuse unless the stray key is byte-identical to
+// HOME's). Round 2 replaced it with assessGradeLoss and it has DECIDED NOTHING since; it is retained
+// as a sound, self-contained helper with no production caller. These cases therefore pin a helper's
+// contract, NOT the refusal's behaviour, and they cannot detect a regression in the gate -- one of
+// them (the wrong-sized-key case below) went on passing for a full round while the defect it was
+// written for was reopened in the code that had taken over deciding. Anything about what the server
+// actually does with a split trust store belongs in test/acceptance/trust-store-home.e2e.test.ts,
+// which asserts the spawned server's own observable contract and names no decider function.
+describe('compareStrayMasterKey (a retained helper — no longer the startup gate)', () => {
   it('returns match when the stray key is byte-identical to HOME\'s own', () => {
     const { home, elsewhere } = layout();
     const key = randomBytes(32);
@@ -158,10 +163,14 @@ describe('compareStrayMasterKey', () => {
     expect(compareStrayMasterKey(home, elsewhere)).toBe('no-home-key');
   });
 
-  it('returns no-home-key rather than throwing when HOME\'s key is wrong-sized (the Minor this closes)', () => {
-    // Before this fix, a wrong-sized HOME key read as "HOME has a key" via existsSync, downgraded
-    // the refusal to a NOTE, and then threw an uncaught LedgerMacError once the store actually
-    // tried to use it. tryReadMaster's strict size check must be caught, not left to propagate.
+  it('returns no-home-key rather than throwing when HOME\'s key is wrong-sized', () => {
+    // This case was written in round 1 to close a Minor about the SERVER crashing on a wrong-sized
+    // HOME key. It stopped covering that the moment assessGradeLoss took over deciding in round 2 --
+    // and the crash duly came back, through readLedgerWitnessed/subkeyForScope, while this test kept
+    // passing. It is kept only for what it can actually still prove: that this helper's own
+    // tryReadMaster calls are caught rather than propagated. The server-level guarantee is pinned
+    // where it belongs, by '(C) refuses with its remedies, rather than crashing' in
+    // test/acceptance/trust-store-home.e2e.test.ts.
     const { home, elsewhere } = layout();
     writeFileSync(join(home, 'ledger-mac-master.key'), 'x', { mode: 0o600 });
     writeFileSync(join(elsewhere, 'ledger-mac-master.key'), randomBytes(32), { mode: 0o600 });
@@ -178,7 +187,9 @@ describe('assessGradeLoss', () => {
   it('finds no loss for a missing ledger, even with no HOME key at all', () => {
     const { home, elsewhere } = layout();
     const result = assessGradeLoss(home, join(elsewhere, 'memory.jsonl'));
-    expect(result).toEqual({ loses: false, unverifiableRecordIds: [], witnessMismatch: false, clampedRecordIds: [] });
+    // `undecidable: null` is load-bearing here, not noise: it proves the measurement RAN and found
+    // nothing, rather than throwing and being fail-closed into a refusal by the wrapper.
+    expect(result).toEqual({ loses: false, unverifiableRecordIds: [], witnessMismatch: false, clampedRecordIds: [], undecidable: null });
   });
 
   it('finds no loss for a ledger whose records are all Fresh (nothing elevated)', () => {
