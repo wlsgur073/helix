@@ -113,6 +113,62 @@ describe('createMetricsSink', () => {
     expect(replays.map((r) => r.op_id).sort()).toEqual(['o_1', 'o_2']);
   });
 
+  it('overlapping (not nested) ops keep their own op_id', async () => {
+    // B starts first and resolves immediately; A starts second (nesting on top of B's still-open
+    // bracket) and stays in-flight on a deferred. This is NOT the nested case (test above): B, the
+    // FIRST-started op, is also the FIRST to settle while A is still running underneath it -- a
+    // stack-style save/restore mishandles exactly this ordering (B's finally unconditionally resets
+    // the shared context to ITS OWN prevOp, clobbering A's still-active op_id).
+    const path = join(tmp(), 'metrics.jsonl');
+    const captured: string[] = [];
+    const sink = createMetricsSink(path, true, {
+      append: (_p, l) => captured.push(l),
+      genId: (() => { let n = 0; return () => `o_${++n}`; })(),
+    });
+    let resolveDeferred!: () => void;
+    const deferred = new Promise<void>((r) => { resolveDeferred = r; });
+
+    const bPromise = sink.runOp('helix_memory_commit', () => {});
+    const aPromise = sink.runOp('helix_memory_recall', async () => {
+      await deferred;
+      sink.emitReplay(replay());
+    });
+
+    await bPromise; // the first-started op settles first
+    resolveDeferred();
+    await aPromise; // A, still in-flight when B finished underneath it, now emits its row
+
+    const rows = captured.map((l) => JSON.parse(l) as Record<string, unknown>);
+    const aOp = rows.find((r) => r.kind === 'op' && r['gen_ai.tool.name'] === 'helix_memory_recall')!;
+    const replayRow = rows.find((r) => r.kind === 'replay')!;
+    expect(replayRow.op_id).toBe(aOp.op_id); // must be A's own id -- not null, not B's id
+    // buffered-then-flushed, per emitReplay's contract: the replay must land AFTER A's own op record.
+    expect(rows.indexOf(replayRow)).toBeGreaterThan(rows.indexOf(aOp));
+  });
+
+  it('a detached continuation that outlives its op reports op_id: null instead of silently vanishing', async () => {
+    // AsyncLocalStorage keeps propagating its store into a setTimeout/setImmediate/un-awaited promise
+    // started inside an op, even after that op's own runOp has already settled and flushed. Without an
+    // explicit "closed" guard, such a late emit would push into an already-flushed buffer array that
+    // nothing ever reads again -- silent data loss, not just misattribution. This proves the guard: the
+    // late emit must surface (op_id: null), not disappear.
+    const path = join(tmp(), 'metrics.jsonl');
+    const captured: string[] = [];
+    const sink = createMetricsSink(path, true, { append: (_p, l) => captured.push(l), genId: () => 'o_x' });
+    let onFired!: () => void;
+    const fired = new Promise<void>((resolve) => { onFired = resolve; });
+
+    await sink.runOp('helix_memory_recall', () => {
+      setTimeout(() => { sink.emitReplay(replay()); onFired(); }, 0); // detached: not awaited/returned
+    });
+    await fired; // let the detached setTimeout actually run, after runOp has already settled
+
+    const rows = captured.map((l) => JSON.parse(l) as Record<string, unknown>);
+    const replayRow = rows.find((r) => r.kind === 'replay');
+    expect(replayRow).toBeDefined(); // must have landed at all -- not lost in an abandoned buffer
+    expect(replayRow!.op_id).toBeNull(); // the op that spawned it had already closed
+  });
+
   it('creates the file owner-only on POSIX (spec §9.14)', () => {
     if (platform() === 'win32') return; // mode bits not enforced on Windows
     const path = join(tmp(), 'metrics.jsonl');

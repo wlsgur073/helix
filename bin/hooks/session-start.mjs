@@ -1091,6 +1091,7 @@ function aliasesGlobalLedger(projectLedger, globalLedger) {
 import { appendFileSync, mkdirSync as mkdirSync5 } from "node:fs";
 import { dirname as dirname6 } from "node:path";
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 var noopMetricsSink = {
   emitReplay: () => {
   },
@@ -1106,22 +1107,26 @@ function createMetricsSink(path, enabled, deps = {}) {
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const genId = deps.genId ?? (() => `o_${randomUUID()}`);
-  let currentOpId = null;
-  let buffer = null;
+  const ctx = new AsyncLocalStorage();
   const safeAppend = (line) => {
     try {
       append(path, line);
     } catch {
     }
   };
+  const activeOp = () => {
+    const store = ctx.getStore();
+    return store && !store.closed ? store : null;
+  };
   return {
     emitReplay(r) {
       try {
+        const active = activeOp();
         const line = JSON.stringify({
           v: 1,
           kind: "replay",
           ts: now(),
-          op_id: currentOpId,
+          op_id: active ? active.opId : null,
           scope: r.scope,
           rows: r.rows,
           live_rows: r.liveRows,
@@ -1131,18 +1136,19 @@ function createMetricsSink(path, enabled, deps = {}) {
           key_available: r.keyAvailable,
           caller: r.caller
         }) + "\n";
-        if (buffer) buffer.push(line);
+        if (active) active.buffer.push(line);
         else safeAppend(line);
       } catch {
       }
     },
     emitCompaction(c) {
       try {
+        const active = activeOp();
         const line = JSON.stringify({
           v: 1,
           kind: "compaction",
           ts: now(),
-          op_id: currentOpId,
+          op_id: active ? active.opId : null,
           scope: c.scope,
           duration_ms: c.durationMs,
           dropped_rows: c.droppedRows,
@@ -1151,31 +1157,26 @@ function createMetricsSink(path, enabled, deps = {}) {
           ok: c.ok,
           landed: c.landed
         }) + "\n";
-        if (buffer) buffer.push(line);
+        if (active) active.buffer.push(line);
         else safeAppend(line);
       } catch {
       }
     },
     async runOp(tool, fn) {
-      const prevOp = currentOpId;
-      const prevBuf = buffer;
       const opId = genId();
-      const myBuf = [];
-      currentOpId = opId;
-      buffer = myBuf;
+      const store = { opId, buffer: [], closed: false };
       const started = performance.now();
       let ok = true;
       let errorType = null;
       try {
-        return await fn();
+        return await ctx.run(store, fn);
       } catch (e) {
         ok = false;
         errorType = e instanceof Error ? e.name : "NonError";
         throw e;
       } finally {
         const durationMs = performance.now() - started;
-        currentOpId = prevOp;
-        buffer = prevBuf;
+        store.closed = true;
         try {
           safeAppend(JSON.stringify({
             v: 1,
@@ -1188,7 +1189,7 @@ function createMetricsSink(path, enabled, deps = {}) {
             ok,
             "error.type": errorType
           }) + "\n");
-          for (const line of myBuf) safeAppend(line);
+          for (const line of store.buffer) safeAppend(line);
         } catch {
         }
       }
