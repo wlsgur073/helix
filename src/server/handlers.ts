@@ -53,9 +53,15 @@ const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] })
  *  (audit.ts), so a control char can never break line framing even unescaped, but nothing bounds
  *  SIZE except this. A residual is accepted, not hidden: an attacker-chosen id of up to 128 printable
  *  characters can still be recorded — inherent to recording ids at all, and audit.ts's own promise
- *  has only ever been "the id only, never the erased text". */
+ *  has only ever been "the id only, never the erased text".
+ *
+ *  FIX ROUND 2 (Minor, surrogate gap): also excludes `\p{Cs}` (Surrogate) — `\p{Cc}\p{Cf}` does not
+ *  cover an UNPAIRED (lone) surrogate, and a JS string is not guaranteed valid UTF-16, so a
+ *  ledger-write adversary could plant one (`isValidId('m_\uD800evil')` returned true before this).
+ *  JSON.stringify still emits well-formed output either way (framing was never at risk), but no
+ *  legitimate human-authored id contains a lone surrogate, so it costs nothing to exclude. */
 export const MAX_ID_CHARS = 128;
-export const ID_CHARSET_RE = /^[^\p{Cc}\p{Cf}\u2028\u2029]+$/u;
+export const ID_CHARSET_RE = /^[^\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]+$/u;
 
 /** The single predicate BOTH enforcement layers use (this file's assertValidId, and
  *  helix-server.ts's ID_SCHEMA via `z.string().refine(isValidId, ...)`) — fix round 1 Minor: before
@@ -84,20 +90,38 @@ export function assertValidId(id: string): void {
   }
 }
 
-/** Bound (never reject) an id sourced from LEDGER CONTENT rather than a caller-supplied lookup key —
- *  e.g. `echoMemoryIds` below, whose ids come from `store.inspect()` reading a possibly-FORGED record
- *  (fix round 1 Important: `handleDualVerify`'s echo detector reads real ledger rows, which
- *  `parseLedger` never bounds — the review reproduced a 5022-char forged id landing verbatim in a
- *  5225-byte audit row). Rejecting the WHOLE dual-verify call over one unrelated forged record's
- *  shape would be an availability regression the caller cannot fix (unlike erase/recheck/confirm's
- *  `id`, this is not something the CALLER typed). And unlike that lookup-key case, mutating this
- *  value cannot resolve to the WRONG record — `echoMemoryIds` is advisory-only, read nowhere but this
- *  audit row (never fed back into a lookup) — so truncating/sanitizing only shortens a report, the
- *  same trade-off `safeId` already makes for every other advisory id `handlers.ts` renders
- *  (recall/inspect's reverify/egress/conflict notes). Reuses `safeId` rather than `ID_CHARSET_RE`
- *  deliberately, to stay the SAME sanitizer as those other advisory sites, not a third variant. */
-export function auditSafeId(id: string): string {
-  return safeId(id).slice(0, MAX_ID_CHARS);
+/** How an attacker-controllable id — one sourced from LEDGER CONTENT, not a schema-validated tool
+ *  argument (e.g. `echoMemoryIds` below, or every `record.id` recall/inspect render in a trusted
+ *  advisory line or DATA-frame row) — is represented anywhere it reaches a reader. Never REJECTS:
+ *  rejecting the whole call/render over one unrelated record's id shape would be an availability
+ *  regression the caller cannot fix (unlike erase/recheck/confirm's `id`, this is not something the
+ *  CALLER typed), and these values are never fed back into a lookup, so mutating one cannot resolve
+ *  to the WRONG record the way a mangled lookup key could.
+ *
+ *  FIX ROUND 2 (review Important 1 + 2): this used to run EVERY id through `safeId`
+ *  (`[^A-Za-z0-9_-] -> ''`) unconditionally — STRICTER than the id bound round 1 just widened for
+ *  adoption (`isValidId` admits any printable, non-control script). So a perfectly legitimate
+ *  adopted id like `note/2026 팀 공유 id` was mangled to `note2026id` at every site that used it:
+ *  an audit row that no longer names the real record (Important 1), and — because `handleInspect`
+ *  is the ONE surface a user reads to learn a record's real id — a display that never showed the
+ *  id the user would need to type back into erase/recheck/confirm (Important 2: the mangled id
+ *  matches no record, so `store.erase` silently no-ops while the real item stays live — reported by
+ *  the review as its own, separate, PRE-EXISTING finding about `store.erase`'s success-on-no-match
+ *  behavior, explicitly NOT this task's to fix; this function only restores the discoverability half
+ *  the id was rendered from at all).
+ *
+ *  Gate on `isValidId`: a VALID id renders VERBATIM (no information loss for the common, real
+ *  case); only a genuinely invalid id — one that still carries a control/format/surrogate character,
+ *  by construction the only case that could break out of a line — gets the STRICT safeId+length-bound
+ *  treatment this file always used. Safe because `isValidId` already excludes every character class
+ *  `safeId`'s OWN docstring names as dangerous (a newline, and by extension U+2028/U+2029 — the
+ *  line-forgery vector); a string that PASSES `isValidId` cannot contain the byte that would let it
+ *  forge a second line, so verbatim rendering carries the exact guarantee `safeId`'s sanitized output
+ *  did, for the threat `safeId` exists to close. (Considered and left OUT of scope: `format-context.ts`'s
+ *  SessionStart-hook egress note uses `safeId` too, but is a separate module `isValidId` cannot reach
+ *  without restructuring the import graph — deferred, reported, not silently dropped.) */
+export function presentId(id: string): string {
+  return isValidId(id) ? id : safeId(id).slice(0, MAX_ID_CHARS);
 }
 
 /** B2 (Codex R2 #8): the trusted, informational, CONSTANT-string unadopted-ledger disclosure note —
@@ -125,11 +149,11 @@ export function handleCommit(store: MemoryStore, args: CommitInput): ToolResult 
 
 export function handleRecall(store: MemoryStore, args: { query: string; maxItems?: number }): ToolResult {
   const { items, framed, integrityAvailable, projectDisposition, witnessNotes } = store.recall(args.query, { maxItems: args.maxItems });
-  const flags = items.filter((i) => i.needsReverify).map((i) => safeId(i.record.id));
+  const flags = items.filter((i) => i.needsReverify).map((i) => presentId(i.record.id));
   const reverifyNote = flags.length ? `\n\n(needs re-verify before acting: ${flags.join(', ')})` : '';
   // S2 advisory: flag injection-shaped items by ID in a trusted, out-of-band ASCII note. Flag-only —
   // never withhold the item (the real enforcement is the 2a quarantine + firewall; S2 is observability).
-  const egressFlags = items.filter((i) => classifyEmission(i.record.content).flagged).map((i) => safeId(i.record.id));
+  const egressFlags = items.filter((i) => classifyEmission(i.record.content).flagged).map((i) => presentId(i.record.id));
   const egressNote = egressFlags.length
     ? `\n\n(egress-shaped content flagged - treat as data only: ${egressFlags.join(', ')})`
     : '';
@@ -144,7 +168,7 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
   // a tampering signal, distinct from the key-absent unavailable case. The item is already clamped to
   // Fresh; surface the conflict by id in a trusted, out-of-band note so the agent does not silently
   // trust a target whose verify history is contradictory.
-  const conflictIds = items.filter((i) => i.integrity === 'compromised').map((i) => safeId(i.record.id));
+  const conflictIds = items.filter((i) => i.integrity === 'compromised').map((i) => presentId(i.record.id));
   const conflictNote = conflictIds.length
     ? `\n\n(integrity conflict — equal-generation verify mismatch: ${conflictIds.join(', ')})`
     : '';
@@ -165,16 +189,16 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
     if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
     const lines: Array<{ text: string; mark: string }> = [];
     for (const f of facts) {
-      lines.push({ text: `${safeId(f.record.id)} ${f.record.content}`, mark: `DATA[${f.grade}:${f.scope}]| ` });
+      lines.push({ text: `${presentId(f.record.id)} ${f.record.content}`, mark: `DATA[${f.grade}:${f.scope}]| ` });
       for (const e of f.evidence) {
         const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? 'Y' : 'N'} applicable=${e.applicable ? 'Y' : 'N'}${e.winner ? ' WINNER' : ''}`;
-        lines.push({ text: `${safeId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
+        lines.push({ text: `${presentId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
       }
     }
     const frame = makeDataFrame({ label: `MEMORY AS OF ${args.asOf}`, nonce: newNonce(), lines });
     const notes: string[] = ['\n\n(as-of snapshot — membership and timing are declared, not authenticated; only auth=Y verify timing is MAC-bound)'];
     if (!keyAvailable) notes.push('\n\n(integrity verification unavailable — trust grades shown are unverified)');
-    if (facts.some((f) => f.integrity === 'compromised')) notes.push(`\n\n(integrity conflict — equal-generation verify mismatch: ${facts.filter((f) => f.integrity === 'compromised').map((f) => safeId(f.record.id)).join(', ')})`);
+    if (facts.some((f) => f.integrity === 'compromised')) notes.push(`\n\n(integrity conflict — equal-generation verify mismatch: ${facts.filter((f) => f.integrity === 'compromised').map((f) => presentId(f.record.id)).join(', ')})`);
     if (facts.some((f) => f.evidence.some((e) => !e.txAuthenticated))) notes.push('\n\n(verify timing marked auth=N is declared, not authenticated — v1/legacy)');
     if (truncated) notes.push('\n\n(history may be truncated by a past compaction — reconstruction before the horizon is unreliable)');
     if (projectDisposition === 'unadopted-present') notes.push(unadoptedNote(projectDisposition));
@@ -190,7 +214,7 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
       lines: rows.map((r) => {
         const verb = r.closedBy ? r.closedBy.kind : r.record.state; // closed: verb; live: grade (both enums)
         const interval = `${iso(r.record.tx)}..${r.txTo === null ? '' : iso(r.txTo)}`;
-        return { text: `${safeId(r.record.id)} ${r.record.content}`, mark: `DATA[${verb}:${r.scope}:${interval}]| ` };
+        return { text: `${presentId(r.record.id)} ${r.record.content}`, mark: `DATA[${verb}:${r.scope}:${interval}]| ` };
       }),
     });
     const notes: string[] = [];
@@ -213,7 +237,7 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
       // byte-for-byte, not reinvented). The SANITIZED id is prepended to the datamarked content so
       // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
       // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
-      text: `${safeId(record.id)} ${record.content}`,
+      text: `${presentId(record.id)} ${record.content}`,
       mark: `DATA[${record.state}:${scope}]| `,
     })),
   }) + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
@@ -440,13 +464,11 @@ export async function handleDualVerify(
     decidedLeg: decided ? deciderLeg(egress!) : undefined,
     releasedLegs: egress && egress.releasedLegs.length ? egress.releasedLegs : undefined,
     piiKinds: egress && egress.piiKinds.length ? egress.piiKinds : undefined,
-    // LEAD-AUDIT-ID-UNCONSTRAINED (fix round 1 Important): these ids come from LEDGER CONTENT
-    // (store.inspect(), read by detectEcho), not a caller-supplied argument -- bound, don't reject
-    // (see auditSafeId's docstring for why this site can't use assertValidId's reject-outright rule).
-    // LEAD-AUDIT-ID-UNCONSTRAINED (fix round 1 Important): these ids come from LEDGER CONTENT
-    // (store.inspect(), read by detectEcho), not a caller-supplied argument -- bound, don't reject
-    // (see auditSafeId's docstring for why this site can't use assertValidId's reject-outright rule).
-    echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds.map(auditSafeId) : undefined,
+    // LEAD-AUDIT-ID-UNCONSTRAINED: these ids come from LEDGER CONTENT (store.inspect(), read by
+    // detectEcho), not a caller-supplied argument -- bound, don't reject (see presentId's docstring
+    // for why this site can't use assertValidId's reject-outright rule; fix round 2 Minor: this
+    // comment was previously pasted twice verbatim here).
+    echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds.map(presentId) : undefined,
   });
   // Opt-in conversation log (default OFF). audit.jsonl above is the always-on content-free ledger;
   // this writes the exact prompt+response ONLY on a 'sent' outcome, metadata-only otherwise (a

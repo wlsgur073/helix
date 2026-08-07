@@ -225,6 +225,25 @@ describe('handleDualVerify egress audit', () => {
     expect(raw).not.toContain('injected marker text');
     expect(raw.length).toBeLessThan(1000); // NOT the ~5225-byte row the review reproduced pre-fix
   });
+
+  // FIX ROUND 2 (review Important 1): the round-1 fix always ran echoMemoryIds through safeId
+  // ([^A-Za-z0-9_-] -> ''), which is STRICTER than the id bound round-1 itself widened for adoption
+  // (isValidId admits any printable, non-control script). So a LEGITIMATE ledger id like
+  // `note/2026 팀 공유 id` was mangled to `note2026id` in the audit row — a forensic field that no
+  // longer names the real record, for a record that isn't even forged. Discriminating case: this id
+  // is chosen to be VALID under isValidId (passes the round-1 bound) but would still be mangled by
+  // safeId alone — that gap is exactly what round-2 must close.
+  it('records a VALID (non-forged) ledger id verbatim in echoMemoryIds, not safeId-mangled', async () => {
+    const echoText = 'the deploy uses the blue cluster in us-east-1';
+    const legitimateId = 'note/2026 팀 공유 id'; // valid under isValidId; safeId alone would mangle it
+    const d = deps({
+      echo: echoEnforce([{ id: legitimateId, content: echoText }]),
+      runner: async () => { throw new Error('must not spawn'); },
+    });
+    await handleDualVerify({ question: echoText, helixAnswer: 'ok' }, d);
+    const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
+    expect(audit.echoMemoryIds).toEqual([legitimateId]); // verbatim, not the safeId-mangled 'note2026id'
+  });
 });
 
 describe('handleDualVerify: error reason is content-free in the persisted sinks', () => {

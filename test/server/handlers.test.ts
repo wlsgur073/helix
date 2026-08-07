@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, appendFile
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
-import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleRecheck, handleConfirm } from '../../src/server/handlers.js';
+import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleRecheck, handleConfirm, isValidId } from '../../src/server/handlers.js';
 import { isOwned } from '../../src/memory/ownership.js';
 import { subkeyForScope } from '../../src/memory/verified-read.js';
 import { signVerify, digestContent } from '../../src/memory/ledger-mac.js';
@@ -309,6 +309,13 @@ describe('id bound (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
   // (Hangul) — none of which are Helix's own m_<uuid> shape — is adopted, then must remain reachable
   // by every id-taking tool. This is the discriminating case Step 4 originally missed (it only tested
   // a CONFORMING id); this one is deliberately chosen to violate the OLD ASCII-only charset.
+  //
+  // FIX ROUND 2 (Minor): this id previously read `'note/2026 team-shared id'` — pure ASCII — while
+  // the comment above claimed "non-ASCII (Hangul)". The claim was false (space/slash still
+  // discriminated against the round-1 ASCII-only regex, but not against non-Latin script at all).
+  // Now genuinely non-ASCII, so the comment is true of the code it describes.
+  const foreignId = 'note/2026 팀 공유 id'; // "note/2026 team-shared id" — space, slash, AND Hangul
+
   it('accepts a human-authored adopted-ledger id with spaces/slash/non-ASCII (round-1 legacy-ledger fix)', () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
     const proj = mkdtempSync(join(tmpdir(), 'helix-p-'));
@@ -316,7 +323,6 @@ describe('id bound (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
       home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => 'm_x',
       project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj },
     });
-    const foreignId = 'note/2026 team-shared id'; // space + slash; would have failed the round-1 charset
     mkdirSync(join(proj, '.helix'), { recursive: true });
     const record: MemoryRecord = {
       id: foreignId, tx: '2026-06-09T00:00:00.000Z', validFrom: '2026-06-09T00:00:00.000Z', validTo: null,
@@ -330,6 +336,47 @@ describe('id bound (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
 
     expect(s.inspect().some((r) => r.record.id === foreignId)).toBe(true); // visible post-adopt
     expect(() => handleErase(s, { id: foreignId }, { auditPath })).not.toThrow();
+  });
+
+  // FIX ROUND 2 (review Important 2): safeId is STRICTER than the id bound round-1 just widened
+  // ([^A-Za-z0-9_-] -> '' vs. isValidId's "any printable, non-control" charset), so handleInspect —
+  // the ONE surface a user reads to learn a record's real id — was still mangling a perfectly legal
+  // adopted id (`note/2026 팀 공유 id` -> `note2026id`) at display time. The predicate half of the
+  // Critical was fixed (the id itself is now accepted by erase/recheck/confirm); the discoverability
+  // half was not: no tool showed the STRING that erase/recheck/confirm would actually accept, so a
+  // user who only ever sees the mangled id would type it back, get an id that matches no record
+  // (mangled != real), and (per the reviewer's own repro, explicitly not this task's to fix) get a
+  // silent false-success erase report. This test is upstream of that: it proves the DISPLAY now shows
+  // the real, actionable id, not that the downstream erase behavior for a non-matching id changed.
+  it('shows the REAL adopted-ledger id verbatim in inspect output (round-2 discoverability fix)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const proj = mkdtempSync(join(tmpdir(), 'helix-p-'));
+    const s = new MemoryStore(join(home, 'memory.jsonl'), {
+      home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => 'm_x',
+      project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj },
+    });
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    const record: MemoryRecord = {
+      id: foreignId, tx: '2026-06-09T00:00:00.000Z', validFrom: '2026-06-09T00:00:00.000Z', validTo: null,
+      type: 'assert', state: 'Fresh', content: 'team-shared onboarding note',
+      provenance: { source: 'user', sessionId: 'other-dev' },
+      supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+    };
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), JSON.stringify(record) + '\n');
+    handleAdopt(s, { projectRoot: proj }, { auditPath: join(home, 'audit.jsonl'), now: () => '2026-06-09T00:00:00.000Z' });
+
+    const out = text(handleInspect(s, {}));
+    expect(out).toContain(foreignId); // the REAL id, not safeId's mangled `note2026id`
+    expect(out).not.toContain('note2026id'); // the old (wrong) mangled form must not appear either
+  });
+
+  // FIX ROUND 2 (Minor, surrogate gap): \p{Cc}\p{Cf} does not cover an UNPAIRED (lone) surrogate
+  // (U+D800-DFFF outside a valid pair) — JS strings are not guaranteed valid UTF-16, so a ledger-write
+  // adversary can plant one. JSON.stringify still emits well-formed output (framing is not at risk),
+  // but no legitimate human-authored id contains a lone surrogate, and this repo already tracks the
+  // general class (docs/issues/repros/f2-duplicate-id-and-surrogate.ts, gitignored) -- exclude it.
+  it('rejects an id containing an unpaired Unicode surrogate', () => {
+    expect(isValidId('m_\uD800evil')).toBe(false);
   });
 });
 
