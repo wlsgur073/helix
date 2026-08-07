@@ -58,10 +58,30 @@ describe('classifyWitness — journal-first (§4.4)', () => {
     const v = classifyWitness(target, entryFor(B('old-longer-bytes\n')), journalFor(target));
     expect(v.kind).toBe('transition-heal');
   });
-  it('pending journal + ANY other state → transition-interrupted — INCLUDING exact predecessor match (R2-F2)', () => {
+  // RETITLED. This read "pending journal + ANY other state → transition-interrupted — INCLUDING
+  // exact predecessor match (R2-F2)". "ANY other state" is precisely the rule the fork/mismatch fix
+  // DELETED: bytes carrying neither the journal's `expected` nor its `predecessor` are a mismatch
+  // now (first test in this file). The fixture never exercised that rule anyway — `journalFor`
+  // defaults `predecessor: null`, so it takes the null-predecessor escape hatch and passes
+  // identically under the fix AND under a rule that reopens the defect, i.e. it discriminated
+  // nothing about the change while its name asserted the opposite of the current contract.
+  // What it genuinely pins is journal-first precedence in the no-lineage case. That is worth
+  // keeping, so it stays — under an accurate name, with the null default made load-bearing by the
+  // last leg rather than left as an unremarked helper default.
+  it('pending journal with a NULL predecessor → transition-interrupted even when the file exactly matches the witness entry', () => {
     const pred = B('pre-erase\n');
-    const v = classifyWitness(pred, entryFor(pred), journalFor(B('post-erase\n')));
-    expect(v.kind).toBe('transition-interrupted'); // naive table said in-sync; journal takes precedence
+    const j = journalFor(B('post-erase\n'));
+    expect(j.predecessor).toBeNull();                                              // the escape hatch this rests on
+    expect(classifyWitness(pred, entryFor(pred), null).kind).toBe('in-sync');       // naive table: in-sync
+    expect(classifyWitness(pred, entryFor(pred), j).kind).toBe('transition-interrupted'); // journal takes precedence
+    // ...and the null predecessor is the ONLY reason. Give the journal a predecessor these bytes are
+    // not on and the same call is a mismatch. A rule restoring "ANY other state →
+    // transition-interrupted" passes every leg above and fails this one.
+    const offLineage = B('other\n');
+    const withPred = journalFor(B('post-erase\n'), {
+      predecessor: { byteLength: offLineage.length, prefixHash: sha256Hex(offLineage) },
+    });
+    expect(classifyWitness(pred, entryFor(pred), withPred).kind).toBe('mismatch');
   });
   it('pending journal + expected-plus-suffix → transition-interrupted (spec literal: only exact expected heals)', () => {
     const target = B('kept\n');

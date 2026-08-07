@@ -97,8 +97,11 @@ if (stray.length > 0) {
     if (loss.undecidable !== null) {
       causes.push(
         `  - HELIX_HOME's own trust state could not be read (${loss.undecidable}), so whether starting\n` +
-        `    is lossless could not be established at all. Starting anyway would mint a replacement key\n` +
-        `    and re-grade this ledger under it - the exact silent trust reset this check prevents.\n`,
+        `    is lossless could not be established at all. Starting mints nothing here: an existing key\n` +
+        `    is read before any key is created, so an unreadable one aborts that read rather than\n` +
+        `    replacing the key. What refusing protects is the ADVICE - the other outcome of this check\n` +
+        `    calls the stray files safe to delete, and if they hold the only readable copy of this\n` +
+        `    ledger's trust store, acting on that cannot be undone.\n`,
       );
     }
     if (loss.unverifiableRecordIds.length > 0) {

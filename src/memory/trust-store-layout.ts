@@ -288,10 +288,17 @@ export function assessGradeLoss(home: string, ledger: string): GradeLossAssessme
     // Concretely: `tryReadMaster` throws `LedgerMacError` on a master key that is present but not
     // exactly MASTER_LEN bytes, on BOTH paths this function reads HOME through, so a truncated or
     // overwritten key used to take the whole server down with a stack trace instead of reaching the
-    // refusal that carries the remedies. Refusing is also the only choice that preserves anything:
-    // starting on an unreadable key mints a fresh one and re-grades the ledger under it, which is
-    // precisely the silent trust reset this gate exists to prevent, and it would be UNRECOVERABLE
-    // once the stray files were then reported as "safe to delete".
+    // refusal that carries the remedies. Refusing does NOT prevent a mint, and must not be justified
+    // that way: `ensureMaster` calls `tryReadMasterStrict` BEFORE mkdirSync/withFileLock/randomBytes,
+    // so the throw that lands here happens before any create path is reached. The branch that DOES
+    // mint is the ABSENT-key one, and there `tryReadMasterStrict` returns null rather than throwing,
+    // so it can never surface as `undecidable` in the first place. Measured: on a present-but-
+    // truncated key ensureMaster throws and HOME is unchanged afterwards (same entries, same key
+    // bytes); on an absent key `undecidable` is null while ensureMaster mints 32 bytes.
+    // What refusing preserves is the ADVICE. The lossless branch of this gate tells the user the
+    // stray files are "safe to delete"; if they hold the only readable copy of this ledger's trust
+    // store, acting on that is UNRECOVERABLE. An unanswerable question must not license that
+    // sentence — which is why an unreadable HOME fails CLOSED rather than reporting "no loss".
     //
     // The caller must distinguish this from a measured loss (see `undecidable`): every id list is
     // empty because nothing was examined, not because nothing was at risk.
