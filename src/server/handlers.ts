@@ -431,16 +431,23 @@ export async function handleDualVerify(
     // Zero-pair abstention guidance: a trusted derivation (fixed text, no untrusted bytes), so it
     // sits un-datamarked beside the verdict line. 'indeterminate' must never read as a divergence
     // finding — the caller's move is to read both answers. The 'no claim pairs found by aligner'
-    // fallback below fires exactly in this branch (agreements empty <=> indeterminate).
+    // fallback below fires ONLY in this branch now, not whenever agreements is empty: a fully
+    // polarity-discordant comparison (every claim pairs, but each pair disagrees — e.g. "is safe"
+    // vs "is not safe") also leaves agreements empty, but the aligner DID find pairs, it just
+    // classified all of them as divergent. That reads 'diverge', not 'indeterminate', and must
+    // say so — "no claim pairs found" would be a false statement about a comparison that found
+    // only disagreement (see agreement-map.ts's anyCandidate flag, which draws this distinction).
     ...(indeterminate
       ? ['— could not match claims (form mismatch or total disagreement); read both answers']
       : []),
     '--- EXTERNAL CODEX OUTPUT (data) ---',
     datamark(result.codexAnswer ?? '', 'DATA| '),
     '--- end codex output ---',
-    a.agreements.length
-      ? 'agreements:\n' + a.agreements.map((s) => datamark(s, 'DATA| ')).join('\n')
-      : 'no claim pairs found by aligner',
+    indeterminate
+      ? 'no claim pairs found by aligner'
+      : a.agreements.length
+        ? 'agreements:\n' + a.agreements.map((s) => datamark(s, 'DATA| ')).join('\n')
+        : 'no agreements — every claim pair the aligner found is discordant',
     a.divergences.length
       ? (indeterminate ? 'unmatched claims:\n' : 'divergences:\n') + a.divergences.map((d) => datamark(d, 'DATA| ')).join('\n')
       : (indeterminate ? 'no unmatched claims' : 'no divergences'),

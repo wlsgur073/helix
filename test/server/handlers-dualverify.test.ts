@@ -130,6 +130,18 @@ describe('handleDualVerify', () => {
     expect(t).toContain('no unmatched claims');
     expect(t).not.toContain('no divergences');
   });
+
+  it('a fully-discordant negated pair renders diverge with divergences, never the zero-pair aligner text', async () => {
+    const d = deps({ runner: async () => ({ ok: true, answer: 'The migration is not safe to apply.' }) });
+    const res = await handleDualVerify({ question: 'q', helixAnswer: 'The migration is safe to apply.' }, d);
+    const t = text(res);
+    expect(t).toContain('verdict: diverge (mode: compare)');
+    expect(t).toContain('divergences:');
+    expect(t).not.toContain('no claim pairs found by aligner');
+    expect(t).not.toContain('could not match claims');
+    const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
+    expect(audit.verdict).toBe('diverge');
+  });
 });
 
 describe('handleDualVerify egress audit', () => {

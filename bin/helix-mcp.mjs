@@ -24408,18 +24408,36 @@ function jaccard(a, b) {
   return union2 === 0 ? 1 : inter / union2;
 }
 var SENTENCE_SIM = 0.5;
+var NEGATION_MARKER_RE = /\bnot\b|n't\b|\bun-/gi;
+function negationParity(s) {
+  return (s.match(NEGATION_MARKER_RE) ?? []).length % 2;
+}
 function buildAgreementMap(helixAnswer, codexAnswer) {
   const helix = sentences(helixAnswer);
   const codex = sentences(codexAnswer);
   const helixTok = helix.map(tokenSet);
   const codexTok = codex.map(tokenSet);
-  const matched = (t, pool) => pool.some((p) => jaccard(t, p) >= SENTENCE_SIM);
-  const agreements = helix.filter((_, i) => matched(helixTok[i], codexTok));
+  const helixParity = helix.map(negationParity);
+  const codexParity = codex.map(negationParity);
+  let anyCandidate = false;
+  const agreesWithPool = (tok, parity, poolTok, poolParity) => {
+    let agree = false;
+    for (let j = 0; j < poolTok.length; j++) {
+      if (jaccard(tok, poolTok[j]) >= SENTENCE_SIM) {
+        anyCandidate = true;
+        if (parity === poolParity[j]) agree = true;
+      }
+    }
+    return agree;
+  };
+  const helixAgrees = helix.map((_, i) => agreesWithPool(helixTok[i], helixParity[i], codexTok, codexParity));
+  const codexAgrees = codex.map((_, j) => agreesWithPool(codexTok[j], codexParity[j], helixTok, helixParity));
+  const agreements = helix.filter((_, i) => helixAgrees[i]);
   const divergences = [
-    ...helix.filter((_, i) => !matched(helixTok[i], codexTok)),
-    ...codex.filter((_, i) => !matched(codexTok[i], helixTok))
+    ...helix.filter((_, i) => !helixAgrees[i]),
+    ...codex.filter((_, j) => !codexAgrees[j])
   ];
-  const verdict = agreements.length === 0 ? "indeterminate" : divergences.length === 0 ? "agree" : "diverge";
+  const verdict = !anyCandidate ? "indeterminate" : divergences.length === 0 ? "agree" : "diverge";
   return { verdict, agreements, divergences };
 }
 
@@ -25064,12 +25082,17 @@ async function handleDualVerify(args, deps, signal) {
     // Zero-pair abstention guidance: a trusted derivation (fixed text, no untrusted bytes), so it
     // sits un-datamarked beside the verdict line. 'indeterminate' must never read as a divergence
     // finding — the caller's move is to read both answers. The 'no claim pairs found by aligner'
-    // fallback below fires exactly in this branch (agreements empty <=> indeterminate).
+    // fallback below fires ONLY in this branch now, not whenever agreements is empty: a fully
+    // polarity-discordant comparison (every claim pairs, but each pair disagrees — e.g. "is safe"
+    // vs "is not safe") also leaves agreements empty, but the aligner DID find pairs, it just
+    // classified all of them as divergent. That reads 'diverge', not 'indeterminate', and must
+    // say so — "no claim pairs found" would be a false statement about a comparison that found
+    // only disagreement (see agreement-map.ts's anyCandidate flag, which draws this distinction).
     ...indeterminate ? ["\u2014 could not match claims (form mismatch or total disagreement); read both answers"] : [],
     "--- EXTERNAL CODEX OUTPUT (data) ---",
     datamark(result.codexAnswer ?? "", "DATA| "),
     "--- end codex output ---",
-    a.agreements.length ? "agreements:\n" + a.agreements.map((s) => datamark(s, "DATA| ")).join("\n") : "no claim pairs found by aligner",
+    indeterminate ? "no claim pairs found by aligner" : a.agreements.length ? "agreements:\n" + a.agreements.map((s) => datamark(s, "DATA| ")).join("\n") : "no agreements \u2014 every claim pair the aligner found is discordant",
     a.divergences.length ? (indeterminate ? "unmatched claims:\n" : "divergences:\n") + a.divergences.map((d) => datamark(d, "DATA| ")).join("\n") : indeterminate ? "no unmatched claims" : "no divergences",
     frameClose(nonce)
   ].join("\n"));

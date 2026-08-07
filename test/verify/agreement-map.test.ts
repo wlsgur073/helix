@@ -80,4 +80,25 @@ describe('agreement map', () => {
     expect(map.verdict).toBe('indeterminate');
     expect(map.divergences).toHaveLength(0);
   });
+
+  it('a direct negation of a paired claim is diverge, never agree', () => {
+    const m = buildAgreementMap('The migration is safe to apply.', 'The migration is not safe to apply.');
+    expect(m.verdict).toBe('diverge');
+  });
+
+  it('contraction negation ("doesn\'t") is caught even though tokenSet would erase it (doesn+t)', () => {
+    const m = buildAgreementMap('The plan works with the new schema.', 'The plan doesn\'t work with the new schema.');
+    expect(m.verdict).toBe('diverge');
+  });
+
+  it('a paired claim with balanced (even) negation stays agree, not diverge (double negation cancels)', () => {
+    const m = buildAgreementMap('The migration is safe to apply.', 'The migration is not un-safe to apply.');
+    expect(m.verdict).toBe('agree');
+  });
+
+  it('a paired claim with no negation on either side is unaffected by the polarity check (regression guard)', () => {
+    const m = buildAgreementMap('The migration is safe to apply.', 'The migration is safe to apply.');
+    expect(m.verdict).toBe('agree');
+    expect(m.divergences).toHaveLength(0);
+  });
 });
