@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-import { strayTrustFiles, TRUST_FILE_NAMES, compareStrayMasterKey } from '../../src/memory/trust-store-layout.js';
+import { strayTrustFiles, TRUST_FILE_NAMES, compareStrayMasterKey, assessGradeLoss } from '../../src/memory/trust-store-layout.js';
+import { MemoryStore } from '../../src/memory/store.js';
+import { ensureMaster } from '../../src/memory/ledger-mac.js';
+import { advanceWitness, witnessPath, scopeKeyOf } from '../../src/memory/witness-store.js';
 
 const layout = () => {
   const base = mkdtempSync(join(tmpdir(), 'helix-layout-'));
@@ -162,5 +165,97 @@ describe('compareStrayMasterKey', () => {
     writeFileSync(join(home, 'ledger-mac-master.key'), 'x', { mode: 0o600 });
     writeFileSync(join(elsewhere, 'ledger-mac-master.key'), randomBytes(32), { mode: 0o600 });
     expect(compareStrayMasterKey(home, elsewhere)).toBe('no-home-key');
+  });
+});
+
+// F1B-DETECTOR-DOS round 2, owner's final ruling (2026-08-07): key presence and key identity are
+// BOTH proxies. compareStrayMasterKey's 'mismatch' (round 1) refused whenever there was no stray
+// key to compare against -- which reopened the DoS this job exists to close: a HEALTHY install (HOME
+// has its own key) refused the instant an adversary planted ONE shape-valid stray file with no
+// master key beside it. The refusal now measures the loss directly instead.
+describe('assessGradeLoss', () => {
+  it('finds no loss for a missing ledger, even with no HOME key at all', () => {
+    const { home, elsewhere } = layout();
+    const result = assessGradeLoss(home, join(elsewhere, 'memory.jsonl'));
+    expect(result).toEqual({ loses: false, unverifiableRecordIds: [], witnessMismatch: false, clampedRecordIds: [] });
+  });
+
+  it('finds no loss for a ledger whose records are all Fresh (nothing elevated)', () => {
+    const { home, elsewhere } = layout();
+    const ledger = join(elsewhere, 'memory.jsonl');
+    let n = 0;
+    const store = new MemoryStore(ledger, { home, sessionId: 's', genId: () => `m_${++n}` });
+    store.commit({ content: 'never confirmed, stays Fresh', source: 'user' });
+    const result = assessGradeLoss(home, ledger);
+    expect(result.loses).toBe(false);
+    expect(result.clampedRecordIds).toEqual([]);
+  });
+
+  it('tolerates a torn/corrupt ledger line without throwing, and still finds no loss', () => {
+    const { home, elsewhere } = layout();
+    const ledger = join(elsewhere, 'memory.jsonl');
+    writeFileSync(ledger, 'not even json\n{"also":"not a record"}\n');
+    expect(() => assessGradeLoss(home, ledger)).not.toThrow();
+    expect(assessGradeLoss(home, ledger).loses).toBe(false);
+  });
+
+  it('loses via path (a) ALONE: a genuinely elevated record that does not verify under HOME\'s own key', () => {
+    // HOME mints its OWN real key (ensureMaster) but its witness for '@global' is never touched --
+    // first-contact, not mismatch -- so ANY loss found here can only be the MAC-verification path,
+    // proving path (a) is checked independently of witness state.
+    const { home, elsewhere } = layout();
+    ensureMaster(home);
+    const foreignHome = mkdtempSync(join(tmpdir(), 'helix-foreign-home-'));
+    const ledger = join(elsewhere, 'memory.jsonl');
+    let n = 0;
+    const foreign = new MemoryStore(ledger, { home: foreignHome, sessionId: 'foreign', genId: () => `f_${++n}` });
+    const rec = foreign.commit({ content: 'confirmed under a key HOME does not have', source: 'user' });
+    const { record: verifyRec } = foreign.confirm(rec.id); // the `verify`-type record itself -- scanLegacyElevated reports ITS id, not the target's
+
+    const result = assessGradeLoss(home, ledger);
+    expect(result.witnessMismatch).toBe(false); // first-contact, never advanced -- not the alarm kind
+    expect(result.clampedRecordIds).toEqual([]);
+    expect(result.unverifiableRecordIds).toContain(verifyRec.id);
+    expect(result.loses).toBe(true);
+  });
+
+  it('loses via path (b) ALONE: a validly-signed record HOME\'s witness no longer recognizes (the reviewer\'s F1 repro)', () => {
+    // Build a REAL elevated record under HOME's own key first (witness advances in step, in-sync).
+    // Then reset HOME's witness to a DIFFERENT, unrelated baseline for the SAME scope -- the record's
+    // own MAC is untouched and still validates under HOME's (unchanged) key, so any loss found here
+    // can only be the witness-mismatch clamp, proving path (b) is checked even when signature
+    // verification alone would say everything is fine.
+    const { home, elsewhere } = layout();
+    const ledger = join(elsewhere, 'memory.jsonl');
+    let n = 0;
+    const store = new MemoryStore(ledger, { home, sessionId: 's', genId: () => `m_${++n}` });
+    const rec = store.commit({ content: 'confirmed under HOME\'s own real key', source: 'user' });
+    store.confirm(rec.id);
+    expect(assessGradeLoss(home, ledger).loses).toBe(false); // sanity: in-sync, nothing lost yet
+
+    rmSync(witnessPath(home), { force: true });
+    advanceWitness(home, scopeKeyOf(home), Buffer.from('an unrelated prior baseline, not this ledger\'s bytes'), null);
+
+    const result = assessGradeLoss(home, ledger);
+    expect(result.unverifiableRecordIds).toEqual([]); // the record's own MAC still validates fine
+    expect(result.witnessMismatch).toBe(true);
+    expect(result.clampedRecordIds).toContain(rec.id);
+    expect(result.loses).toBe(true);
+  });
+
+  it('finds no loss when witness mismatches but nothing live is elevated (the DoS this measurement kills)', () => {
+    const { home, elsewhere } = layout();
+    const ledger = join(elsewhere, 'memory.jsonl');
+    let n = 0;
+    const store = new MemoryStore(ledger, { home, sessionId: 's', genId: () => `m_${++n}` });
+    store.commit({ content: 'never confirmed, stays Fresh', source: 'user' }); // advances witness, in-sync
+
+    rmSync(witnessPath(home), { force: true });
+    advanceWitness(home, scopeKeyOf(home), Buffer.from('an unrelated prior baseline'), null);
+
+    const result = assessGradeLoss(home, ledger);
+    expect(result.witnessMismatch).toBe(true);
+    expect(result.clampedRecordIds).toEqual([]); // nothing live was elevated, so the clamp is a no-op
+    expect(result.loses).toBe(false);
   });
 });

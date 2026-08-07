@@ -16,6 +16,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { MemoryStore } from '../../src/memory/store.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BUNDLE = join(root, 'bin', 'helix-mcp.mjs');
@@ -87,26 +88,31 @@ describe('trust store location vs HELIX_LEDGER', () => {
     expect(existsSync(join(home, 'ledger-mac-master.key')), 'the master key belongs under HELIX_HOME').toBe(true);
   }, 30_000);
 
-  it('refuses to start when a previous run left trust state beside the ledger', async () => {
+  it('refuses to start when a previous run left an ELEVATED grade beside the ledger', async () => {
     const { home, ledgerDir, ledger } = splitLayout();
-    // Exactly what the old behaviour produced: a master key sitting next to a relocated ledger.
-    // Silently pinning home now would mint a SECOND key, revoking every grade the first one
-    // conferred and orphaning a witness that still attests to this scope — so this state has to be
-    // reported, not stepped over.
-    writeFileSync(join(ledgerDir, 'ledger-mac-master.key'), randomBytes(32), { mode: 0o600 });
-    writeFileSync(ledger, '');
+    // Exactly what the old behaviour produced: home derived from the LEDGER's own directory, so a
+    // commit+confirm there mints its own key and signs a genuine `verify` under it -- a real elevated
+    // grade, not just a bare key file. Silently pinning HOME now (which has no key of its own yet)
+    // would mint a SECOND, unrelated key and read this ledger through it: the confirm never
+    // validates, so the grade the user took the trouble to earn silently vanishes on replay (F1B's
+    // path a). This state has to be reported, not stepped over.
+    let n = 0;
+    const old = new MemoryStore(ledger, { home: ledgerDir, sessionId: 'old', genId: () => `m_${++n}` });
+    const rec = old.commit({ content: 'a fact the user took the trouble to confirm', source: 'user' });
+    old.confirm(rec.id);
+    expect(old.inspect().map((r) => r.record.state)).toContain('Verified'); // fixture sanity
 
     const { code, stderr } = await startAndWait(home, ledger, home);
-    expect(code, 'the server should refuse to start on a split trust store').not.toBe(0);
+    expect(code, 'the server should refuse to start on a split trust store with a real grade at risk').not.toBe(0);
+    expect(stderr).toContain('REFUSING TO START');
     expect(stderr).toMatch(/ledger-mac-master\.key/);
     expect(stderr, 'the operator needs both directories named to act on this').toContain(ledgerDir);
     expect(stderr).toContain(home);
   }, 30_000);
 
-  it('warns but does NOT refuse when the stray key is byte-identical to HELIX_HOME\'s own (F1B-DETECTOR-DOS)', async () => {
-    // The stray key is the SAME key as HOME's -- a genuine, inert leftover. Re-grading the ledger
-    // under HOME's key is a no-op because HOME's key IS the key that signed it, so there is no
-    // migration left to protect and nothing to lose. Blocking startup forever over it would itself
+  it('warns but does NOT refuse when the stray key is byte-identical to HELIX_HOME\'s own and nothing is at risk (F1B-DETECTOR-DOS)', async () => {
+    // The stray key is the SAME key as HOME's and the ledger carries nothing elevated -- a genuine,
+    // inert leftover with nothing whatsoever to lose. Blocking startup forever over it would itself
     // be the startup denial of service the detector must not become
     // (docs/issues/repros/f1-detector-startup-dos.ts).
     const { home, ledgerDir, ledger } = splitLayout();
@@ -116,30 +122,62 @@ describe('trust store location vs HELIX_LEDGER', () => {
     writeFileSync(ledger, '');
 
     const { code, stderr } = await startAndWait(home, ledger, home);
-    expect(code, 'a HELIX_HOME whose key matches the stray leftover must not be blocked').toBe(0);
+    expect(code, 'a HELIX_HOME whose key matches the stray leftover, with nothing at risk, must not be blocked').toBe(0);
     expect(stderr).not.toContain('REFUSING TO START');
     expect(stderr).toMatch(/NOTE/);
     expect(stderr).toContain(ledgerDir);
     expect(stderr).toContain(home);
   }, 30_000);
 
-  it('still refuses when the stray key DIFFERS from HELIX_HOME\'s own (F1 preserved)', async () => {
-    // The Critical this closes: a user runs Helix normally (a key mints under HOME); later they set
-    // HELIX_LEDGER on a pre-pin version, which builds a SECOND trust store beside the relocated
-    // ledger. HOME has *a* key, so a presence-only gate would wave this through -- but starting
-    // would then re-grade the ledger under HOME's key, which is NOT the key that signed those
-    // records, silently clamping every elevated grade to Fresh (store.ts's mismatch guard). Two
-    // distinct keys beside/under each directory is exactly that setup: the refusal must still fire.
+  it('(A) refuses when a normal-use HOME later meets a second, pre-pin-style store beside a relocated ledger', async () => {
+    // The Critical round 2 closes: it is not enough for HOME to merely HAVE a key (round 1's
+    // presence proxy) or for the keys to differ (round 1's identity proxy) -- the refusal must be
+    // grounded in an actual grade at risk. Here HOME has its OWN real, prior, normal usage (its own
+    // key, its own witness history, from ITS OWN earlier ledger) before the user ever sets
+    // HELIX_LEDGER on a pre-pin version that builds a second store beside a DIFFERENT, relocated
+    // ledger. Reading that second ledger under HOME's (unrelated) key must still refuse.
     const { home, ledgerDir, ledger } = splitLayout();
-    writeFileSync(join(home, 'ledger-mac-master.key'), randomBytes(32), { mode: 0o600 });
-    writeFileSync(join(ledgerDir, 'ledger-mac-master.key'), randomBytes(32), { mode: 0o600 });
-    writeFileSync(ledger, '');
+    let n = 0;
+    const homeLedger = join(home, 'memory.jsonl');
+    const normalUse = new MemoryStore(homeLedger, { home, sessionId: 'normal', genId: () => `h_${++n}` });
+    const homeRec = normalUse.commit({ content: 'normal use establishes HOME\'s own trust state', source: 'user' });
+    normalUse.confirm(homeRec.id);
+
+    const old = new MemoryStore(ledger, { home: ledgerDir, sessionId: 'old', genId: () => `m_${++n}` });
+    const rec = old.commit({ content: 'a fact the user took the trouble to confirm', source: 'user' });
+    old.confirm(rec.id);
+    expect(old.inspect().map((r) => r.record.state)).toContain('Verified'); // fixture sanity
 
     const { code, stderr } = await startAndWait(home, ledger, home);
-    expect(code, 'a stray key that differs from HELIX_HOME\'s own must still refuse to start').not.toBe(0);
+    expect(code, 'a real grade behind a relocated second store must still refuse, even with HOME already established').not.toBe(0);
     expect(stderr).toContain('REFUSING TO START');
-    expect(stderr).toMatch(/ledger-mac-master\.key/);
     expect(stderr).toContain(ledgerDir);
     expect(stderr).toContain(home);
   }, 30_000);
+
+  const shapeValidPlant: Record<string, () => string | Buffer> = {
+    'witness.json': () => JSON.stringify({ v: 1, scopes: {} }),
+    'projects.json': () => JSON.stringify({ '/some/project': { stamp: 'x', adoptedAt: '2026-01-01T00:00:00.000Z', macNonce: 'n' } }),
+    'witness-log.jsonl': () => '{"v":1}\n',
+  };
+  for (const [name, content] of Object.entries(shapeValidPlant)) {
+    it(`(B) starts when a healthy install meets ONE adversary-planted ${name} beside the ledger`, async () => {
+      // The DoS round 2 reopened: a HEALTHY install (HOME has its own key already) refused the
+      // instant an adversary planted a single shape-valid stray file with no master key alongside it
+      // -- there was no stray key to compare against, so the identity proxy fell back to refuse.
+      // Nothing here is actually at risk: the planted file never touches the ledger's own bytes or
+      // HOME's own key/witness, so the ledger the server actually reads carries nothing elevated (in
+      // fact nothing at all) and nothing HOME's witness would call a mismatch. Must start.
+      const { home, ledgerDir, ledger } = splitLayout();
+      writeFileSync(join(home, 'ledger-mac-master.key'), randomBytes(32), { mode: 0o600 });
+      writeFileSync(join(ledgerDir, name), content(), { mode: 0o600 });
+
+      const { code, stderr } = await startAndWait(home, ledger, home);
+      expect(code, `a healthy install must not refuse over a lone stray ${name}`).toBe(0);
+      expect(stderr).not.toContain('REFUSING TO START');
+      expect(stderr).toMatch(/NOTE/);
+      expect(stderr).toContain(ledgerDir);
+      expect(stderr).toContain(home);
+    }, 30_000);
+  }
 });

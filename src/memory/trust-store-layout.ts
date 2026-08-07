@@ -2,7 +2,11 @@ import { existsSync, readFileSync, lstatSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { canonicalRoot } from './ownership.js';
-import { tryReadMaster } from './ledger-mac.js';
+import { tryReadMaster, verifyVerify } from './ledger-mac.js';
+import { subkeyForScope, verifiedProjectionWithSubkey } from './verified-read.js';
+import { readLedgerWitnessed } from './witness-read.js';
+import { clampElevatedState } from './verified-projection.js';
+import { scanLegacyElevated } from './legacy-scan.js';
 
 /** Everything the trust store keeps under `home`. These are the files whose location SECURITY.md
  *  makes a promise about: the signing key, the ownership registry, and the rollback witness pair. */
@@ -124,4 +128,78 @@ export function compareStrayMasterKey(home: string, ledgerDir: string): StrayKey
   let strayKey: Buffer | null;
   try { strayKey = tryReadMaster(ledgerDir); } catch { strayKey = null; }
   return strayKey !== null && timingSafeEqual(homeKey, strayKey) ? 'match' : 'mismatch';
+}
+
+/** Measures, not infers, whether starting would lose a trust grade `ledger` currently carries. Key
+ *  presence (round 1) and key identity (`compareStrayMasterKey`, round 1's revision) are both
+ *  PROXIES for this — and the second one is still too conservative: a healthy install with its own
+ *  HOME key refuses the instant an adversary plants ONE shape-valid stray file (e.g. a bare
+ *  `witness.json`), even though nothing whatsoever is at risk, because there is no stray key to
+ *  compare against. That re-opens the startup denial of service this job exists to close. */
+export interface GradeLossAssessment {
+  /** True iff starting would lose at least one already-elevated grade, via EITHER path below. */
+  loses: boolean;
+  /** Path (a): ids of `verify`-type records that do NOT validate under HOME's own subkey (or a
+   *  baked non-Fresh assert/supersede — see scanLegacyElevated) — their elevation never reaches
+   *  the projection at all, silently, on every replay from here on. */
+  unverifiableRecordIds: string[];
+  /** HOME's rollback witness for this scope does not match `ledger`'s CURRENT bytes. */
+  witnessMismatch: boolean;
+  /** Path (b): ids of currently-elevated live records that `witnessMismatch` would clamp to Fresh
+   *  (store.ts's mismatch guard) — empty even under a witness mismatch if nothing live is elevated,
+   *  which is what lets an empty or ungraded ledger start regardless of witness state. */
+  clampedRecordIds: string[];
+}
+
+/**
+ * The refusal's actual ground, replacing both proxies tried before it: does STARTING on `ledger`,
+ * read as HOME would read it, lose a trust grade it currently carries? Loss arrives by two
+ * independent paths, mirroring store.ts's own read pipeline exactly, and BOTH must be checked:
+ *
+ *  (a) a `verify` record that does not validate under HOME's subkey never confers its grade in the
+ *      first place (`buildVerifiedProjection`'s verify predicate) — the author's intended elevation
+ *      silently vanishes on replay. Same predicate the pre-existing "Verifying integrity scan"
+ *      warning in server/index.ts already uses (`scanLegacyElevated` + `verifyVerify`).
+ *  (b) HOME's rollback witness for this scope does not match `ledger`'s CURRENT bytes — store.ts's
+ *      mismatch guard (`clampElevatedState`) then clamps every already-elevated LIVE record to
+ *      Fresh, regardless of whether its own verify validates. This is the path a presence/identity
+ *      proxy cannot see: two stores can share the exact same key and still diverge here, because a
+ *      witness is scoped to HOME + '@global', not to any one ledger file — pointing the SAME scope
+ *      at a DIFFERENT ledger's bytes mismatches even when nothing was ever forged.
+ *
+ * A ledger with nothing elevated in play — empty, fresh, or every record still Fresh — takes
+ * neither path regardless of key or witness state: this is what lets a bare stray file (nothing
+ * behind it to lose) start instead of refusing, closing the DoS this measurement replaces.
+ *
+ * PURE READ, safe to call before any state-changing startup step: `readLedgerWitnessed`
+ * (witness-read.ts) never mints a master key or advances a witness transition, and tolerates an
+ * absent/empty/torn `ledger` (ENOENT -> empty bytes/records, verdict `first-contact`) without
+ * throwing. `subkeyForScope` short-circuits to `null` (no scope-nonce lookup, no side effects at
+ * all) when HOME has no master key yet — scanLegacyElevated then correctly reports every existing
+ * `verify` record as unverifiable, since starting would in fact mint a fresh key none of them were
+ * signed under.
+ *
+ * Reads `ledger` once (`readLedgerWitnessed`'s single witness-first, retry-once pass) and reuses
+ * that one parse for both paths — no second read. It IS a second read of the same bytes the first
+ * real recall will do moments later (this must run before MemoryStore exists, per the ordering note
+ * on its call site, and MemoryStore's constructor accepts no seed for a pre-computed projection to
+ * avoid that): unavoidable without touching store.ts, which is pinned, so it is accepted rather than
+ * worked around. It happens only when `strayTrustFiles` is non-empty — an already-anomalous boot,
+ * never on an ordinary healthy start.
+ */
+export function assessGradeLoss(home: string, ledger: string): GradeLossAssessment {
+  const { records, verdict } = readLedgerWitnessed(ledger, home);
+  const subkey = subkeyForScope(home);
+  const scan = scanLegacyElevated(records, (r) => (subkey ? verifyVerify(r, subkey) : false));
+  const clampedRecordIds = verdict.kind === 'mismatch'
+    ? [...verifiedProjectionWithSubkey(records, subkey).live.values()]
+        .filter((r) => clampElevatedState(r.state) !== r.state)
+        .map((r) => r.id)
+    : [];
+  return {
+    loses: scan.offenders.length > 0 || clampedRecordIds.length > 0,
+    unverifiableRecordIds: scan.offenders,
+    witnessMismatch: verdict.kind === 'mismatch',
+    clampedRecordIds,
+  };
 }

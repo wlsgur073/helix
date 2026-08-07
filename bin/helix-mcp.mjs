@@ -16089,7 +16089,6 @@ function aliasesGlobalLedger(projectLedger2, globalLedger2) {
 
 // src/memory/trust-store-layout.ts
 import { existsSync as existsSync4, readFileSync as readFileSync9, lstatSync as lstatSync4 } from "node:fs";
-import { timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 import { dirname as dirname9, join as join7 } from "node:path";
 var TRUST_FILE_NAMES = ["ledger-mac-master.key", "projects.json", "witness.json", "witness-log.jsonl"];
 var MASTER_KEY_LEN = 32;
@@ -16119,21 +16118,17 @@ function strayTrustFiles(home2, globalLedger2) {
     return existsSync4(p) && looksLikeOurs(name, p);
   });
 }
-function compareStrayMasterKey(home2, ledgerDir) {
-  let homeKey;
-  try {
-    homeKey = tryReadMaster(home2);
-  } catch {
-    homeKey = null;
-  }
-  if (!homeKey) return "no-home-key";
-  let strayKey;
-  try {
-    strayKey = tryReadMaster(ledgerDir);
-  } catch {
-    strayKey = null;
-  }
-  return strayKey !== null && timingSafeEqual3(homeKey, strayKey) ? "match" : "mismatch";
+function assessGradeLoss(home2, ledger) {
+  const { records, verdict } = readLedgerWitnessed(ledger, home2);
+  const subkey = subkeyForScope(home2);
+  const scan = scanLegacyElevated(records, (r) => subkey ? verifyVerify(r, subkey) : false);
+  const clampedRecordIds = verdict.kind === "mismatch" ? [...verifiedProjectionWithSubkey(records, subkey).live.values()].filter((r) => clampElevatedState(r.state) !== r.state).map((r) => r.id) : [];
+  return {
+    loses: scan.offenders.length > 0 || clampedRecordIds.length > 0,
+    unverifiableRecordIds: scan.offenders,
+    witnessMismatch: verdict.kind === "mismatch",
+    clampedRecordIds
+  };
 }
 
 // src/server/helix-server.ts
@@ -25669,47 +25664,52 @@ var metrics = createMetricsSink(join12(home, "metrics.jsonl"), config2.metrics.e
 var stray = strayTrustFiles(home, globalLedger);
 if (stray.length > 0) {
   const ledgerDir = dirname13(globalLedger);
-  const keyOutcome = compareStrayMasterKey(home, ledgerDir);
-  if (keyOutcome === "match") {
+  const loss = assessGradeLoss(home, globalLedger);
+  if (!loss.loses) {
     process.stderr.write(
       // ASCII only
-      `helix: NOTE - trust-store-shaped files were found next to the ledger, but they carry the SAME
-  signing key as HELIX_HOME's own, so starting will NOT touch them and will NOT re-grade
-  anything under a different key.
+      `helix: NOTE - trust-store-shaped files were found next to the ledger, but starting will NOT
+  lose any trust grade this ledger currently carries (measured, not inferred from key or file
+  presence alone).
   found next to the ledger: ${stray.join(", ")}
   ledger directory        : ${ledgerDir}
   HELIX_HOME              : ${home}
-They are an inert leftover, most likely from before the trust store's location was pinned to
-HELIX_HOME. If they still hold state you need, move ${stray.join(", ")} into HELIX_HOME by
-hand; otherwise it is safe to delete them from the ledger directory - this note will keep
-appearing until they are gone.
+They are most likely an inert leftover, from before the trust store's location was pinned to
+HELIX_HOME or from a repo-writing adversary. If they still hold state you need, move
+${stray.join(", ")} into HELIX_HOME by hand; otherwise it is safe to delete them from the
+ledger directory - this note will keep appearing until they are gone.
 `
     );
   } else {
-    const reason = keyOutcome === "no-home-key" ? `HELIX_HOME has no signing key of its own yet (or its key is unreadable/wrong-sized).
-Starting would mint a NEW key over these files and silently drop every trust grade the old
-one conferred.` : `the signing key beside the ledger does not match HELIX_HOME's own key (or could not be
-confirmed to match). Starting would re-grade this ledger's history under the WRONG key:
-every record signed under the old key would fail verification, and any Verified or
-Corroborated fact would be silently clamped to Fresh.`;
-    const remedy = keyOutcome === "no-home-key" ? `  1. Move ${stray.join(", ")} from the ledger directory into HELIX_HOME, keeping the ledger where it is.
-  2. Discard the old trust state (delete those files) and re-establish it with the re-baseline
-     ceremony: node bin/helix-rebaseline.mjs --scope global
-` : `  1. If the key beside the ledger is the one you trust, back up HELIX_HOME's current key and
-     replace it with that one by hand, then restart.
-  2. Otherwise, delete ${stray.join(", ")} from the ledger directory and re-bless this ledger
-     under HELIX_HOME's own key with the re-baseline ceremony:
-     node bin/helix-rebaseline.mjs --scope global
-`;
+    const causes = [];
+    if (loss.unverifiableRecordIds.length > 0) {
+      causes.push(
+        `  - ${loss.unverifiableRecordIds.length} record(s) (${loss.unverifiableRecordIds.join(", ")}) do not verify
+    under HELIX_HOME's own signing key: their elevated grade would never be recognized again.
+`
+      );
+    }
+    if (loss.clampedRecordIds.length > 0) {
+      causes.push(
+        `  - HELIX_HOME's rollback witness for this ledger does not match its current content, which
+    would clamp ${loss.clampedRecordIds.length} already-elevated record(s) (${loss.clampedRecordIds.join(", ")})
+    to Fresh (store.ts's mismatch guard).
+`
+      );
+    }
     process.stderr.write(
       // ASCII only
-      `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME.
+      `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME,
+and starting would lose a trust grade this ledger currently carries:
   found next to the ledger: ${stray.join(", ")}
   ledger directory        : ${ledgerDir}
   HELIX_HOME              : ${home}
-${reason}
-Two ways out, both deliberate:
-${remedy}`
+${causes.join("")}Two ways out, both deliberate:
+  1. Move ${stray.join(", ")} from the ledger directory into HELIX_HOME, keeping the ledger where it
+     is - the only remedy proven lossless (docs/issues/repros/f1-manual-remedy.ts).
+  2. Discard the old trust state (delete those files) and accept the loss deliberately with the
+     re-baseline ceremony: node bin/helix-rebaseline.mjs --scope global
+`
     );
     process.exit(78);
   }
