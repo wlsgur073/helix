@@ -79,13 +79,21 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit | AdoptAudit
  *  entry is durable — not just its inode (a crash could otherwise lose the whole freshly-created file).
  *
  *  The directory fsync is swallowed UNCONDITIONALLY here — narrower than fs-ops.ts's own fsyncDir
- *  contract (task 7), which now propagates a genuinely failed attempt (EIO class). Every caller
- *  (handlers.ts) invokes appendAudit AFTER its primary operation — erase/confirm/adopt/dual-verify —
- *  has already durably committed via ITS OWN write path, and none of them wrap this call in a catch.
- *  Letting a directory-fsync failure escape here would report an already-successful primary operation
- *  as FAILED for a reason unrelated to it, which is worse than the audit row silently missing — a gap
- *  this docstring already accepts. The row's own bytes stay unconditional: writeAll + fsyncSync(fd)
- *  above are untouched and still propagate. */
+ *  contract (task 7), which now propagates a genuinely failed attempt. No caller (handlers.ts) wraps
+ *  this call, and by the time it runs every caller has already COMPLETED its primary operation — not
+ *  always successfully. Three of seven call sites (handlers.ts:154,167,186 — erase/adopt/recheck
+ *  -success) run it after a SUCCEEDED operation; handlers.ts:189/:201 (recheck-reject/confirm-reject)
+ *  run it INSIDE a catch, after the primary operation already FAILED, immediately before re-throwing
+ *  that real error; handlers.ts:348 (dual-verify) follows an operation that commits nothing to disk at
+ *  all — audit.jsonl IS the durable record there. Fix round 1 (review Important 3): an earlier version
+ *  of this comment claimed every caller's primary operation had "already durably committed", which is
+ *  false for the reject paths and the dual-verify path. The exemption is correct regardless — it is
+ *  *more* clearly correct once stated right: at the reject sites, letting a directory-fsync failure
+ *  escape would not just misreport a success as a failure, it would REPLACE the real rejection error
+ *  the caller is about to re-throw with an unrelated fsync error, masking the actual diagnosis. Both
+ *  outcomes are worse than the audit row silently missing — a gap this docstring already accepts. The
+ *  row's own bytes stay unconditional: writeAll + fsyncSync(fd) above are untouched and still
+ *  propagate. */
 export function appendAudit(path: string, event: AuditEvent): void {
   mkdirSync(dirname(path), { recursive: true });
   const isNew = !existsSync(path);

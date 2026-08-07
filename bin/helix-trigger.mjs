@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 // src/memory/fs-ops.ts
 import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, renameSync, unlinkSync, linkSync, fchmodSync, readdirSync } from "node:fs";
 var realDirFsyncSyscalls = { openSync, fsyncSync, closeSync };
+var SWALLOWED_FSYNC_CODES = /* @__PURE__ */ new Set(["EINVAL", "EISDIR", "ENOTSUP", "EOPNOTSUPP"]);
 function fsyncDir(dir, sys = realDirFsyncSyscalls) {
   let dfd;
   try {
@@ -17,7 +18,7 @@ function fsyncDir(dir, sys = realDirFsyncSyscalls) {
     sys.fsyncSync(dfd);
   } catch (e) {
     const code = e.code;
-    if (code !== "EINVAL" && code !== "EISDIR") throw e;
+    if (code === void 0 || !SWALLOWED_FSYNC_CODES.has(code)) throw e;
   } finally {
     sys.closeSync(dfd);
   }

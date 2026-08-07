@@ -269,10 +269,12 @@ same one-time path as before; nothing about the key's secrecy changes, only when
   and a complete-but-unacknowledged record commits (at-least-once). The **directory** fsync that
   makes a new file's name durable is attempted on the same path, and splits into two classes on
   **errno alone, never on the message**: if the directory cannot be opened at all, or the fsync call
-  itself fails with `EINVAL`/`EISDIR`, the platform genuinely cannot fsync a directory (some
-  filesystems, and Windows, reject it outright) and the failure is suppressed — success is still
-  reported, so an acknowledged append could, after power loss, be found under a directory entry that
-  never reached the platter. Any other failure (`EIO` and its class) means the fsync was attempted
+  itself fails with `EINVAL`/`EISDIR`/`ENOTSUP`/`EOPNOTSUPP`, the platform genuinely cannot fsync a
+  directory (some filesystems, and Windows, reject it outright — `ENOTSUP`/`EOPNOTSUPP` are a second
+  pair some filesystems return instead of `EINVAL`/`EISDIR`; the same numeric value on Linux but
+  distinct symbols elsewhere) and the failure is suppressed — success is still reported, so an
+  acknowledged append could, after power loss, be found under a directory entry that never reached
+  the platter. Any other failure (`EIO`, `ENOSPC`, and their class) means the fsync was attempted
   and genuinely failed, and now **propagates**: the append itself throws rather than reporting a
   success that isn't true, converting that rare disk-level failure into an availability failure on
   every write path (append, compaction's post-rename fsync, master-key mint, witness advance, orphan

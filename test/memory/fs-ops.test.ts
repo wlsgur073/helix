@@ -25,7 +25,7 @@ describe('fs-ops seam', () => {
     expect(readFileSync(f, 'utf8')).toBe('abcdefghij');   // no fragment loss under short writes
     expect(calls).toBeGreaterThan(1);                      // the loop actually looped
   });
-  it('swallows the platform-cannot-fsync class: a real open failure, an injected open failure (Windows-style), and EINVAL/EISDIR on the fsync itself', () => {
+  it('swallows the platform-cannot-fsync class: a real open failure, an injected open failure (Windows-style), and EINVAL/EISDIR/ENOTSUP/EOPNOTSUPP on the fsync itself', () => {
     expect(() => fsyncDir('/definitely/not/a/dir')).not.toThrow();     // real open() failure — never attempted, nothing to report
     const openFails: DirFsyncSyscalls = {
       openSync: () => { throw Object.assign(new Error('EPERM fake (Windows-style open failure)'), { code: 'EPERM' }); },
@@ -35,9 +35,22 @@ describe('fs-ops seam', () => {
     expect(() => fsyncDir('/irrelevant', openFails)).not.toThrow();
     expect(() => fsyncDir('/irrelevant', fsyncThrows('EINVAL'))).not.toThrow();
     expect(() => fsyncDir('/irrelevant', fsyncThrows('EISDIR'))).not.toThrow();
+    // fix round 1 (owner ruling): ENOTSUP/EOPNOTSUPP are a second "platform can't do this" pair some
+    // filesystems return instead of EINVAL/EISDIR — same value on Linux, distinct symbols elsewhere.
+    expect(() => fsyncDir('/irrelevant', fsyncThrows('ENOTSUP'))).not.toThrow();
+    expect(() => fsyncDir('/irrelevant', fsyncThrows('EOPNOTSUPP'))).not.toThrow();
   });
   it('propagates an attempted-and-failed directory fsync (EIO class)', () => {
     expect(() => fsyncDir('/irrelevant', fsyncThrows('EIO'))).toThrow(/fake EIO/);
+  });
+  // fix round 1 (review Important 1): the tests above alone pass equally under an EIO-ONLY allowlist
+  // (`if (code === 'EIO') throw e`) as under the real denylist — nothing here exercised a genuine
+  // failure OTHER than EIO. That would silently re-swallow ENOSPC/EDQUOT/EBADF/code-less errors,
+  // exactly the class ledger-sweep.ts:39-44's own comment names as the reason to discriminate on
+  // errno at all. These two pin that a NON-EIO, NON-swallow-listed failure also propagates.
+  it('propagates OTHER genuine failures too, not just EIO — an EIO-only allowlist would wrongly re-swallow these', () => {
+    expect(() => fsyncDir('/irrelevant', fsyncThrows('ENOSPC'))).toThrow(/fake ENOSPC/);
+    expect(() => fsyncDir('/irrelevant', fsyncThrows(undefined, 'fake code-less failure'))).toThrow(/fake code-less failure/);
   });
   it('closes the fd even when the fsync attempt is propagated (no fd leak on the throw path)', () => {
     const calls: string[] = [];

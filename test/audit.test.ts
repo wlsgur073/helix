@@ -88,15 +88,18 @@ describe('appendAudit', () => {
   });
 
   // Task 7 (LEAD-DIRFSYNC-SUPPRESSED): fs-ops.ts's fsyncDir now PROPAGATES an attempted-and-failed
-  // directory fsync (EIO class) instead of swallowing it — correct for the ledger/key/witness write
-  // paths. audit.jsonl is deliberately exempted: this file's own docstring says completeness is
-  // best-effort, NOT transactional, and every caller (handlers.ts) calls appendAudit UNWRAPPED,
-  // AFTER its primary operation (erase/confirm/adopt/dual-verify) already durably committed via its
-  // OWN write path. Letting a directory-fsync failure escape here would report an already-successful
-  // primary operation as FAILED for a reason that has nothing to do with it — worse than the audit
-  // row silently missing, which the docstring already accepts. The row content itself (writeAll +
-  // fsyncSync(fd)) is UNCHANGED — still unconditional and still propagates — only the directory fsync
-  // on first creation is swallowed here.
+  // directory fsync instead of swallowing it — correct for the ledger/key/witness write paths.
+  // audit.jsonl is deliberately exempted: this file's own docstring says completeness is best-effort,
+  // NOT transactional, and no caller (handlers.ts) wraps appendAudit — by the time it runs, every
+  // caller has already COMPLETED its primary operation (successfully at handlers.ts:154/167/186, or
+  // having already FAILED at :189/:201, about to re-throw its own real error). Fix round 1 (review
+  // Important 3): the primary operation is not always a SUCCESS that "already durably committed" —
+  // see audit.ts's own docstring for the corrected, per-site breakdown. Letting a directory-fsync
+  // failure escape here would, at best, report an already-successful primary operation as FAILED for
+  // an unrelated reason, and at worst — at the reject sites — REPLACE the real rejection error with a
+  // generic fsync error, masking it. Both are worse than the audit row silently missing, which the
+  // docstring already accepts. The row content itself (writeAll + fsyncSync(fd)) is UNCHANGED — still
+  // unconditional and still propagates — only the directory fsync on first creation is swallowed here.
   it('a genuinely failed directory fsync on FIRST creation does not abort the audit append (best-effort by design)', () => {
     const p = tmpAudit();
     throwOnNextFsyncDir = Object.assign(new Error('EIO fake (audit dir fsync)'), { code: 'EIO' });
