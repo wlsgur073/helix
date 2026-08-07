@@ -75,9 +75,18 @@ export interface RecalledItem {
   record: MemoryRecord;
   scope: MemoryScope;
   needsReverify: boolean;
-  /** 'compromised' iff the verifying replay saw an equal-generation MAC conflict for this target
-   *  (R-conflict). 'ok' otherwise — including a forged elevation that was simply ignored (it shows
-   *  its honest clamped state, no conflict). */
+  /** 'compromised' iff the verifying replay had a key AND this target carries at least one VALID
+   *  SIGNED verify AND that replay saw either tampering signal: an equal-generation MAC conflict
+   *  (R-conflict — two valid verifies at one gen disagreeing on state), OR a duplicate fact id (two
+   *  DIFFERING records claiming this id, so which is genuine is not knowable; byte-identical repeats
+   *  are exempt as at-least-once append replays). The second cause needs no verify CONFLICT — one
+   *  genuine verify plus a forged twin reaches it — but it does need that verify: both signals are
+   *  raised only inside the per-target grading loop, which iterates targets that have one. So a
+   *  duplicate id on a fact NOTHING has verified reads 'ok' here even though forgedFactIds sees it
+   *  (measured) — there is no grade to withhold, and none is conferred, but no alarm is raised
+   *  either. 'ok' also covers key-absent, where nothing is graded at all (see
+   *  RecallResult.integrityAvailable), and a forged elevation that was simply ignored (it shows its
+   *  honest clamped state, no conflict). */
   integrity: 'ok' | 'compromised';
 }
 

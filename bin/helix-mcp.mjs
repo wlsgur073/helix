@@ -13358,6 +13358,11 @@ function buildProjection(records) {
   return live;
 }
 
+// src/memory/ledger-mac.ts
+import { createHash, createHmac, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
+import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync } from "node:fs";
+import { dirname as dirname3, join as join3 } from "node:path";
+
 // src/memory/lock.ts
 import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
@@ -13709,254 +13714,41 @@ function sweepOrphanTmps(artifactPath, opts = {}) {
   return removed;
 }
 
-// src/memory/witness-core.ts
-import { createHash } from "node:crypto";
-function sha256Hex(bytes) {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-function matchesAt(bytes, byteLength, prefixHash) {
-  if (bytes.length < byteLength) return false;
-  return sha256Hex(bytes.subarray(0, byteLength)) === prefixHash;
-}
-function classifyWitness(bytes, entry, journal) {
-  if (journal) {
-    const exact = bytes.length === journal.expected.byteLength && matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash);
-    if (exact) return { kind: "transition-heal", journal };
-    const onLineage = matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash) || journal.predecessor === null || matchesAt(bytes, journal.predecessor.byteLength, journal.predecessor.prefixHash);
-    return onLineage ? { kind: "transition-interrupted", journal } : { kind: "mismatch" };
-  }
-  if (!entry) return { kind: "first-contact", reason: "no-entry" };
-  if (!matchesAt(bytes, entry.byteLength, entry.prefixHash)) return { kind: "mismatch" };
-  return bytes.length === entry.byteLength ? { kind: "in-sync" } : { kind: "unwitnessed-suffix" };
-}
-function advanceAllowed(v) {
-  return v.kind === "first-contact" || v.kind === "in-sync" || v.kind === "unwitnessed-suffix";
-}
-function fenceId(epoch, nonce) {
-  return `witness_fence_${epoch}_${nonce}`;
-}
-
-// src/memory/witness-store.ts
-import { randomBytes as randomBytes4, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { mkdirSync as mkdirSync3, readFileSync as readFileSync5 } from "node:fs";
-import { dirname as dirname5, join as join5 } from "node:path";
-
-// src/memory/ownership.ts
-import { randomBytes as randomBytes2 } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync2, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
-import { join as join3, resolve, dirname as dirname3 } from "node:path";
-function canonicalRoot(projectRoot2) {
-  try {
-    return canonical(projectRoot2);
-  } catch {
-    return resolve(projectRoot2);
-  }
-}
-var GLOBAL_KEY = "@global";
-function registryPath(home2) {
-  return join3(home2, "projects.json");
-}
-function ownerFile(projectRoot2) {
-  return join3(projectRoot2, ".helix", ".owner");
-}
-function isPlainObject2(x) {
-  return typeof x === "object" && x !== null && !Array.isArray(x);
-}
-function isValidRegistry(x) {
-  if (!isPlainObject2(x)) return false;
-  for (const v of Object.values(x)) {
-    if (!isPlainObject2(v)) return false;
-    if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
-  }
-  return true;
-}
-function loadRegistry(home2) {
-  const path = registryPath(home2);
-  let st;
-  try {
-    st = lstatSync2(path);
-  } catch (e) {
-    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
-  }
-  if (st.isSymbolicLink()) return { kind: "corrupt" };
-  let text;
-  try {
-    text = readFileSync3(path, "utf8");
-  } catch {
-    return { kind: "corrupt" };
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { kind: "corrupt" };
-  }
-  if (!isValidRegistry(parsed)) return { kind: "corrupt" };
-  return { kind: "ok", reg: parsed };
-}
-function readRegistry(home2) {
-  const r = loadRegistry(home2);
-  return r.kind === "ok" ? r.reg : {};
-}
-function assertNotSymlink(path, what) {
-  let st;
-  try {
-    st = lstatSync2(path);
-  } catch {
-    return;
-  }
-  if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
-}
-function writeAll2(fd, data) {
-  const buf = Buffer.from(data, "utf8");
-  for (let off = 0; off < buf.length; ) off += writeSync2(fd, buf, off, buf.length - off);
-}
-function atomicWriteFile(path, data, mode) {
-  const tmp = `${path}.${randomBytes2(8).toString("hex")}.tmp`;
-  const fd = openSync2(tmp, "wx", mode);
-  try {
-    writeAll2(fd, data);
-    fsyncSync2(fd);
-  } finally {
-    closeSync2(fd);
-  }
-  try {
-    renameSync2(tmp, path);
-  } catch (e) {
-    try {
-      unlinkSync3(tmp);
-    } catch {
-    }
-    throw e;
-  }
-  let dfd;
-  try {
-    dfd = openSync2(dirname3(path), "r");
-    fsyncSync2(dfd);
-  } catch {
-  } finally {
-    if (dfd !== void 0) {
-      try {
-        closeSync2(dfd);
-      } catch {
-      }
-    }
-  }
-}
-function atomicWriteRegistry(home2, reg) {
-  const path = registryPath(home2);
-  assertNotSymlink(path, "registry");
-  atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
-}
-function atomicWriteOwner(projectRoot2, stamp) {
-  atomicWriteFile(ownerFile(projectRoot2), stamp, 384);
-}
-function readOwner(projectRoot2) {
-  try {
-    return readFileSync3(ownerFile(projectRoot2), "utf8").trim();
-  } catch {
-    return null;
-  }
-}
-function isOwned(projectRoot2, home2) {
-  const entry = readRegistry(home2)[canonicalRoot(projectRoot2)];
-  if (!entry) return false;
-  const stamp = readOwner(projectRoot2);
-  return stamp !== null && stamp === entry.stamp;
-}
-function projectDispositionOf(project2) {
-  if (!project2) return "inactive";
-  if (isOwned(project2.root, project2.home)) return "owned";
-  return existsSync(project2.ledger) ? "unadopted-present" : "inactive";
-}
-function stampOwnership(projectRoot2, home2, opts = {}) {
-  const gen = opts.genStamp ?? (() => randomBytes2(16).toString("hex"));
-  const key = canonicalRoot(projectRoot2);
-  mkdirSync(home2, { recursive: true });
-  withFileLock(registryPath(home2), () => {
-    const loaded = loadRegistry(home2);
-    if (loaded.kind === "corrupt")
-      throw new Error(`stampOwnership: registry at ${registryPath(home2)} is present but unparseable \u2014 restore it before adopting (refusing to overwrite and lose other projects)`);
-    const reg = loaded.kind === "ok" ? loaded.reg : {};
-    const existing = reg[key];
-    if (opts.autoAdoptLedger && existsSync(opts.autoAdoptLedger))
-      throw new Error("commit: a project memory file appeared here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it");
-    const stamp = existing?.stamp ?? gen();
-    const macNonce = existing?.macNonce ?? gen();
-    const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
-    const helixDir = join3(projectRoot2, ".helix");
-    assertNotSymlink(helixDir, ".helix directory");
-    mkdirSync(helixDir, { recursive: true });
-    atomicWriteOwner(projectRoot2, stamp);
-    reg[key] = { stamp, adoptedAt, macNonce };
-    atomicWriteRegistry(home2, reg);
-  });
-}
-function scopeNonce(projectRoot2, home2) {
-  const entry = readRegistry(home2)[canonicalRoot(projectRoot2)];
-  return entry?.macNonce ?? null;
-}
-function globalScopeNonce(home2) {
-  const r = loadRegistry(home2);
-  if (r.kind === "corrupt") return null;
-  const fast = r.kind === "ok" ? r.reg[GLOBAL_KEY]?.macNonce : void 0;
-  if (fast) return fast;
-  mkdirSync(home2, { recursive: true });
-  try {
-    return withFileLock(registryPath(home2), () => {
-      const r2 = loadRegistry(home2);
-      if (r2.kind === "corrupt") return null;
-      const reg = r2.kind === "ok" ? r2.reg : {};
-      const existing = reg[GLOBAL_KEY]?.macNonce;
-      if (existing) return existing;
-      const macNonce = randomBytes2(16).toString("hex");
-      reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
-      atomicWriteRegistry(home2, reg);
-      return macNonce;
-    });
-  } catch {
-    return null;
-  }
-}
-
 // src/memory/ledger-mac.ts
-import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
-import { openSync as openSync3, fsyncSync as fsyncSync3, closeSync as closeSync3, readFileSync as readFileSync4, linkSync as linkSync3, unlinkSync as unlinkSync4, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
-import { dirname as dirname4, join as join4 } from "node:path";
 var MAC_VERSION = 2;
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 var LONE_SURROGATE = new RegExp("\\p{Surrogate}", "u");
 var ILL_FORMED_DOMAIN = Buffer.from("helix.digestContent.ill-formed.v1\0", "utf8");
 function digestContent(content) {
   if (LONE_SURROGATE.test(content))
-    return createHash2("sha256").update(ILL_FORMED_DOMAIN).update(Buffer.from(content, "utf16le")).digest("hex");
-  return createHash2("sha256").update(Buffer.from(content, "utf8")).digest("hex");
+    return createHash("sha256").update(ILL_FORMED_DOMAIN).update(Buffer.from(content, "utf16le")).digest("hex");
+  return createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex");
 }
 var LedgerMacError = class extends Error {
 };
 var MASTER_LEN = 32;
 function masterPath(home2) {
-  return join4(home2, "ledger-mac-master.key");
+  return join3(home2, "ledger-mac-master.key");
 }
 function ensureMaster(home2) {
   const path = masterPath(home2);
   const existing = tryReadMasterStrict(path);
   if (existing) return existing;
-  mkdirSync2(home2, { recursive: true });
+  mkdirSync(home2, { recursive: true });
   return withFileLock(path, () => {
     const again = tryReadMasterStrict(path);
     if (again) return again;
     sweepOrphanTmps(path, {});
-    const key = randomBytes3(MASTER_LEN);
-    const tmp = `${path}.k-${randomBytes3(16).toString("hex")}.tmp`;
-    const fd = openSync3(tmp, "wx", 384);
+    const key = randomBytes2(MASTER_LEN);
+    const tmp = `${path}.k-${randomBytes2(16).toString("hex")}.tmp`;
+    const fd = openSync2(tmp, "wx", 384);
     let published = false;
     try {
       try {
         writeAll(realFsOps, fd, key);
-        fsyncSync3(fd);
+        fsyncSync2(fd);
       } finally {
-        closeSync3(fd);
+        closeSync2(fd);
       }
       try {
         linkSync3(tmp, path);
@@ -13966,11 +13758,11 @@ function ensureMaster(home2) {
       }
     } finally {
       try {
-        unlinkSync4(tmp);
+        unlinkSync3(tmp);
       } catch {
       }
     }
-    fsyncDir(dirname4(path));
+    fsyncDir(dirname3(path));
     if (published) return key;
     const winner = tryReadMasterStrict(path);
     if (!winner) throw new LedgerMacError("master key vanished during concurrent mint");
@@ -13980,7 +13772,7 @@ function ensureMaster(home2) {
 function tryReadMasterStrict(path) {
   let buf;
   try {
-    buf = readFileSync4(path);
+    buf = readFileSync3(path);
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -13999,7 +13791,7 @@ function deriveSubkey(master, nonce) {
   return Buffer.from(hkdfSync("sha256", master, Buffer.from(nonce, "utf8"), Buffer.from("helix-ledger-mac-v1", "utf8"), 32));
 }
 function keyIdOf(subkey) {
-  return createHash2("sha256").update(Buffer.concat([Buffer.from("keyid"), subkey])).digest().subarray(0, 8).toString("hex");
+  return createHash("sha256").update(Buffer.concat([Buffer.from("keyid"), subkey])).digest().subarray(0, 8).toString("hex");
 }
 var DOMAIN = Buffer.from("helix-ledger-mac");
 function field(buf) {
@@ -14056,6 +13848,401 @@ function verifyVerify(record2, subkey) {
     return false;
   }
   return got.length === want.length && timingSafeEqual(got, want);
+}
+
+// src/memory/history.ts
+var ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+var isIsoInstant = (s) => {
+  if (!ISO_Z.test(s)) return false;
+  const d = new Date(s);
+  return !Number.isNaN(d.getTime()) && d.toISOString() === s;
+};
+var isClosing = (t) => t === "supersede" || t === "invalidate" || t === "erase";
+function ledgerTruncated(records) {
+  const factIds = new Set(records.filter((r) => r.type === "assert" || r.type === "supersede").map((r) => r.id));
+  return records.some((r) => {
+    if (r.type === "verify" && r.supersedes === null && !r.mac && r.content === "") return true;
+    return r.type === "erase" && r.supersedes !== null && !factIds.has(r.supersedes);
+  });
+}
+function buildHistory(records) {
+  const live = buildProjection(records);
+  const anomalies = /* @__PURE__ */ new Set();
+  const factIndex = /* @__PURE__ */ new Map();
+  const markersByTarget = /* @__PURE__ */ new Map();
+  records.forEach((r, i) => {
+    if (r.type === "assert" || r.type === "supersede") {
+      if (factIndex.has(r.id)) anomalies.add(r.id);
+      else factIndex.set(r.id, i);
+    }
+    if (isClosing(r.type) && r.supersedes) {
+      const arr = markersByTarget.get(r.supersedes) ?? [];
+      arr.push({ kind: r.type, i, tx: r.tx, markerId: r.id });
+      markersByTarget.set(r.supersedes, arr);
+    }
+  });
+  const rows = [];
+  const emitted = /* @__PURE__ */ new Set();
+  for (const r of records) {
+    if (r.type !== "assert" && r.type !== "supersede") continue;
+    if (emitted.has(r.id)) continue;
+    emitted.add(r.id);
+    if (live.has(r.id)) {
+      rows.push({ record: r, txTo: null, closedBy: null });
+      continue;
+    }
+    const ri = factIndex.get(r.id);
+    const markers = markersByTarget.get(r.id) ?? [];
+    const after = markers.filter((m) => m.i > ri).sort((x, y) => x.i - y.i);
+    const C = after[0];
+    if (markers.some((m) => m.i < ri)) anomalies.add(r.id);
+    let txTo;
+    let closedBy;
+    if (C) {
+      closedBy = { kind: C.kind, markerId: C.markerId };
+      if (C.tx >= r.tx) {
+        txTo = C.tx;
+      } else {
+        txTo = r.tx;
+        anomalies.add(r.id);
+      }
+    } else {
+      const earliest = [...markers].sort((x, y) => x.i - y.i)[0];
+      closedBy = earliest ? { kind: earliest.kind, markerId: earliest.markerId } : null;
+      txTo = r.tx;
+      anomalies.add(r.id);
+    }
+    const record2 = closedBy?.kind === "erase" ? { ...r, content: "" } : r;
+    rows.push({ record: record2, txTo, closedBy });
+  }
+  const truncated = ledgerTruncated(records);
+  return { rows, anomalies, truncated };
+}
+
+// src/memory/verified-projection.ts
+function clampElevatedState(s) {
+  return s === "Verified" || s === "Corroborated" ? "Fresh" : s;
+}
+function clampElevated(p) {
+  const live = /* @__PURE__ */ new Map();
+  for (const [id, rec] of p.live) {
+    const state = clampElevatedState(rec.state);
+    live.set(id, state === rec.state ? rec : { ...rec, state });
+  }
+  return { live, compromised: p.compromised, keyAvailable: p.keyAvailable };
+}
+function enforceWitnessProjection(p, verdict) {
+  if (verdict.kind === "transition-interrupted") return { live: /* @__PURE__ */ new Map(), compromised: /* @__PURE__ */ new Set(), keyAvailable: p.keyAvailable };
+  if (verdict.kind === "mismatch") return clampElevated(p);
+  return p;
+}
+var isPromotion = (s) => s === "Verified" || s === "Corroborated";
+var TRUST_RANK = { Suspect: 0, Fresh: 1, Corroborated: 2, Verified: 3 };
+var KNOWN_STATES = /* @__PURE__ */ new Set(["Fresh", "Corroborated", "Verified", "Suspect"]);
+function isKnownState(s) {
+  return typeof s === "string" && KNOWN_STATES.has(s);
+}
+function resolveTargetGrade(verifies, liveDigest) {
+  const laneOf = (v) => v.macVersion === 1 ? 1 : v.macVersion === 2 ? 2 : 0;
+  const canonGen = (g) => BigInt(g ?? 0);
+  const byGen = /* @__PURE__ */ new Map();
+  for (const v of verifies) {
+    const g = canonGen(v.gen);
+    (byGen.get(g) ?? byGen.set(g, []).get(g)).push(v);
+  }
+  let conflict = false;
+  const active = [];
+  for (const slot of byGen.values()) {
+    const lanes = /* @__PURE__ */ new Map();
+    for (const v of slot) (lanes.get(laneOf(v)) ?? lanes.set(laneOf(v), []).get(laneOf(v))).push(v);
+    for (const members of lanes.values()) {
+      const s0 = members[0].state, d0 = members[0].targetDigest ?? null;
+      if (members.some((m) => m.state !== s0 || (m.targetDigest ?? null) !== d0)) {
+        conflict = true;
+        break;
+      }
+    }
+    if (conflict) break;
+    const l1 = lanes.get(1), l2 = lanes.get(2);
+    const r1 = l1?.[0], r2 = l2?.[0];
+    if (r1 && r2 && r1.state !== r2.state) {
+      active.push(...TRUST_RANK[r1.state] <= TRUST_RANK[r2.state] ? l1 : l2);
+      if (lanes.has(0)) active.push(...lanes.get(0));
+    } else {
+      active.push(...slot);
+    }
+  }
+  const toEvidence = (v, winner2) => ({
+    gen: v.gen ?? 0,
+    state: v.state,
+    tx: v.tx,
+    macVersion: v.macVersion ?? 0,
+    txAuthenticated: v.macVersion === 2 && typeof v.tx === "string" && isIsoInstant(v.tx),
+    applicable: !isPromotion(v.state) || v.targetDigest === liveDigest,
+    winner: winner2,
+    lane: laneOf(v)
+  });
+  if (conflict) return { grade: null, compromised: true, evidence: verifies.map((v) => toEvidence(v, false)) };
+  const sorted = [...active].sort((a, b) => {
+    const ga = canonGen(a.gen), gb = canonGen(b.gen);
+    return ga < gb ? -1 : ga > gb ? 1 : 0;
+  });
+  let winner = null;
+  for (const v of sorted) {
+    if (!isPromotion(v.state) || v.targetDigest === liveDigest) winner = v;
+  }
+  return { grade: winner ? winner.state : null, compromised: false, evidence: verifies.map((v) => toEvidence(v, v === winner)) };
+}
+var isFactRow = (r) => r.type !== "verify" && r.type !== "invalidate" && r.type !== "erase";
+function forgedFactIds(records) {
+  const firstById = /* @__PURE__ */ new Map();
+  const forged = /* @__PURE__ */ new Set();
+  for (const r of records) {
+    if (!isFactRow(r)) continue;
+    const serialized = JSON.stringify(r);
+    const first = firstById.get(r.id);
+    if (first === void 0) firstById.set(r.id, serialized);
+    else if (first !== serialized) forged.add(r.id);
+  }
+  return forged;
+}
+function buildVerifiedProjection(records, opts) {
+  const nonVerify = records.filter((r) => r.type !== "verify");
+  const live = /* @__PURE__ */ new Map();
+  for (const [id, rec] of buildProjection(nonVerify)) live.set(id, { ...rec, state: "Fresh" });
+  const compromised = /* @__PURE__ */ new Set();
+  if (!opts.keyAvailable) return { live, compromised, keyAvailable: false };
+  const forgedIds = forgedFactIds(nonVerify);
+  const byTarget = /* @__PURE__ */ new Map();
+  for (const r of records) {
+    if (r.type !== "verify" || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue;
+    (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)).push(r);
+  }
+  for (const [target, verifies] of byTarget) {
+    const item = live.get(target);
+    if (!item) continue;
+    if (forgedIds.has(target)) {
+      compromised.add(target);
+      continue;
+    }
+    const { grade, compromised: c } = resolveTargetGrade(verifies, digestContent(item.content));
+    if (c) {
+      compromised.add(target);
+      continue;
+    }
+    if (grade) live.set(target, { ...item, state: grade });
+  }
+  return { live, compromised, keyAvailable: true };
+}
+
+// src/memory/witness-core.ts
+import { createHash as createHash2 } from "node:crypto";
+function sha256Hex(bytes) {
+  return createHash2("sha256").update(bytes).digest("hex");
+}
+function matchesAt(bytes, byteLength, prefixHash) {
+  if (bytes.length < byteLength) return false;
+  return sha256Hex(bytes.subarray(0, byteLength)) === prefixHash;
+}
+function classifyWitness(bytes, entry, journal) {
+  if (journal) {
+    const exact = bytes.length === journal.expected.byteLength && matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash);
+    if (exact) return { kind: "transition-heal", journal };
+    const onLineage = matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash) || journal.predecessor === null || matchesAt(bytes, journal.predecessor.byteLength, journal.predecessor.prefixHash);
+    return onLineage ? { kind: "transition-interrupted", journal } : { kind: "mismatch" };
+  }
+  if (!entry) return { kind: "first-contact", reason: "no-entry" };
+  if (!matchesAt(bytes, entry.byteLength, entry.prefixHash)) return { kind: "mismatch" };
+  return bytes.length === entry.byteLength ? { kind: "in-sync" } : { kind: "unwitnessed-suffix" };
+}
+function advanceAllowed(v) {
+  return v.kind === "first-contact" || v.kind === "in-sync" || v.kind === "unwitnessed-suffix";
+}
+function fenceId(epoch, nonce) {
+  return `witness_fence_${epoch}_${nonce}`;
+}
+
+// src/memory/witness-store.ts
+import { randomBytes as randomBytes4, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync5 } from "node:fs";
+import { dirname as dirname5, join as join5 } from "node:path";
+
+// src/memory/ownership.ts
+import { randomBytes as randomBytes3 } from "node:crypto";
+import { existsSync, mkdirSync as mkdirSync2, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync2, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
+import { join as join4, resolve, dirname as dirname4 } from "node:path";
+function canonicalRoot(projectRoot2) {
+  try {
+    return canonical(projectRoot2);
+  } catch {
+    return resolve(projectRoot2);
+  }
+}
+var GLOBAL_KEY = "@global";
+function registryPath(home2) {
+  return join4(home2, "projects.json");
+}
+function ownerFile(projectRoot2) {
+  return join4(projectRoot2, ".helix", ".owner");
+}
+function isPlainObject2(x) {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+function isValidRegistry(x) {
+  if (!isPlainObject2(x)) return false;
+  for (const v of Object.values(x)) {
+    if (!isPlainObject2(v)) return false;
+    if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
+  }
+  return true;
+}
+function loadRegistry(home2) {
+  const path = registryPath(home2);
+  let st;
+  try {
+    st = lstatSync2(path);
+  } catch (e) {
+    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
+  }
+  if (st.isSymbolicLink()) return { kind: "corrupt" };
+  let text;
+  try {
+    text = readFileSync4(path, "utf8");
+  } catch {
+    return { kind: "corrupt" };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { kind: "corrupt" };
+  }
+  if (!isValidRegistry(parsed)) return { kind: "corrupt" };
+  return { kind: "ok", reg: parsed };
+}
+function readRegistry(home2) {
+  const r = loadRegistry(home2);
+  return r.kind === "ok" ? r.reg : {};
+}
+function assertNotSymlink(path, what) {
+  let st;
+  try {
+    st = lstatSync2(path);
+  } catch {
+    return;
+  }
+  if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
+}
+function writeAll2(fd, data) {
+  const buf = Buffer.from(data, "utf8");
+  for (let off = 0; off < buf.length; ) off += writeSync2(fd, buf, off, buf.length - off);
+}
+function atomicWriteFile(path, data, mode) {
+  const tmp = `${path}.${randomBytes3(8).toString("hex")}.tmp`;
+  const fd = openSync3(tmp, "wx", mode);
+  try {
+    writeAll2(fd, data);
+    fsyncSync3(fd);
+  } finally {
+    closeSync3(fd);
+  }
+  try {
+    renameSync2(tmp, path);
+  } catch (e) {
+    try {
+      unlinkSync4(tmp);
+    } catch {
+    }
+    throw e;
+  }
+  let dfd;
+  try {
+    dfd = openSync3(dirname4(path), "r");
+    fsyncSync3(dfd);
+  } catch {
+  } finally {
+    if (dfd !== void 0) {
+      try {
+        closeSync3(dfd);
+      } catch {
+      }
+    }
+  }
+}
+function atomicWriteRegistry(home2, reg) {
+  const path = registryPath(home2);
+  assertNotSymlink(path, "registry");
+  atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
+}
+function atomicWriteOwner(projectRoot2, stamp) {
+  atomicWriteFile(ownerFile(projectRoot2), stamp, 384);
+}
+function readOwner(projectRoot2) {
+  try {
+    return readFileSync4(ownerFile(projectRoot2), "utf8").trim();
+  } catch {
+    return null;
+  }
+}
+function isOwned(projectRoot2, home2) {
+  const entry = readRegistry(home2)[canonicalRoot(projectRoot2)];
+  if (!entry) return false;
+  const stamp = readOwner(projectRoot2);
+  return stamp !== null && stamp === entry.stamp;
+}
+function projectDispositionOf(project2) {
+  if (!project2) return "inactive";
+  if (isOwned(project2.root, project2.home)) return "owned";
+  return existsSync(project2.ledger) ? "unadopted-present" : "inactive";
+}
+function stampOwnership(projectRoot2, home2, opts = {}) {
+  const gen = opts.genStamp ?? (() => randomBytes3(16).toString("hex"));
+  const key = canonicalRoot(projectRoot2);
+  mkdirSync2(home2, { recursive: true });
+  withFileLock(registryPath(home2), () => {
+    const loaded = loadRegistry(home2);
+    if (loaded.kind === "corrupt")
+      throw new Error(`stampOwnership: registry at ${registryPath(home2)} is present but unparseable \u2014 restore it before adopting (refusing to overwrite and lose other projects)`);
+    const reg = loaded.kind === "ok" ? loaded.reg : {};
+    const existing = reg[key];
+    if (opts.autoAdoptLedger && existsSync(opts.autoAdoptLedger))
+      throw new Error("commit: a project memory file appeared here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it");
+    const stamp = existing?.stamp ?? gen();
+    const macNonce = existing?.macNonce ?? gen();
+    const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
+    const helixDir = join4(projectRoot2, ".helix");
+    assertNotSymlink(helixDir, ".helix directory");
+    mkdirSync2(helixDir, { recursive: true });
+    atomicWriteOwner(projectRoot2, stamp);
+    reg[key] = { stamp, adoptedAt, macNonce };
+    atomicWriteRegistry(home2, reg);
+  });
+}
+function scopeNonce(projectRoot2, home2) {
+  const entry = readRegistry(home2)[canonicalRoot(projectRoot2)];
+  return entry?.macNonce ?? null;
+}
+function globalScopeNonce(home2) {
+  const r = loadRegistry(home2);
+  if (r.kind === "corrupt") return null;
+  const fast = r.kind === "ok" ? r.reg[GLOBAL_KEY]?.macNonce : void 0;
+  if (fast) return fast;
+  mkdirSync2(home2, { recursive: true });
+  try {
+    return withFileLock(registryPath(home2), () => {
+      const r2 = loadRegistry(home2);
+      if (r2.kind === "corrupt") return null;
+      const reg = r2.kind === "ok" ? r2.reg : {};
+      const existing = reg[GLOBAL_KEY]?.macNonce;
+      if (existing) return existing;
+      const macNonce = randomBytes3(16).toString("hex");
+      reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
+      atomicWriteRegistry(home2, reg);
+      return macNonce;
+    });
+  } catch {
+    return null;
+  }
 }
 
 // src/memory/witness-store.ts
@@ -14411,9 +14598,22 @@ function readLedgerRaw(path) {
 function planCompaction(records, opts) {
   const live = buildProjection(records);
   const hmacAware = opts.keepValidVerify !== void 0;
+  const forgedIds = forgedFactIds(records);
+  const forgedRows = /* @__PURE__ */ new Map();
+  if (forgedIds.size > 0) {
+    for (const r of records) {
+      if (!isFactRow(r) || !forgedIds.has(r.id)) continue;
+      (forgedRows.get(r.id) ?? forgedRows.set(r.id, []).get(r.id)).push(r);
+    }
+  }
   const kept = [];
   for (const r of live.values()) {
     if (opts.erasedIds.has(r.id)) continue;
+    const occurrences = forgedRows.get(r.id);
+    if (occurrences) {
+      for (const o of occurrences) kept.push(o);
+      continue;
+    }
     kept.push(hmacAware ? { ...r, state: "Fresh" } : r);
   }
   for (const r of records) {
@@ -14606,190 +14806,6 @@ function cheapGate(a) {
 function dirtyGate(a) {
   if (a.rows === 0) return false;
   return a.reclaimable / a.rows >= a.cfg.dirtyRatio || a.reclaimableBytes >= a.cfg.minDirtyBytes;
-}
-
-// src/memory/history.ts
-var ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-var isIsoInstant = (s) => {
-  if (!ISO_Z.test(s)) return false;
-  const d = new Date(s);
-  return !Number.isNaN(d.getTime()) && d.toISOString() === s;
-};
-var isClosing = (t) => t === "supersede" || t === "invalidate" || t === "erase";
-function ledgerTruncated(records) {
-  const factIds = new Set(records.filter((r) => r.type === "assert" || r.type === "supersede").map((r) => r.id));
-  return records.some((r) => {
-    if (r.type === "verify" && r.supersedes === null && !r.mac && r.content === "") return true;
-    return r.type === "erase" && r.supersedes !== null && !factIds.has(r.supersedes);
-  });
-}
-function buildHistory(records) {
-  const live = buildProjection(records);
-  const anomalies = /* @__PURE__ */ new Set();
-  const factIndex = /* @__PURE__ */ new Map();
-  const markersByTarget = /* @__PURE__ */ new Map();
-  records.forEach((r, i) => {
-    if (r.type === "assert" || r.type === "supersede") {
-      if (factIndex.has(r.id)) anomalies.add(r.id);
-      else factIndex.set(r.id, i);
-    }
-    if (isClosing(r.type) && r.supersedes) {
-      const arr = markersByTarget.get(r.supersedes) ?? [];
-      arr.push({ kind: r.type, i, tx: r.tx, markerId: r.id });
-      markersByTarget.set(r.supersedes, arr);
-    }
-  });
-  const rows = [];
-  const emitted = /* @__PURE__ */ new Set();
-  for (const r of records) {
-    if (r.type !== "assert" && r.type !== "supersede") continue;
-    if (emitted.has(r.id)) continue;
-    emitted.add(r.id);
-    if (live.has(r.id)) {
-      rows.push({ record: r, txTo: null, closedBy: null });
-      continue;
-    }
-    const ri = factIndex.get(r.id);
-    const markers = markersByTarget.get(r.id) ?? [];
-    const after = markers.filter((m) => m.i > ri).sort((x, y) => x.i - y.i);
-    const C = after[0];
-    if (markers.some((m) => m.i < ri)) anomalies.add(r.id);
-    let txTo;
-    let closedBy;
-    if (C) {
-      closedBy = { kind: C.kind, markerId: C.markerId };
-      if (C.tx >= r.tx) {
-        txTo = C.tx;
-      } else {
-        txTo = r.tx;
-        anomalies.add(r.id);
-      }
-    } else {
-      const earliest = [...markers].sort((x, y) => x.i - y.i)[0];
-      closedBy = earliest ? { kind: earliest.kind, markerId: earliest.markerId } : null;
-      txTo = r.tx;
-      anomalies.add(r.id);
-    }
-    const record2 = closedBy?.kind === "erase" ? { ...r, content: "" } : r;
-    rows.push({ record: record2, txTo, closedBy });
-  }
-  const truncated = ledgerTruncated(records);
-  return { rows, anomalies, truncated };
-}
-
-// src/memory/verified-projection.ts
-function clampElevatedState(s) {
-  return s === "Verified" || s === "Corroborated" ? "Fresh" : s;
-}
-function clampElevated(p) {
-  const live = /* @__PURE__ */ new Map();
-  for (const [id, rec] of p.live) {
-    const state = clampElevatedState(rec.state);
-    live.set(id, state === rec.state ? rec : { ...rec, state });
-  }
-  return { live, compromised: p.compromised, keyAvailable: p.keyAvailable };
-}
-function enforceWitnessProjection(p, verdict) {
-  if (verdict.kind === "transition-interrupted") return { live: /* @__PURE__ */ new Map(), compromised: /* @__PURE__ */ new Set(), keyAvailable: p.keyAvailable };
-  if (verdict.kind === "mismatch") return clampElevated(p);
-  return p;
-}
-var isPromotion = (s) => s === "Verified" || s === "Corroborated";
-var TRUST_RANK = { Suspect: 0, Fresh: 1, Corroborated: 2, Verified: 3 };
-var KNOWN_STATES = /* @__PURE__ */ new Set(["Fresh", "Corroborated", "Verified", "Suspect"]);
-function isKnownState(s) {
-  return typeof s === "string" && KNOWN_STATES.has(s);
-}
-function resolveTargetGrade(verifies, liveDigest) {
-  const laneOf = (v) => v.macVersion === 1 ? 1 : v.macVersion === 2 ? 2 : 0;
-  const canonGen = (g) => BigInt(g ?? 0);
-  const byGen = /* @__PURE__ */ new Map();
-  for (const v of verifies) {
-    const g = canonGen(v.gen);
-    (byGen.get(g) ?? byGen.set(g, []).get(g)).push(v);
-  }
-  let conflict = false;
-  const active = [];
-  for (const slot of byGen.values()) {
-    const lanes = /* @__PURE__ */ new Map();
-    for (const v of slot) (lanes.get(laneOf(v)) ?? lanes.set(laneOf(v), []).get(laneOf(v))).push(v);
-    for (const members of lanes.values()) {
-      const s0 = members[0].state, d0 = members[0].targetDigest ?? null;
-      if (members.some((m) => m.state !== s0 || (m.targetDigest ?? null) !== d0)) {
-        conflict = true;
-        break;
-      }
-    }
-    if (conflict) break;
-    const l1 = lanes.get(1), l2 = lanes.get(2);
-    const r1 = l1?.[0], r2 = l2?.[0];
-    if (r1 && r2 && r1.state !== r2.state) {
-      active.push(...TRUST_RANK[r1.state] <= TRUST_RANK[r2.state] ? l1 : l2);
-      if (lanes.has(0)) active.push(...lanes.get(0));
-    } else {
-      active.push(...slot);
-    }
-  }
-  const toEvidence = (v, winner2) => ({
-    gen: v.gen ?? 0,
-    state: v.state,
-    tx: v.tx,
-    macVersion: v.macVersion ?? 0,
-    txAuthenticated: v.macVersion === 2 && typeof v.tx === "string" && isIsoInstant(v.tx),
-    applicable: !isPromotion(v.state) || v.targetDigest === liveDigest,
-    winner: winner2,
-    lane: laneOf(v)
-  });
-  if (conflict) return { grade: null, compromised: true, evidence: verifies.map((v) => toEvidence(v, false)) };
-  const sorted = [...active].sort((a, b) => {
-    const ga = canonGen(a.gen), gb = canonGen(b.gen);
-    return ga < gb ? -1 : ga > gb ? 1 : 0;
-  });
-  let winner = null;
-  for (const v of sorted) {
-    if (!isPromotion(v.state) || v.targetDigest === liveDigest) winner = v;
-  }
-  return { grade: winner ? winner.state : null, compromised: false, evidence: verifies.map((v) => toEvidence(v, v === winner)) };
-}
-function forgedFactIds(records) {
-  const firstById = /* @__PURE__ */ new Map();
-  const forged = /* @__PURE__ */ new Set();
-  for (const r of records) {
-    if (r.type === "verify" || r.type === "invalidate" || r.type === "erase") continue;
-    const serialized = JSON.stringify(r);
-    const first = firstById.get(r.id);
-    if (first === void 0) firstById.set(r.id, serialized);
-    else if (first !== serialized) forged.add(r.id);
-  }
-  return forged;
-}
-function buildVerifiedProjection(records, opts) {
-  const nonVerify = records.filter((r) => r.type !== "verify");
-  const live = /* @__PURE__ */ new Map();
-  for (const [id, rec] of buildProjection(nonVerify)) live.set(id, { ...rec, state: "Fresh" });
-  const compromised = /* @__PURE__ */ new Set();
-  if (!opts.keyAvailable) return { live, compromised, keyAvailable: false };
-  const forgedIds = forgedFactIds(nonVerify);
-  const byTarget = /* @__PURE__ */ new Map();
-  for (const r of records) {
-    if (r.type !== "verify" || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue;
-    (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)).push(r);
-  }
-  for (const [target, verifies] of byTarget) {
-    const item = live.get(target);
-    if (!item) continue;
-    if (forgedIds.has(target)) {
-      compromised.add(target);
-      continue;
-    }
-    const { grade, compromised: c } = resolveTargetGrade(verifies, digestContent(item.content));
-    if (c) {
-      compromised.add(target);
-      continue;
-    }
-    if (grade) live.set(target, { ...item, state: grade });
-  }
-  return { live, compromised, keyAvailable: true };
 }
 
 // src/memory/asof.ts
@@ -24877,7 +24893,7 @@ function handleRecall(store2, args) {
   const conflictIds = items.filter((i) => i.integrity === "compromised").map((i) => safeId(i.record.id));
   const conflictNote = conflictIds.length ? `
 
-(integrity conflict \u2014 equal-generation verify mismatch: ${conflictIds.join(", ")})` : "";
+(integrity conflict \u2014 equal-generation verify mismatch or duplicate fact id: ${conflictIds.join(", ")})` : "";
   return ok(framed + reverifyNote + egressNote + integrityNote + conflictNote + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
 }
 function handleInspect(store2, args) {
@@ -24900,7 +24916,7 @@ function handleInspect(store2, args) {
     if (!keyAvailable) notes.push("\n\n(integrity verification unavailable \u2014 trust grades shown are unverified)");
     if (facts.some((f) => f.integrity === "compromised")) notes.push(`
 
-(integrity conflict \u2014 equal-generation verify mismatch: ${facts.filter((f) => f.integrity === "compromised").map((f) => safeId(f.record.id)).join(", ")})`);
+(integrity conflict \u2014 equal-generation verify mismatch or duplicate fact id: ${facts.filter((f) => f.integrity === "compromised").map((f) => safeId(f.record.id)).join(", ")})`);
     if (facts.some((f) => f.evidence.some((e) => !e.txAuthenticated))) notes.push("\n\n(verify timing marked auth=N is declared, not authenticated \u2014 v1/legacy)");
     if (truncated) notes.push("\n\n(history may be truncated by a past compaction \u2014 reconstruction before the horizon is unreliable)");
     if (projectDisposition2 === "unadopted-present") notes.push(unadoptedNote(projectDisposition2));

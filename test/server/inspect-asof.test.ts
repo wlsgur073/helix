@@ -119,6 +119,17 @@ describe('handleInspect asOf (spec C §6)', () => {
     expect(out).not.toContain('2026-01-01T00:00:00Z'); // raw forged tx never rendered (iso() replaced it)
   });
 
+  it('names the DUPLICATE-FACT-ID cause on the as-of surface the duplicate guard actually feeds', () => {
+    // The as-of note carries the same two-cause wording as recall's: here the ONLY verify is genuine,
+    // so an advisory naming an equal-generation mismatch alone describes a conflict that is not there.
+    const { store, id, rec, ledger } = mk();
+    appendRaw(ledger, { ...rec, provenance: { source: 'agent-inference', sessionId: 's' } });
+    const out = text(handleInspect(store, { asOf: new Date().toISOString() }));
+    expect(out).toContain('integrity conflict');
+    expect(out).toContain('duplicate fact id');
+    expect(out).toContain(id);
+  });
+
   it('surfaces the integrity-conflict note for a fact compromised at t (M2 surface)', () => {
     const { store, id, rec, home, ledger } = mk();
     // The genuine confirm minted a v2 gen-1 Verified verify. A ledger-write adversary (test proxy: has the

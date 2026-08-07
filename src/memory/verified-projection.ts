@@ -101,6 +101,17 @@ export function resolveTargetGrade(
   return { grade: winner ? winner.state : null, compromised: false, evidence: verifies.map((v) => toEvidence(v, v === winner)) };
 }
 
+/** Rows that can BE a live fact under their own id (assert/supersede), i.e. exactly the population
+ *  forgedFactIds compares for a duplicate. A verify targets another row (`supersedes`), and an
+ *  invalidate/erase closes one; none of the three is ever surfaced as a fact under its own id.
+ *
+ *  Exported because compaction (ledger.ts) must PRESERVE precisely the rows this admits when an id is
+ *  forged. The detector and the preserver cannot be allowed to drift: a row the detector compares but
+ *  the preserver drops is evidence destroyed by a rewrite; a row the preserver keeps but the detector
+ *  ignores is unreclaimable bloat that flags nothing. One predicate, both call sites. */
+export const isFactRow = (r: MemoryRecord): boolean =>
+  r.type !== 'verify' && r.type !== 'invalidate' && r.type !== 'erase';
+
 /** Fact ids carried by two or more DIFFERING records — tamper evidence, never elevated.
  *
  *  Ids are minted server-side per commit (store.id -> randomUUID), so a caller cannot choose one and
@@ -117,12 +128,24 @@ export function resolveTargetGrade(
  *  property into silent grade loss.
  *
  *  Shared by the live projection and the as-of reconstruction: a guard on only one of them would
- *  hand the other back as a bypass, and would break as-of's contract that asOf(now) equals live. */
+ *  hand the other back as a bypass, and would break as-of's contract that asOf(now) equals live.
+ *
+ *  DETECTION IS PHYSICAL, so the EVIDENCE must be too. This function infers tampering per read from
+ *  two differing rows co-existing in the record array — it reads no durable flag. A rewrite that kept
+ *  one row per live id would therefore not hide the alarm but DELETE it, leaving the forger's twin
+ *  (buildProjection is last-write-wins and a twin is appended after the original) holding a still-valid
+ *  signed verify. planCompaction is the counterpart that makes this durable: it preserves every
+ *  occurrence of a forged id VERBATIM instead of collapsing it, and must never normalize ANY field —
+ *  not just `state`. The identity here is whole-record JSON, so normalizing whichever field two
+ *  occurrences happen to differ in makes them byte-identical and lands them in the exemption above,
+ *  destroying the evidence. `state` is only the field the adjacent Fresh-reset would have hit; a
+ *  timestamp canonicalizer at the horizon would do the same via `tx`/`validFrom` (measured: the twin
+ *  re-grades to Verified), and every other field is equally load-bearing. */
 export function forgedFactIds(records: MemoryRecord[]): Set<string> {
   const firstById = new Map<string, string>();
   const forged = new Set<string>();
   for (const r of records) {
-    if (r.type === 'verify' || r.type === 'invalidate' || r.type === 'erase') continue; // never live facts
+    if (!isFactRow(r)) continue; // never live facts
     const serialized = JSON.stringify(r);
     const first = firstById.get(r.id);
     if (first === undefined) firstById.set(r.id, serialized);

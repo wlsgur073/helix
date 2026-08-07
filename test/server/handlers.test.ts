@@ -150,6 +150,26 @@ describe('tool handlers', () => {
     expect(out.split('\n').some((l) => l.startsWith('- m_z'))).toBe(false);
   });
 
+  it('handleRecall names the DUPLICATE-FACT-ID cause too — an operator sent to look for a verify conflict finds none', () => {
+    // `compromised` has TWO causes: an equal-generation verify mismatch AND a fact id carried by two
+    // differing records. An advisory naming only the first sends an operator hunting a conflict that
+    // does not exist here — there is exactly ONE verify, and it is genuine.
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const ledger = join(home, 'm.jsonl');
+    let n = 0;
+    const s = new MemoryStore(ledger, { sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`, home });
+    const a = s.commit({ content: 'db is postgres', source: 'user' });
+    s.confirm(a.id);
+    const original = readFileSync(ledger, 'utf8').split('\n').filter(Boolean)
+      .map((l) => JSON.parse(l) as MemoryRecord).find((r) => r.id === a.id && r.type === 'assert')!;
+    appendFileSync(ledger, JSON.stringify({ ...original, provenance: { ...original.provenance, source: 'agent-inference' } }) + '\n');
+
+    const out = text(handleRecall(s, { query: 'postgres' }));
+    expect(out).toContain('integrity conflict');
+    expect(out).toContain('duplicate fact id');
+    expect(out).toContain(a.id);
+  });
+
   it('handleRecall surfaces the integrity-conflict advisory for an equal-generation verify mismatch', () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
     const ledger = join(home, 'm.jsonl');

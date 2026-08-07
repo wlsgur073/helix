@@ -581,6 +581,130 @@ function buildProjection(records) {
   return live;
 }
 
+// src/memory/history.ts
+var ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+var isIsoInstant = (s) => {
+  if (!ISO_Z.test(s)) return false;
+  const d = new Date(s);
+  return !Number.isNaN(d.getTime()) && d.toISOString() === s;
+};
+
+// src/memory/verified-projection.ts
+function clampElevatedState(s) {
+  return s === "Verified" || s === "Corroborated" ? "Fresh" : s;
+}
+function clampElevated(p) {
+  const live = /* @__PURE__ */ new Map();
+  for (const [id, rec] of p.live) {
+    const state = clampElevatedState(rec.state);
+    live.set(id, state === rec.state ? rec : { ...rec, state });
+  }
+  return { live, compromised: p.compromised, keyAvailable: p.keyAvailable };
+}
+function enforceWitnessProjection(p, verdict) {
+  if (verdict.kind === "transition-interrupted") return { live: /* @__PURE__ */ new Map(), compromised: /* @__PURE__ */ new Set(), keyAvailable: p.keyAvailable };
+  if (verdict.kind === "mismatch") return clampElevated(p);
+  return p;
+}
+var isPromotion = (s) => s === "Verified" || s === "Corroborated";
+var TRUST_RANK = { Suspect: 0, Fresh: 1, Corroborated: 2, Verified: 3 };
+var KNOWN_STATES = /* @__PURE__ */ new Set(["Fresh", "Corroborated", "Verified", "Suspect"]);
+function isKnownState(s) {
+  return typeof s === "string" && KNOWN_STATES.has(s);
+}
+function resolveTargetGrade(verifies, liveDigest) {
+  const laneOf = (v) => v.macVersion === 1 ? 1 : v.macVersion === 2 ? 2 : 0;
+  const canonGen = (g) => BigInt(g ?? 0);
+  const byGen = /* @__PURE__ */ new Map();
+  for (const v of verifies) {
+    const g = canonGen(v.gen);
+    (byGen.get(g) ?? byGen.set(g, []).get(g)).push(v);
+  }
+  let conflict = false;
+  const active = [];
+  for (const slot of byGen.values()) {
+    const lanes = /* @__PURE__ */ new Map();
+    for (const v of slot) (lanes.get(laneOf(v)) ?? lanes.set(laneOf(v), []).get(laneOf(v))).push(v);
+    for (const members of lanes.values()) {
+      const s0 = members[0].state, d0 = members[0].targetDigest ?? null;
+      if (members.some((m) => m.state !== s0 || (m.targetDigest ?? null) !== d0)) {
+        conflict = true;
+        break;
+      }
+    }
+    if (conflict) break;
+    const l1 = lanes.get(1), l2 = lanes.get(2);
+    const r1 = l1?.[0], r2 = l2?.[0];
+    if (r1 && r2 && r1.state !== r2.state) {
+      active.push(...TRUST_RANK[r1.state] <= TRUST_RANK[r2.state] ? l1 : l2);
+      if (lanes.has(0)) active.push(...lanes.get(0));
+    } else {
+      active.push(...slot);
+    }
+  }
+  const toEvidence = (v, winner2) => ({
+    gen: v.gen ?? 0,
+    state: v.state,
+    tx: v.tx,
+    macVersion: v.macVersion ?? 0,
+    txAuthenticated: v.macVersion === 2 && typeof v.tx === "string" && isIsoInstant(v.tx),
+    applicable: !isPromotion(v.state) || v.targetDigest === liveDigest,
+    winner: winner2,
+    lane: laneOf(v)
+  });
+  if (conflict) return { grade: null, compromised: true, evidence: verifies.map((v) => toEvidence(v, false)) };
+  const sorted = [...active].sort((a, b) => {
+    const ga = canonGen(a.gen), gb = canonGen(b.gen);
+    return ga < gb ? -1 : ga > gb ? 1 : 0;
+  });
+  let winner = null;
+  for (const v of sorted) {
+    if (!isPromotion(v.state) || v.targetDigest === liveDigest) winner = v;
+  }
+  return { grade: winner ? winner.state : null, compromised: false, evidence: verifies.map((v) => toEvidence(v, v === winner)) };
+}
+var isFactRow = (r) => r.type !== "verify" && r.type !== "invalidate" && r.type !== "erase";
+function forgedFactIds(records) {
+  const firstById = /* @__PURE__ */ new Map();
+  const forged = /* @__PURE__ */ new Set();
+  for (const r of records) {
+    if (!isFactRow(r)) continue;
+    const serialized = JSON.stringify(r);
+    const first = firstById.get(r.id);
+    if (first === void 0) firstById.set(r.id, serialized);
+    else if (first !== serialized) forged.add(r.id);
+  }
+  return forged;
+}
+function buildVerifiedProjection(records, opts) {
+  const nonVerify = records.filter((r) => r.type !== "verify");
+  const live = /* @__PURE__ */ new Map();
+  for (const [id, rec] of buildProjection(nonVerify)) live.set(id, { ...rec, state: "Fresh" });
+  const compromised = /* @__PURE__ */ new Set();
+  if (!opts.keyAvailable) return { live, compromised, keyAvailable: false };
+  const forgedIds = forgedFactIds(nonVerify);
+  const byTarget = /* @__PURE__ */ new Map();
+  for (const r of records) {
+    if (r.type !== "verify" || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue;
+    (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)).push(r);
+  }
+  for (const [target, verifies] of byTarget) {
+    const item = live.get(target);
+    if (!item) continue;
+    if (forgedIds.has(target)) {
+      compromised.add(target);
+      continue;
+    }
+    const { grade, compromised: c } = resolveTargetGrade(verifies, digestContent(item.content));
+    if (c) {
+      compromised.add(target);
+      continue;
+    }
+    if (grade) live.set(target, { ...item, state: grade });
+  }
+  return { live, compromised, keyAvailable: true };
+}
+
 // src/memory/witness-core.ts
 import { createHash as createHash2 } from "node:crypto";
 function sha256Hex(bytes) {
@@ -708,129 +832,6 @@ function readLedgerRaw(path) {
   }
   const { records, skippedNonBlank } = parseLedgerHealth(bytes.toString("utf8"));
   return { bytes, records, skippedNonBlank };
-}
-
-// src/memory/history.ts
-var ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-var isIsoInstant = (s) => {
-  if (!ISO_Z.test(s)) return false;
-  const d = new Date(s);
-  return !Number.isNaN(d.getTime()) && d.toISOString() === s;
-};
-
-// src/memory/verified-projection.ts
-function clampElevatedState(s) {
-  return s === "Verified" || s === "Corroborated" ? "Fresh" : s;
-}
-function clampElevated(p) {
-  const live = /* @__PURE__ */ new Map();
-  for (const [id, rec] of p.live) {
-    const state = clampElevatedState(rec.state);
-    live.set(id, state === rec.state ? rec : { ...rec, state });
-  }
-  return { live, compromised: p.compromised, keyAvailable: p.keyAvailable };
-}
-function enforceWitnessProjection(p, verdict) {
-  if (verdict.kind === "transition-interrupted") return { live: /* @__PURE__ */ new Map(), compromised: /* @__PURE__ */ new Set(), keyAvailable: p.keyAvailable };
-  if (verdict.kind === "mismatch") return clampElevated(p);
-  return p;
-}
-var isPromotion = (s) => s === "Verified" || s === "Corroborated";
-var TRUST_RANK = { Suspect: 0, Fresh: 1, Corroborated: 2, Verified: 3 };
-var KNOWN_STATES = /* @__PURE__ */ new Set(["Fresh", "Corroborated", "Verified", "Suspect"]);
-function isKnownState(s) {
-  return typeof s === "string" && KNOWN_STATES.has(s);
-}
-function resolveTargetGrade(verifies, liveDigest) {
-  const laneOf = (v) => v.macVersion === 1 ? 1 : v.macVersion === 2 ? 2 : 0;
-  const canonGen = (g) => BigInt(g ?? 0);
-  const byGen = /* @__PURE__ */ new Map();
-  for (const v of verifies) {
-    const g = canonGen(v.gen);
-    (byGen.get(g) ?? byGen.set(g, []).get(g)).push(v);
-  }
-  let conflict = false;
-  const active = [];
-  for (const slot of byGen.values()) {
-    const lanes = /* @__PURE__ */ new Map();
-    for (const v of slot) (lanes.get(laneOf(v)) ?? lanes.set(laneOf(v), []).get(laneOf(v))).push(v);
-    for (const members of lanes.values()) {
-      const s0 = members[0].state, d0 = members[0].targetDigest ?? null;
-      if (members.some((m) => m.state !== s0 || (m.targetDigest ?? null) !== d0)) {
-        conflict = true;
-        break;
-      }
-    }
-    if (conflict) break;
-    const l1 = lanes.get(1), l2 = lanes.get(2);
-    const r1 = l1?.[0], r2 = l2?.[0];
-    if (r1 && r2 && r1.state !== r2.state) {
-      active.push(...TRUST_RANK[r1.state] <= TRUST_RANK[r2.state] ? l1 : l2);
-      if (lanes.has(0)) active.push(...lanes.get(0));
-    } else {
-      active.push(...slot);
-    }
-  }
-  const toEvidence = (v, winner2) => ({
-    gen: v.gen ?? 0,
-    state: v.state,
-    tx: v.tx,
-    macVersion: v.macVersion ?? 0,
-    txAuthenticated: v.macVersion === 2 && typeof v.tx === "string" && isIsoInstant(v.tx),
-    applicable: !isPromotion(v.state) || v.targetDigest === liveDigest,
-    winner: winner2,
-    lane: laneOf(v)
-  });
-  if (conflict) return { grade: null, compromised: true, evidence: verifies.map((v) => toEvidence(v, false)) };
-  const sorted = [...active].sort((a, b) => {
-    const ga = canonGen(a.gen), gb = canonGen(b.gen);
-    return ga < gb ? -1 : ga > gb ? 1 : 0;
-  });
-  let winner = null;
-  for (const v of sorted) {
-    if (!isPromotion(v.state) || v.targetDigest === liveDigest) winner = v;
-  }
-  return { grade: winner ? winner.state : null, compromised: false, evidence: verifies.map((v) => toEvidence(v, v === winner)) };
-}
-function forgedFactIds(records) {
-  const firstById = /* @__PURE__ */ new Map();
-  const forged = /* @__PURE__ */ new Set();
-  for (const r of records) {
-    if (r.type === "verify" || r.type === "invalidate" || r.type === "erase") continue;
-    const serialized = JSON.stringify(r);
-    const first = firstById.get(r.id);
-    if (first === void 0) firstById.set(r.id, serialized);
-    else if (first !== serialized) forged.add(r.id);
-  }
-  return forged;
-}
-function buildVerifiedProjection(records, opts) {
-  const nonVerify = records.filter((r) => r.type !== "verify");
-  const live = /* @__PURE__ */ new Map();
-  for (const [id, rec] of buildProjection(nonVerify)) live.set(id, { ...rec, state: "Fresh" });
-  const compromised = /* @__PURE__ */ new Set();
-  if (!opts.keyAvailable) return { live, compromised, keyAvailable: false };
-  const forgedIds = forgedFactIds(nonVerify);
-  const byTarget = /* @__PURE__ */ new Map();
-  for (const r of records) {
-    if (r.type !== "verify" || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue;
-    (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)).push(r);
-  }
-  for (const [target, verifies] of byTarget) {
-    const item = live.get(target);
-    if (!item) continue;
-    if (forgedIds.has(target)) {
-      compromised.add(target);
-      continue;
-    }
-    const { grade, compromised: c } = resolveTargetGrade(verifies, digestContent(item.content));
-    if (c) {
-      compromised.add(target);
-      continue;
-    }
-    if (grade) live.set(target, { ...item, state: grade });
-  }
-  return { live, compromised, keyAvailable: true };
 }
 
 // src/memory/witness-read.ts

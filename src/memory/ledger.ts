@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
+import { forgedFactIds, isFactRow } from './verified-projection.js';
 import { withFileLock, canonical } from './lock.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
@@ -337,9 +338,43 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   // the re-kept signed verify (below) is the SOLE source of trust on replay. Legacy mode (no
   // keepValidVerify) must NOT reset, since it drops verifies and the baked state is all that's left.
   const hmacAware = opts.keepValidVerify !== undefined;
+  // Duplicate-fact-id tamper evidence is PHYSICAL (verified-projection.forgedFactIds): it is detected
+  // by two DIFFERING rows for one id co-existing in the file, not by a durable flag. `live` holds one
+  // last-write-wins row per id — the FORGER'S, since a twin is appended after the original — so
+  // collapsing a forged id here does not merely hide the alarm, it destroys it: the original row is
+  // deleted, the genuine signed verify is preserved by the loop below (its target is still live and
+  // the twin keeps `content` byte-identical, which is the premise of the attack), and the next read
+  // sees one row, no duplicate, and re-grades the twin to what the original earned. No existing signal
+  // covers that: the horizon marker fires only for a row NO LONGER live and this id is live, and
+  // droppedForgedVerifies counts only verifies — so the rewrite would record that it destroyed nothing.
+  // A permanent erase rewrites unconditionally (store.erase), and the erased id need not be the forged
+  // one, so right-to-erasure on one item would otherwise launder a forgery against another.
+  const forgedIds = forgedFactIds(records);
+  // Physical occurrences of each forged id, grouped in FILE order by ONE pass — never rescanned per
+  // id, so a hostile ledger carrying many forged ids cannot make the keep loop below quadratic. Built
+  // only when there is something to group, so the ordinary (empty) case costs one Set.size check.
+  const forgedRows = new Map<string, MemoryRecord[]>();
+  if (forgedIds.size > 0) {
+    for (const r of records) {
+      if (!isFactRow(r) || !forgedIds.has(r.id)) continue;
+      (forgedRows.get(r.id) ?? forgedRows.set(r.id, []).get(r.id)!).push(r);
+    }
+  }
   const kept: MemoryRecord[] = [];
   for (const r of live.values()) {
-    if (opts.erasedIds.has(r.id)) continue;
+    if (opts.erasedIds.has(r.id)) continue;                 // erasure still wins: evidence never outranks right-to-erasure
+    const occurrences = forgedRows.get(r.id);
+    if (occurrences) {
+      // Every physical occurrence, VERBATIM and in file order. Verbatim is load-bearing, not
+      // conservatism: the Fresh reset below would make two rows differing ONLY in `state`
+      // byte-identical, and forgedFactIds EXEMPTS byte-identical repeats (appends are at-least-once,
+      // so a crash may legitimately replay one line) — normalizing here would erase exactly the
+      // evidence this branch exists to preserve. Withholding trust is unaffected: the verifying
+      // replay (R1) clamps every non-verify `state` to Fresh on read, so a preserved row's stale
+      // elevation confers nothing, and the id is flagged compromised regardless.
+      for (const o of occurrences) kept.push(o);
+      continue;
+    }
     kept.push(hmacAware ? { ...r, state: 'Fresh' } : r);
   }
   // Keep a content-free tombstone for each erase marker (audit: an erasure happened).

@@ -204,14 +204,25 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
   const integrityNote = integrityAvailable
     ? ''
     : '\n\n(integrity verification unavailable — trust grades shown are unverified)';
-  // Spec §8 / Unit U1: buildVerifiedProjection flags an item `compromised` when it sees an
-  // equal-generation MAC conflict (two valid verifies of the same target+gen disagreeing on state) —
-  // a tampering signal, distinct from the key-absent unavailable case. The item is already clamped to
-  // Fresh; surface the conflict by id in a trusted, out-of-band note so the agent does not silently
-  // trust a target whose verify history is contradictory.
+  // Spec §8 / Unit U1: buildVerifiedProjection flags an item `compromised` for EITHER of two
+  // tampering signals, both distinct from the key-absent unavailable case. Both are raised only
+  // inside the per-target grading loop, so BOTH require the target to be live AND to carry at least
+  // one valid signed verify — the loop iterates exactly those targets:
+  //   (1) an equal-generation MAC conflict — two valid verifies of the same target+gen disagreeing
+  //       on state, so the verify history is self-contradictory; or
+  //   (2) a duplicate fact id — two DIFFERING records claiming one id, so which occurrence is
+  //       genuine is not knowable from the ledger (ids are minted server-side per commit, so this
+  //       takes a boundary append or an adopted foreign ledger). Here the verify history may be
+  //       perfectly consistent — a single genuine verify — and the conflict is between the FACT rows.
+  //       The shared precondition still binds: a duplicate id on a fact nothing has verified is NOT
+  //       flagged (measured), so this note is silent for it. Nothing elevates it either, so no grade
+  //       is laundered — but its content is served unremarked.
+  // Both causes are named: an advisory naming only (1) sends an operator hunting a verify conflict
+  // that, under (2), does not exist. The item is already clamped to Fresh; surface the ids in a
+  // trusted, out-of-band note so the agent does not silently trust the target.
   const conflictIds = items.filter((i) => i.integrity === 'compromised').map((i) => safeId(i.record.id));
   const conflictNote = conflictIds.length
-    ? `\n\n(integrity conflict — equal-generation verify mismatch: ${conflictIds.join(', ')})`
+    ? `\n\n(integrity conflict — equal-generation verify mismatch or duplicate fact id: ${conflictIds.join(', ')})`
     : '';
   return ok(framed + reverifyNote + egressNote + integrityNote + conflictNote + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
 }
@@ -239,7 +250,9 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
     const frame = makeDataFrame({ label: `MEMORY AS OF ${args.asOf}`, nonce: newNonce(), lines });
     const notes: string[] = ['\n\n(as-of snapshot — membership and timing are declared, not authenticated; only auth=Y verify timing is MAC-bound)'];
     if (!keyAvailable) notes.push('\n\n(integrity verification unavailable — trust grades shown are unverified)');
-    if (facts.some((f) => f.integrity === 'compromised')) notes.push(`\n\n(integrity conflict — equal-generation verify mismatch: ${facts.filter((f) => f.integrity === 'compromised').map((f) => safeId(f.record.id)).join(', ')})`);
+    // Same two causes as the recall note above (equal-gen verify mismatch OR duplicate fact id) — this
+    // is the surface the duplicate guard actually feeds, so naming only the first would be worst here.
+    if (facts.some((f) => f.integrity === 'compromised')) notes.push(`\n\n(integrity conflict — equal-generation verify mismatch or duplicate fact id: ${facts.filter((f) => f.integrity === 'compromised').map((f) => safeId(f.record.id)).join(', ')})`);
     if (facts.some((f) => f.evidence.some((e) => !e.txAuthenticated))) notes.push('\n\n(verify timing marked auth=N is declared, not authenticated — v1/legacy)');
     if (truncated) notes.push('\n\n(history may be truncated by a past compaction — reconstruction before the horizon is unreliable)');
     if (projectDisposition === 'unadopted-present') notes.push(unadoptedNote(projectDisposition));
