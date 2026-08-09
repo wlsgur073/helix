@@ -86,6 +86,14 @@ Operationally:
 4. Record in the final report that the chain was run from a candidate-commit checkout, per §9a's
    requirement to carry "the pins re-verified at the close".
 
+Deviation ledger: every entry in `v2-freeze-deviations-2026-08.md` (same directory) is REQUIRED
+content for the §9a report's reset-and-deviation history — including the 2026-08 autoUpdate
+deviation and its no-reset determination. The freeze-runtime guard
+(`scripts/freeze-runtime-check.sh`) retires only when the close checklist writes the validated
+close receipt (`v2-close-receipt-2026-08.json`) after release-record validation; writing that
+file is part of this §9a step, and the close also removes the bashrc/systemd freeze-guard wiring
+and restores both marketplace `autoUpdate` flags to true.
+
 ## Conditions to expect at the close
 
 These are known now. Meeting them for the first time on close day, when they cannot be
