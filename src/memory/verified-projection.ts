@@ -108,7 +108,13 @@ export function resolveTargetGrade(
  *  Exported because compaction (ledger.ts) must PRESERVE precisely the rows this admits when an id is
  *  forged. The detector and the preserver cannot be allowed to drift: a row the detector compares but
  *  the preserver drops is evidence destroyed by a rewrite; a row the preserver keeps but the detector
- *  ignores is unreclaimable bloat that flags nothing. One predicate, both call sites. */
+ *  ignores is unreclaimable bloat that flags nothing. This export is shared by exactly those two -
+ *  `forgedFactIds` and the compaction preserver - because a mismatch THERE destroys evidence.
+ *  It is NOT the only statement of "fact row": `history.ts` (ledgerTruncated, and buildHistory's own
+ *  duplicate-fact-id anomaly scan) and `ledger.ts`'s horizon-marker trigger each restate `assert ||
+ *  supersede` positively and independently. All agree today; a sixth RecordType would split them (the
+ *  negative form here admits it, the positive forms exclude it). Routing them through this predicate
+ *  too is a worthwhile follow-up, but is not what this extraction claims to have done. */
 export const isFactRow = (r: MemoryRecord): boolean =>
   r.type !== 'verify' && r.type !== 'invalidate' && r.type !== 'erase';
 

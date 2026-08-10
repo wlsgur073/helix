@@ -25816,11 +25816,12 @@ ledger directory - this note will keep appearing until they are gone.
     if (loss.undecidable !== null) {
       causes.push(
         `  - HELIX_HOME's own trust state could not be read (${loss.undecidable}), so whether starting
-    is lossless could not be established at all. Starting mints nothing here: an existing key
-    is read before any key is created, so an unreadable one aborts that read rather than
-    replacing the key. What refusing protects is the ADVICE - the other outcome of this check
-    calls the stray files safe to delete, and if they hold the only readable copy of this
-    ledger's trust store, acting on that cannot be undone.
+    is lossless could not be established at all - and neither could whether starting would
+    mint a fresh key over these files, since this cause is ANY unreadable ledger, witness, or
+    key: on an absent key with an unreadable ledger, starting does mint. What refusing
+    protects is the ADVICE - the other outcome of this check calls the stray files safe to
+    delete, and if they hold the only readable copy of this ledger's trust store, acting on
+    that cannot be undone.
 `
       );
     }

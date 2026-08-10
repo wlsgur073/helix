@@ -142,7 +142,7 @@ describe('handleInspect asOf (spec C §6)', () => {
     appendFileSync(ledger, JSON.stringify(conflicting) + '\n');
     const out = text(handleInspect(store, { asOf: new Date().toISOString() }));
 
-    expect(out).toContain('integrity conflict'); // (integrity conflict — equal-generation verify mismatch: …)
+    expect(out).toContain('integrity conflict'); // (integrity conflict — equal-generation verify mismatch or duplicate fact id: …)
     expect(out).toContain(id);                   // the compromised id is listed (via safeId; store ids are clean)
     // the fact renders at the clamped Fresh grade, never the conflicting Verified/Suspect claim
     expect(out.split('\n').some((l) => l.startsWith('DATA[Fresh:global]| ') && l.includes(id))).toBe(true);

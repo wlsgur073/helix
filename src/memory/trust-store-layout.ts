@@ -288,13 +288,17 @@ export function assessGradeLoss(home: string, ledger: string): GradeLossAssessme
     // Concretely: `tryReadMaster` throws `LedgerMacError` on a master key that is present but not
     // exactly MASTER_LEN bytes, on BOTH paths this function reads HOME through, so a truncated or
     // overwritten key used to take the whole server down with a stack trace instead of reaching the
-    // refusal that carries the remedies. Refusing does NOT prevent a mint, and must not be justified
-    // that way: `ensureMaster` calls `tryReadMasterStrict` BEFORE mkdirSync/withFileLock/randomBytes,
-    // so the throw that lands here happens before any create path is reached. The branch that DOES
-    // mint is the ABSENT-key one, and there `tryReadMasterStrict` returns null rather than throwing,
-    // so it can never surface as `undecidable` in the first place. Measured: on a present-but-
-    // truncated key ensureMaster throws and HOME is unchanged afterwards (same entries, same key
-    // bytes); on an absent key `undecidable` is null while ensureMaster mints 32 bytes.
+    // refusal that carries the remedies. Refusing must NOT be justified as "no mint can happen":
+    // `undecidable` is set on ANY throw out of `measureGradeLoss`, which reads the ledger and witness
+    // (`readLedgerWitnessed`) as well as the key, so it is a CLASS of causes, not one. If the cause IS
+    // the key (present but not MASTER_LEN bytes), `ensureMaster` calls `tryReadMasterStrict` BEFORE
+    // mkdirSync/withFileLock/randomBytes and throws before any create path, so THAT cause mints
+    // nothing. But an absent key with an UNREADABLE LEDGER also throws here, with the key absent - and
+    // the absent-key branch is exactly the one `ensureMaster` mints on, so `undecidable` can coincide
+    // with a mint. Measured: truncated key -> ensureMaster throws, HOME unchanged; absent key +
+    // ledger-that-is-a-directory -> `undecidable` set AND ensureMaster mints 32 bytes. Refusing is
+    // therefore justified by protecting the ADVICE (below), which holds for every cause, not by an
+    // absolute the unreadable state cannot support.
     // What refusing preserves is the ADVICE. The lossless branch of this gate tells the user the
     // stray files are "safe to delete"; if they hold the only readable copy of this ledger's trust
     // store, acting on that is UNRECOVERABLE. An unanswerable question must not license that

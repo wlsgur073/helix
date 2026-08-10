@@ -369,9 +369,14 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
       // conservatism: the Fresh reset below would make two rows differing ONLY in `state`
       // byte-identical, and forgedFactIds EXEMPTS byte-identical repeats (appends are at-least-once,
       // so a crash may legitimately replay one line) — normalizing here would erase exactly the
-      // evidence this branch exists to preserve. Withholding trust is unaffected: the verifying
-      // replay (R1) clamps every non-verify `state` to Fresh on read, so a preserved row's stale
-      // elevation confers nothing, and the id is flagged compromised regardless.
+      // evidence this branch exists to preserve. Withholding trust on the READ path is unaffected:
+      // the verifying replay (R1) clamps every non-verify `state` to Fresh on read, so on any
+      // user-facing recall a preserved row's stale elevation confers nothing. Two caveats, both
+      // rooted in the DELIBERATELY UNENFORCED write-path projection (a separate, deferred fix, not
+      // reachable from here): R1 is READ-path only, so `liveTarget`'s unenforced projection
+      // (recheck/confirm -> resolveTransition) still sees the preserved `state` verbatim — a narrow
+      // denial-of-demotion on a forged id carrying no verify; and that id is flagged `compromised`
+      // only when the target also carries a valid signed verify, NOT regardless.
       for (const o of occurrences) kept.push(o);
       continue;
     }
