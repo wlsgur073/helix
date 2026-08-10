@@ -1,4 +1,4 @@
-import { mkdirSync, openSync, existsSync, fsyncSync, closeSync } from 'node:fs';
+import { mkdirSync, openSync, fsyncSync, closeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeAll, realFsOps, fsyncDir } from './memory/fs-ops.js';
 import type { EgressLeg } from './config.js';
@@ -62,17 +62,18 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit;
 /** Append one audit event as a JSONL line, fsync'd so a written row survives power loss. Creates
  *  parent dirs as needed. Completeness is best-effort, NOT transactional: the row is appended AFTER
  *  the action it records (the erase/verify, itself fsynced), so a crash in the narrow window between
- *  the two can leave the action durable with its audit row absent. Durable-once-written: the row bytes
- *  are fsync'd, and on FIRST creation the parent directory is fsync'd too, so the new file's directory
- *  entry is durable — not just its inode (a crash could otherwise lose the whole freshly-created file). */
-export function appendAudit(path: string, event: AuditEvent): void {
+ *  the two can leave the action durable with its audit row absent. Durable-once-written: the row
+ *  bytes are fsync'd AND the parent directory is fsync'd on every append — an exists-then-decide
+ *  probe raced concurrent first creation (a non-creator's acknowledged row depended on the CREATOR
+ *  surviving to its fsyncDir), so every appender now owns the directory-entry durability of the row
+ *  it acknowledges. Audit appends are low-frequency; the extra directory fsync is noise. */
+export function appendAudit(path: string, event: AuditEvent, io: { fsyncDir: typeof fsyncDir } = { fsyncDir }): void {
   mkdirSync(dirname(path), { recursive: true });
-  const isNew = !existsSync(path);
   const fd = openSync(path, 'a', 0o600);   // owner-only ON CREATE (the audit trail is unauthenticated; a group writer could rewrite it)
   try {
     // writeAll loops short writes (a truncated row is never fsynced) and guards a zero-progress write.
     writeAll(realFsOps, fd, JSON.stringify(event) + '\n');
     fsyncSync(fd);
   } finally { closeSync(fd); }
-  if (isNew) fsyncDir(dirname(path)); // first creation: make the directory entry durable, not just the bytes
+  io.fsyncDir(dirname(path));
 }

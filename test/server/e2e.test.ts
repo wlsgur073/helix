@@ -55,6 +55,14 @@ describe('Helix MCP server (end-to-end via in-memory transport)', () => {
     expect(confirm.description).toMatch(/never self-confirm|do not self-confirm/i);
   });
 
+  it('helix_memory_adopt description states adoption is an explicit user decision and must not be allow-listed (D3)', async () => {
+    const client = await connectedClient();
+    const { tools } = await client.listTools();
+    const adopt = tools.find((t) => t.name === 'helix_memory_adopt')!;
+    expect(adopt.description).toMatch(/explicit user (instruction|approval)/i);
+    expect(adopt.description).toMatch(/do not allow-list/i);
+  });
+
   it('confirm promotes a source=user item to Verified over the protocol', async () => {
     const client = await connectedClient();
     const committed = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'deploy target is fly.io', source: 'user' } });

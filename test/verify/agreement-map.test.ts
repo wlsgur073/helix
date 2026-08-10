@@ -80,4 +80,20 @@ describe('agreement map', () => {
     expect(map.verdict).toBe('indeterminate');
     expect(map.divergences).toHaveLength(0);
   });
+
+  it('keeps file paths, file:line cites and version numbers as single claims (H3: a period splits only before whitespace or end)', () => {
+    const map = buildAgreementMap(
+      'The fix belongs in src/verify/codex.ts:12 next to version 0.144.1.',
+      'The fix belongs in src/verify/codex.ts:12 next to version 0.144.1.',
+    );
+    expect(map.verdict).toBe('agree');
+    expect(map.agreements).toHaveLength(1);
+    expect(map.agreements[0]).toContain('src/verify/codex.ts:12');
+    expect(map.agreements[0]).toContain('0.144.1');
+  });
+
+  it('a markdown link to a file path survives as one claim (H3 minimal 07-29 specimen)', () => {
+    const map = buildAgreementMap('read [the spec](docs/release/spec.md) first', 'something else entirely here');
+    expect(map.divergences).toContain('read [the spec](docs/release/spec.md) first');
+  });
 });

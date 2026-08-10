@@ -88,6 +88,13 @@ describe('dualVerify', () => {
     expect(preflights).toBe(0); // the floor gate must not even preflight
   });
 
+  it('the floor refusal names the lowest accepted stakes and the config key (H4)', async () => {
+    const r = await dualVerify({ question: 'q', helixAnswer: 'a', stakes: 'low' },
+      deps({ config: enabled() }));
+    expect(r.reason).toContain("lowest accepted: 'high'");
+    expect(r.reason).toContain('dualVerify.stakesFloor');
+  });
+
   it('runs when stakes meet the floor', async () => {
     const r = await dualVerify({ question: 'q', helixAnswer: 'the answer is 4', stakes: 'high' },
       deps({ config: enabled() }));

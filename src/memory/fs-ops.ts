@@ -19,13 +19,37 @@ export interface DurableFsOps {
   fsyncDir(dir: string): void;
 }
 
-/** Best-effort fsync of a directory fd so a create/rename/unlink is durably persisted. On Windows
- *  (and some FS) a directory cannot be opened/fsynced — skip; never a correctness issue. */
-export function fsyncDir(dir: string): void {
+/** Error codes meaning "this platform/FS cannot fsync a directory" — benign, swallowed. Anything
+ *  else (EIO, ENOSPC, ENOENT…) is GENUINELY lost durability and rethrows, matching writeAll's
+ *  fail-closed stance: silently acknowledging an append whose directory entry may not survive a
+ *  crash is the fsyncDir-swallow finding this guard closes. */
+const DIR_FSYNC_UNSUPPORTED = new Set(['EISDIR', 'EINVAL', 'ENOTSUP', 'EPERM', 'EACCES']);
+const isUnsupported = (e: unknown): boolean =>
+  DIR_FSYNC_UNSUPPORTED.has((e as NodeJS.ErrnoException)?.code ?? '');
+
+/** Fsync of a directory fd so a create/rename/unlink is durably persisted. On Windows a directory
+ *  can never be opened/fsynced — wholesale best-effort there. Elsewhere, only the
+ *  directory-unsupported error classes are swallowed; a real I/O failure propagates. The io/platform
+ *  params are test seams (durability has no behavioral observable — only the syscall contract). */
+export function fsyncDir(
+  dir: string,
+  io: { openSync: typeof openSync; fsyncSync: typeof fsyncSync; closeSync: typeof closeSync } = { openSync, fsyncSync, closeSync },
+  platform: NodeJS.Platform = process.platform,
+): void {
   let dfd: number;
-  try { dfd = openSync(dir, 'r'); } catch { return; }
-  try { fsyncSync(dfd); } catch { /* EINVAL/EISDIR on some FS — durability only */ }
-  finally { closeSync(dfd); }
+  try {
+    dfd = io.openSync(dir, 'r');
+  } catch (e) {
+    if (platform === 'win32' || isUnsupported(e)) return;
+    throw e;
+  }
+  try {
+    io.fsyncSync(dfd);
+  } catch (e) {
+    if (!(platform === 'win32' || isUnsupported(e))) throw e;
+  } finally {
+    io.closeSync(dfd);
+  }
 }
 
 export const realFsOps: DurableFsOps = {

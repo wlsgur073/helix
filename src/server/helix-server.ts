@@ -10,6 +10,16 @@ import { loadConfig } from '../config.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus, checkCodexModel } from '../verify/codex.js';
 import { noopMetricsSink, type MetricsSink } from '../metrics.js';
 
+/** Shared id constraint for erase/recheck/confirm (audit-id finding): the id is echoed into
+ *  audit.jsonl, so control/format characters (NUL, RTL override) and whitespace are refused at
+ *  the tool boundary. Deliberately NOT m_<uuid>-strict: marker ids and ids from forged rows are
+ *  legitimate erase targets and must stay expressible. */
+export const MEMORY_ID = z
+  .string()
+  .min(1)
+  .max(200)
+  .regex(/^[^\p{Cc}\p{Cf}\s]+$/u, 'id must be printable with no control/format characters or whitespace');
+
 /** Build a Helix MCP server with the memory tools registered against `store`. */
 export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps, metrics?: MetricsSink): McpServer {
   // Single dispatch seam: every tool handler runs inside m.runOp so store.emitReplay calls made
@@ -63,7 +73,14 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     // is refused by schema validation before it reaches a handler at all — the same bounded-input
     // discipline `maxItems` and `asOf` already get. The store keeps the authoritative check (it also
     // bounds distinct TERMS, which needs the tokenizer) for callers that do not come through MCP.
-    inputSchema: { query: z.string().max(MAX_QUERY_CHARS), maxItems: z.number().int().positive().optional() },
+    inputSchema: {
+      query: z.string().max(MAX_QUERY_CHARS),
+      maxItems: z.number().int().positive().optional(),
+      // H5: count bounds are not size bounds — long prose items made a 30-item recall render
+      // 74.6 KB. Per-item character cap; truncation is marked with an ellipsis.
+      maxChars: z.number().int().positive().optional()
+        .describe('Per-item character cap for rendered content (truncated with …). Use when the caller can only read a bounded result.'),
+    },
   }, async (args) => m.runOp('helix_memory_recall', () => handleRecall(store, args)));
 
   server.registerTool('helix_memory_inspect', {
@@ -75,7 +92,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   server.registerTool('helix_memory_erase', {
     title: 'Erase memory',
     description: 'Erase a memory item by id. Soft: the item is removed from the live view (recall/inspect) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool itself never physically destroys content. By default (compaction off) the erased content stays recoverable on disk indefinitely; but if the user has enabled compaction.auto, that recoverability is time-bounded — an ordinary helix_memory_recall can then compact the ledger and physically destroy it once the grace window (graceMs) has passed.',
-    inputSchema: { id: z.string() },
+    inputSchema: { id: MEMORY_ID },
   }, async (args) => m.runOp('helix_memory_erase', () => handleErase(store, args, { auditPath: dv.auditPath, now: dv.now })));
 
   server.registerTool('helix_memory_recheck', {
@@ -86,7 +103,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       'file-contains and BOTH path and pattern MUST appear in the item content, or the call is rejected ' +
       '(prevents laundering an unrelated passing check into trust). Use for objective, checkable facts.',
     inputSchema: {
-      id: z.string(),
+      id: MEMORY_ID,
       check: z.object({ kind: z.literal('file-contains'), path: z.string(), pattern: z.string() }),
     },
   }, async (args) => m.runOp('helix_memory_recheck', () => handleRecheck(store, args as { id: string; check: RealityCheck }, { auditPath: dv.auditPath, now: dv.now })));
@@ -99,7 +116,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       'fact, never to confirm your own inference or a relayed claim. Only items committed with source=user ' +
       'are eligible (re-commit a relayed/inferred fact as source=user first). The user, not Helix, is the ' +
       'authority — do not allow-list this tool.',
-    inputSchema: { id: z.string() },
+    inputSchema: { id: MEMORY_ID },
   }, async (args) => m.runOp('helix_memory_confirm', () => handleConfirm(store, args, { auditPath: dv.auditPath, now: dv.now })));
 
   server.registerTool('helix_dual_verify', {
@@ -120,7 +137,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   server.registerTool('helix_memory_adopt', {
     title: 'Adopt project memory',
-    description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted.",
+    description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted. Adoption is a trust decision THE USER makes — call only on explicit user instruction, and do not allow-list this tool.",
     inputSchema: {},
   }, async () => m.runOp('helix_memory_adopt', () => handleAdopt(store, {})));
 

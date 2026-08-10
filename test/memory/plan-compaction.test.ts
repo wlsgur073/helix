@@ -19,6 +19,12 @@ describe('planCompaction', () => {
     expect(kept.filter((r) => !isHorizonMarker(r)).map((r) => r.id)).toEqual(['b']);
   });
 
+  it('a LIVE fact whose id merely starts with witness_fence_ survives compaction (fence-prefix finding)', () => {
+    const records = [assert('witness_fence_trap')];
+    const { kept } = planCompaction(records, { erasedIds: new Set() });
+    expect(kept.map((r) => r.id)).toContain('witness_fence_trap');
+  });
+
   it('serializedBytes is UTF-8 byte length plus one newline per record', () => {
     const r = assert('a');
     expect(serializedBytes([r])).toBe(Buffer.byteLength(JSON.stringify(r)) + 1);

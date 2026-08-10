@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { canonicalRoot } from './ownership.js';
 
@@ -15,16 +15,33 @@ export const TRUST_FILE_NAMES = ['ledger-mac-master.key', 'projects.json', 'witn
  *  right shape. */
 function looksLikeOurs(name: string, path: string): boolean {
   try {
-    if (name === 'ledger-mac-master.key') return statSync(path).isFile() && statSync(path).size > 0;
-    if (name === 'witness-log.jsonl') return statSync(path).isFile();
+    // This predicate gates an exit(78) refusal to start, so it must be hard to SATISFY with
+    // planted junk (startup-DoS finding): a loose shape check let five trivially plantable states
+    // deny every future session its memory. lstat, never stat — a symlink beside the ledger is a
+    // plantable redirection, not our state.
+    const st = lstatSync(path);
+    if (!st.isFile()) return false;
+    if (name === 'ledger-mac-master.key') return st.size === 32; // MASTER_LEN — anything else is not our key
+    if (name === 'witness-log.jsonl') {
+      // our log has at least one parseable JSONL line; an empty or garbage file is not evidence
+      return readFileSync(path, 'utf8').split('\n').some((l) => {
+        if (!l.trim()) return false;
+        try { JSON.parse(l); return true; } catch { return false; }
+      });
+    }
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
     const values = Object.values(parsed as Record<string, unknown>);
     if (name === 'projects.json') {
-      // scope key -> { stamp, adoptedAt, macNonce }
-      return values.length > 0 && values.every((v) => typeof v === 'object' && v !== null && 'stamp' in v && 'macNonce' in v);
+      // scope key -> { stamp, adoptedAt, macNonce } with the value types ownership.ts writes
+      return values.length > 0 && values.every((v) =>
+        typeof v === 'object' && v !== null &&
+        typeof (v as Record<string, unknown>).stamp === 'string' &&
+        typeof (v as Record<string, unknown>).macNonce === 'string');
     }
-    return 'scopes' in (parsed as Record<string, unknown>) || values.length > 0; // witness.json
+    // witness.json: the witness store writes { v: 1, scopes: Record<scopeKey, ScopeFile> }
+    const scopes = (parsed as Record<string, unknown>).scopes;
+    return typeof scopes === 'object' && scopes !== null && !Array.isArray(scopes);
   } catch {
     return false;   // unreadable or unparseable is not evidence of our state
   }

@@ -9,6 +9,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 /** One per-scope verifying read, camelCase in code — the sink writes snake_case wire names. */
 export interface ReplayInput {
@@ -67,55 +68,55 @@ export function createMetricsSink(path: string, enabled: boolean, deps: MetricsS
   const now = deps.now ?? ((): string => new Date().toISOString());
   const genId = deps.genId ?? ((): string => `o_${randomUUID()}`);
 
-  let currentOpId: string | null = null;
-  let buffer: string[] | null = null; // non-null while an op is active (signal purity, spec §5)
+  // Per-async-chain op context (N2-METRICS-OP): a module-level currentOpId/buffer pair was
+  // stack-restored, which is only correct for NESTED ops — two ops interleaving on the event loop
+  // (dual-verify awaits Codex for minutes while another tool call runs) mis-attributed or orphaned
+  // rows. AsyncLocalStorage binds the context to the op's own chain, so no restore is needed and
+  // no interleaving can leak an op id across chains.
+  const als = new AsyncLocalStorage<{ opId: string; buf: string[] }>();
 
   const safeAppend = (line: string): void => { try { append(path, line); } catch { /* best-effort */ } };
 
   return {
     emitReplay(r: ReplayInput): void {
       try {
+        const ctx = als.getStore();
         const line = JSON.stringify({
-          v: 1, kind: 'replay', ts: now(), op_id: currentOpId, scope: r.scope,
+          v: 1, kind: 'replay', ts: now(), op_id: ctx?.opId ?? null, scope: r.scope,
           rows: r.rows, live_rows: r.liveRows, bytes: r.bytes,
           parse_ms: r.parseMs, project_ms: r.projectMs,
           key_available: r.keyAvailable, caller: r.caller,
         }) + '\n';
-        if (buffer) buffer.push(line); else safeAppend(line);
+        if (ctx) ctx.buf.push(line); else safeAppend(line);
       } catch { /* never throw into a read path */ }
     },
 
     emitCompaction(c: CompactionInput): void {
       try {
+        const ctx = als.getStore();
         const line = JSON.stringify({
-          v: 1, kind: 'compaction', ts: now(), op_id: currentOpId, scope: c.scope,
+          v: 1, kind: 'compaction', ts: now(), op_id: ctx?.opId ?? null, scope: c.scope,
           duration_ms: c.durationMs, dropped_rows: c.droppedRows, reclaimed_bytes: c.reclaimedBytes,
           dropped_forged_verifies: c.droppedForgedVerifies, ok: c.ok,
         }) + '\n';
-        if (buffer) buffer.push(line); else safeAppend(line);
+        if (ctx) ctx.buf.push(line); else safeAppend(line);
       } catch { /* never throw into a compaction path */ }
     },
 
     async runOp<T>(tool: string, fn: () => T | Promise<T>): Promise<T> {
-      const prevOp = currentOpId;
-      const prevBuf = buffer;
       const opId = genId();
       const myBuf: string[] = [];
-      currentOpId = opId;
-      buffer = myBuf;
       const started = performance.now();
       let ok = true;
       let errorType: string | null = null;
       try {
-        return await fn();
+        return await als.run({ opId, buf: myBuf }, async () => await fn());
       } catch (e) {
         ok = false;
         errorType = e instanceof Error ? e.name : 'NonError';
         throw e;
       } finally {
         const durationMs = performance.now() - started; // capture BEFORE any metrics I/O
-        currentOpId = prevOp;                            // stack-style restore
-        buffer = prevBuf;
         try {
           safeAppend(JSON.stringify({
             v: 1, kind: 'op', ts: now(), op_id: opId,

@@ -16,6 +16,26 @@ const lines = (path: string): Record<string, unknown>[] =>
   readFileSync(path, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
 
 describe('createMetricsSink', () => {
+  it('interleaved (non-nested) ops attribute every row to their OWN op (N2-METRICS-OP)', async () => {
+    const out: string[] = [];
+    let n = 0;
+    const sink = createMetricsSink('/unused', true, {
+      append: (_p, l) => { out.push(l); }, now: () => 't', genId: () => `op_${++n}`,
+    });
+    let releaseA!: () => void; let releaseB!: () => void;
+    const gateA = new Promise<void>((r) => { releaseA = r; });
+    const gateB = new Promise<void>((r) => { releaseB = r; });
+    const opA = sink.runOp('a', async () => { sink.emitReplay(replay({ rows: 1 })); await gateA; });
+    const opB = sink.runOp('b', async () => { await gateB; sink.emitReplay(replay({ rows: 3 })); });
+    releaseA(); await opA;   // A finishes while B is still in flight
+    releaseB(); await opB;   // B's late emission must still carry B's op id, never null/A's
+    const rows = out.map((l) => JSON.parse(l) as Record<string, unknown>);
+    const rep = (k: number) => rows.find((r) => r.kind === 'replay' && r.rows === k)!;
+    const op = (t: string) => rows.find((r) => r.kind === 'op' && r['gen_ai.tool.name'] === t)!;
+    expect(rep(1).op_id).toBe(op('a').op_id);
+    expect(rep(3).op_id).toBe(op('b').op_id);
+  });
+
   it('writes a v1 replay line with wire field names and null op_id outside an op', () => {
     const path = join(tmp(), 'metrics.jsonl');
     const sink = createMetricsSink(path, true, { now: () => '2026-07-05T00:00:00.000Z' });

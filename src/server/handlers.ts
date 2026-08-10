@@ -4,7 +4,7 @@ import type { HelixConfig } from '../config.js';
 import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type EchoSource } from '../verify/dual-verify.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, newNonce, safeId, UNADOPTED_LEDGER_NOTE, asOfWitnessNotes } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, UNADOPTED_LEDGER_NOTE, asOfWitnessNotes } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
 import { appendAudit, type VerifyAudit } from '../audit.js';
 import { readFileSync } from 'node:fs';
@@ -43,8 +43,20 @@ export function handleCommit(store: MemoryStore, args: CommitInput): ToolResult 
   return ok(`committed ${JSON.stringify({ id: rec.id, state: rec.state, classification: rec.classification })}`);
 }
 
-export function handleRecall(store: MemoryStore, args: { query: string; maxItems?: number }): ToolResult {
+export function handleRecall(store: MemoryStore, args: { query: string; maxItems?: number; maxChars?: number }): ToolResult {
   const { items, framed, integrityAvailable, projectDisposition, witnessNotes } = store.recall(args.query, { maxItems: args.maxItems });
+  // H5: recall bounds ITEM COUNT but had no byte bound — 30 prose items rendered 74.6 KB and were
+  // client-truncated into uselessness. maxChars is a per-item cap applied by re-framing at the
+  // handler (the store's frame is built without it; store.ts is freeze-pinned), with the same
+  // datamark/normalizeUntrusted quarantine and a fresh nonce.
+  const framedOut = args.maxChars !== undefined
+    ? frameAsData(items.map(({ record, scope }) => ({ record, scope })), newNonce(), args.maxChars)
+    : framed;
+  // H1 (recency crowding) is NOT fixed here: a handler-side recency appendix would need a full
+  // currentView() read per recall, which violates the A4 recall-cache lock (a cached recall must
+  // not re-read ledgers), pollutes the replay metric, and inflates the §6 index-trigger latency
+  // signal. The honest fix is a recency component (or an appendix built from the already-read
+  // projection) inside the pinned retrieval/store path — post-close work.
   const flags = items.filter((i) => i.needsReverify).map((i) => safeId(i.record.id));
   const reverifyNote = flags.length ? `\n\n(needs re-verify before acting: ${flags.join(', ')})` : '';
   // S2 advisory: flag injection-shaped items by ID in a trusted, out-of-band ASCII note. Flag-only —
@@ -68,7 +80,7 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
   const conflictNote = conflictIds.length
     ? `\n\n(integrity conflict — equal-generation verify mismatch: ${conflictIds.join(', ')})`
     : '';
-  return ok(framed + reverifyNote + egressNote + integrityNote + conflictNote + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
+  return ok(framedOut + reverifyNote + egressNote + integrityNote + conflictNote + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
 }
 
 /** Inspect is a READ surface: both id and content of every row are attacker-controllable (a forged
@@ -262,6 +274,9 @@ export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResu
     `- connection:     ${connection}`,
     `- auth mode:      ${auth}`,
     `- dual-verify:    ${dualVerify}`,
+    // H4: the floor decides whether a call runs at all; a caller must see it from the free
+    // pre-flight instead of discovering it via a refused metered call.
+    `- stakes floor:   ${dv.stakesFloor}`,
     `- model:          ${model}`,
     `- effort:         ${effort}`,
     // No "(default)" suffix: HelixConfig does not record whether timeoutMs was set, and printing

@@ -148,10 +148,11 @@ export function makeDataFrame(opts: {
 export const safeId = (id: string): string => id.replace(/[^A-Za-z0-9_-]/g, '');
 
 /** Memory-recall frame: datamarks each record with its trust state and scope. */
-export function frameAsData(scoped: ScopedRecord[], nonce: string): string {
+export function frameAsData(scoped: ScopedRecord[], nonce: string, maxChars?: number): string {
   return makeDataFrame({
     label: 'RECALLED MEMORY',
     nonce,
     lines: scoped.map(({ record, scope }) => ({ text: record.content, mark: `DATA[${record.state}:${scope}]| ` })),
+    maxChars,
   });
 }

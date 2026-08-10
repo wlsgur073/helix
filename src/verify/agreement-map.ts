@@ -4,10 +4,13 @@ export interface AgreementMap {
   divergences: string[];
 }
 
-/** Split an answer into trimmed claim-sentences, preserving original casing for display. */
+/** Split an answer into trimmed claim-sentences, preserving original casing for display.
+ *  A period terminates a sentence only before whitespace/end-of-input, so file paths
+ *  (src/verify/codex.ts:12), version numbers (0.144.1) and markdown link targets stay
+ *  single claims instead of being shredded into non-claims (H3, dogfood 07-26..07-30). */
 function sentences(answer: string): string[] {
   return answer
-    .split(/[.\n;]+/)
+    .split(/\n+|;+\s*|(?<=\S)\.(?=\s|$)/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }

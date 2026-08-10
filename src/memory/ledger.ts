@@ -408,7 +408,10 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   // the HMAC-aware verify-preserve loop before `keepValidVerify` is ever consulted. The drop is
   // made EXPLICIT here too regardless, so it does not silently depend on the incidental
   // interaction of those two unrelated guards elsewhere in this function.
-  const withoutStaleFences = kept.filter((r) => !r.id.startsWith('witness_fence_'));
+  // Shape-guarded (fence-prefix finding): a genuine fence is marker-shaped (verify-typed, null
+  // supersedes, unsigned) — a LIVE fact that merely carries the id prefix must survive; dropping
+  // by bare id-prefix physically destroyed such a fact.
+  const withoutStaleFences = kept.filter((r) => !(r.id.startsWith('witness_fence_') && isMarkerShape(r)));
   return { kept: withoutStaleFences, droppedForgedVerifies };
 }
 
