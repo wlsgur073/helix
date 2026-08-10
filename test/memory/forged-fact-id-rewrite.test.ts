@@ -27,8 +27,10 @@ const rowsFor = (ledger: string, id: string): MemoryRecord[] =>
 describe('duplicate fact id survives a ledger rewrite', () => {
   // The guard added for a forged twin (verified-projection.forgedFactIds) is a property of two rows
   // CO-EXISTING physically: it reads the record array, not a durable flag. A rewrite that keeps one
-  // row per live id therefore does not merely hide the evidence, it DESTROYS it — and the row that
-  // survives last-write-wins is the attacker's. `store.erase(id, { permanent: true })` rewrites
+  // row per live id therefore does not merely hide the evidence, it DESTROYS it — whichever row the
+  // projection's tie-break leaves standing re-grades to what the original earned, so these tests
+  // assert the EVIDENCE survives and deliberately do not pin which occurrence wins (that is
+  // buildProjection's contract, not this one). `store.erase(id, { permanent: true })` rewrites
   // UNCONDITIONALLY, config-independent, and the erased id need not be the forged one: a user
   // exercising right-to-erasure on one item would silently launder a forgery against another.
   it('a forged provenance twin stays compromised after a permanent erase of an UNRELATED fact', () => {

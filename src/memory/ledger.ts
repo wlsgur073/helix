@@ -339,12 +339,15 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   // keepValidVerify) must NOT reset, since it drops verifies and the baked state is all that's left.
   const hmacAware = opts.keepValidVerify !== undefined;
   // Duplicate-fact-id tamper evidence is PHYSICAL (verified-projection.forgedFactIds): it is detected
-  // by two DIFFERING rows for one id co-existing in the file, not by a durable flag. `live` holds one
-  // last-write-wins row per id — the FORGER'S, since a twin is appended after the original — so
-  // collapsing a forged id here does not merely hide the alarm, it destroys it: the original row is
-  // deleted, the genuine signed verify is preserved by the loop below (its target is still live and
-  // the twin keeps `content` byte-identical, which is the premise of the attack), and the next read
-  // sees one row, no duplicate, and re-grades the twin to what the original earned. No existing signal
+  // by two DIFFERING rows for one id co-existing in the file, not by a durable flag. `live` holds ONE
+  // row per id, so collapsing a forged id here does not merely hide the alarm, it destroys it: the
+  // other row is deleted, the genuine signed verify is preserved by the loop below (its target is
+  // still live and the twin keeps `content` byte-identical, which is the premise of the attack), and
+  // the next read sees one row, no duplicate, and re-grades the survivor to what the original earned.
+  // WHICH row survives is buildProjection's tie-break to decide and is deliberately NOT relied on
+  // here: the occurrences below are grouped from a scan of the RAW records, keyed by id, so
+  // preservation behaves identically whichever row `live` holds — measured under both rules. No
+  // existing signal
   // covers that: the horizon marker fires only for a row NO LONGER live and this id is live, and
   // droppedForgedVerifies counts only verifies — so the rewrite would record that it destroyed nothing.
   // A permanent erase rewrites unconditionally (store.erase), and the erased id need not be the forged
