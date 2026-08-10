@@ -27,6 +27,9 @@ export interface DualVerifyParams {
   /** Caller-classified stakes; below the configured floor the (metered) call is skipped.
    *  Unspecified => proceed: an explicit tool invocation already signals intent. */
   stakes?: Stakes;
+  /** MCP request cancellation (extra.signal), forwarded to the metered runner call so a cancel or
+   *  transport close kills the codex child instead of leaving it running unattended. */
+  signal?: AbortSignal;
 }
 
 export interface DualVerifyResult {
@@ -124,6 +127,7 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
     model: deps.config.dualVerify.model,
     effort: deps.config.dualVerify.effort,
     timeoutMs: deps.config.dualVerify.timeoutMs,
+    signal: params.signal,
   });
   if (!res.ok) {
     return { ran: false, attempted: true, outcome: 'error', reason: `codex run failed: ${res.error}`, egress: verdict };

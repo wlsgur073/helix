@@ -99,6 +99,24 @@ describe('planCompaction — fence drop (Step 1b)', () => {
     expect(kept.map((r) => r.id)).toEqual(['m_new', 'horizon_marker']); // fence contributes nothing
   });
 
+  it('keeps a LIVE assert whose id merely carries the fence prefix (shape decides, not the prefix)', () => {
+    // The two sibling marker families gate on isMarkerShape AND the prefix; this filter gated on the
+    // prefix alone, so any live row wearing the namespace was physically dropped — with no horizon
+    // marker (the row is live, so the closed-fact test cannot fire) and no droppedForgedVerifies.
+    // A compaction destroyed a served fact while recording that it destroyed nothing.
+    const poisoned = rec({ id: fenceId(1, 'a'.repeat(32)), content: 'PROD DB host = db.internal.example' });
+    const ordinary = rec({ id: 'm_normal', content: 'ordinary fact' });
+    const { kept } = planCompaction([poisoned, ordinary], { erasedIds: new Set() });
+    expect(kept.map((r) => r.id)).toEqual([poisoned.id, 'm_normal']);
+  });
+
+  it('keeps an erase tombstone wearing the fence prefix, so the right-to-erasure trace survives', () => {
+    const tombstone = rec({ id: fenceId(2, 'b'.repeat(32)), type: 'erase', supersedes: 'm_gone', content: '' });
+    const live = rec({ id: 'm_keep', content: 'keep' });
+    const { kept } = planCompaction([live, tombstone], { erasedIds: new Set() });
+    expect(kept.map((r) => r.id)).toContain(tombstone.id);
+  });
+
   it('drops MULTIPLE stale fences accumulated across several rewrites, without minting a replacement', () => {
     const f1 = witnessFenceRecord(1, 'd'.repeat(32), '2026-01-01T00:00:00.000Z');
     const f2 = witnessFenceRecord(2, 'e'.repeat(32), '2026-01-02T00:00:00.000Z');

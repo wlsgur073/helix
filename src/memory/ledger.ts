@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
+import { forgedFactIds, isFactRow } from './verified-projection.js';
 import { withFileLock, canonical } from './lock.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
@@ -32,6 +33,19 @@ export const isHorizonMarker = (r: MemoryRecord): boolean => isMarkerShape(r) &&
  *  >=1 forged verify (spec §5 delta). Module-private — external callers key off the `integrity_`
  *  prefix via parseLedger output (e.g. test assertions), never need the predicate itself. */
 const isIntegrityMarker = (r: MemoryRecord): boolean => isMarkerShape(r) && r.id.startsWith('integrity_');
+
+/** A stale epoch fence — the marker SHAPE plus the family prefix, exactly like the two predicates
+ *  above. Gating on the prefix alone (as this did until 2026-08-06) drops any live row wearing the
+ *  namespace: an `assert` is physically destroyed with no horizon marker (that test fires only for a
+ *  row no longer live, and this one is) and no droppedForgedVerifies, so the compaction records that
+ *  it destroyed nothing. A genuine fence is verify-shaped (witnessFenceRecord), so shape-gating drops
+ *  every real one and none of the impostors.
+ *
+ *  Exported because the auto-compaction reclaim estimate (store.ts) must net out PRECISELY the rows
+ *  this drops. Those two predicates cannot be allowed to drift: a row counted in `kept` but excluded
+ *  from the estimate's input makes `reclaimable` negative, breaking the `0 <= reclaimable <= rows`
+ *  precondition the gate is documented to rely on. One predicate, both call sites. */
+export const isWitnessFence = (r: MemoryRecord): boolean => isMarkerShape(r) && r.id.startsWith('witness_fence_');
 
 /** Reconstruct a marker CANONICALLY — every field whitelisted, constant id, sentinel timestamps. Never
  *  copies an existing row through, so hostile content/provenance/timestamps/extension fields on a
@@ -324,9 +338,51 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   // the re-kept signed verify (below) is the SOLE source of trust on replay. Legacy mode (no
   // keepValidVerify) must NOT reset, since it drops verifies and the baked state is all that's left.
   const hmacAware = opts.keepValidVerify !== undefined;
+  // Duplicate-fact-id tamper evidence is PHYSICAL (verified-projection.forgedFactIds): it is detected
+  // by two DIFFERING rows for one id co-existing in the file, not by a durable flag. `live` holds ONE
+  // row per id, so collapsing a forged id here does not merely hide the alarm, it destroys it: the
+  // other row is deleted, the genuine signed verify is preserved by the loop below (its target is
+  // still live and the twin keeps `content` byte-identical, which is the premise of the attack), and
+  // the next read sees one row, no duplicate, and re-grades the survivor to what the original earned.
+  // WHICH row survives is buildProjection's tie-break to decide and is deliberately NOT relied on
+  // here: the occurrences below are grouped from a scan of the RAW records, keyed by id, so
+  // preservation behaves identically whichever row `live` holds — measured under both rules. No
+  // existing signal
+  // covers that: the horizon marker fires only for a row NO LONGER live and this id is live, and
+  // droppedForgedVerifies counts only verifies — so the rewrite would record that it destroyed nothing.
+  // A permanent erase rewrites unconditionally (store.erase), and the erased id need not be the forged
+  // one, so right-to-erasure on one item would otherwise launder a forgery against another.
+  const forgedIds = forgedFactIds(records);
+  // Physical occurrences of each forged id, grouped in FILE order by ONE pass — never rescanned per
+  // id, so a hostile ledger carrying many forged ids cannot make the keep loop below quadratic. Built
+  // only when there is something to group, so the ordinary (empty) case costs one Set.size check.
+  const forgedRows = new Map<string, MemoryRecord[]>();
+  if (forgedIds.size > 0) {
+    for (const r of records) {
+      if (!isFactRow(r) || !forgedIds.has(r.id)) continue;
+      (forgedRows.get(r.id) ?? forgedRows.set(r.id, []).get(r.id)!).push(r);
+    }
+  }
   const kept: MemoryRecord[] = [];
   for (const r of live.values()) {
-    if (opts.erasedIds.has(r.id)) continue;
+    if (opts.erasedIds.has(r.id)) continue;                 // erasure still wins: evidence never outranks right-to-erasure
+    const occurrences = forgedRows.get(r.id);
+    if (occurrences) {
+      // Every physical occurrence, VERBATIM and in file order. Verbatim is load-bearing, not
+      // conservatism: the Fresh reset below would make two rows differing ONLY in `state`
+      // byte-identical, and forgedFactIds EXEMPTS byte-identical repeats (appends are at-least-once,
+      // so a crash may legitimately replay one line) — normalizing here would erase exactly the
+      // evidence this branch exists to preserve. Withholding trust on the READ path is unaffected:
+      // the verifying replay (R1) clamps every non-verify `state` to Fresh on read, so on any
+      // user-facing recall a preserved row's stale elevation confers nothing. Two caveats, both
+      // rooted in the DELIBERATELY UNENFORCED write-path projection (a separate, deferred fix, not
+      // reachable from here): R1 is READ-path only, so `liveTarget`'s unenforced projection
+      // (recheck/confirm -> resolveTransition) still sees the preserved `state` verbatim — a narrow
+      // denial-of-demotion on a forged id carrying no verify; and that id is flagged `compromised`
+      // only when the target also carries a valid signed verify, NOT regardless.
+      for (const o of occurrences) kept.push(o);
+      continue;
+    }
     kept.push(hmacAware ? { ...r, state: 'Fresh' } : r);
   }
   // Keep a content-free tombstone for each erase marker (audit: an erasure happened).
@@ -408,7 +464,7 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   // the HMAC-aware verify-preserve loop before `keepValidVerify` is ever consulted. The drop is
   // made EXPLICIT here too regardless, so it does not silently depend on the incidental
   // interaction of those two unrelated guards elsewhere in this function.
-  const withoutStaleFences = kept.filter((r) => !r.id.startsWith('witness_fence_'));
+  const withoutStaleFences = kept.filter((r) => !isWitnessFence(r));
   return { kept: withoutStaleFences, droppedForgedVerifies };
 }
 
@@ -448,6 +504,25 @@ function fileSize(path: LedgerPath): number {
   try { return statSync(path).size; } catch { return 0; }
 }
 
+/** Private channel for handing REAL stats out of a thrown compactLedger error when the failure hit
+ *  AFTER the rewrite had already landed (see the catch in compactLedger below) — a `unique symbol` key
+ *  so it can never collide with a real error property, and it is inherently invisible to
+ *  JSON.stringify/Object.keys (never serialized, never logged verbatim). Content-free: the value is a
+ *  CompactionStats, the exact same shape a clean return already carries — no path/id/content is added. */
+const LANDED_STATS: unique symbol = Symbol('compactLedger.landedStats');
+interface LandedStatsCarrier { [LANDED_STATS]?: CompactionStats }
+
+/** Read back the stats compactLedger attached to a rethrown error when its rewrite had already landed
+ *  on disk before the failure struck (dir fsync or witness-transition completion, both AFTER the
+ *  atomic rename) — undefined for every other throw: a pre-rename failure (nothing landed), or any
+ *  error this module never touched. A caller that swallows a compaction's throw (store.ts's
+ *  maybeAutoCompact) uses this to report the REAL droppedRows/reclaimedBytes instead of the "nothing
+ *  happened" zero a bare swallow would otherwise imply for a rewrite that, in fact, already happened. */
+export function landedCompactionStats(e: unknown): CompactionStats | undefined {
+  if (e === null || typeof e !== 'object') return undefined;
+  return (e as LandedStatsCarrier)[LANDED_STATS];
+}
+
 /**
  * Rewrite the ledger to the canonical current state. Crash-safe + self-fencing: writes
  * `<path>.c-<hex32>.tmp` (created BEFORE the read so a successor's sweep can fence a lost-lock
@@ -483,6 +558,7 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
     let fenceTx: string | null = null;
     let preRewriteHash: string | null = null; // ledger content at journal-open time — the catch's nothing-landed proof
     let retractNonce: string | null = null;   // set from the journal openTransition actually wrote, so a retraction key exists only for OUR landed journal
+    let landedStats: CompactionStats | null = null; // set the instant the rename succeeds (see below) — non-null there means every later throw in this try is a POST-rename failure, so the catch has real numbers to attach instead of reporting "nothing happened"
     try {
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost after tmp creation');
       // Preserve the destination's mode across the rename — a project ledger may be deliberately
@@ -548,6 +624,12 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       assertSingleLink(path);                                      // re-check immediately before the rename
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost before rename');
       fsOps.renameSync(tmp, path);                                 // atomic on the same filesystem
+      // From here on the rewrite has PHYSICALLY LANDED — the ledger already holds the new bytes, so
+      // any later throw in this try (the dir fsync right below, or completeTransition further down)
+      // must not be reported by a swallowing caller as "nothing happened". Snapshot the real deltas
+      // NOW, with the exact same inputs (records/rows/beforeBytes/droppedForgedVerifies) the success
+      // return below would use, so the catch has them ready regardless of which post-rename step fails.
+      landedStats = { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
       fsOps.fsyncDir(dirname(path));                               // rename gives visibility, not durability
       if (w && fenceTx !== null) {
         // New bytes are durable; complete the transition (still under the ledger lock). re-read the
@@ -578,6 +660,24 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
         try {
           if (sha256Hex(readLedgerBytes(path)) === preRewriteHash) discardTransition(w.home, w.scopeKey, retractNonce);
         } catch { /* best-effort hygiene; a pending journal stays the honest state */ }
+      }
+      // landedStats is non-null only when the rename above already succeeded before this failure hit —
+      // attach the real counts so a caller that swallows this throw (store.ts's maybeAutoCompact) can
+      // report what actually happened instead of the "nothing happened" zero a bare swallow implies.
+      // Every failure BEFORE the rename leaves landedStats null, so any stats a REUSED error object
+      // might already carry from an earlier landed call (no in-tree throw site reuses one today, but
+      // `opts.fsOps` is a public seam a caller could point at a shared sentinel) are explicitly
+      // cleared here, never left to leak into this unrelated pre-rename failure. Both branches are
+      // try-wrapped like every other side effect in this catch: `e` may be non-extensible/frozen
+      // (also reachable via `opts.fsOps`, not just internal callers), and a mutation attempt failing
+      // must not destroy the real error we are about to rethrow — the bookkeeping is expendable, the
+      // original failure is not. Net effect: every caller/test still sees exactly today's error
+      // (same message, same type, same stack, same object identity), with or without this attach.
+      if (e !== null && typeof e === 'object') {
+        try {
+          if (landedStats !== null) (e as LandedStatsCarrier)[LANDED_STATS] = landedStats;
+          else delete (e as LandedStatsCarrier)[LANDED_STATS];
+        } catch { /* e resists mutation (frozen/non-extensible/exotic) — leave it exactly as thrown */ }
       }
       throw e;
     }

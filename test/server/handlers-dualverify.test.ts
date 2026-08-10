@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { handleDualVerify, type DualVerifyHandlerDeps } from '../../src/server/handlers.js';
+import { handleDualVerify, MAX_ID_CHARS, type DualVerifyHandlerDeps } from '../../src/server/handlers.js';
 import { DEFAULT_CONFIG, type HelixConfig } from '../../src/config.js';
 import type { EchoSource } from '../../src/verify/dual-verify.js';
 
@@ -24,6 +24,27 @@ function deps(over: Partial<DualVerifyHandlerDeps>): DualVerifyHandlerDeps {
     ...over,
   };
 }
+
+describe('handleDualVerify (cancel wiring: LEAD-CODEX-CANCEL)', () => {
+  it('forwards a caller-provided AbortSignal through dualVerify to the runner', async () => {
+    let seenSignal: AbortSignal | undefined;
+    const d = deps({
+      runner: async (_q, opts) => { seenSignal = opts?.signal; return { ok: true, answer: 'use postgres' }; },
+    });
+    const ac = new AbortController();
+    await handleDualVerify({ question: 'db?', helixAnswer: 'use postgres' }, d, ac.signal);
+    expect(seenSignal).toBe(ac.signal);
+  });
+
+  it('omits signal entirely when the caller passes none (no behavior change)', async () => {
+    let seenSignal: AbortSignal | undefined = {} as AbortSignal;
+    const d = deps({
+      runner: async (_q, opts) => { seenSignal = opts?.signal; return { ok: true, answer: 'use postgres' }; },
+    });
+    await handleDualVerify({ question: 'db?', helixAnswer: 'use postgres' }, d);
+    expect(seenSignal).toBeUndefined();
+  });
+});
 
 describe('handleDualVerify', () => {
   it('returns a DATA-framed agreement map and audit-logs the spawn', async () => {
@@ -109,6 +130,18 @@ describe('handleDualVerify', () => {
     expect(t).toContain('no unmatched claims');
     expect(t).not.toContain('no divergences');
   });
+
+  it('a fully-discordant negated pair renders diverge with divergences, never the zero-pair aligner text', async () => {
+    const d = deps({ runner: async () => ({ ok: true, answer: 'The migration is not safe to apply.' }) });
+    const res = await handleDualVerify({ question: 'q', helixAnswer: 'The migration is safe to apply.' }, d);
+    const t = text(res);
+    expect(t).toContain('verdict: diverge (mode: compare)');
+    expect(t).toContain('divergences:');
+    expect(t).not.toContain('no claim pairs found by aligner');
+    expect(t).not.toContain('could not match claims');
+    const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
+    expect(audit.verdict).toBe('diverge');
+  });
 });
 
 describe('handleDualVerify egress audit', () => {
@@ -165,6 +198,51 @@ describe('handleDualVerify egress audit', () => {
     const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
     expect(audit.egressDecision).toBe('pass');
     expect(audit.decidedLeg).toBeUndefined();
+  });
+
+  // LEAD-AUDIT-ID-UNCONSTRAINED (fix round 1 Important): echoMemoryIds' ids come from LEDGER CONTENT
+  // (store.inspect(), read by detectEcho) -- unlike erase/recheck/confirm's `id`, this is NOT
+  // something the CALLER typed, so it is never gated by the MCP schema. parseLedger enforces only
+  // `typeof id === 'string'`, so a FORGED record in an owned ledger (e.g. planted by a compromised
+  // dependency, or corrupted by hand) can carry an arbitrarily long/injected id; if its content
+  // happens to echo into a dual-verify prompt, that raw id used to land verbatim in the audit row —
+  // the review reproduced a 5022-char forged id producing a 5225-byte audit row via this exact path.
+  it('bounds a forged ledger id before it reaches echoMemoryIds in the audit row', async () => {
+    const secretFreeEcho = 'the deploy uses the blue cluster in us-east-1';
+    const forgedId = 'm_evil\n' + 'x'.repeat(5000) + '(injected marker text)';
+    const d = deps({
+      echo: echoEnforce([{ id: forgedId, content: secretFreeEcho }]),
+      runner: async () => { throw new Error('must not spawn'); },
+    });
+    await handleDualVerify({ question: secretFreeEcho, helixAnswer: 'ok' }, d);
+    const raw = readFileSync(d.auditPath, 'utf8');
+    const audit = JSON.parse(raw.trim());
+    expect(audit.echoMemoryIds).toHaveLength(1);
+    expect(audit.echoMemoryIds[0].length).toBeLessThanOrEqual(MAX_ID_CHARS); // bounded, not the raw 5029-char id
+    expect(audit.echoMemoryIds[0]).not.toContain('\n');
+    expect(audit.echoMemoryIds[0]).not.toContain('injected marker text');
+    // INVARIANT: the forged bytes never reach the audit file at all, bounded or not.
+    expect(raw).not.toContain('injected marker text');
+    expect(raw.length).toBeLessThan(1000); // NOT the ~5225-byte row the review reproduced pre-fix
+  });
+
+  // FIX ROUND 2 (review Important 1): the round-1 fix always ran echoMemoryIds through safeId
+  // ([^A-Za-z0-9_-] -> ''), which is STRICTER than the id bound round-1 itself widened for adoption
+  // (isValidId admits any printable, non-control script). So a LEGITIMATE ledger id like
+  // `note/2026 팀 공유 id` was mangled to `note2026id` in the audit row — a forensic field that no
+  // longer names the real record, for a record that isn't even forged. Discriminating case: this id
+  // is chosen to be VALID under isValidId (passes the round-1 bound) but would still be mangled by
+  // safeId alone — that gap is exactly what round-2 must close.
+  it('records a VALID (non-forged) ledger id verbatim in echoMemoryIds, not safeId-mangled', async () => {
+    const echoText = 'the deploy uses the blue cluster in us-east-1';
+    const legitimateId = 'note/2026 팀 공유 id'; // valid under isValidId; safeId alone would mangle it
+    const d = deps({
+      echo: echoEnforce([{ id: legitimateId, content: echoText }]),
+      runner: async () => { throw new Error('must not spawn'); },
+    });
+    await handleDualVerify({ question: echoText, helixAnswer: 'ok' }, d);
+    const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
+    expect(audit.echoMemoryIds).toEqual([legitimateId]); // verbatim, not the safeId-mangled 'note2026id'
   });
 });
 

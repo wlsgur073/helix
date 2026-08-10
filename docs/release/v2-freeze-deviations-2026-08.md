@@ -31,8 +31,9 @@ same cache path, no new bytes) is same-startup scope registration, not the cause
 verdict (settings.json id `4be465da75fd64fd`): v1 08-05 22:48 KST = true; v2 08-06 00:08 KST =
 **false** — the CLAUDE.md-recorded guard WAS persisted; v3 08-06 18:19:09 KST = true again,
 23 seconds after the 18:18:46 e66384c pull — the reversion coincides with the update cycle
-itself. No known_marketplaces.json history survives. Raw captures: the local (gitignored)
-evidence dir `docs/superpowers/evidence/2026-08-09-autoupdate-deviation/`.
+itself. No known_marketplaces.json history survives. Raw captures are held in a local, gitignored
+evidence directory for this deviation, alongside the working-tree design notes; they are not part
+of this repository and a clone will not contain them.
 
 **Remediation (2026-08-09, all verified same day).**
 - Both flags set explicitly false: `~/.claude/settings.json`
@@ -71,6 +72,6 @@ checklist after release-record validation — never by the passing of `txClose` 
 close, also remove the two freeze-guard lines + export from `~/.bashrc` and the systemd drop-in,
 and restore both `autoUpdate` flags to true.
 
-**Method note.** The remediation design was cross-checked with Codex (compare mode, 2 rounds,
-convergence declared); the divergence why-log lives in the local design spec
-(`docs/superpowers/specs/2026-08-09-autoupdate-guard-restore-design.md`).
+**Method note.** The remediation design was cross-checked with a second reviewing model (compare
+mode, 2 rounds, convergence declared); the divergence why-log lives in the local, gitignored design
+notes for this remediation, not in this repository.

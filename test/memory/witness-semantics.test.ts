@@ -98,7 +98,7 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
         // witnessing it — unlike an ordinary commit, which stamps ownership AND witnesses atomically
         // within one call, this is the genuine "a scope newly participates, unwitnessed" window
         // (the team-shared-ledger precedent, store.ts adopt() doc-comment).
-        store.adopt();
+        store.adopt(root);
         expect(readScopeWitness(home, scopeKeyOf(home, root)).entry).toBeNull(); // never witnessed
 
         const res = store.recall('global already');
@@ -336,7 +336,7 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
     });
   });
 
-  describe('failpoint: fsync error path — a thrown fsyncSync on the witness fd aborts the replace, leaving OLD content intact (fs-ops.ts fsyncDir already swallows in production)', () => {
+  describe('failpoint: fsync error path — a thrown fsyncSync on the witness fd aborts the replace, leaving OLD content intact (fs-ops.ts fsyncDir discriminates by errno in production: EINVAL/EISDIR/ENOTSUP/EOPNOTSUPP/an open failure swallow, everything else propagates)', () => {
     it('a thrown fsyncSync leaves witness.json byte-identical to its pre-attempt content; rename never runs', () => {
       const home = newHome();
       try {
@@ -353,13 +353,16 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
       } finally { rmSync(home, { recursive: true, force: true }); }
     });
 
-    // fs-ops.ts's OWN fsyncDir (the directory-level fsync AFTER rename) already swallows EINVAL/EISDIR
-    // internally (fs-ops.ts:24-29) — a REAL failure there can never propagate to a DurableFsOps caller
-    // in production, so it is not a "content stays old" failpoint the way fsyncSync-on-fd is; it runs
-    // only after the rename already landed the NEW content. Confirmed directly for completeness: even
-    // an INJECTED fsOps.fsyncDir override (which bypasses the internal swallow, since it replaces the
-    // whole function) still fires too late to protect old content — a durability-only concern the
-    // design already accepts, not a correctness gap.
+    // fs-ops.ts's OWN fsyncDir (the directory-level fsync AFTER rename) discriminates by errno (task
+    // 7, fs-ops.ts's SWALLOWED_FSYNC_CODES): EINVAL/EISDIR/ENOTSUP/EOPNOTSUPP/an open failure still
+    // swallow, but any other attempted-and-failed fsync (EIO, ENOSPC, a code-less error, ...) now
+    // PROPAGATES to a DurableFsOps caller in production too. Either way it runs only after the rename
+    // already landed the NEW content, so it is not a "content stays old" failpoint the way
+    // fsyncSync-on-fd is. Confirmed directly for completeness: even an INJECTED fsOps.fsyncDir
+    // override (which bypasses the internal errno discrimination, since it replaces the whole
+    // function) still fires too late to protect old content — a durability-only concern in the
+    // swallowed case, an availability failure in the propagated case, never a correctness gap
+    // either way.
     it('a thrown fsyncDir fires only AFTER the rename already landed the new content (not a content-intact failpoint)', () => {
       const home = newHome();
       try {

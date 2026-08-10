@@ -32,7 +32,12 @@ export interface DualVerifyAudit {
  *  after the fsync'd erase, so a crash in the narrow gap can miss it; see appendAudit) — so a
  *  poisoned/erroneous erase that suppresses an authoritative fact is detectable in audit.jsonl. The MCP tool is soft-only
  *  (`soft: true`); `soft: false` marks the out-of-band permanent/compaction path. Content-free
- *  by design — only the id is recorded, never the erased text. */
+ *  by design — only the id is recorded, never the erased text. LEAD-AUDIT-ID-UNCONSTRAINED: `id` used
+ *  to be an unbounded string written here VERBATIM even when it matched no record (erase() is a
+ *  no-op, not a throw, for an absent id) — an attacker-chosen id of unbounded length/bytes could ride
+ *  this "content-free" field. `id` is now bounded (length + charset) before this event is ever
+ *  constructed: handlers.ts's `assertValidId` guards every caller of this interface, mirrored at the
+ *  MCP boundary by helix-server.ts's `ID_SCHEMA`. */
 export interface EraseAudit {
   kind: 'erase';
   ts: string;
@@ -45,7 +50,11 @@ export interface EraseAudit {
  *  after the fsync'd transition; see appendAudit) — so a poisoned/erroneous promotion or a
  *  silently-dropped corroboration is detectable in audit.jsonl. Content-free by design: ids /
  *  enums / booleans ONLY, NEVER a matched span, file path, or check pattern. `outcome` is an INLINE
- *  shape (not firewall's VerifyOutcome) to keep audit decoupled from the check engine. */
+ *  shape (not firewall's VerifyOutcome) to keep audit decoupled from the check engine.
+ *  LEAD-AUDIT-ID-UNCONSTRAINED: the REJECTED branch (recheck/confirm target-not-found or unbound)
+ *  is the sharp case — it audits BEFORE re-throwing, so a garbage id would otherwise be logged on
+ *  every single failed lookup. `id` is bounded (length + charset) before either handler's try block
+ *  runs: see handlers.ts's `assertValidId` / helix-server.ts's `ID_SCHEMA`. */
 export interface VerifyAudit {
   kind: 'verify';
   ts: string;
@@ -57,14 +66,48 @@ export interface VerifyAudit {
   outcome?: { ran: boolean; indeterminate: boolean; passed: boolean };
 }
 
-export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit;
+/** Adopt audit: every helix_memory_adopt is recorded — best-effort, like the others. Adoption is one
+ *  of only two operations that move what Helix trusts (confirm is the other), and it was previously
+ *  the only one that left no trace at all: a foreign project ledger became trusted with nothing in
+ *  audit.jsonl to show for it. `scope` is the canonical project root — an IDENTITY, not content. It
+ *  discloses nothing that `projects.json` beside it does not already hold, and the content-free rule
+ *  this file keeps is about memory text, which never appears here. */
+export interface AdoptAudit {
+  kind: 'adopt';
+  ts: string;
+  scope: string;
+}
+
+export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit | AdoptAudit;
 
 /** Append one audit event as a JSONL line, fsync'd so a written row survives power loss. Creates
  *  parent dirs as needed. Completeness is best-effort, NOT transactional: the row is appended AFTER
  *  the action it records (the erase/verify, itself fsynced), so a crash in the narrow window between
  *  the two can leave the action durable with its audit row absent. Durable-once-written: the row bytes
  *  are fsync'd, and on FIRST creation the parent directory is fsync'd too, so the new file's directory
- *  entry is durable — not just its inode (a crash could otherwise lose the whole freshly-created file). */
+ *  entry is durable — not just its inode (a crash could otherwise lose the whole freshly-created file).
+ *
+ *  The directory fsync is swallowed UNCONDITIONALLY here — narrower than fs-ops.ts's own fsyncDir
+ *  contract (task 7), which now propagates a genuinely failed attempt. No caller (handlers.ts) wraps
+ *  this call, and by the time it runs every caller has already COMPLETED its primary operation — not
+ *  always successfully. Four of seven call sites — handlers.ts `handleErase`, `handleAdopt`, and the
+ *  post-success appends in `handleRecheck` and `handleConfirm` — run it after a SUCCEEDED operation;
+ *  two — the appends in `handleRecheck`'s and `handleConfirm`'s catch blocks — run it INSIDE a catch,
+ *  after the primary operation already FAILED, immediately before re-throwing that real error; one —
+ *  `handleDualVerify` — follows an operation that commits nothing to disk at all: audit.jsonl IS the
+ *  durable record there. Sites are named by FUNCTION rather than by line because the line form of this
+ *  same enumeration was corrected twice for its reasoning and then invalidated a third time by
+ *  unrelated edits above it, silently and without any check noticing. `grep -n appendAudit
+ *  src/server/handlers.ts` re-derives it. Fix round 1 (review Important 3): an earlier version of this
+ *  comment claimed every caller's primary operation had "already durably committed", which is false
+ *  for the reject paths and the dual-verify path. Fix round 2: that same earlier version also
+ *  undercounted the success sites (three, not four — `handleConfirm`'s was missing). The
+ *  exemption is correct regardless of the count — it is *more* clearly correct once stated right: at
+ *  the reject sites, letting a directory-fsync failure escape would not just misreport a success as a
+ *  failure, it would REPLACE the real rejection error the caller is about to re-throw with an
+ *  unrelated fsync error, masking the actual diagnosis. Both outcomes are worse than the audit row
+ *  silently missing — a gap this docstring already accepts. The row's own bytes stay unconditional:
+ *  writeAll + fsyncSync(fd) above are untouched and still propagate. */
 export function appendAudit(path: string, event: AuditEvent): void {
   mkdirSync(dirname(path), { recursive: true });
   const isNew = !existsSync(path);
@@ -74,5 +117,7 @@ export function appendAudit(path: string, event: AuditEvent): void {
     writeAll(realFsOps, fd, JSON.stringify(event) + '\n');
     fsyncSync(fd);
   } finally { closeSync(fd); }
-  if (isNew) fsyncDir(dirname(path)); // first creation: make the directory entry durable, not just the bytes
+  if (isNew) {
+    try { fsyncDir(dirname(path)); } catch { /* best-effort by design — see docstring above */ }
+  }
 }

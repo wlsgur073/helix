@@ -38,7 +38,24 @@ export function classifyWitness(
   if (journal) {
     const exact = bytes.length === journal.expected.byteLength
       && matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash);
-    return exact ? { kind: 'transition-heal', journal } : { kind: 'transition-interrupted', journal };
+    if (exact) return { kind: 'transition-heal', journal };
+    // The rewrite did not land whole. A journal knows BOTH ends of the transition it opened, so it
+    // can still say whether these bytes are on that lineage at all: `predecessor` is what the ledger
+    // held at open, `expected` is what the rewrite would have produced. Bytes carrying either as a
+    // prefix are a real interruption — the re-drive path, which the rewrite gate must not refuse.
+    // Bytes carrying NEITHER are a fork: neither the before nor the after. Classifying those as an
+    // interruption was how a rollback laundered itself clean — the rewrite gate refuses 'mismatch'
+    // only, so a fork under a pending journal was blessed into a fresh epoch, and the alarm the
+    // witness exists to raise went with it. Suffix tolerance mirrors the entry path below, where
+    // appended bytes are 'unwitnessed-suffix' rather than an alarm: divergence is a changed PREFIX.
+    //
+    // A null predecessor keeps the old verdict. It is null only when there is no witness entry
+    // (planTransition derives it from one), and with no established lineage there is nothing to
+    // fork FROM — a writer there is at first contact and could set the bytes regardless.
+    const onLineage = matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash)
+      || journal.predecessor === null
+      || matchesAt(bytes, journal.predecessor.byteLength, journal.predecessor.prefixHash);
+    return onLineage ? { kind: 'transition-interrupted', journal } : { kind: 'mismatch' };
   }
   if (!entry) return { kind: 'first-contact', reason: 'no-entry' };
   if (!matchesAt(bytes, entry.byteLength, entry.prefixHash)) return { kind: 'mismatch' };

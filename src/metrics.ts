@@ -9,6 +9,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 /** One per-scope verifying read, camelCase in code — the sink writes snake_case wire names. */
 export interface ReplayInput {
@@ -32,6 +33,13 @@ export interface CompactionInput {
    *  failed/no-op compaction or when no HMAC subkey was available). */
   droppedForgedVerifies: number;
   ok: boolean;
+  /** Whether the atomic rewrite physically landed on disk for this attempt — true on a clean success
+   *  AND on a failure that struck AFTER the rename (dir fsync / witness-transition completion), false
+   *  only when nothing landed (a pre-rename failure, or no compaction was attempted). Disambiguates
+   *  `droppedRows`/`reclaimedBytes` on an `ok:false` row: `landed:false` means they are honestly zero
+   *  (nothing happened); `landed:true` means they are the REAL on-disk deltas from a rewrite that did
+   *  happen despite the later failure. A count/boolean pair, never a path, id, or content fragment. */
+  landed: boolean;
 }
 
 export interface MetricsSink {
@@ -40,8 +48,9 @@ export interface MetricsSink {
   /** Emit one compaction record (best-effort, never throws). */
   emitCompaction(c: CompactionInput): void;
   /** Time a tool handler to settlement (sync or promise), emit one op record, and bracket a
-   *  current-op id so replays emitted synchronously inside self-stamp it. Save/restore, not
-   *  null-clear, so a nested runOp cannot orphan the outer op's later replays. */
+   *  current-op id (via AsyncLocalStorage, keyed per invocation) so replays emitted anywhere in this
+   *  op's own async chain self-stamp it -- correct for both nested AND partially overlapping calls,
+   *  since there is no shared slot for one op's settlement to clobber another's still-active id. */
   runOp<T>(tool: string, fn: () => T | Promise<T>): Promise<T>;
 }
 
@@ -67,62 +76,74 @@ export function createMetricsSink(path: string, enabled: boolean, deps: MetricsS
   const now = deps.now ?? ((): string => new Date().toISOString());
   const genId = deps.genId ?? ((): string => `o_${randomUUID()}`);
 
-  let currentOpId: string | null = null;
-  let buffer: string[] | null = null; // non-null while an op is active (signal purity, spec §5)
+  // Per-invocation op context, not a shared mutable slot: AsyncLocalStorage keys the context by the
+  // causal async chain of each runOp call, so two overlapping (non-nested) ops each carry their own
+  // {opId, buffer} through their own awaits regardless of settlement order. A stack-style save/restore
+  // on shared closure vars (the prior design) is correct only when ops settle LIFO; ALS has no such
+  // ordering requirement because there is no shared slot to clobber.
+  const ctx = new AsyncLocalStorage<{ opId: string; buffer: string[]; closed: boolean }>();
 
   const safeAppend = (line: string): void => { try { append(path, line); } catch { /* best-effort */ } };
+
+  // The active op for THIS emit, or null if we're outside any op OR the op that created this async
+  // chain has already settled (closed=true). ALS keeps propagating its store into continuations that
+  // outlive the run() call that spawned them (a detached setTimeout/setImmediate/un-awaited promise
+  // started inside the op) -- closed guards against silently pushing into a buffer nobody will ever
+  // flush again; without it such a line would be swallowed for good instead of landing unbuffered.
+  const activeOp = (): { opId: string; buffer: string[] } | null => {
+    const store = ctx.getStore();
+    return store && !store.closed ? store : null;
+  };
 
   return {
     emitReplay(r: ReplayInput): void {
       try {
+        const active = activeOp();
         const line = JSON.stringify({
-          v: 1, kind: 'replay', ts: now(), op_id: currentOpId, scope: r.scope,
+          v: 1, kind: 'replay', ts: now(), op_id: active ? active.opId : null, scope: r.scope,
           rows: r.rows, live_rows: r.liveRows, bytes: r.bytes,
           parse_ms: r.parseMs, project_ms: r.projectMs,
           key_available: r.keyAvailable, caller: r.caller,
         }) + '\n';
-        if (buffer) buffer.push(line); else safeAppend(line);
+        if (active) active.buffer.push(line); else safeAppend(line);
       } catch { /* never throw into a read path */ }
     },
 
     emitCompaction(c: CompactionInput): void {
       try {
+        const active = activeOp();
         const line = JSON.stringify({
-          v: 1, kind: 'compaction', ts: now(), op_id: currentOpId, scope: c.scope,
+          v: 1, kind: 'compaction', ts: now(), op_id: active ? active.opId : null, scope: c.scope,
           duration_ms: c.durationMs, dropped_rows: c.droppedRows, reclaimed_bytes: c.reclaimedBytes,
-          dropped_forged_verifies: c.droppedForgedVerifies, ok: c.ok,
+          dropped_forged_verifies: c.droppedForgedVerifies, ok: c.ok, landed: c.landed,
         }) + '\n';
-        if (buffer) buffer.push(line); else safeAppend(line);
+        if (active) active.buffer.push(line); else safeAppend(line);
       } catch { /* never throw into a compaction path */ }
     },
 
     async runOp<T>(tool: string, fn: () => T | Promise<T>): Promise<T> {
-      const prevOp = currentOpId;
-      const prevBuf = buffer;
       const opId = genId();
-      const myBuf: string[] = [];
-      currentOpId = opId;
-      buffer = myBuf;
+      const store = { opId, buffer: [] as string[], closed: false };
       const started = performance.now();
       let ok = true;
       let errorType: string | null = null;
       try {
-        return await fn();
+        return await ctx.run(store, fn);
       } catch (e) {
         ok = false;
         errorType = e instanceof Error ? e.name : 'NonError';
         throw e;
       } finally {
         const durationMs = performance.now() - started; // capture BEFORE any metrics I/O
-        currentOpId = prevOp;                            // stack-style restore
-        buffer = prevBuf;
+        store.closed = true; // any emit still reaching this store now (a detached continuation) is
+                              // no longer "inside" this op -- see activeOp's comment.
         try {
           safeAppend(JSON.stringify({
             v: 1, kind: 'op', ts: now(), op_id: opId,
             'mcp.method.name': 'tools/call', 'gen_ai.tool.name': tool,
             duration_ms: durationMs, ok, 'error.type': errorType,
           }) + '\n');
-          for (const line of myBuf) safeAppend(line); // flush AFTER capture
+          for (const line of store.buffer) safeAppend(line); // flush AFTER capture
         } catch { /* never throw */ }
       }
     },

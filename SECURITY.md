@@ -23,7 +23,12 @@ acknowledgement within a few days.
   **tamper-evident at the file surface** (see *Ledger integrity* below): a forged or hand-edited
   ledger record replays as `Fresh`. The grade is still **not** an enforceable human-approval
   signal at the *tool* surface, so do **not** allow-list `helix_memory_confirm` — it must prompt
-  for your explicit approval.
+  for your explicit approval. The same holds for **`helix_memory_adopt`**, the only other tool that
+  moves what Helix trusts: adopting a project ledger makes everything already in it recallable, and
+  no grade check stands between the adoption and the next recall. It names the project root it is
+  adopting so the prompt has something to review, and refuses a root that is not the active scope,
+  but neither substitutes for the prompt — do **not** allow-list it either. Every adoption is
+  recorded in `audit.jsonl`.
 - **Trust states:** `Fresh / Corroborated / Verified / Suspect`, with re-verify-before-use on
   high-blast-radius paths.
 - **Secret handling:** memory is secret-scanned and redacted before it is persisted.
@@ -116,7 +121,7 @@ locally-held key, so:
 
 **This authenticates the file surface, not the tool surface.** A legitimate `helix_memory_confirm`
 call still carries no enforceable human-approval signal, so the guidance above stands: do **not**
-allow-list `helix_memory_confirm`.
+allow-list `helix_memory_confirm`, and do **not** allow-list `helix_memory_adopt`.
 
 ### Compaction integrity/horizon markers (F5) — clearing a planted marker is an operator procedure
 
@@ -221,7 +226,12 @@ adversary cannot read or write, so a ledger's current bytes are checked against 
   never advances over a mismatch. Only an explicit re-baseline (below) clears the signal, so the
   very next ordinary append after a rollback can never silently launder the alarm away. (A
   separate, narrower state — a ledger rewrite caught mid-transition — always excludes reads and
-  blocks writes for that scope until resolved, independent of this policy.)
+  blocks appends for that scope until resolved, independent of this policy. A *rewrite* is still
+  permitted there, because re-driving an interrupted transition is how that state is meant to
+  resolve. So that this does not become a second laundering route, the mid-transition state is
+  itself discriminated: a pending transition records the bytes it opened over as well as the bytes
+  it would produce, and a ledger carrying NEITHER as a prefix is neither the before nor the after.
+  It is classified a mismatch, not an interruption, and the rewrite is refused.)
 - **Fenced current-head-only witness, user-only ceremony.** The witness keeps only each scope's
   live head, never a history of erased-era bytes, kept honest by a content-free marker row planted
   at the end of every legitimate rewrite (compaction, erase, an authorized re-baseline) — so a
@@ -282,11 +292,23 @@ same one-time path as before; nothing about the key's secrecy changes, only when
 - **Appends are durable:** every append fsyncs the line before success is reported; a torn tail
   (power cut mid-append) is isolated by the next writer's tail repair and counted by parse health,
   and a complete-but-unacknowledged record commits (at-least-once). The **directory** fsync that
-  makes a new file's name durable is attempted on the same path but is **best-effort**: it is
-  suppressed if the directory cannot be opened or the fsync itself fails, and success is still
-  reported. This is deliberate — some filesystems reject it outright — but it means an acknowledged
-  append could, after power loss, be found under a directory entry that never reached the platter.
-  The line's own bytes are unaffected.
+  makes a new file's name durable is attempted on the same path, and splits into two classes on
+  **errno alone, never on the message**: if the directory cannot be opened at all, or the fsync call
+  itself fails with `EINVAL`/`EISDIR`/`ENOTSUP`/`EOPNOTSUPP`, the platform genuinely cannot fsync a
+  directory (some filesystems, and Windows, reject it outright — `ENOTSUP`/`EOPNOTSUPP` are a second
+  pair some filesystems return instead of `EINVAL`/`EISDIR`; the same numeric value on Linux but
+  distinct symbols elsewhere) and the failure is suppressed — success is still reported, so an
+  acknowledged append could, after power loss, be found under a directory entry that never reached
+  the platter. Any other failure (`EIO`, `ENOSPC`, and their class) means the fsync was attempted
+  and genuinely failed, and now **propagates**: the append itself throws rather than reporting a
+  success that isn't true, converting that rare disk-level failure into an availability failure on
+  every write path (append, compaction's post-rename fsync, master-key mint, witness advance, orphan
+  -tmp sweep) at once — a deliberate trade against silently lying about durability. The audit trail
+  (`audit.jsonl`) is the one exception: it is documented best-effort/non-transactional already (see
+  its own docstring), and its directory fsync on first creation stays unconditionally suppressed, so a
+  disk hiccup on that side channel never reports an already-succeeded operation as failed — or, at a
+  rejection site, replaces the real rejection error with an unrelated one on its way out.
+  The line's own bytes are unaffected either way.
 - **Rollout launch barrier (normative):** old bundles age-steal locks and do not sweep — while any
   old helix-mcp process runs, the new guarantees do not hold. Upgrade procedure: close every Claude
   session, verify no helix-mcp processes remain, reinstall the plugin, then reopen sessions. The

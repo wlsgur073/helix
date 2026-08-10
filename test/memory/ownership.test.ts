@@ -88,6 +88,22 @@ describe('auto-adopt TOCTOU guard (targetLedger)', () => {
     stampOwnership(proj, home, { autoAdoptLedger: ledger });
     expect(isOwned(proj, home)).toBe(true);
   });
+
+  it('refuses a raced foreign ledger on the REPAIR path (stale registry entry, lost .owner)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-own-'));
+    const proj = mkdtempSync(join(tmpdir(), 'helix-proj-'));
+    // First use registers the project and writes .owner.
+    stampOwnership(proj, home, {});
+    // The .owner stamp is lost or overwritten — isOwned is now false, but the registry entry
+    // survives, so the guard's `!existing` conjunct stops the re-check from ever running.
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    writeFileSync(join(proj, '.helix', '.owner'), 'not-our-stamp');
+    expect(isOwned(proj, home)).toBe(false);
+    // A foreign ledger races into the window.
+    const ledger = join(proj, '.helix', 'memory.jsonl');
+    writeFileSync(ledger, '{}\n');
+    expect(() => stampOwnership(proj, home, { autoAdoptLedger: ledger })).toThrow(/did not create|adopt/i);
+  });
 });
 
 describe('re-adoption preserves the nonce; deletion-safety is the compaction chokepoint (F6)', () => {

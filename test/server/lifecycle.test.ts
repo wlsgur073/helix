@@ -103,4 +103,31 @@ describe('installSelfTermination', () => {
     await tick();
     expect(h.exitCodes).toEqual([0]);
   });
+
+  it('drains an in-flight handler (e.g. a still-writing dual-verify audit row) before exiting', async () => {
+    const h = harness();
+    let resolveDrain: (() => void) | undefined;
+    const draining = new Promise<void>((r) => { resolveDrain = r; });
+    let drainBudget: number | undefined;
+    h.deps.drainInFlight = async (budgetMs) => { drainBudget = budgetMs; await draining; };
+    installSelfTermination(h.deps);
+    h.stdin.emit('end');
+    await tick();
+    expect(h.exitCodes).toEqual([]);      // still draining -- must not have exited yet
+    expect(drainBudget).toBe(500);        // handed the SAME budget as the fallback timer, not a new one
+    resolveDrain!();
+    await tick();
+    expect(h.exitCodes).toEqual([0]);
+  });
+
+  it('a drain that never resolves does not delay exit past the existing fallback timer', async () => {
+    const h = harness();
+    h.deps.drainInFlight = () => new Promise<void>(() => { /* never settles */ });
+    installSelfTermination(h.deps);
+    h.stdin.emit('end');
+    await tick();
+    expect(h.exitCodes).toEqual([]);   // drain hasn't resolved
+    h.fireTimer();                     // the SAME fallback timer as always -- no separate/longer budget
+    expect(h.exitCodes).toEqual([0]);
+  });
 });

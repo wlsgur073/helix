@@ -61,6 +61,31 @@ describe('classifyHolder precedence (spec Layer 2)', () => {
   it('nonsense pid (0, negative, NaN) is alive-unknown', () => {
     for (const pid of [0, -3, Number.NaN]) expect(classifyHolder(mk({ pid }), self(), realProbe)).toBe('alive-unknown');
   });
+  it('a holder with NO recorded start-ticks (non-Linux) is alive-unknown, never a certain alive', () => {
+    // mk()/self() build on selfIdentity(), which on THIS (Linux) host always yields non-null
+    // startTicks/bootId/pidNs — so the non-/proc shape must be constructed explicitly here, or
+    // this test would fall through the rule-2/rule-3 early-outs without ever reaching the branch
+    // under test (the final `return 'alive'` for a kill0-only verdict).
+    const nonProc = { startTicks: null, bootId: null, pidNs: null, platform: 'darwin' };
+    expect(classifyHolder(
+      mk({ pid: 4242, ...nonProc }),
+      { ...self(), ...nonProc },
+      probeOf({ kill0: () => 'alive', startTicksOf: () => null, stateOf: () => null }),
+    )).toBe('alive-unknown');
+  });
+  it('EPERM with NO recorded start-ticks (non-Linux) is ALSO alive-unknown — same shared fall-through as the non-EPERM case above, not a separate rule', () => {
+    // Pins the side effect the non-EPERM fix has on this sub-case: EPERM and a plain non-dead
+    // kill0 result both fall through the SAME final line, so both are equally affected when
+    // startTicks is null. The Linux EPERM case ('EPERM is alive' above, non-null startTicks
+    // inherited from self()) is untouched and deliberately out of scope — this test guards only
+    // the startTicks===null sub-case so a future refactor can't silently flip it back to 'alive'.
+    const nonProc = { startTicks: null, bootId: null, pidNs: null, platform: 'darwin' };
+    expect(classifyHolder(
+      mk({ pid: 1, ...nonProc }),
+      { ...self(), ...nonProc },
+      probeOf({ kill0: () => 'eperm', startTicksOf: () => null, stateOf: () => null }),
+    )).toBe('alive-unknown');
+  });
 });
 
 describe('real probe (one REAL process each way — injection cannot catch a wrong errno mapping)', () => {

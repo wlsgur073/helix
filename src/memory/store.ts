@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, type CompactionStats, type LedgerPath } from './ledger.js';
+import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, type CompactionStats, type LedgerPath } from './ledger.js';
 import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
 import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, WitnessBlockedError } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
@@ -17,7 +17,7 @@ import { rankWithArtifacts, buildRankArtifacts, assertQueryWithinBounds, type Ex
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce, collectWitnessNotes } from './content-frame.js';
-import { isOwned, stampOwnership, projectDispositionOf, type ProjectDisposition } from './ownership.js';
+import { isOwned, stampOwnership, projectDispositionOf, canonicalRoot, type ProjectDisposition } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedLiveWitnessed, verifiedProjectionWithSubkey } from './verified-read.js';
@@ -75,9 +75,18 @@ export interface RecalledItem {
   record: MemoryRecord;
   scope: MemoryScope;
   needsReverify: boolean;
-  /** 'compromised' iff the verifying replay saw an equal-generation MAC conflict for this target
-   *  (R-conflict). 'ok' otherwise — including a forged elevation that was simply ignored (it shows
-   *  its honest clamped state, no conflict). */
+  /** 'compromised' iff the verifying replay had a key AND this target carries at least one VALID
+   *  SIGNED verify AND that replay saw either tampering signal: an equal-generation MAC conflict
+   *  (R-conflict — two valid verifies at one gen disagreeing on state), OR a duplicate fact id (two
+   *  DIFFERING records claiming this id, so which is genuine is not knowable; byte-identical repeats
+   *  are exempt as at-least-once append replays). The second cause needs no verify CONFLICT — one
+   *  genuine verify plus a forged twin reaches it — but it does need that verify: both signals are
+   *  raised only inside the per-target grading loop, which iterates targets that have one. So a
+   *  duplicate id on a fact NOTHING has verified reads 'ok' here even though forgedFactIds sees it
+   *  (measured) — there is no grade to withhold, and none is conferred, but no alarm is raised
+   *  either. 'ok' also covers key-absent, where nothing is graded at all (see
+   *  RecallResult.integrityAvailable), and a forged elevation that was simply ignored (it shows its
+   *  honest clamped state, no conflict). */
   integrity: 'ok' | 'compromised';
 }
 
@@ -481,14 +490,17 @@ export class MemoryStore {
       // breaking the self-limiting invariant (spec §4.5). Measuring reclaim against the NON-fence input
       // rows nets it out (on a fence-free ledger this is identical to `records`, so a genuinely dirty
       // ledger is unaffected). `rows` for the gate stays the total PHYSICAL count (dirtyGate contract).
-      const inputNonFence = records.filter((rec) => !rec.id.startsWith('witness_fence_'));
+      // Same predicate planCompaction drops by — imported, not restated, so the estimate can never
+      // drift from the keep-set it is estimating (see isWitnessFence).
+      const inputNonFence = records.filter((rec) => !isWitnessFence(rec));
       const reclaimable = inputNonFence.length - kept.length;
       const reclaimableBytes = serializedBytes(inputNonFence) - serializedBytes(kept);
       if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
       // Eligible: guard on ATTEMPT (before the call), fire, emit a metric, swallow errors.
       this.compactedThisSession = true;
       const started = performance.now();
-      let stats: CompactionStats | null = null;   // null <=> the compaction threw <=> nothing happened
+      let stats: CompactionStats | null = null;        // null <=> the compaction threw <=> did not complete cleanly
+      let landedStats: CompactionStats | null = null;   // set only when a THROWN compaction's rewrite had already landed (post-rename failure) — see ledger.ts's landedCompactionStats
       try {
         stats = compactLedger(r.ledger, {
           erasedIds: new Set(), keepValidVerify, provesKey,
@@ -496,17 +508,25 @@ export class MemoryStore {
           // advances the witness (plants a fence) — otherwise the next witnessed read would false-alarm.
           witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), r.root), now: () => this.now(), kind: 'compaction' },
         });
-      } catch { /* swallowed: compaction must never break a recall */ }
+      } catch (e) {
+        // swallowed: compaction must never break a recall. But a throw AFTER the rename landed still
+        // dropped real rows on disk — recover them so the metric never claims "nothing happened" for a
+        // rewrite that, in fact, already did.
+        landedStats = landedCompactionStats(e) ?? null;
+      }
       const durationMs = performance.now() - started;   // capture BEFORE any metrics I/O
-      // Drop the entry this recall just installed. On SUCCESS the ledger bytes changed, so the
-      // content-identity key would miss anyway (belt and braces). On FAILURE the bytes did NOT change,
-      // and clearing is what forces the next recall to MISS and re-enter this method — where the
-      // once-per-session guard, not a cache hit, then suppresses the retry. Defensive on both paths.
+      // Drop the entry this recall just installed. On a clean SUCCESS the ledger bytes changed, so the
+      // content-identity key would miss anyway (belt and braces). On a FAILURE the bytes usually did NOT
+      // change (a pre-rename throw is a pure no-op) — but a post-rename throw (landedStats set) DID
+      // change them. Either way clearing here is correct: it forces the next recall to MISS and
+      // re-enter this method, where the once-per-session guard, not a cache hit, then suppresses the
+      // retry. Defensive on every path.
       this.rankCache = null;
+      const real = stats ?? landedStats;   // whichever is non-null carries the REAL on-disk deltas
       this.opts.metricsSink?.emitCompaction({
         scope: r.root ? 'project' : 'global', durationMs,
-        droppedRows: stats?.droppedRows ?? 0, reclaimedBytes: stats?.reclaimedBytes ?? 0,
-        droppedForgedVerifies: stats?.droppedForgedVerifies ?? 0, ok: stats !== null,
+        droppedRows: real?.droppedRows ?? 0, reclaimedBytes: real?.reclaimedBytes ?? 0,
+        droppedForgedVerifies: real?.droppedForgedVerifies ?? 0, ok: stats !== null, landed: real !== null,
       });
     }
   }
@@ -783,16 +803,28 @@ export class MemoryStore {
   }
 
   /** Explicitly adopt the active project ledger (trust its current contents). For team-shared
-   *  ledgers. Throws if no project layer is active. */
-  adopt(): void {
+   *  ledgers. Throws if no project layer is active, or if `expectedRoot` names a different one.
+   *
+   *  The caller must NAME the root it means. Adoption moves a trust boundary — it is the only other
+   *  tool besides confirm that changes what Helix trusts — and a zero-argument call gives the
+   *  approval prompt nothing to show, so a user could only ever approve the ACT, never the target.
+   *  Requiring the root means the prompt names the ledger, and an agent that guessed wrong adopts
+   *  nothing instead of silently adopting whatever scope happened to be active. The check lives
+   *  here rather than in the handler because this is where the authority is: a caller reaching the
+   *  store directly must clear the same gate. Returns the canonical scope for the audit row. */
+  adopt(expectedRoot: string): string {
     const p = this.opts.project;
     if (!p) throw new Error('adopt: no project scope is active');
+    const active = canonicalRoot(p.root);
+    if (canonicalRoot(expectedRoot) !== active)
+      throw new Error(`adopt: the named project root is not the active project scope (${active})`);
     stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp });
     // Make signing possible going forward (future confirm/recheck can mint signed verifies), but
     // do NOT sign or bless any pre-existing record: adoption must never launder an unsigned,
     // pre-seeded elevated assert into a Verified one. R1's replay clamp already demotes such a
     // record to Fresh — this only ensures the master exists, it signs nothing that already exists.
     ensureMaster(this.homeDir());
+    return active;
   }
 
   /** Which marker family an id belongs to, or null for a normal id. `integrity_marker`/

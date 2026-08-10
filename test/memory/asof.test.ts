@@ -17,6 +17,24 @@ const D = digestContent('fact');
 const T = (s: string) => `2026-06-09T00:00:${s}.000Z`; // helper: distinct seconds within one minute
 
 describe('buildAsOfEvidence (spec C §4)', () => {
+  it('a forged duplicate id is tamper evidence here too, so asOf(now) still equals the live grade', () => {
+    // The file's own contract is that grade comes from the same resolver as the live projection, so
+    // asOf(now) equals the live grade. A guard that lives only on the live path would break that
+    // and hand the point-in-time view back as a bypass.
+    const recs = [
+      base({ id: 'a', content: 'fact', tx: T('01'), provenance: { source: 'agent-inference', sessionId: 's' } }),
+      sv2({ id: 'v', supersedes: 'a', state: 'Corroborated', gen: 1, targetDigest: D, tx: T('02') }),
+      base({ id: 'a', content: 'fact', tx: T('03'), provenance: { source: 'user', sessionId: 's' } }),
+    ];
+    const asOf = buildAsOfEvidence(recs, T('09'), { verify: V, keyAvailable: true }).facts.find((f) => f.record.id === 'a')!;
+    const live = buildVerifiedProjection(recs, { verify: V, keyAvailable: true }).live.get('a')!;
+    // Flagged, not demoted, on BOTH surfaces — and asOf(now) still equals live, which is the
+    // contract this test exists for. Detection reads the undeduped window: the evidence is exactly
+    // the rows the ownership pass drops, so detecting after that pass would report nothing.
+    expect(asOf.grade).toBe('Corroborated');
+    expect(asOf.integrity).toBe('compromised');
+    expect(asOf.record.state).toBe(live.state);
+  });
   it('membership: a fact superseded at tx>t is live at t; absent once tx<=t', () => {
     const recs = [
       base({ id: 'a', content: 'fact', tx: T('01') }),

@@ -15,6 +15,23 @@ const journalFor = (expected: Buffer, over: Partial<JournalEntry> = {}): Journal
 });
 
 describe('classifyWitness — journal-first (§4.4)', () => {
+  it('bytes on neither the pre- nor the post-transition lineage are a mismatch, not an interruption', () => {
+    // A pending journal knows both ends of the transition it opened: `predecessor` is what the
+    // ledger held when it opened, `expected` is what the rewrite would produce. Bytes that diverge
+    // from BOTH prefixes are neither the before nor the after — they are a fork, and calling that
+    // an interruption hands it to the rewrite gate, which refuses only 'mismatch'.
+    const before = B('r1\nr2\n');
+    const after = B('r1\nr2\nr3\n');
+    const fork = B('r1\nPOISON\n');
+    const j = journalFor(after, { predecessor: { byteLength: before.length, prefixHash: sha256Hex(before) } });
+    expect(classifyWitness(fork, entryFor(before), j).kind).toBe('mismatch');
+  });
+  it('bytes still at the predecessor are an interruption: the legitimate re-drive must not be refused', () => {
+    const before = B('r1\nr2\n');
+    const after = B('r1\nr2\nr3\n');
+    const j = journalFor(after, { predecessor: { byteLength: before.length, prefixHash: sha256Hex(before) } });
+    expect(classifyWitness(before, entryFor(before), j).kind).toBe('transition-interrupted');
+  });
   it('no entry, no journal → first-contact/no-entry', () => {
     expect(classifyWitness(B('a\n'), null, null)).toEqual({ kind: 'first-contact', reason: 'no-entry' });
   });
@@ -41,10 +58,30 @@ describe('classifyWitness — journal-first (§4.4)', () => {
     const v = classifyWitness(target, entryFor(B('old-longer-bytes\n')), journalFor(target));
     expect(v.kind).toBe('transition-heal');
   });
-  it('pending journal + ANY other state → transition-interrupted — INCLUDING exact predecessor match (R2-F2)', () => {
+  // RETITLED. This read "pending journal + ANY other state → transition-interrupted — INCLUDING
+  // exact predecessor match (R2-F2)". "ANY other state" is precisely the rule the fork/mismatch fix
+  // DELETED: bytes carrying neither the journal's `expected` nor its `predecessor` are a mismatch
+  // now (first test in this file). The fixture never exercised that rule anyway — `journalFor`
+  // defaults `predecessor: null`, so it takes the null-predecessor escape hatch and passes
+  // identically under the fix AND under a rule that reopens the defect, i.e. it discriminated
+  // nothing about the change while its name asserted the opposite of the current contract.
+  // What it genuinely pins is journal-first precedence in the no-lineage case. That is worth
+  // keeping, so it stays — under an accurate name, with the null default made load-bearing by the
+  // last leg rather than left as an unremarked helper default.
+  it('pending journal with a NULL predecessor → transition-interrupted even when the file exactly matches the witness entry', () => {
     const pred = B('pre-erase\n');
-    const v = classifyWitness(pred, entryFor(pred), journalFor(B('post-erase\n')));
-    expect(v.kind).toBe('transition-interrupted'); // naive table said in-sync; journal takes precedence
+    const j = journalFor(B('post-erase\n'));
+    expect(j.predecessor).toBeNull();                                              // the escape hatch this rests on
+    expect(classifyWitness(pred, entryFor(pred), null).kind).toBe('in-sync');       // naive table: in-sync
+    expect(classifyWitness(pred, entryFor(pred), j).kind).toBe('transition-interrupted'); // journal takes precedence
+    // ...and the null predecessor is the ONLY reason. Give the journal a predecessor these bytes are
+    // not on and the same call is a mismatch. A rule restoring "ANY other state →
+    // transition-interrupted" passes every leg above and fails this one.
+    const offLineage = B('other\n');
+    const withPred = journalFor(B('post-erase\n'), {
+      predecessor: { byteLength: offLineage.length, prefixHash: sha256Hex(offLineage) },
+    });
+    expect(classifyWitness(pred, entryFor(pred), withPred).kind).toBe('mismatch');
   });
   it('pending journal + expected-plus-suffix → transition-interrupted (spec literal: only exact expected heals)', () => {
     const target = B('kept\n');

@@ -10,7 +10,7 @@ const replay = (over: Partial<ReplayInput> = {}): ReplayInput => ({
   parseMs: 1.5, projectMs: 0.5, keyAvailable: true, ...over,
 });
 const compaction = (over: Partial<CompactionInput> = {}): CompactionInput => ({
-  scope: 'global', durationMs: 12.5, droppedRows: 40, reclaimedBytes: 4096, droppedForgedVerifies: 2, ok: true, ...over,
+  scope: 'global', durationMs: 12.5, droppedRows: 40, reclaimedBytes: 4096, droppedForgedVerifies: 2, ok: true, landed: true, ...over,
 });
 const lines = (path: string): Record<string, unknown>[] =>
   readFileSync(path, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
@@ -113,6 +113,62 @@ describe('createMetricsSink', () => {
     expect(replays.map((r) => r.op_id).sort()).toEqual(['o_1', 'o_2']);
   });
 
+  it('overlapping (not nested) ops keep their own op_id', async () => {
+    // B starts first and resolves immediately; A starts second (nesting on top of B's still-open
+    // bracket) and stays in-flight on a deferred. This is NOT the nested case (test above): B, the
+    // FIRST-started op, is also the FIRST to settle while A is still running underneath it -- a
+    // stack-style save/restore mishandles exactly this ordering (B's finally unconditionally resets
+    // the shared context to ITS OWN prevOp, clobbering A's still-active op_id).
+    const path = join(tmp(), 'metrics.jsonl');
+    const captured: string[] = [];
+    const sink = createMetricsSink(path, true, {
+      append: (_p, l) => captured.push(l),
+      genId: (() => { let n = 0; return () => `o_${++n}`; })(),
+    });
+    let resolveDeferred!: () => void;
+    const deferred = new Promise<void>((r) => { resolveDeferred = r; });
+
+    const bPromise = sink.runOp('helix_memory_commit', () => {});
+    const aPromise = sink.runOp('helix_memory_recall', async () => {
+      await deferred;
+      sink.emitReplay(replay());
+    });
+
+    await bPromise; // the first-started op settles first
+    resolveDeferred();
+    await aPromise; // A, still in-flight when B finished underneath it, now emits its row
+
+    const rows = captured.map((l) => JSON.parse(l) as Record<string, unknown>);
+    const aOp = rows.find((r) => r.kind === 'op' && r['gen_ai.tool.name'] === 'helix_memory_recall')!;
+    const replayRow = rows.find((r) => r.kind === 'replay')!;
+    expect(replayRow.op_id).toBe(aOp.op_id); // must be A's own id -- not null, not B's id
+    // buffered-then-flushed, per emitReplay's contract: the replay must land AFTER A's own op record.
+    expect(rows.indexOf(replayRow)).toBeGreaterThan(rows.indexOf(aOp));
+  });
+
+  it('a detached continuation that outlives its op reports op_id: null instead of silently vanishing', async () => {
+    // AsyncLocalStorage keeps propagating its store into a setTimeout/setImmediate/un-awaited promise
+    // started inside an op, even after that op's own runOp has already settled and flushed. Without an
+    // explicit "closed" guard, such a late emit would push into an already-flushed buffer array that
+    // nothing ever reads again -- silent data loss, not just misattribution. This proves the guard: the
+    // late emit must surface (op_id: null), not disappear.
+    const path = join(tmp(), 'metrics.jsonl');
+    const captured: string[] = [];
+    const sink = createMetricsSink(path, true, { append: (_p, l) => captured.push(l), genId: () => 'o_x' });
+    let onFired!: () => void;
+    const fired = new Promise<void>((resolve) => { onFired = resolve; });
+
+    await sink.runOp('helix_memory_recall', () => {
+      setTimeout(() => { sink.emitReplay(replay()); onFired(); }, 0); // detached: not awaited/returned
+    });
+    await fired; // let the detached setTimeout actually run, after runOp has already settled
+
+    const rows = captured.map((l) => JSON.parse(l) as Record<string, unknown>);
+    const replayRow = rows.find((r) => r.kind === 'replay');
+    expect(replayRow).toBeDefined(); // must have landed at all -- not lost in an abandoned buffer
+    expect(replayRow!.op_id).toBeNull(); // the op that spawned it had already closed
+  });
+
   it('creates the file owner-only on POSIX (spec §9.14)', () => {
     if (platform() === 'win32') return; // mode bits not enforced on Windows
     const path = join(tmp(), 'metrics.jsonl');
@@ -129,13 +185,18 @@ describe('emitCompaction', () => {
     const rec = JSON.parse(out[0]!) as Record<string, unknown>;
     // EXACT key set: toMatchObject is a subset matcher, so only this can catch a future
     // record that adds a content-bearing field (path/query/error) -- HARD RULE, spec section 3.
+    // `landed` (LEAD-METRIC-MISREPORT fix) is content-free by the same standard as `ok`: a boolean,
+    // never a path/id/content fragment — it says whether the physical rewrite landed on disk for this
+    // attempt, so a failure AFTER the rename (dir fsync / witness completion) is distinguishable from
+    // one that never touched the file, and `dropped_rows`/`reclaimed_bytes` can be trusted accordingly.
     expect(Object.keys(rec).sort()).toEqual([
-      'dropped_forged_verifies', 'dropped_rows', 'duration_ms', 'kind', 'ok', 'op_id',
+      'dropped_forged_verifies', 'dropped_rows', 'duration_ms', 'kind', 'landed', 'ok', 'op_id',
       'reclaimed_bytes', 'scope', 'ts', 'v',
     ]);
     expect(rec).toMatchObject({
       v: 1, kind: 'compaction', ts: '2026-07-09T00:00:00.000Z', op_id: null, scope: 'global',
       duration_ms: 12.5, dropped_rows: 40, reclaimed_bytes: 4096, dropped_forged_verifies: 2, ok: true,
+      landed: true,
     });
   });
 

@@ -80,4 +80,67 @@ describe('agreement map', () => {
     expect(map.verdict).toBe('indeterminate');
     expect(map.divergences).toHaveLength(0);
   });
+
+  it('a direct negation of a paired claim is diverge, never agree', () => {
+    const m = buildAgreementMap('The migration is safe to apply.', 'The migration is not safe to apply.');
+    expect(m.verdict).toBe('diverge');
+  });
+
+  it('contraction negation ("doesn\'t") is caught even though tokenSet would erase it (doesn+t)', () => {
+    const m = buildAgreementMap('The plan works with the new schema.', 'The plan doesn\'t work with the new schema.');
+    expect(m.verdict).toBe('diverge');
+  });
+
+  it('a paired claim with balanced (even) negation stays agree, not diverge (double negation cancels)', () => {
+    const m = buildAgreementMap('The migration is safe to apply.', 'The migration is not un-safe to apply.');
+    expect(m.verdict).toBe('agree');
+  });
+
+  it('a paired claim with no negation on either side is unaffected by the polarity check (regression guard)', () => {
+    const m = buildAgreementMap('The migration is safe to apply.', 'The migration is safe to apply.');
+    expect(m.verdict).toBe('agree');
+    expect(m.divergences).toHaveLength(0);
+  });
+
+  // Fix round 1 (2026-08-07): the reviewer found the marker set (not/n't/un-) too narrow — a real
+  // negation using any of these forms still reproduced N-VERDICT (false 'agree'). Each of the
+  // following is a marker that /\bnot\b|n't\b|\bun-/gi missed on its own; each gets its own test
+  // so a regression in any one marker fails exactly one test, not the whole suite.
+  it('"never" negation is caught, not just "not"', () => {
+    const m = buildAgreementMap('The migration is safe to apply.', 'The migration is never safe to apply.');
+    expect(m.verdict).toBe('diverge');
+  });
+
+  it('"no" negation is caught (bare determiner, not just "not")', () => {
+    const m = buildAgreementMap('There is a race in this function.', 'There is no race in this function.');
+    expect(m.verdict).toBe('diverge');
+  });
+
+  it('"cannot" negation is caught (no separate "not" token for \\bnot\\b to find)', () => {
+    const m = buildAgreementMap('The worker can reclaim the lock.', 'The worker cannot reclaim the lock.');
+    expect(m.verdict).toBe('diverge');
+  });
+
+  it('bare "unsafe" (no hyphen) is caught, not only the hyphenated "un-safe" form', () => {
+    const m = buildAgreementMap('The migration is safe to apply.', 'The migration is unsafe to apply.');
+    expect(m.verdict).toBe('diverge');
+  });
+
+  it('bare "unavailable" is caught', () => {
+    const m = buildAgreementMap('The service is available right now.', 'The service is unavailable right now.');
+    expect(m.verdict).toBe('diverge');
+  });
+
+  it('bare "unreachable" is caught', () => {
+    const m = buildAgreementMap('The host is reachable from here.', 'The host is unreachable from here.');
+    expect(m.verdict).toBe('diverge');
+  });
+
+  it('a true antonym pair with no shared negation marker still reads agree (documented gap, not a regression)', () => {
+    // "safe" vs "dangerous" share no root and no negation morphology at all — no marker scan can
+    // catch this class. This test pins the KNOWN limit so a future reader sees it was measured,
+    // not missed; it is not asserting desired behavior.
+    const m = buildAgreementMap('The migration is safe to apply.', 'The migration is dangerous to apply.');
+    expect(m.verdict).toBe('agree');
+  });
 });

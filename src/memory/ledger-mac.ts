@@ -9,25 +9,36 @@ import type { MemoryRecord } from '../types.js';
 export const MAC_VERSION = 2;                             // version NEW signatures carry
 const ACCEPTED_MAC_VERSIONS = new Set<number>([1, 2]);   // versions verifyVerify treats as valid
 
-// Domain tag for the ill-formed branch of digestContent. 0xFF is the load-bearing byte: it appears
-// in the UTF-8 encoding of NO code point, so no well-formed string's image can begin with it.
+/** Domain tag for the ill-formed lane. 0xFF is the load-bearing byte: it appears in the UTF-8
+ *  encoding of NO code point, so no well-formed string's image can begin with it and the two lanes'
+ *  images are disjoint BY CONSTRUCTION.
+ *
+ *  Do NOT make this tag readable. A printable tag is reachable as ordinary content, and then a
+ *  well-formed string exists whose UTF-8 encoding IS <tag> ++ utf16le(ill) — the two lanes hash the
+ *  same bytes and the substitution primitive this split removes comes back one lane over. Measured
+ *  with a candidate tag of 'helix.digestContent.ill-formed.v1' + NUL: utf16le(U+D800 U+0080) is
+ *  00 D8 80 00, whose middle pair is a valid two-byte UTF-8 sequence (U+0600), so that tag followed
+ *  by U+0000 U+0000 U+0600 U+0000 is well-formed text encoding to exactly those bytes. Pinned by
+ *  ledger-mac.test.ts, which keeps that pair as a regression case. */
 const ILL_FORMED_TAG = Buffer.from([0xff, 0x01]);
 
 /** Lowercase hex SHA-256 binding `content`. INJECTIVE over arbitrary JS strings.
  *
- *  A JS string is a sequence of UTF-16 code units and `Buffer.from(s, 'utf8')` REPLACES every lone
- *  surrogate with U+FFFD, so the plain UTF-8 form folds an unbounded set of distinct strings onto
- *  one digest. Since this digest is the ONLY thing a signed `verify` says about a fact's bytes,
- *  that made it a content-substitution primitive — swap the content, keep the grade — and the
- *  substitute did not even have to be ill-formed, because '\uD800' folded onto the well-formed
- *  U+FFFD too.
+ *  Ill-formed content takes a separate, LOSSLESS lane. `Buffer.from(s, 'utf8')` maps every unpaired
+ *  surrogate to U+FFFD, so `'x\uD800y'` and `'x\uD801y'` hashed that way are indistinguishable — and
+ *  the binding this feeds is a bare `targetDigest === liveDigest` equality (verified-projection.ts),
+ *  so a collision is enough for changed content to inherit a signed grade it was never granted. That
+ *  breaks the invariant the grade rests on: any change to the content drops it. Note the substitute
+ *  need not be ill-formed either: '\uD800' folds onto the well-formed U+FFFD too.
  *
- *  Well-formed content keeps the ORIGINAL expression byte-for-byte, so every verify signed before
- *  this change still applies: all of them are over well-formed content. Ill-formed content is bound
- *  over its UTF-16LE image, which is fixed-width and substitution-free and therefore injective.
- *  Deliberately fail-closed: a legacy promotion signed over ILL-formed content stops applying and
- *  its row falls back to the R1 Fresh clamp (`compromised` stays false — this is a lost elevation,
- *  not tamper evidence). */
+ *  Well-formed content — everything a real caller produces — keeps the original UTF-8 path and
+ *  therefore its existing digest, so no already-signed `targetDigest` is invalidated. Re-encoding
+ *  wholesale would have invalidated all of them at once, and since `targetDigest` is MAC-covered and
+ *  cannot be re-signed, every promotion would have become inapplicable and every Corroborated or
+ *  Verified fact would have silently dropped to Fresh. Ill-formed content is bound over its UTF-16LE
+ *  image, which is fixed-width and substitution-free and therefore injective. Deliberately fail
+ *  closed: a legacy promotion signed over ILL-formed content stops applying and its row falls back to
+ *  the R1 Fresh clamp (`compromised` stays false — a lost elevation, not tamper evidence). */
 export function digestContent(content: string): string {
   // ES2024 method, present on every runtime package.json's `engines` admits (>=24). The cast is
   // because tsconfig pins `target: ES2022` with no `lib` override, not because it may be absent.

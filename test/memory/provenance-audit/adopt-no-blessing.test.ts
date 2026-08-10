@@ -25,7 +25,7 @@ describe('probe (a): adopt() blesses nothing pre-existing', () => {
       sessionId: 's', home, now: () => CLK, genId: () => 'm_1',
       project: { ledger: projLedger, root },
     });
-    store.adopt(); // stamps ownership + ensures master; must NOT sign the planted row
+    store.adopt(root); // stamps ownership + ensures master; must NOT sign the planted row
     const live = store.inspect().find((s) => s.record.id === 'planted');
     expect(live?.record.state).toBe('Fresh'); // clamped: no valid MAC exists for it
   });
@@ -45,7 +45,7 @@ describe('probe (a): adopt() blesses nothing pre-existing', () => {
       sessionId: 's', home, now: () => CLK, genId: () => 'm_' + (++n),
       project: { ledger: projLedger, root },
     });
-    store.adopt(); // same setup as probe (a): stamps ownership + ensures master
+    store.adopt(root); // same setup as probe (a): stamps ownership + ensures master
 
     const a = store.commit({ content: 'authored here', source: 'user' });
     store.confirm(a.id);

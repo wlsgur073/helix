@@ -99,7 +99,7 @@ describe('store ledger-HMAC', () => {
       sessionId: 's', home, now: () => '2026-06-09T00:00:00.000Z', genId: () => 'm_1',
       project: { ledger: projLedger, root },
     });
-    store.adopt();
+    store.adopt(root);
     const hit = store.recall('planted').items.find((i) => i.record.id === 'seed')!;
     expect(hit.record.state).toBe('Fresh'); // NOT laundered into Verified
   });

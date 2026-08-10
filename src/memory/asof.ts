@@ -1,7 +1,7 @@
 import type { MemoryRecord, AsOfFact } from '../types.js';
 import { buildProjection, withoutDuplicateFactIds } from './projection.js';
 import { digestContent } from './ledger-mac.js';
-import { resolveTargetGrade, isKnownState } from './verified-projection.js';
+import { resolveTargetGrade, isKnownState, forgedFactIds } from './verified-projection.js';
 
 /** Reconstruct the snapshot at system-time `t` with full per-verify evidence (spec C §4). Membership
  *  is DECLARED: filter by raw `tx <= t` (assert/supersede/erase tx is unsigned). Grade + evidence come
@@ -32,16 +32,28 @@ export function buildAsOfEvidence(
     (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)!).push(r);
   }
 
+  // Scoped to the membership window, so a twin appended after `t` cannot retro-taint the snapshot —
+  // but read from the UNDEDUPED window. `asOfRecords` has already had every non-owning duplicate
+  // removed, so detecting over it can never report anything: the evidence is precisely the rows the
+  // ownership pass drops. Ownership decides WHICH row is served; this decides whether to say a twin
+  // was seen. Two questions, two inputs.
+  const forgedIds = forgedFactIds(records.filter((r) => r.tx <= t));
+
   for (const rec of liveAt.values()) {
     const item: MemoryRecord = { ...rec, state: 'Fresh' }; // R1 base clamp
     const verifies = byTarget.get(rec.id) ?? [];
     if (verifies.length === 0) { facts.push({ record: item, grade: 'Fresh', evidence: [], integrity: 'ok' }); continue; }
     const { grade, compromised, evidence } = resolveTargetGrade(verifies, digestContent(rec.content));
+    // A duplicate id ADVISES, it does not demote. The row served here is the one positional ownership
+    // says owns the id, and its elevation was earned honestly — withholding it would punish the
+    // victim for the forger's append, and since anyone who can append can plant a twin, demoting on
+    // sight would hand that writer a demote-anything primitive. The twin is already inert; the
+    // operator is told it existed.
     facts.push({
       record: grade ? { ...item, state: grade } : item,
       grade: grade ?? 'Fresh',
       evidence,
-      integrity: compromised ? 'compromised' : 'ok',
+      integrity: compromised || forgedIds.has(rec.id) ? 'compromised' : 'ok',
     });
   }
   return { facts, keyAvailable: true };

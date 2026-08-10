@@ -176,7 +176,10 @@ export function stampOwnership(
     // Auto-adopt TOCTOU guard: targetLedger only auto-adopts when NO ledger exists yet. Re-check that
     // under the registry lock (as close to the write as possible) so a foreign ledger that appeared in
     // the caller's check-then-stamp window is refused, not silently adopted past the explicit barrier.
-    if (opts.autoAdoptLedger && !existing && existsSync(opts.autoAdoptLedger))
+    // Deliberately NOT gated on `!existing`: a registry entry surviving is not proof this ledger is
+    // ours — a lost/overwritten .owner leaves isOwned() false while the entry lingers (the REPAIR
+    // path), and gating here let a foreign ledger that raced into that window be silently adopted.
+    if (opts.autoAdoptLedger && existsSync(opts.autoAdoptLedger))
       throw new Error('commit: a project memory file appeared here that Helix did not create — adopt it explicitly (helix_memory_adopt) or remove it');
     // Reused-path safety (F6, revised): earlier this REFUSED when the current .owner did not match the
     // entry — but that bricked a legitimate lost-.owner repair with no recovery ceremony. Deletion
