@@ -16,6 +16,23 @@ describe('digestContent', () => {
     // `targetDigest === liveDigest`, so a collision lets changed content inherit a signed grade.
     expect(digestContent('secret-\uD800-tail')).not.toBe(digestContent('secret-\uD801-tail'));
   });
+  it('never lets WELL-FORMED content collide with ILL-FORMED content', () => {
+    // The test above pins injectivity WITHIN the ill-formed lane; this one pins that the two lanes
+    // cannot meet. Ill-formed content is hashed as <domain tag> ++ UTF-16LE image, so if the tag is
+    // itself reachable as ordinary text, a well-formed string exists whose UTF-8 encoding IS that
+    // whole byte string — same digest, two different contents, the same substitution primitive the
+    // lane split exists to remove. It is reachable: utf16le(U+D800 U+0080) is 00 D8 80 00, and the
+    // middle pair is a valid two-byte UTF-8 sequence (U+0600), so those bytes are ordinary text.
+    // What forecloses it is the tag's FIRST byte being one no UTF-8 encoding can produce, which is
+    // why the tag is not a printable string. This case is the historical collision, kept verbatim.
+    // ES2024 method; the cast is because tsconfig pins target ES2022 with no lib override.
+    const wellFormedP = (s: string) => (s as unknown as { isWellFormed(): boolean }).isWellFormed();
+    const ill = String.fromCharCode(0xd800, 0x0080);
+    const wellFormed = 'helix.digestContent.ill-formed.v1' + String.fromCharCode(0, 0, 0x600, 0);
+    expect(wellFormedP(wellFormed)).toBe(true);  // premise: it really is in the other lane
+    expect(wellFormedP(ill)).toBe(false);
+    expect(digestContent(wellFormed)).not.toBe(digestContent(ill));
+  });
 });
 
 import { mkdtempSync, writeFileSync, statSync, readFileSync, readdirSync } from 'node:fs';

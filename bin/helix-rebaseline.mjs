@@ -373,8 +373,7 @@ function sweepOrphanTmps(artifactPath, opts = {}) {
 }
 
 // src/memory/ledger-mac.ts
-var LONE_SURROGATE = new RegExp("\\p{Surrogate}", "u");
-var ILL_FORMED_DOMAIN = Buffer.from("helix.digestContent.ill-formed.v1\0", "utf8");
+var ILL_FORMED_TAG = Buffer.from([255, 1]);
 var LedgerMacError = class extends Error {
 };
 var MASTER_LEN = 32;

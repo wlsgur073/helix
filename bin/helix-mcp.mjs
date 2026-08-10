@@ -13717,11 +13717,11 @@ function sweepOrphanTmps(artifactPath, opts = {}) {
 // src/memory/ledger-mac.ts
 var MAC_VERSION = 2;
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
-var LONE_SURROGATE = new RegExp("\\p{Surrogate}", "u");
-var ILL_FORMED_DOMAIN = Buffer.from("helix.digestContent.ill-formed.v1\0", "utf8");
+var ILL_FORMED_TAG = Buffer.from([255, 1]);
 function digestContent(content) {
-  if (LONE_SURROGATE.test(content))
-    return createHash("sha256").update(ILL_FORMED_DOMAIN).update(Buffer.from(content, "utf16le")).digest("hex");
+  const wellFormed = content.isWellFormed();
+  if (!wellFormed)
+    return createHash("sha256").update(Buffer.concat([ILL_FORMED_TAG, Buffer.from(content, "utf16le")])).digest("hex");
   return createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex");
 }
 var LedgerMacError = class extends Error {
