@@ -122,6 +122,6 @@ fi
 {
   printf '\033[1;31m[freeze-guard]\033[0m v2 freeze runtime-pin VIOLATION (%d):\n' "${#fails[@]}"
   for f in "${fails[@]}"; do printf '  - %s\n' "$f"; done
-  printf '  spec: docs/superpowers/specs/2026-08-09-autoupdate-guard-restore-design.md\n'
+  printf '  see: docs/release/v2-freeze-deviations-2026-08.md (deviation ledger + remediation)\n'
 } >&2
 exit 1
