@@ -101,6 +101,24 @@ if [ "$close" -gt 0 ] && [ "$now" -gt "$close" ]; then
 fi
 
 [ ${#fails[@]} -eq 0 ] && exit 0
+
+# Auto-heal (owner-approved 2026-08-10, deviation D-2026-08-10): when the SOLE violation is
+# clone-HEAD drift and every byte/pin check passed, mechanize the twice-approved remediation —
+# reset the clone to the candidate, log the heal, notify on stderr, exit healthy. Any other
+# combination (byte drift, flag drift, past-close, dirty clone) still hard-fails below.
+HEAL="${FRC_HEAL:-1}"
+HEAL_LOG="${FRC_HEAL_LOG:-$HOME/.cache/freeze-guard-heals.log}"
+if [ "$HEAL" = "1" ] && [ ${#fails[@]} -eq 1 ] && [[ "${fails[0]}" == "marketplace clone HEAD"* ]]; then
+  if [ -z "$(git -C "$CLONE" status --porcelain=v1 2>/dev/null)" ] \
+     && git -C "$CLONE" reset --hard "$CANDIDATE" >/dev/null 2>&1 \
+     && [ "$(git -C "$CLONE" rev-parse HEAD 2>/dev/null)" = "$CANDIDATE" ]; then
+    mkdir -p "$(dirname "$HEAL_LOG")" 2>/dev/null
+    printf '%s healed %s -> %s\n' "$(date -u +%FT%TZ)" "$h" "$CANDIDATE" >> "$HEAL_LOG" 2>/dev/null
+    printf '[freeze-guard] auto-healed marketplace clone HEAD drift (%s -> candidate; bytes were candidate-identical; logged to %s)\n' "$h" "$HEAL_LOG" >&2
+    exit 0
+  fi
+fi
+
 {
   printf '\033[1;31m[freeze-guard]\033[0m v2 freeze runtime-pin VIOLATION (%d):\n' "${#fails[@]}"
   for f in "${fails[@]}"; do printf '  - %s\n' "$f"; done

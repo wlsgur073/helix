@@ -74,3 +74,39 @@ and restore both `autoUpdate` flags to true.
 **Method note.** The remediation design was cross-checked with Codex (compare mode, 2 rounds,
 convergence declared); the divergence why-log lives in the local design spec
 (`docs/superpowers/specs/2026-08-09-autoupdate-guard-restore-design.md`).
+
+## Deviation D-2026-08-10-autoupdate-recurrence
+
+**Statement.** One day after D-2026-08-09's remediation, the clone fast-forwarded again:
+`pull origin HEAD` at 2026-08-10 21:02:02 KST (12:02:02Z) moved HEAD `27b4373 -> 2fdc1ca`
+(the previous day's pushed docs/scripts commit). Detected the same evening by
+`freeze-runtime-check.sh` on its first post-drift invocation — the guard worked as designed,
+under 24 h from wiring to first catch.
+
+**Why this entry matters — both preventive controls are FALSIFIED.** At pull time BOTH
+`autoUpdate` flags were `false` (set 08-09 21:5x, still false when checked 21:1x on 08-10),
+AND the Claude process that triggered the refresh (started 21:01:46 KST, 16 s before the pull)
+carried `DISABLE_AUTOUPDATER=1` in its environment (verified via /proc). Conclusion for CLI
+2.1.226: the startup marketplace-clone refresh runs regardless of the per-marketplace
+`autoUpdate:false` and regardless of `DISABLE_AUTOUPDATER=1`. The 08-09 root-cause section's
+"probable" mechanism stands (post-startup refresh), but its assumed controls do not control it.
+Prevention is currently NOT achievable with documented configuration; detection + reset is the
+operating mode for the rest of the window.
+
+**Byte continuity.** Unbroken: `2fdc1ca` touches `docs/release/` and `scripts/` only —
+`git diff 27b4373..2fdc1ca -- bin/ .claude-plugin/ hooks/ data/` is empty — and the guard's
+pin-list checks passed against both load paths throughout. Same wording bound as before:
+control/provenance deviation with continuous runtime bytes.
+
+**Remediation.** Clone `reset --hard` to `27b4373` on `feat/helix-v1` (same owner-approved
+action as D-2026-08-09), re-verified 2026-08-10: symbolic-ref intact, HEAD = candidate, guard
+exit 0. Standing exposure until close: every Claude startup may move the clone again; the
+window's byte-safety therefore rests on (a) the standing discipline that no in-window commit
+rebuilds `bin/` and (b) the guard's detection. **Recurrence handling DECIDED by the owner
+2026-08-10: guard auto-heal.** `freeze-runtime-check.sh` now mechanizes the twice-approved
+remediation under a strict condition — the SOLE violation is clone-HEAD drift and every
+byte/pin/flag/receipt check passed — resetting the clone to the candidate, appending to
+`~/.cache/freeze-guard-heals.log` (the close report counts heals from it), printing a one-line
+stderr notice, and exiting healthy. Any other violation combination (byte drift, flag drift,
+past-close, dirty clone) still hard-fails, so the dogfood `ExecStartPre` blocks only on real
+incidents. Verified by fixture drills (12/12 incl. the heal path) on 2026-08-10.
