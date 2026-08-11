@@ -524,6 +524,36 @@ describe('D1: the egress decision is disclosed on every sent result', () => {
   });
 });
 
+// The "a non-sent entry is metadata-only" case in test/codex-log.test.ts asserts a property of its
+// own FIXTURE: it hands appendCodexLog an entry with no prompt and finds no prompt in the line.
+// appendCodexLog serialises whatever it is given — the invariant is enforced one layer up, at the
+// call site that chooses which fields to include. This measures it there.
+describe('codex content log: a refused run persists no payload', () => {
+  it('writes reason-only for a blocked run, with no prompt or response', async () => {
+    const cfg = structuredClone(DEFAULT_CONFIG) as HelixConfig;
+    cfg.dualVerify.enabled = true;
+    cfg.dualVerify.logContent = true;                     // the opt-in content log is ON
+    cfg.dualVerify.stakesFloor = 'low';
+    const d = deps({
+      config: cfg,
+      // A payload the egress guard must refuse, so the run is never sent.
+      runner: async () => { throw new Error('runner must not be reached for a blocked payload'); },
+    });
+
+    await handleDualVerify(
+      { question: 'is this key valid: AKIAIOSFODNN7EXAMPLE', helixAnswer: 'yes' },
+      d,
+    );
+
+    expect(existsSync(d.codexLogPath)).toBe(true);
+    const line = JSON.parse(readFileSync(d.codexLogPath, 'utf8').trim().split('\n').pop()!) as Record<string, unknown>;
+    expect(line.outcome).not.toBe('sent');
+    expect('prompt' in line).toBe(false);
+    expect('response' in line).toBe(false);
+    expect(typeof line.reason).toBe('string');
+  });
+});
+
 describe('X2: audit distinguishes the deciding leg from released legs', () => {
   it('an allowed_override records decidedLeg (the decider) AND releasedLegs, not "blockedLeg"', async () => {
     const d = deps({

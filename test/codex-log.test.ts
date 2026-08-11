@@ -26,7 +26,16 @@ describe('appendCodexLog', () => {
     expect(line.response).toBe('use postgres');
   });
 
-  it('a non-sent entry is metadata-only: NO prompt/response, reason present', () => {
+  // A prior version of this case asserted "no prompt/response" on a `refused` fixture that was
+  // never GIVEN a prompt/response — that only proves appendCodexLog didn't invent fields, since it
+  // serializes whatever it is handed and strips nothing. The invariant that a refused run's actual
+  // prompt/response never reach disk is enforced one layer up, at the handlers.ts call site that
+  // decides which fields to pass in (`...(sent ? { prompt, response } : { reason })`) — see
+  // test/server/handlers-dualverify.test.ts, describe('codex content log: a refused run persists
+  // no payload'), which exercises handleDualVerify end-to-end and reads the written file back.
+  // What stays here is only what IS about appendCodexLog itself: it writes exactly the fields it
+  // is given, verbatim.
+  it('writes exactly the fields it is given (metadata-only fixture in, metadata-only line out)', () => {
     const p = tmpLog();
     appendCodexLog(p, refused);
     const line = JSON.parse(readFileSync(p, 'utf8').trim());
