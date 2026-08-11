@@ -98,9 +98,11 @@ describe('Task 6 — witnessed rewrites', () => {
       // Injected fsOps whose renameSync throws: compactLedger throws AFTER openTransition has
       // journaled, and its catch unlinks the tmp — the ledger keeps its OLD bytes. The failing
       // compaction still holds the ledger lock and re-reads those unchanged bytes, so it can vouch
-      // the rewrite never landed and retract its own journal. (A genuine CRASH in this window gets
-      // no retraction — the journal stays pending and the scope is honestly interrupted, because
-      // from disk alone that state cannot be told apart from a landed-then-rolled-back rewrite.)
+      // the rewrite never landed and retract its own journal. (A genuine CRASH in this window
+      // leaves the journal pending, and the NEXT startup retracts it: predecessor bytes under a
+      // pending journal really are indistinguishable from a landed-then-rolled-back rewrite, but
+      // the correct action is the same for both — retract, never re-drive, leaving the scope
+      // holding exactly the bytes on disk. See healWitness and interruptedAtPredecessor.)
       const faultyFs: DurableFsOps = { ...realFsOps, renameSync: () => { throw new Error('injected rename failure (crash window A)'); } };
       expect(() => compactLedger(ledger, {
         erasedIds: new Set(),

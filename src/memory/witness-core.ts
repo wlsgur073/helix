@@ -62,6 +62,32 @@ export function classifyWitness(
   return bytes.length === entry.byteLength ? { kind: 'in-sync' } : { kind: 'unwitnessed-suffix' };
 }
 
+/**
+ * Whether a `transition-interrupted` scope may be RETRACTED at startup — the one state in which
+ * discarding the pending journal restores a coherent ledger rather than destroying a result.
+ *
+ * `transition-interrupted` deliberately bundles more than one on-disk state, because the rewrite
+ * gate only needs to know "on this lineage at all". Recovery needs the finer question, since the
+ * lineages call for opposite actions:
+ *
+ *  - bytes on the PREDECESSOR lineage: the rename never landed. Retracting the journal returns the
+ *    scope to exactly what it held before the rewrite opened — which is also the right answer if a
+ *    rollback deliberately restored those bytes, so no intent has to be inferred.
+ *  - bytes on the EXPECTED lineage (suffix-tolerant, so a plain append lands here): the rewrite DID
+ *    land and something was appended after it. Retracting there would throw away a witness advance
+ *    that actually happened. Not retractable.
+ *  - both, or no predecessor at all: undecidable from the bytes. Fail closed — leave it for the
+ *    operator ceremony rather than guess, which is the same direction `mismatch` already takes.
+ *
+ * Bytes on NEITHER lineage never reach here: classifyWitness calls those `mismatch`.
+ */
+export function interruptedAtPredecessor(bytes: Buffer, journal: JournalEntry): boolean {
+  if (journal.predecessor === null) return false;
+  const onExpected = matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash);
+  const onPredecessor = matchesAt(bytes, journal.predecessor.byteLength, journal.predecessor.prefixHash);
+  return onPredecessor && !onExpected;
+}
+
 export function advanceAllowed(v: WitnessVerdict): boolean {
   return v.kind === 'first-contact' || v.kind === 'in-sync' || v.kind === 'unwitnessed-suffix';
 }

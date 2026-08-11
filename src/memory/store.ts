@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
 import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, type CompactionStats, type LedgerPath } from './ledger.js';
 import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
-import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, WitnessBlockedError } from './witness-store.js';
+import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, discardTransition, WitnessBlockedError } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated } from './history.js';
@@ -22,7 +22,7 @@ import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } fr
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedLiveWitnessed, verifiedProjectionWithSubkey } from './verified-read.js';
 import { readLedgerWitnessed, readLedgerBytesWitnessed } from './witness-read.js';
-import type { WitnessVerdict } from './witness-core.js';
+import { interruptedAtPredecessor, type WitnessVerdict } from './witness-core.js';
 import { ledgerDigest, subkeyFingerprint, keyVectorEqual, type ScopeKeyComponent, type RecallCacheEntry } from './recall-cache.js';
 import type { MetricsSink } from '../metrics.js';
 import { withFileLock } from './lock.js';
@@ -1026,6 +1026,24 @@ export class MemoryStore {
           const verdict = classifyState(readScopeWitness(home, scopeKey), bytes);
           if (verdict.kind === 'transition-heal') {
             completeTransition(home, scopeKey, bytes, verdict.journal.tx);
+          } else if (verdict.kind === 'transition-interrupted' && interruptedAtPredecessor(bytes, verdict.journal)) {
+            // A crash between openTransition and the rename used to leave the scope dark forever:
+            // reads excluded it, writes threw, and only a TTY ceremony could clear it. On the global
+            // scope that darkened all memory until a human ran it.
+            //
+            // The argument for leaving it was that predecessor bytes under a pending journal cannot
+            // be told apart from a rewrite that landed and was then rolled back. That is true and it
+            // does not decide anything, because the correct action is the SAME either way. This
+            // RETRACTS; it never re-drives. The scope is left holding exactly the bytes on disk — the
+            // pre-rewrite state if the rename never landed, and precisely what was asked for if a
+            // rollback restored them. Nothing a rollback removed can return through this path.
+            //
+            // Only the predecessor lineage qualifies: interruptedAtPredecessor refuses the expected
+            // lineage (that rewrite completed), the both-match case and the no-predecessor case, and
+            // classifyWitness has already sent a fork to `mismatch`. Everything it refuses stays
+            // pending for the ceremony — the same fail-closed direction, now reached by measuring the
+            // bytes rather than by declining to look.
+            discardTransition(home, scopeKey, verdict.journal.nonce);
           }
         });
       } catch { /* best-effort: a stale/rejected/broken heal stays pending; never block startup */ }

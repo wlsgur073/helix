@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  advanceAllowed, classifyWitness, cleanupClearAllowed, fenceId, sha256Hex,
+  advanceAllowed, classifyWitness, cleanupClearAllowed, fenceId, sha256Hex, interruptedAtPredecessor,
   type JournalEntry, type WitnessEntry,
 } from '../../src/memory/witness-core.js';
 
@@ -119,4 +119,43 @@ describe('cleanupClearAllowed — two-part predicate (R4-F1)', () => {
 
 it('fenceId shape', () => {
   expect(fenceId(3, 'a'.repeat(32))).toBe(`witness_fence_3_${'a'.repeat(32)}`);
+});
+
+// Startup recovery needs to tell apart the states `transition-interrupted` bundles together, because
+// only ONE of them is safe to retract. The verdict is returned for bytes on EITHER lineage — the
+// rewrite did not land (predecessor prefix), or it landed and something appended afterwards
+// (expected prefix, suffix-tolerant) — and also when there is no predecessor to compare against.
+// Discarding the journal is right for the first and WRONG for the second: that transition completed,
+// and retracting its journal would throw away a witness advance that actually happened.
+describe('interruptedAtPredecessor — which interruptions startup may retract', () => {
+  const before = B('r1\nr2\n');
+  const after = B('r1\nr2\nr3\n');
+  const predecessorOf = (b: Buffer) => ({ byteLength: b.length, prefixHash: sha256Hex(b) });
+
+  it('true when the bytes are the predecessor — the rename never landed', () => {
+    const j = journalFor(after, { predecessor: predecessorOf(before) });
+    expect(interruptedAtPredecessor(before, j)).toBe(true);
+  });
+
+  it('FALSE when the bytes carry the expected prefix — the rewrite landed and was appended to', () => {
+    const j = journalFor(after, { predecessor: predecessorOf(before) });
+    expect(interruptedAtPredecessor(Buffer.concat([after, B('r4\n')]), j)).toBe(false);
+  });
+
+  it('false when there is no predecessor to compare against — no lineage, nothing to retract to', () => {
+    const j = journalFor(after, { predecessor: null });
+    expect(interruptedAtPredecessor(before, j)).toBe(false);
+  });
+
+  it('false on a fork — those are a mismatch, and startup must not touch them', () => {
+    const j = journalFor(after, { predecessor: predecessorOf(before) });
+    expect(interruptedAtPredecessor(B('r1\nPOISON\n'), j)).toBe(false);
+  });
+
+  it('false when the bytes satisfy BOTH lineages — ambiguous, so fail closed rather than guess', () => {
+    // `before` is a strict prefix of `after`, so a journal whose predecessor is `before` and whose
+    // expected is `after` cannot distinguish them from the predecessor bytes alone.
+    const j = journalFor(before, { predecessor: predecessorOf(before) });
+    expect(interruptedAtPredecessor(before, j)).toBe(false);
+  });
 });

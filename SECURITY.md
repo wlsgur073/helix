@@ -270,9 +270,13 @@ same one-time path as before; nothing about the key's secrecy changes, only when
   not the witness's.
 - Availability under attack is contained per scope: forcing a mismatch and forcing a caught-mid-
   rewrite state both require boundary write access, though they are not the identical capability.
-  Recovery is normally a short, idempotent re-drive of the interrupted rewrite; when the rewrite
-  cannot be re-driven, recovery is ceremony-bound instead, and the affected scope stays dark until
-  a human runs it.
+  Recovery is normally a short, idempotent re-drive of the interrupted rewrite. A rewrite that was
+  interrupted BEFORE its bytes landed is retracted at the next start instead: the scope is left
+  holding exactly the bytes already on disk, which is both the pre-rewrite state and what a
+  deliberate rollback to those bytes asked for, so retraction never re-drives anything a rollback
+  removed. Only what cannot be decided from the bytes — an interruption whose ledger is on the
+  post-rewrite lineage, one with no predecessor to compare against, or a fork off both — stays
+  ceremony-bound, and that scope stays dark until a human runs it.
 
 ## Ledger locking, erasure, and durability boundaries
 
