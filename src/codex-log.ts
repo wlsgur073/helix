@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync, openSync, writeSync, closeSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { ensureHelixDir } from './memory/home-permissions.js';
 
 /** Outcome of a Helix-mediated Codex call. Only 'sent' carries prompt/response content. */
 export type CodexOutcome = 'sent' | 'refused' | 'skipped' | 'unavailable' | 'error';
@@ -27,7 +28,7 @@ export const MAX_ENTRIES = 1000;
  */
 export function appendCodexLog(path: string, entry: CodexLogEntry): void {
   try {
-    mkdirSync(dirname(path), { recursive: true });
+    ensureHelixDir(dirname(path));
     // Create owner-only AT OPEN TIME (the mode applies when the file is created), so the exact
     // prompt/response bytes are never briefly group/world-readable and a crash before a separate
     // chmod can never leave them that way permanently.

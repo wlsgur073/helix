@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { withFileLock, canonical } from './lock.js';
+import { ensureHelixDir } from './home-permissions.js';
 
 /** Canonical (symlink-resolved) project key so two path spellings of ONE physical project — a symlink,
  *  a case alias — map to a SINGLE registry entry and nonce, matching the realpath-based ledger lock.
@@ -161,7 +162,7 @@ export function stampOwnership(
 ): void {
   const gen = opts.genStamp ?? (() => randomBytes(16).toString('hex'));
   const key = canonicalRoot(projectRoot);
-  mkdirSync(home, { recursive: true }); // the registry lock file needs `home` to exist first
+  ensureHelixDir(home); // the registry lock file needs `home` to exist first
   // Serialize every registry writer across concurrent sessions and publish atomically. Both the
   // .owner and the registry entry are written INSIDE the one lock, so they cannot mismatch and a
   // concurrent adopt cannot drop this (or its own) entry via a read-modify-write race.
@@ -225,7 +226,7 @@ export function globalScopeNonce(home: string): string | null {
   // Mint under the registry lock with a re-check (double-checked): another session may have minted
   // between our read and the lock, and the write must be serialized + atomic like every other. A
   // lock that cannot be taken fails closed (null => key-absent => clamp to Fresh), never a blind mint.
-  mkdirSync(home, { recursive: true }); // the lock file needs `home` to exist first
+  ensureHelixDir(home); // the lock file needs `home` to exist first
   try {
     return withFileLock(registryPath(home), () => {
       const r2 = loadRegistry(home);

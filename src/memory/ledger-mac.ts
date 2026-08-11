@@ -5,6 +5,7 @@ import { withFileLock } from './lock.js';
 import { fsyncDir, writeAll, realFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import type { MemoryRecord } from '../types.js';
+import { ensureHelixDir } from './home-permissions.js';
 
 export const MAC_VERSION = 2;                             // version NEW signatures carry
 const ACCEPTED_MAC_VERSIONS = new Set<number>([1, 2]);   // versions verifyVerify treats as valid
@@ -63,7 +64,7 @@ export function ensureMaster(home: string): Buffer {
   const path = masterPath(home);
   const existing = tryReadMasterStrict(path);
   if (existing) return existing;
-  mkdirSync(home, { recursive: true });
+  ensureHelixDir(home);
   return withFileLock(path, () => {
     const again = tryReadMasterStrict(path);   // re-check inside the lock (another process may have won)
     if (again) return again;

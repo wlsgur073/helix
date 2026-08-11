@@ -6,6 +6,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { buildSessionEndRecord } from './session-record.js';
+import { ensureHelixDir } from '../memory/home-permissions.js';
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -18,7 +19,7 @@ try {
   if (record) {
     const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
     const path = process.env.HELIX_SESSIONS ?? join(home, 'sessions.jsonl');
-    mkdirSync(dirname(path), { recursive: true });
+    ensureHelixDir(dirname(path));
     appendFileSync(path, JSON.stringify(record) + '\n', { mode: 0o600 });   // owner-only ON CREATE
   }
 } catch {

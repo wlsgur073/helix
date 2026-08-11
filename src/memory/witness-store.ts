@@ -11,6 +11,7 @@ import { withFileLock, canonical } from './lock.js';
 import { ensureMaster, tryReadMaster } from './ledger-mac.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
+import { ensureHelixDir } from './home-permissions.js';
 import {
   classifyWitness, advanceAllowed, cleanupClearAllowed, sha256Hex,
   type WitnessEntry, type JournalEntry, type WitnessVerdict,
@@ -163,7 +164,7 @@ function appendWitnessLogLine(home: string, line: { v: 1; scope: string; epoch: 
  *  TOFU adoption: the new entry's epoch resets to 1, matching a genuine first-contact. `fsOps`
  *  (Task 8): injectable seam for the witness.json replace itself — defaults to realFsOps. */
 export function advanceWitness(home: string, scopeKey: string, bytes: Buffer, headTx: string | null, fsOps: DurableFsOps = realFsOps): void {
-  mkdirSync(home, { recursive: true });
+  ensureHelixDir(home);
   const master = ensureMaster(home);
   const rawPath = witnessPath(home);
   withFileLock(rawPath, () => {
@@ -234,7 +235,7 @@ export function openTransition(
   },
   fsOps: DurableFsOps = realFsOps,
 ): JournalEntry {
-  mkdirSync(home, { recursive: true });
+  ensureHelixDir(home);
   const master = ensureMaster(home);
   const rawPath = witnessPath(home);
   return withFileLock(rawPath, () => {
@@ -273,7 +274,7 @@ export function openTransition(
  *  expected head at the journal's epoch, and the slot clears. `fsOps` (Task 8): injectable seam for
  *  the witness.json replace itself — defaults to realFsOps. */
 export function completeTransition(home: string, scopeKey: string, bytes: Buffer, headTx: string | null, fsOps: DurableFsOps = realFsOps): void {
-  mkdirSync(home, { recursive: true });
+  ensureHelixDir(home);
   const master = ensureMaster(home);
   const rawPath = witnessPath(home);
   withFileLock(rawPath, () => {
@@ -330,7 +331,7 @@ export function completeTransition(home: string, scopeKey: string, bytes: Buffer
  *  classifyWitness keeps calling that state 'transition-interrupted' and no read path may relax
  *  it; a CRASHED writer's journal therefore stays pending until an operator re-drives it. */
 export function discardTransition(home: string, scopeKey: string, nonce: string, fsOps: DurableFsOps = realFsOps): void {
-  mkdirSync(home, { recursive: true });
+  ensureHelixDir(home);
   const master = ensureMaster(home);
   const rawPath = witnessPath(home);
   withFileLock(rawPath, () => {
@@ -368,7 +369,7 @@ export function discardTransition(home: string, scopeKey: string, nonce: string,
  *  is retained, tested, as defense-in-depth against a partial-write adversary the model otherwise
  *  excludes; no production caller invokes it today. */
 export function maybeCleanupClear(home: string, scopeKey: string, bytes: Buffer, fsOps: DurableFsOps = realFsOps): boolean {
-  mkdirSync(home, { recursive: true });
+  ensureHelixDir(home);
   const rawPath = witnessPath(home);
   return withFileLock(rawPath, () => {
     const path = canonical(rawPath);

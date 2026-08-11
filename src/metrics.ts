@@ -10,6 +10,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { ensureHelixDir } from './memory/home-permissions.js';
 
 /** One per-scope verifying read, camelCase in code — the sink writes snake_case wire names. */
 export interface ReplayInput {
@@ -70,7 +71,7 @@ export const noopMetricsSink: MetricsSink = {
 export function createMetricsSink(path: string, enabled: boolean, deps: MetricsSinkDeps = {}): MetricsSink {
   if (!enabled) return noopMetricsSink;
   const append = deps.append ?? ((p: string, line: string): void => {
-    mkdirSync(dirname(p), { recursive: true });
+    ensureHelixDir(dirname(p));
     appendFileSync(p, line, { mode: 0o600 }); // owner-only on create; O_APPEND, one line per record
   });
   const now = deps.now ?? ((): string => new Date().toISOString());

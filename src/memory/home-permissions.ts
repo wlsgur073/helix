@@ -1,5 +1,5 @@
-import { lstatSync, chmodSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync, chmodSync, readdirSync, mkdirSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 
 /** Files Helix persists under HELIX_HOME. Enumerated rather than globbed so the pass can never
  *  reach a name Helix does not own, and so adding a persisted file is a deliberate edit here.
@@ -82,5 +82,65 @@ export function hardenHomePermissions(home: string, deps: HardenDeps): void {
     } catch {
       deps.warn(`helix: could not repair permissions on ${path} — leaving it as it is`);
     }
+  }
+}
+
+/**
+ * The ONE way a Helix-owned directory comes into existence. Every site that used to reach for
+ * `mkdirSync(dir, { recursive: true })` calls this instead.
+ *
+ * S3: seven separate sites created HELIX_HOME, none passing a mode, so a brand-new install ran its
+ * whole first session at the umask's mode — 0755, or 0775 under umask 002 — and was tightened only
+ * at the next start. POSIX puts unlink permission on the PARENT, so a 0600 master key inside a 0775
+ * directory can still be replaced by any group member. Adding a mode argument seven times would fix
+ * today and leave the eighth site as the next exposure; the invariant needs one owner.
+ *
+ * NON-RECURSIVE, deliberately. `recursive: true` walks and creates missing ancestors, and against an
+ * attacker-writable ancestor that walk can be raced: pre-create a component, or substitute a symlink,
+ * and the recursive call succeeds against the planted path. Requiring the parent to exist means the
+ * only directory this creates is the leaf, under a parent the caller already trusts.
+ *
+ * THROWS on a hostile name rather than repairing it. `hardenHomePermissions` never throws because an
+ * over-broad mode is ordinary legacy state; a SYMLINK or a plain file standing where the directory
+ * belongs is not, and following one would hand an arbitrary-write primitive to whoever planted it.
+ * The same reasoning `ensureScratchRoot` applies to the scratch root, which refuses rather than
+ * adopts. A wrong owner is refused for that reason too: another user's directory is not our state.
+ *
+ * SCOPED TO CREATION. A home that already ran group-writable may have had its key or registry
+ * replaced while it was exposed, and tightening the mode afterwards locks those objects in rather
+ * than restoring trust. That is legacy remediation and is deliberately NOT what this closes.
+ *
+ * Windows has no POSIX mode bits — `mkdir`'s mode is ignored there and `hardenHomePermissions`
+ * returns early for the same reason — so the owner-only guarantee is POSIX-only and this says so by
+ * taking the plain path rather than pretending to enforce something.
+ */
+export function ensureHelixDir(dir: string): void {
+  if (process.platform === 'win32') { mkdirSync(dir, { recursive: true }); return; }
+
+  let st: ReturnType<typeof lstatSync> | null = null;
+  try { st = lstatSync(dir); } catch { st = null; }   // ENOENT is the create path below
+
+  if (st !== null) {
+    // lstat, never stat: the question is what the NAME is, never what it points at.
+    if (st.isSymbolicLink()) throw new Error(`refusing to use ${dir}: it is a symlink, not a directory Helix owns`);
+    if (!st.isDirectory()) throw new Error(`refusing to use ${dir}: it exists and is not a directory`);
+    const uid = process.getuid?.();
+    if (uid !== undefined && st.uid !== uid) {
+      throw new Error(`refusing to use ${dir}: it is owned by uid ${st.uid}, not by this user (${uid})`);
+    }
+    if ((st.mode & 0o077) !== 0) chmodSync(dir, 0o700);
+    return;
+  }
+
+  const parent = dirname(dir);
+  if (!existsSync(parent)) {
+    throw new Error(`refusing to create ${dir}: its parent ${parent} does not exist (Helix creates one directory, never a chain)`);
+  }
+  try {
+    mkdirSync(dir, { mode: 0o700 });
+  } catch (e) {
+    // Lost a creation race with a concurrent Helix process: validate what landed rather than assume.
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    ensureHelixDir(dir);
   }
 }

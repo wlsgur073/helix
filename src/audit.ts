@@ -2,6 +2,7 @@ import { mkdirSync, openSync, fsyncSync, closeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeAll, realFsOps, fsyncDir } from './memory/fs-ops.js';
 import type { EgressLeg } from './config.js';
+import { ensureHelixDir } from './memory/home-permissions.js';
 
 /** Schema note (append-only history): `decidedLeg` replaces the mis-named `blockedLeg` (an
  *  `allowed_override` used to write its DECIDER into a field literally called `blockedLeg`,
@@ -114,7 +115,7 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit | AdoptAudit
  *  surviving to its own fsyncDir. Each appender now owns the directory-entry durability of the row
  *  it acknowledges. Audit appends are low-frequency; the extra directory fsync is noise. */
 export function appendAudit(path: string, event: AuditEvent, io: { fsyncDir: typeof fsyncDir } = { fsyncDir }): void {
-  mkdirSync(dirname(path), { recursive: true });
+  ensureHelixDir(dirname(path));
   const fd = openSync(path, 'a', 0o600);   // owner-only ON CREATE (the audit trail is unauthenticated; a group writer could rewrite it)
   try {
     // writeAll loops short writes (a truncated row is never fsynced) and guards a zero-progress write.
