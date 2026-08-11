@@ -57,3 +57,23 @@ describe('scan-history-secrets', () => {
     expect(hits.some((h) => h.path === 'src/leak.txt')).toBe(true);   // history keeps the dual-path blob scanned
   });
 });
+
+// P4 was the OTHER half of the P3/P4 pair: on a pristine checkout the scanner exited 1 on four
+// named false positives, all from docs/release/audit-2026-07.md quoting the detector's own PEM
+// header in prose while documenting it. A gate that is red on a clean tree gets ignored or removed,
+// so the exit code is the property worth locking, not the allowlist's spelling.
+//
+// The fixtures above cover the allowlist MECHANISM (P3). None of them touch this repository, so
+// nothing noticed the entry itself: deleting the docs/release/audit-2026-07.md line and running the
+// whole suite produced no failure, while the scanner reported 4 hits and exit 1.
+//
+// Reads real history, so it needs an unshallowed clone — the CI test job already fetches full
+// history for the anchor-verification test. ~2.6s over 822 blobs at the time of writing.
+describe('scan-history-secrets against THIS repository', () => {
+  it('a pristine checkout scans clean, so the gate is never red by default (P4)', async () => {
+    const { fileURLToPath } = await import('node:url');
+    const repoRoot = fileURLToPath(new URL('..', import.meta.url));
+    // Mapped to strings so a failure names the offending paths instead of printing object diffs.
+    expect(scanRepo(repoRoot).map((h) => `${h.kind} ${h.path}`)).toEqual([]);
+  }, 60_000);
+});
