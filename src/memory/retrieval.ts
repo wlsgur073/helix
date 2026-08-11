@@ -298,6 +298,16 @@ export function buildIndex(docs: Array<{ id: string; tokens: string[] }>): Bm25I
   const df = new Map<string, number>();
   let total = 0;
   for (const { id, tokens } of docs) {
+    // FIRST-WINS, and every accumulator below is inside the guard. This loop used to mix two keying
+    // schemes: N, `total` and df counted once per ELEMENT, while tf and len are keyed by an id that
+    // is not unique. A duplicate id then left the index asserting it held N documents when only
+    // N-1 could be scored, with df crediting terms to a document bm25Score can never reach and
+    // avgdl divided by a count including it. Which row survives is not a free choice either —
+    // projection.ts ("the FIRST row bearing an id") and history.ts ("first occurrence, append
+    // order") both hand a duplicated id to its first claimant, for the reason 80904f2 records:
+    // last-wins let an appender inherit a signed grade while supplying their own unauthenticated
+    // fields. This was the sibling site that never got the rule.
+    if (tf.has(id)) continue;
     const counts = new Map<string, number>();
     for (const t of tokens) counts.set(t, (counts.get(t) ?? 0) + 1);
     tf.set(id, counts);
@@ -305,7 +315,7 @@ export function buildIndex(docs: Array<{ id: string; tokens: string[] }>): Bm25I
     total += tokens.length;
     for (const t of counts.keys()) df.set(t, (df.get(t) ?? 0) + 1);
   }
-  const N = docs.length;
+  const N = tf.size;   // what the index can actually score, never the rows it dropped
   return { tf, len, df, N, avgdl: N ? total / N : 0 };
 }
 

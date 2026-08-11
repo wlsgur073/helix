@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  semanticCoverage, rankRecords, rankWithArtifacts, buildRankArtifacts, buildIndex, tokenize,
+  semanticCoverage, rankRecords, rankWithArtifacts, buildRankArtifacts, buildIndex, bm25Score, tokenize,
 } from '../../src/memory/retrieval.js';
 import type { MemoryRecord } from '../../src/types.js';
 
@@ -122,5 +122,60 @@ describe('ranker wiring', () => {
     // the ranker must not throw on df=0 query terms and the target still ranks:
     const out = rankRecords(corpus, 'sorttool nonexistentterm');
     expect(out[0]!.id).toBe('t1');
+  });
+});
+
+// N2-BM25-DUP. buildIndex mixes two keying schemes: N, avgdl's running total and df accumulate once
+// per ELEMENT of `docs`, while tf and len are keyed by ID, which is not unique. A duplicate id
+// therefore leaves the index asserting it holds N documents when only N-1 can be scored, with df
+// crediting terms to a document bm25Score can never reach. Reproduced at HEAD: two docs in, N=2,
+// tf.size=1, df("revenue")=1 for a document whose score is 0.
+//
+// The survivor is also wrong. projection.ts ("the FIRST row bearing an id") and history.ts ("first
+// occurrence, append order") both give a duplicated id to the first claimant, and 80904f2 gives the
+// security reason: last-wins let an appender inherit a signed grade while supplying their own
+// unauthenticated fields. buildIndex was the sibling site that never got the rule.
+describe('buildIndex — duplicate ids (N2-BM25-DUP)', () => {
+  const dup = () => buildIndex([
+    { id: 'm_X', tokens: tokenize('quarterly revenue forecast spreadsheet') },
+    { id: 'm_X', tokens: tokenize('kubernetes ingress controller') },
+    { id: 'm_Y', tokens: tokenize('postgres connection pooling') },
+  ]);
+
+  it('N counts what the index can actually score, never the rows it dropped', () => {
+    const idx = dup();
+    expect(idx.tf.size).toBe(2);
+    expect(idx.N).toBe(idx.tf.size);
+  });
+
+  it('df credits no term to a document that is not in the index', () => {
+    const idx = dup();
+    // 'kubernetes' belongs only to the shadowed second m_X row.
+    expect(idx.df.get('kubernetes') ?? 0).toBe(0);
+    expect(idx.df.get('revenue') ?? 0).toBe(1);
+  });
+
+  it('the FIRST row bearing an id owns it, matching projection.ts and history.ts', () => {
+    const idx = dup();
+    expect(idx.tf.get('m_X')!.has('revenue')).toBe(true);
+    expect(idx.tf.get('m_X')!.has('kubernetes')).toBe(false);
+    expect(bm25Score('m_X', tokenize('revenue'), idx)).toBeGreaterThan(0);
+  });
+
+  it('avgdl averages over the counted documents only', () => {
+    const idx = dup();
+    const lens = [...idx.len.values()];
+    expect(lens).toHaveLength(2);
+    expect(idx.avgdl).toBeCloseTo(lens.reduce((a, b) => a + b, 0) / lens.length, 10);
+  });
+
+  it('a distinct-id corpus is completely unaffected', () => {
+    const idx = buildIndex([
+      { id: 'a', tokens: tokenize('quarterly revenue forecast') },
+      { id: 'b', tokens: tokenize('kubernetes ingress controller') },
+    ]);
+    expect(idx.N).toBe(2);
+    expect(idx.df.get('kubernetes')).toBe(1);
+    expect(idx.df.get('revenue')).toBe(1);
   });
 });
