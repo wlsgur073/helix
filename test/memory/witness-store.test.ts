@@ -442,6 +442,40 @@ function recordingShortFs(): { fs: DurableFsOps; events: Array<{ kind: 'open' | 
   return { fs, events };
 }
 
+// openTransition refuses a plan whose epoch does not advance. The check lives in one condition that
+// ALSO verifies the pending journal being superseded, so a test must weaken only the epoch half —
+// otherwise a red result cannot say which invariant was unmeasured.
+describe('openTransition — the epoch must advance', () => {
+  it('refuses a plan whose epoch equals the current entry epoch', () => {
+    const home = tmpHome();
+    try {
+      const target = Buffer.from('row1\nrow2\n', 'utf8');
+
+      // Establish an entry at some epoch by driving one full transition.
+      const p1 = planTransition(home, '@global', 'compaction');
+      openTransition(home, '@global', {
+        kind: 'compaction', epoch: p1.epoch, nonce: p1.nonce, predecessor: p1.predecessor,
+        supersedes: p1.supersedes,
+        expected: { byteLength: target.length, prefixHash: sha256Hex(target) },
+        tx: '2026-08-11T00:00:00.000Z',
+      });
+      completeTransition(home, '@global', target, '2026-08-11T00:00:00.000Z');
+
+      const entryEpoch = readScopeWitness(home, '@global').entry!.epoch;
+      const p2 = planTransition(home, '@global', 'compaction');
+
+      // A plan that does not advance past the entry must be refused, even though its `supersedes`
+      // matches the (now absent) pending journal exactly.
+      expect(() => openTransition(home, '@global', {
+        kind: 'compaction', epoch: entryEpoch, nonce: p2.nonce, predecessor: p2.predecessor,
+        supersedes: p2.supersedes,
+        expected: { byteLength: target.length, prefixHash: sha256Hex(target) },
+        tx: '2026-08-11T00:01:00.000Z',
+      })).toThrow(/epoch/i);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+});
+
 describe('M1: transition-log durability wiring (three locks)', () => {
   it('the log append goes through the injected seam, completes under short writes, and fsyncs the log fd before close', () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-wlog-'));
