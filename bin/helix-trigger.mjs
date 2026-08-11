@@ -5,22 +5,18 @@ import { homedir } from "node:os";
 
 // src/memory/fs-ops.ts
 import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, renameSync, unlinkSync, linkSync, fchmodSync, readdirSync } from "node:fs";
-var realDirFsyncSyscalls = { openSync, fsyncSync, closeSync };
-var SWALLOWED_FSYNC_CODES = /* @__PURE__ */ new Set(["EINVAL", "EISDIR", "ENOTSUP", "EOPNOTSUPP"]);
-function fsyncDir(dir, sys = realDirFsyncSyscalls) {
+function fsyncDir(dir) {
   let dfd;
   try {
-    dfd = sys.openSync(dir, "r");
+    dfd = openSync(dir, "r");
   } catch {
     return;
   }
   try {
-    sys.fsyncSync(dfd);
-  } catch (e) {
-    const code = e.code;
-    if (code === void 0 || !SWALLOWED_FSYNC_CODES.has(code)) throw e;
+    fsyncSync(dfd);
+  } catch {
   } finally {
-    sys.closeSync(dfd);
+    closeSync(dfd);
   }
 }
 var realFsOps = {
@@ -136,7 +132,6 @@ function isOwned(projectRoot, home) {
 }
 
 // src/memory/ledger-mac.ts
-var ILL_FORMED_TAG = Buffer.from([255, 1]);
 var DOMAIN = Buffer.from("helix-ledger-mac");
 var NULL_FIELD = Buffer.from([0, 0, 0, 0, 0]);
 

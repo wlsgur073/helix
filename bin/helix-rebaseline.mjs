@@ -98,7 +98,7 @@ function classifyHolder(recorded, self, probe) {
   }
   const st = probe.stateOf(recorded.pid);
   if (st === "Z" || st === "X") return "dead";
-  return recorded.startTicks === null ? "alive-unknown" : "alive";
+  return "alive";
 }
 
 // src/memory/lock.ts
@@ -134,7 +134,7 @@ function acquireFileLock(target, opts = {}) {
   for (; ; ) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString("hex")}.tmp`;
     try {
-      writeFileSync(srcTmp, payloadText, { flag: "wx", mode: 384 });
+      writeFileSync(srcTmp, payloadText, { flag: "wx" });
       try {
         linkSync(srcTmp, lockPath);
         break;
@@ -245,7 +245,7 @@ function stealUnderGate(lockPath, probe) {
   const gateToken = randomBytes(16).toString("hex");
   const gateSrc = `${gatePath}.src-${gateToken}.tmp`;
   try {
-    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: "wx", mode: 384 });
+    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: "wx" });
     try {
       linkSync(gateSrc, gatePath);
     } finally {
@@ -293,29 +293,20 @@ function readdirSyncSafe(dir) {
 import { readFileSync as readFileSync5, mkdirSync as mkdirSync3, statSync as statSync2 } from "node:fs";
 import { dirname as dirname6 } from "node:path";
 
-// src/memory/ledger-mac.ts
-import { createHash, createHmac, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync } from "node:fs";
-import { dirname as dirname3, join as join3 } from "node:path";
-
 // src/memory/fs-ops.ts
 import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, renameSync, unlinkSync as unlinkSync2, linkSync as linkSync2, fchmodSync, readdirSync as readdirSync2 } from "node:fs";
-var realDirFsyncSyscalls = { openSync, fsyncSync, closeSync };
-var SWALLOWED_FSYNC_CODES = /* @__PURE__ */ new Set(["EINVAL", "EISDIR", "ENOTSUP", "EOPNOTSUPP"]);
-function fsyncDir(dir, sys = realDirFsyncSyscalls) {
+function fsyncDir(dir) {
   let dfd;
   try {
-    dfd = sys.openSync(dir, "r");
+    dfd = openSync(dir, "r");
   } catch {
     return;
   }
   try {
-    sys.fsyncSync(dfd);
-  } catch (e) {
-    const code = e.code;
-    if (code === void 0 || !SWALLOWED_FSYNC_CODES.has(code)) throw e;
+    fsyncSync(dfd);
+  } catch {
   } finally {
-    sys.closeSync(dfd);
+    closeSync(dfd);
   }
 }
 var realFsOps = {
@@ -372,13 +363,55 @@ function sweepOrphanTmps(artifactPath, opts = {}) {
   return removed;
 }
 
+// src/memory/witness-core.ts
+import { createHash } from "node:crypto";
+function sha256Hex(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+function matchesAt(bytes, byteLength, prefixHash) {
+  if (bytes.length < byteLength) return false;
+  return sha256Hex(bytes.subarray(0, byteLength)) === prefixHash;
+}
+function classifyWitness(bytes, entry, journal) {
+  if (journal) {
+    const exact = bytes.length === journal.expected.byteLength && matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash);
+    return exact ? { kind: "transition-heal", journal } : { kind: "transition-interrupted", journal };
+  }
+  if (!entry) return { kind: "first-contact", reason: "no-entry" };
+  if (!matchesAt(bytes, entry.byteLength, entry.prefixHash)) return { kind: "mismatch" };
+  return bytes.length === entry.byteLength ? { kind: "in-sync" } : { kind: "unwitnessed-suffix" };
+}
+function fenceId(epoch, nonce) {
+  return `witness_fence_${epoch}_${nonce}`;
+}
+
+// src/memory/witness-store.ts
+import { randomBytes as randomBytes3, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync4 } from "node:fs";
+import { dirname as dirname5, join as join5 } from "node:path";
+
+// src/memory/ownership.ts
+import { join as join3, resolve, dirname as dirname3 } from "node:path";
+function canonicalRoot(projectRoot) {
+  try {
+    return canonical(projectRoot);
+  } catch {
+    return resolve(projectRoot);
+  }
+}
+function projectLedgerPath(projectRoot) {
+  return join3(projectRoot, ".helix", "memory.jsonl");
+}
+
 // src/memory/ledger-mac.ts
-var ILL_FORMED_TAG = Buffer.from([255, 1]);
+import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
+import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync } from "node:fs";
+import { dirname as dirname4, join as join4 } from "node:path";
 var LedgerMacError = class extends Error {
 };
 var MASTER_LEN = 32;
 function masterPath(home) {
-  return join3(home, "ledger-mac-master.key");
+  return join4(home, "ledger-mac-master.key");
 }
 function ensureMaster(home) {
   const path = masterPath(home);
@@ -412,7 +445,7 @@ function ensureMaster(home) {
       } catch {
       }
     }
-    fsyncDir(dirname3(path));
+    fsyncDir(dirname4(path));
     if (published) return key;
     const winner = tryReadMasterStrict(path);
     if (!winner) throw new LedgerMacError("master key vanished during concurrent mint");
@@ -439,48 +472,6 @@ function tryReadMaster(home) {
 }
 var DOMAIN = Buffer.from("helix-ledger-mac");
 var NULL_FIELD = Buffer.from([0, 0, 0, 0, 0]);
-
-// src/memory/witness-core.ts
-import { createHash as createHash2 } from "node:crypto";
-function sha256Hex(bytes) {
-  return createHash2("sha256").update(bytes).digest("hex");
-}
-function matchesAt(bytes, byteLength, prefixHash) {
-  if (bytes.length < byteLength) return false;
-  return sha256Hex(bytes.subarray(0, byteLength)) === prefixHash;
-}
-function classifyWitness(bytes, entry, journal) {
-  if (journal) {
-    const exact = bytes.length === journal.expected.byteLength && matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash);
-    if (exact) return { kind: "transition-heal", journal };
-    const onLineage = matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash) || journal.predecessor === null || matchesAt(bytes, journal.predecessor.byteLength, journal.predecessor.prefixHash);
-    return onLineage ? { kind: "transition-interrupted", journal } : { kind: "mismatch" };
-  }
-  if (!entry) return { kind: "first-contact", reason: "no-entry" };
-  if (!matchesAt(bytes, entry.byteLength, entry.prefixHash)) return { kind: "mismatch" };
-  return bytes.length === entry.byteLength ? { kind: "in-sync" } : { kind: "unwitnessed-suffix" };
-}
-function fenceId(epoch, nonce) {
-  return `witness_fence_${epoch}_${nonce}`;
-}
-
-// src/memory/witness-store.ts
-import { randomBytes as randomBytes3, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { mkdirSync as mkdirSync2, readFileSync as readFileSync4 } from "node:fs";
-import { dirname as dirname5, join as join5 } from "node:path";
-
-// src/memory/ownership.ts
-import { join as join4, resolve, dirname as dirname4 } from "node:path";
-function canonicalRoot(projectRoot) {
-  try {
-    return canonical(projectRoot);
-  } catch {
-    return resolve(projectRoot);
-  }
-}
-function projectLedgerPath(projectRoot) {
-  return join4(projectRoot, ".helix", "memory.jsonl");
-}
 
 // src/memory/witness-store.ts
 function witnessPath(home) {
@@ -710,7 +701,7 @@ function appendRecordUnlocked(rawPath, record, fsOps = realFsOps) {
   mkdirSync3(dirname6(rawPath), { recursive: true });
   const path = canonical(rawPath);
   sweepOrphanTmps(path, { fsOps });
-  const fd = fsOps.openSync(path, "a+", 384);
+  const fd = fsOps.openSync(path, "a+");
   try {
     const st = fsOps.fstatSync(fd);
     if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);

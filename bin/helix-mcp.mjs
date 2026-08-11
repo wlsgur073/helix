@@ -6887,7 +6887,7 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join12, dirname as dirname13 } from "node:path";
+import { join as join11, dirname as dirname13 } from "node:path";
 import { existsSync as existsSync8 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
@@ -13030,14 +13030,14 @@ function canCommit(record2) {
   return Boolean(record2.provenance && record2.provenance.source);
 }
 function resolveTransition(input) {
-  const { targetState, evidenceSource, outcome } = input;
+  const { targetSource, targetState, evidenceSource, outcome } = input;
   if (evidenceSource === "user") return { kind: "state", state: "Verified" };
   if (evidenceSource !== "reality-check") return { kind: "no-change" };
   if (!outcome.ran || outcome.indeterminate) return { kind: "no-change" };
   if (outcome.passed) {
     return targetState === "Verified" || targetState === "Corroborated" ? { kind: "no-change" } : { kind: "state", state: "Corroborated" };
   }
-  if (targetState === "Verified") return { kind: "contested" };
+  if (targetState === "Verified" || targetSource === "user") return { kind: "contested" };
   if (targetState === "Suspect") return { kind: "no-change" };
   return { kind: "state", state: "Suspect" };
 }
@@ -13335,19 +13335,10 @@ function rankWithArtifacts(records, artifacts, query, opts = {}) {
 }
 
 // src/memory/projection.ts
-function withoutDuplicateFactIds(records) {
-  const owned = /* @__PURE__ */ new Set();
-  return records.filter((r) => {
-    if (r.type === "verify" || r.type === "invalidate" || r.type === "erase") return true;
-    if (owned.has(r.id)) return false;
-    owned.add(r.id);
-    return true;
-  });
-}
 function buildProjection(records) {
   const removed = /* @__PURE__ */ new Set();
   const live = /* @__PURE__ */ new Map();
-  for (const r of withoutDuplicateFactIds(records)) {
+  for (const r of records) {
     if (r.type === "verify") {
       const target = r.supersedes;
       if (target && live.has(target)) {
@@ -13366,11 +13357,6 @@ function buildProjection(records) {
   for (const id of removed) live.delete(id);
   return live;
 }
-
-// src/memory/ledger-mac.ts
-import { createHash, createHmac, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync, chmodSync, mkdirSync } from "node:fs";
-import { dirname as dirname3, join as join3 } from "node:path";
 
 // src/memory/lock.ts
 import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from "node:fs";
@@ -13466,7 +13452,7 @@ function classifyHolder(recorded, self, probe) {
   }
   const st = probe.stateOf(recorded.pid);
   if (st === "Z" || st === "X") return "dead";
-  return recorded.startTicks === null ? "alive-unknown" : "alive";
+  return "alive";
 }
 
 // src/memory/lock.ts
@@ -13502,7 +13488,7 @@ function acquireFileLock(target, opts = {}) {
   for (; ; ) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString("hex")}.tmp`;
     try {
-      writeFileSync(srcTmp, payloadText, { flag: "wx", mode: 384 });
+      writeFileSync(srcTmp, payloadText, { flag: "wx" });
       try {
         linkSync(srcTmp, lockPath);
         break;
@@ -13605,7 +13591,7 @@ function stealUnderGate(lockPath, probe) {
   const gateToken = randomBytes(16).toString("hex");
   const gateSrc = `${gatePath}.src-${gateToken}.tmp`;
   try {
-    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: "wx", mode: 384 });
+    writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: "wx" });
     try {
       linkSync(gateSrc, gatePath);
     } finally {
@@ -13651,22 +13637,18 @@ function readdirSyncSafe(dir) {
 
 // src/memory/fs-ops.ts
 import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, renameSync, unlinkSync as unlinkSync2, linkSync as linkSync2, fchmodSync, readdirSync as readdirSync2 } from "node:fs";
-var realDirFsyncSyscalls = { openSync, fsyncSync, closeSync };
-var SWALLOWED_FSYNC_CODES = /* @__PURE__ */ new Set(["EINVAL", "EISDIR", "ENOTSUP", "EOPNOTSUPP"]);
-function fsyncDir(dir, sys = realDirFsyncSyscalls) {
+function fsyncDir(dir) {
   let dfd;
   try {
-    dfd = sys.openSync(dir, "r");
+    dfd = openSync(dir, "r");
   } catch {
     return;
   }
   try {
-    sys.fsyncSync(dfd);
-  } catch (e) {
-    const code = e.code;
-    if (code === void 0 || !SWALLOWED_FSYNC_CODES.has(code)) throw e;
+    fsyncSync(dfd);
+  } catch {
   } finally {
-    sys.closeSync(dfd);
+    closeSync(dfd);
   }
 }
 var realFsOps = {
@@ -13723,40 +13705,248 @@ function sweepOrphanTmps(artifactPath, opts = {}) {
   return removed;
 }
 
+// src/memory/witness-core.ts
+import { createHash } from "node:crypto";
+function sha256Hex(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+function matchesAt(bytes, byteLength, prefixHash) {
+  if (bytes.length < byteLength) return false;
+  return sha256Hex(bytes.subarray(0, byteLength)) === prefixHash;
+}
+function classifyWitness(bytes, entry, journal) {
+  if (journal) {
+    const exact = bytes.length === journal.expected.byteLength && matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash);
+    return exact ? { kind: "transition-heal", journal } : { kind: "transition-interrupted", journal };
+  }
+  if (!entry) return { kind: "first-contact", reason: "no-entry" };
+  if (!matchesAt(bytes, entry.byteLength, entry.prefixHash)) return { kind: "mismatch" };
+  return bytes.length === entry.byteLength ? { kind: "in-sync" } : { kind: "unwitnessed-suffix" };
+}
+function advanceAllowed(v) {
+  return v.kind === "first-contact" || v.kind === "in-sync" || v.kind === "unwitnessed-suffix";
+}
+function fenceId(epoch, nonce) {
+  return `witness_fence_${epoch}_${nonce}`;
+}
+
+// src/memory/witness-store.ts
+import { randomBytes as randomBytes4, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync5 } from "node:fs";
+import { dirname as dirname5, join as join5 } from "node:path";
+
+// src/memory/ownership.ts
+import { randomBytes as randomBytes2 } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync2, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
+import { join as join3, resolve, dirname as dirname3 } from "node:path";
+function canonicalRoot(projectRoot2) {
+  try {
+    return canonical(projectRoot2);
+  } catch {
+    return resolve(projectRoot2);
+  }
+}
+var GLOBAL_KEY = "@global";
+function registryPath(home2) {
+  return join3(home2, "projects.json");
+}
+function ownerFile(projectRoot2) {
+  return join3(projectRoot2, ".helix", ".owner");
+}
+function isPlainObject2(x) {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+function isValidRegistry(x) {
+  if (!isPlainObject2(x)) return false;
+  for (const v of Object.values(x)) {
+    if (!isPlainObject2(v)) return false;
+    if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
+  }
+  return true;
+}
+function loadRegistry(home2) {
+  const path = registryPath(home2);
+  let st;
+  try {
+    st = lstatSync2(path);
+  } catch (e) {
+    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
+  }
+  if (st.isSymbolicLink()) return { kind: "corrupt" };
+  let text;
+  try {
+    text = readFileSync3(path, "utf8");
+  } catch {
+    return { kind: "corrupt" };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { kind: "corrupt" };
+  }
+  if (!isValidRegistry(parsed)) return { kind: "corrupt" };
+  return { kind: "ok", reg: parsed };
+}
+function readRegistry(home2) {
+  const r = loadRegistry(home2);
+  return r.kind === "ok" ? r.reg : {};
+}
+function assertNotSymlink(path, what) {
+  let st;
+  try {
+    st = lstatSync2(path);
+  } catch {
+    return;
+  }
+  if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
+}
+function writeAll2(fd, data) {
+  const buf = Buffer.from(data, "utf8");
+  for (let off = 0; off < buf.length; ) off += writeSync2(fd, buf, off, buf.length - off);
+}
+function atomicWriteFile(path, data, mode) {
+  const tmp = `${path}.${randomBytes2(8).toString("hex")}.tmp`;
+  const fd = openSync2(tmp, "wx", mode);
+  try {
+    writeAll2(fd, data);
+    fsyncSync2(fd);
+  } finally {
+    closeSync2(fd);
+  }
+  try {
+    renameSync2(tmp, path);
+  } catch (e) {
+    try {
+      unlinkSync3(tmp);
+    } catch {
+    }
+    throw e;
+  }
+  let dfd;
+  try {
+    dfd = openSync2(dirname3(path), "r");
+    fsyncSync2(dfd);
+  } catch {
+  } finally {
+    if (dfd !== void 0) {
+      try {
+        closeSync2(dfd);
+      } catch {
+      }
+    }
+  }
+}
+function atomicWriteRegistry(home2, reg) {
+  const path = registryPath(home2);
+  assertNotSymlink(path, "registry");
+  atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
+}
+function atomicWriteOwner(projectRoot2, stamp) {
+  atomicWriteFile(ownerFile(projectRoot2), stamp, 384);
+}
+function readOwner(projectRoot2) {
+  try {
+    return readFileSync3(ownerFile(projectRoot2), "utf8").trim();
+  } catch {
+    return null;
+  }
+}
+function isOwned(projectRoot2, home2) {
+  const entry = readRegistry(home2)[canonicalRoot(projectRoot2)];
+  if (!entry) return false;
+  const stamp = readOwner(projectRoot2);
+  return stamp !== null && stamp === entry.stamp;
+}
+function projectDispositionOf(project2) {
+  if (!project2) return "inactive";
+  if (isOwned(project2.root, project2.home)) return "owned";
+  return existsSync(project2.ledger) ? "unadopted-present" : "inactive";
+}
+function stampOwnership(projectRoot2, home2, opts = {}) {
+  const gen = opts.genStamp ?? (() => randomBytes2(16).toString("hex"));
+  const key = canonicalRoot(projectRoot2);
+  mkdirSync(home2, { recursive: true });
+  withFileLock(registryPath(home2), () => {
+    const loaded = loadRegistry(home2);
+    if (loaded.kind === "corrupt")
+      throw new Error(`stampOwnership: registry at ${registryPath(home2)} is present but unparseable \u2014 restore it before adopting (refusing to overwrite and lose other projects)`);
+    const reg = loaded.kind === "ok" ? loaded.reg : {};
+    const existing = reg[key];
+    if (opts.autoAdoptLedger && !existing && existsSync(opts.autoAdoptLedger))
+      throw new Error("commit: a project memory file appeared here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it");
+    const stamp = existing?.stamp ?? gen();
+    const macNonce = existing?.macNonce ?? gen();
+    const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
+    const helixDir = join3(projectRoot2, ".helix");
+    assertNotSymlink(helixDir, ".helix directory");
+    mkdirSync(helixDir, { recursive: true });
+    atomicWriteOwner(projectRoot2, stamp);
+    reg[key] = { stamp, adoptedAt, macNonce };
+    atomicWriteRegistry(home2, reg);
+  });
+}
+function scopeNonce(projectRoot2, home2) {
+  const entry = readRegistry(home2)[canonicalRoot(projectRoot2)];
+  return entry?.macNonce ?? null;
+}
+function globalScopeNonce(home2) {
+  const r = loadRegistry(home2);
+  if (r.kind === "corrupt") return null;
+  const fast = r.kind === "ok" ? r.reg[GLOBAL_KEY]?.macNonce : void 0;
+  if (fast) return fast;
+  mkdirSync(home2, { recursive: true });
+  try {
+    return withFileLock(registryPath(home2), () => {
+      const r2 = loadRegistry(home2);
+      if (r2.kind === "corrupt") return null;
+      const reg = r2.kind === "ok" ? r2.reg : {};
+      const existing = reg[GLOBAL_KEY]?.macNonce;
+      if (existing) return existing;
+      const macNonce = randomBytes2(16).toString("hex");
+      reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
+      atomicWriteRegistry(home2, reg);
+      return macNonce;
+    });
+  } catch {
+    return null;
+  }
+}
+
 // src/memory/ledger-mac.ts
+import { createHash as createHash2, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
+import { openSync as openSync3, fsyncSync as fsyncSync3, closeSync as closeSync3, readFileSync as readFileSync4, linkSync as linkSync3, unlinkSync as unlinkSync4, statSync, chmodSync, mkdirSync as mkdirSync2 } from "node:fs";
+import { dirname as dirname4, join as join4 } from "node:path";
 var MAC_VERSION = 2;
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
-var ILL_FORMED_TAG = Buffer.from([255, 1]);
 function digestContent(content) {
-  const wellFormed = content.isWellFormed();
-  const bytes = wellFormed ? Buffer.from(content, "utf8") : Buffer.concat([ILL_FORMED_TAG, Buffer.from(content, "utf16le")]);
-  return createHash("sha256").update(bytes).digest("hex");
+  return createHash2("sha256").update(Buffer.from(content, "utf8")).digest("hex");
 }
 var LedgerMacError = class extends Error {
 };
 var MASTER_LEN = 32;
 function masterPath(home2) {
-  return join3(home2, "ledger-mac-master.key");
+  return join4(home2, "ledger-mac-master.key");
 }
 function ensureMaster(home2) {
   const path = masterPath(home2);
   const existing = tryReadMasterStrict(path);
   if (existing) return existing;
-  mkdirSync(home2, { recursive: true });
+  mkdirSync2(home2, { recursive: true });
   return withFileLock(path, () => {
     const again = tryReadMasterStrict(path);
     if (again) return again;
     sweepOrphanTmps(path, {});
-    const key = randomBytes2(MASTER_LEN);
-    const tmp = `${path}.k-${randomBytes2(16).toString("hex")}.tmp`;
-    const fd = openSync2(tmp, "wx", 384);
+    const key = randomBytes3(MASTER_LEN);
+    const tmp = `${path}.k-${randomBytes3(16).toString("hex")}.tmp`;
+    const fd = openSync3(tmp, "wx", 384);
     let published = false;
     try {
       try {
         writeAll(realFsOps, fd, key);
-        fsyncSync2(fd);
+        fsyncSync3(fd);
       } finally {
-        closeSync2(fd);
+        closeSync3(fd);
       }
       try {
         linkSync3(tmp, path);
@@ -13766,11 +13956,11 @@ function ensureMaster(home2) {
       }
     } finally {
       try {
-        unlinkSync3(tmp);
+        unlinkSync4(tmp);
       } catch {
       }
     }
-    fsyncDir(dirname3(path));
+    fsyncDir(dirname4(path));
     if (published) return key;
     const winner = tryReadMasterStrict(path);
     if (!winner) throw new LedgerMacError("master key vanished during concurrent mint");
@@ -13780,7 +13970,7 @@ function ensureMaster(home2) {
 function tryReadMasterStrict(path) {
   let buf;
   try {
-    buf = readFileSync3(path);
+    buf = readFileSync4(path);
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -13799,7 +13989,7 @@ function deriveSubkey(master, nonce) {
   return Buffer.from(hkdfSync("sha256", master, Buffer.from(nonce, "utf8"), Buffer.from("helix-ledger-mac-v1", "utf8"), 32));
 }
 function keyIdOf(subkey) {
-  return createHash("sha256").update(Buffer.concat([Buffer.from("keyid"), subkey])).digest().subarray(0, 8).toString("hex");
+  return createHash2("sha256").update(Buffer.concat([Buffer.from("keyid"), subkey])).digest().subarray(0, 8).toString("hex");
 }
 var DOMAIN = Buffer.from("helix-ledger-mac");
 function field(buf) {
@@ -13856,398 +14046,6 @@ function verifyVerify(record2, subkey) {
     return false;
   }
   return got.length === want.length && timingSafeEqual(got, want);
-}
-
-// src/memory/history.ts
-var ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-var isIsoInstant = (s) => {
-  if (!ISO_Z.test(s)) return false;
-  const d = new Date(s);
-  return !Number.isNaN(d.getTime()) && d.toISOString() === s;
-};
-var isClosing = (t) => t === "supersede" || t === "invalidate" || t === "erase";
-function ledgerTruncated(records) {
-  const factIds = new Set(records.filter((r) => r.type === "assert" || r.type === "supersede").map((r) => r.id));
-  return records.some((r) => {
-    if (r.type === "verify" && r.supersedes === null && !r.mac && r.content === "") return true;
-    return r.type === "erase" && r.supersedes !== null && !factIds.has(r.supersedes);
-  });
-}
-function buildHistory(records) {
-  const live = buildProjection(records);
-  const anomalies = /* @__PURE__ */ new Set();
-  const factIndex = /* @__PURE__ */ new Map();
-  const markersByTarget = /* @__PURE__ */ new Map();
-  records.forEach((r, i) => {
-    if (r.type === "assert" || r.type === "supersede") {
-      if (factIndex.has(r.id)) anomalies.add(r.id);
-      else factIndex.set(r.id, i);
-    }
-    if (isClosing(r.type) && r.supersedes) {
-      const arr = markersByTarget.get(r.supersedes) ?? [];
-      arr.push({ kind: r.type, i, tx: r.tx, markerId: r.id });
-      markersByTarget.set(r.supersedes, arr);
-    }
-  });
-  const rows = [];
-  const emitted = /* @__PURE__ */ new Set();
-  for (const r of records) {
-    if (r.type !== "assert" && r.type !== "supersede") continue;
-    if (emitted.has(r.id)) continue;
-    emitted.add(r.id);
-    if (live.has(r.id)) {
-      rows.push({ record: r, txTo: null, closedBy: null });
-      continue;
-    }
-    const ri = factIndex.get(r.id);
-    const markers = markersByTarget.get(r.id) ?? [];
-    const after = markers.filter((m) => m.i > ri).sort((x, y) => x.i - y.i);
-    const C = after[0];
-    if (markers.some((m) => m.i < ri)) anomalies.add(r.id);
-    let txTo;
-    let closedBy;
-    if (C) {
-      closedBy = { kind: C.kind, markerId: C.markerId };
-      if (C.tx >= r.tx) {
-        txTo = C.tx;
-      } else {
-        txTo = r.tx;
-        anomalies.add(r.id);
-      }
-    } else {
-      const earliest = [...markers].sort((x, y) => x.i - y.i)[0];
-      closedBy = earliest ? { kind: earliest.kind, markerId: earliest.markerId } : null;
-      txTo = r.tx;
-      anomalies.add(r.id);
-    }
-    const record2 = closedBy?.kind === "erase" ? { ...r, content: "" } : r;
-    rows.push({ record: record2, txTo, closedBy });
-  }
-  const truncated = ledgerTruncated(records);
-  return { rows, anomalies, truncated };
-}
-
-// src/memory/verified-projection.ts
-function clampElevatedState(s) {
-  return s === "Verified" || s === "Corroborated" ? "Fresh" : s;
-}
-function clampElevated(p) {
-  const live = /* @__PURE__ */ new Map();
-  for (const [id, rec] of p.live) {
-    const state = clampElevatedState(rec.state);
-    live.set(id, state === rec.state ? rec : { ...rec, state });
-  }
-  return { live, compromised: p.compromised, keyAvailable: p.keyAvailable };
-}
-function enforceWitnessProjection(p, verdict) {
-  if (verdict.kind === "transition-interrupted") return { live: /* @__PURE__ */ new Map(), compromised: /* @__PURE__ */ new Set(), keyAvailable: p.keyAvailable };
-  if (verdict.kind === "mismatch") return clampElevated(p);
-  return p;
-}
-var isPromotion = (s) => s === "Verified" || s === "Corroborated";
-var TRUST_RANK = { Suspect: 0, Fresh: 1, Corroborated: 2, Verified: 3 };
-var KNOWN_STATES = /* @__PURE__ */ new Set(["Fresh", "Corroborated", "Verified", "Suspect"]);
-function isKnownState(s) {
-  return typeof s === "string" && KNOWN_STATES.has(s);
-}
-function resolveTargetGrade(verifies, liveDigest) {
-  const laneOf = (v) => v.macVersion === 1 ? 1 : v.macVersion === 2 ? 2 : 0;
-  const canonGen = (g) => BigInt(g ?? 0);
-  const byGen = /* @__PURE__ */ new Map();
-  for (const v of verifies) {
-    const g = canonGen(v.gen);
-    (byGen.get(g) ?? byGen.set(g, []).get(g)).push(v);
-  }
-  let conflict = false;
-  const active = [];
-  for (const slot of byGen.values()) {
-    const lanes = /* @__PURE__ */ new Map();
-    for (const v of slot) (lanes.get(laneOf(v)) ?? lanes.set(laneOf(v), []).get(laneOf(v))).push(v);
-    for (const members of lanes.values()) {
-      const s0 = members[0].state, d0 = members[0].targetDigest ?? null;
-      if (members.some((m) => m.state !== s0 || (m.targetDigest ?? null) !== d0)) {
-        conflict = true;
-        break;
-      }
-    }
-    if (conflict) break;
-    const l1 = lanes.get(1), l2 = lanes.get(2);
-    const r1 = l1?.[0], r2 = l2?.[0];
-    if (r1 && r2 && r1.state !== r2.state) {
-      active.push(...TRUST_RANK[r1.state] <= TRUST_RANK[r2.state] ? l1 : l2);
-      if (lanes.has(0)) active.push(...lanes.get(0));
-    } else {
-      active.push(...slot);
-    }
-  }
-  const toEvidence = (v, winner2) => ({
-    gen: v.gen ?? 0,
-    state: v.state,
-    tx: v.tx,
-    macVersion: v.macVersion ?? 0,
-    txAuthenticated: v.macVersion === 2 && typeof v.tx === "string" && isIsoInstant(v.tx),
-    applicable: !isPromotion(v.state) || v.targetDigest === liveDigest,
-    winner: winner2,
-    lane: laneOf(v)
-  });
-  if (conflict) return { grade: null, compromised: true, evidence: verifies.map((v) => toEvidence(v, false)) };
-  const sorted = [...active].sort((a, b) => {
-    const ga = canonGen(a.gen), gb = canonGen(b.gen);
-    return ga < gb ? -1 : ga > gb ? 1 : 0;
-  });
-  let winner = null;
-  for (const v of sorted) {
-    if (!isPromotion(v.state) || v.targetDigest === liveDigest) winner = v;
-  }
-  return { grade: winner ? winner.state : null, compromised: false, evidence: verifies.map((v) => toEvidence(v, v === winner)) };
-}
-var isFactRow = (r) => r.type !== "verify" && r.type !== "invalidate" && r.type !== "erase";
-function forgedFactIds(records) {
-  const firstById = /* @__PURE__ */ new Map();
-  const forged = /* @__PURE__ */ new Set();
-  for (const r of records) {
-    if (!isFactRow(r)) continue;
-    const serialized = JSON.stringify(r);
-    const first = firstById.get(r.id);
-    if (first === void 0) firstById.set(r.id, serialized);
-    else if (first !== serialized) forged.add(r.id);
-  }
-  return forged;
-}
-function buildVerifiedProjection(records, opts) {
-  const nonVerify = records.filter((r) => r.type !== "verify");
-  const live = /* @__PURE__ */ new Map();
-  for (const [id, rec] of buildProjection(nonVerify)) live.set(id, { ...rec, state: "Fresh" });
-  const compromised = /* @__PURE__ */ new Set();
-  if (!opts.keyAvailable) return { live, compromised, keyAvailable: false };
-  const forgedIds = forgedFactIds(nonVerify);
-  const byTarget = /* @__PURE__ */ new Map();
-  for (const r of records) {
-    if (r.type !== "verify" || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue;
-    (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)).push(r);
-  }
-  for (const [target, verifies] of byTarget) {
-    const item = live.get(target);
-    if (!item) continue;
-    if (forgedIds.has(target)) compromised.add(target);
-    const { grade, compromised: c } = resolveTargetGrade(verifies, digestContent(item.content));
-    if (c) {
-      compromised.add(target);
-      continue;
-    }
-    if (grade) live.set(target, { ...item, state: grade });
-  }
-  return { live, compromised, keyAvailable: true };
-}
-
-// src/memory/witness-core.ts
-import { createHash as createHash2 } from "node:crypto";
-function sha256Hex(bytes) {
-  return createHash2("sha256").update(bytes).digest("hex");
-}
-function matchesAt(bytes, byteLength, prefixHash) {
-  if (bytes.length < byteLength) return false;
-  return sha256Hex(bytes.subarray(0, byteLength)) === prefixHash;
-}
-function classifyWitness(bytes, entry, journal) {
-  if (journal) {
-    const exact = bytes.length === journal.expected.byteLength && matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash);
-    if (exact) return { kind: "transition-heal", journal };
-    const onLineage = matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash) || journal.predecessor === null || matchesAt(bytes, journal.predecessor.byteLength, journal.predecessor.prefixHash);
-    return onLineage ? { kind: "transition-interrupted", journal } : { kind: "mismatch" };
-  }
-  if (!entry) return { kind: "first-contact", reason: "no-entry" };
-  if (!matchesAt(bytes, entry.byteLength, entry.prefixHash)) return { kind: "mismatch" };
-  return bytes.length === entry.byteLength ? { kind: "in-sync" } : { kind: "unwitnessed-suffix" };
-}
-function advanceAllowed(v) {
-  return v.kind === "first-contact" || v.kind === "in-sync" || v.kind === "unwitnessed-suffix";
-}
-function fenceId(epoch, nonce) {
-  return `witness_fence_${epoch}_${nonce}`;
-}
-
-// src/memory/witness-store.ts
-import { randomBytes as randomBytes4, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { mkdirSync as mkdirSync3, readFileSync as readFileSync5 } from "node:fs";
-import { dirname as dirname5, join as join5 } from "node:path";
-
-// src/memory/ownership.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
-import { existsSync, mkdirSync as mkdirSync2, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync2, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
-import { join as join4, resolve, dirname as dirname4 } from "node:path";
-function canonicalRoot(projectRoot2) {
-  try {
-    return canonical(projectRoot2);
-  } catch {
-    return resolve(projectRoot2);
-  }
-}
-var GLOBAL_KEY = "@global";
-function registryPath(home2) {
-  return join4(home2, "projects.json");
-}
-function ownerFile(projectRoot2) {
-  return join4(projectRoot2, ".helix", ".owner");
-}
-function isPlainObject2(x) {
-  return typeof x === "object" && x !== null && !Array.isArray(x);
-}
-function isValidRegistry(x) {
-  if (!isPlainObject2(x)) return false;
-  for (const v of Object.values(x)) {
-    if (!isPlainObject2(v)) return false;
-    if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
-  }
-  return true;
-}
-function loadRegistry(home2) {
-  const path = registryPath(home2);
-  let st;
-  try {
-    st = lstatSync2(path);
-  } catch (e) {
-    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
-  }
-  if (st.isSymbolicLink()) return { kind: "corrupt" };
-  let text;
-  try {
-    text = readFileSync4(path, "utf8");
-  } catch {
-    return { kind: "corrupt" };
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { kind: "corrupt" };
-  }
-  if (!isValidRegistry(parsed)) return { kind: "corrupt" };
-  return { kind: "ok", reg: parsed };
-}
-function readRegistry(home2) {
-  const r = loadRegistry(home2);
-  return r.kind === "ok" ? r.reg : {};
-}
-function assertNotSymlink(path, what) {
-  let st;
-  try {
-    st = lstatSync2(path);
-  } catch {
-    return;
-  }
-  if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
-}
-function writeAll2(fd, data) {
-  const buf = Buffer.from(data, "utf8");
-  for (let off = 0; off < buf.length; ) off += writeSync2(fd, buf, off, buf.length - off);
-}
-function atomicWriteFile(path, data, mode) {
-  const tmp = `${path}.${randomBytes3(8).toString("hex")}.tmp`;
-  const fd = openSync3(tmp, "wx", mode);
-  try {
-    writeAll2(fd, data);
-    fsyncSync3(fd);
-  } finally {
-    closeSync3(fd);
-  }
-  try {
-    renameSync2(tmp, path);
-  } catch (e) {
-    try {
-      unlinkSync4(tmp);
-    } catch {
-    }
-    throw e;
-  }
-  let dfd;
-  try {
-    dfd = openSync3(dirname4(path), "r");
-    fsyncSync3(dfd);
-  } catch {
-  } finally {
-    if (dfd !== void 0) {
-      try {
-        closeSync3(dfd);
-      } catch {
-      }
-    }
-  }
-}
-function atomicWriteRegistry(home2, reg) {
-  const path = registryPath(home2);
-  assertNotSymlink(path, "registry");
-  atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
-}
-function atomicWriteOwner(projectRoot2, stamp) {
-  atomicWriteFile(ownerFile(projectRoot2), stamp, 384);
-}
-function readOwner(projectRoot2) {
-  try {
-    return readFileSync4(ownerFile(projectRoot2), "utf8").trim();
-  } catch {
-    return null;
-  }
-}
-function isOwned(projectRoot2, home2) {
-  const entry = readRegistry(home2)[canonicalRoot(projectRoot2)];
-  if (!entry) return false;
-  const stamp = readOwner(projectRoot2);
-  return stamp !== null && stamp === entry.stamp;
-}
-function projectDispositionOf(project2) {
-  if (!project2) return "inactive";
-  if (isOwned(project2.root, project2.home)) return "owned";
-  return existsSync(project2.ledger) ? "unadopted-present" : "inactive";
-}
-function stampOwnership(projectRoot2, home2, opts = {}) {
-  const gen = opts.genStamp ?? (() => randomBytes3(16).toString("hex"));
-  const key = canonicalRoot(projectRoot2);
-  mkdirSync2(home2, { recursive: true });
-  withFileLock(registryPath(home2), () => {
-    const loaded = loadRegistry(home2);
-    if (loaded.kind === "corrupt")
-      throw new Error(`stampOwnership: registry at ${registryPath(home2)} is present but unparseable \u2014 restore it before adopting (refusing to overwrite and lose other projects)`);
-    const reg = loaded.kind === "ok" ? loaded.reg : {};
-    const existing = reg[key];
-    if (opts.autoAdoptLedger && existsSync(opts.autoAdoptLedger))
-      throw new Error("commit: a project memory file appeared here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it");
-    const stamp = existing?.stamp ?? gen();
-    const macNonce = existing?.macNonce ?? gen();
-    const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
-    const helixDir = join4(projectRoot2, ".helix");
-    assertNotSymlink(helixDir, ".helix directory");
-    mkdirSync2(helixDir, { recursive: true });
-    atomicWriteOwner(projectRoot2, stamp);
-    reg[key] = { stamp, adoptedAt, macNonce };
-    atomicWriteRegistry(home2, reg);
-  });
-}
-function scopeNonce(projectRoot2, home2) {
-  const entry = readRegistry(home2)[canonicalRoot(projectRoot2)];
-  return entry?.macNonce ?? null;
-}
-function globalScopeNonce(home2) {
-  const r = loadRegistry(home2);
-  if (r.kind === "corrupt") return null;
-  const fast = r.kind === "ok" ? r.reg[GLOBAL_KEY]?.macNonce : void 0;
-  if (fast) return fast;
-  mkdirSync2(home2, { recursive: true });
-  try {
-    return withFileLock(registryPath(home2), () => {
-      const r2 = loadRegistry(home2);
-      if (r2.kind === "corrupt") return null;
-      const reg = r2.kind === "ok" ? r2.reg : {};
-      const existing = reg[GLOBAL_KEY]?.macNonce;
-      if (existing) return existing;
-      const macNonce = randomBytes3(16).toString("hex");
-      reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
-      atomicWriteRegistry(home2, reg);
-      return macNonce;
-    });
-  } catch {
-    return null;
-  }
 }
 
 // src/memory/witness-store.ts
@@ -14476,7 +14274,6 @@ var MARKER_SENTINEL_TX = "1970-01-01T00:00:00.000Z";
 var isMarkerShape = (r) => r != null && r.type === "verify" && r.supersedes === null && !r.mac && typeof r.id === "string";
 var isHorizonMarker = (r) => isMarkerShape(r) && r.id.startsWith("horizon_");
 var isIntegrityMarker = (r) => isMarkerShape(r) && r.id.startsWith("integrity_");
-var isWitnessFence = (r) => isMarkerShape(r) && r.id.startsWith("witness_fence_");
 function canonicalMarker(kind) {
   return {
     id: kind,
@@ -14516,7 +14313,7 @@ function appendRecordUnlocked(rawPath, record2, fsOps = realFsOps) {
   mkdirSync4(dirname6(rawPath), { recursive: true });
   const path = canonical(rawPath);
   sweepOrphanTmps(path, { fsOps });
-  const fd = fsOps.openSync(path, "a+", 384);
+  const fd = fsOps.openSync(path, "a+");
   try {
     const st = fsOps.fstatSync(fd);
     if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
@@ -14603,22 +14400,9 @@ function readLedgerRaw(path) {
 function planCompaction(records, opts) {
   const live = buildProjection(records);
   const hmacAware = opts.keepValidVerify !== void 0;
-  const forgedIds = forgedFactIds(records);
-  const forgedRows = /* @__PURE__ */ new Map();
-  if (forgedIds.size > 0) {
-    for (const r of records) {
-      if (!isFactRow(r) || !forgedIds.has(r.id)) continue;
-      (forgedRows.get(r.id) ?? forgedRows.set(r.id, []).get(r.id)).push(r);
-    }
-  }
   const kept = [];
   for (const r of live.values()) {
     if (opts.erasedIds.has(r.id)) continue;
-    const occurrences = forgedRows.get(r.id);
-    if (occurrences) {
-      for (const o of occurrences) kept.push(o);
-      continue;
-    }
     kept.push(hmacAware ? { ...r, state: "Fresh" } : r);
   }
   for (const r of records) {
@@ -14642,7 +14426,7 @@ function planCompaction(records, opts) {
   if ((records.some(isHorizonMarker) || records.some((r) => (r.type === "assert" || r.type === "supersede") && !live.has(r.id))) && !opts.erasedIds.has("horizon_marker")) {
     kept.push(canonicalMarker("horizon_marker"));
   }
-  const withoutStaleFences = kept.filter((r) => !isWitnessFence(r));
+  const withoutStaleFences = kept.filter((r) => !r.id.startsWith("witness_fence_"));
   return { kept: withoutStaleFences, droppedForgedVerifies };
 }
 function serializedBytes(records) {
@@ -14657,11 +14441,6 @@ function fileSize(path) {
     return 0;
   }
 }
-var LANDED_STATS = /* @__PURE__ */ Symbol("compactLedger.landedStats");
-function landedCompactionStats(e) {
-  if (e === null || typeof e !== "object") return void 0;
-  return e[LANDED_STATS];
-}
 function compactLedger(rawPath, opts) {
   const fsOps = opts.fsOps ?? realFsOps;
   return withFileLock(rawPath, (ctx) => {
@@ -14675,11 +14454,10 @@ function compactLedger(rawPath, opts) {
     let fenceTx = null;
     let preRewriteHash = null;
     let retractNonce = null;
-    let landedStats = null;
     try {
       if (!ctx.stillOwned()) throw new Error("compactLedger: lock lost after tmp creation");
-      const mode = modeOf(path) ?? 384;
-      fsOps.fchmodSync(fd, mode);
+      const mode = modeOf(path);
+      if (mode !== null) fsOps.fchmodSync(fd, mode);
       const beforeBytes = fileSize(path);
       const records = parseLedger(path);
       const { kept, droppedForgedVerifies } = planCompaction(records, opts);
@@ -14719,7 +14497,6 @@ function compactLedger(rawPath, opts) {
       assertSingleLink(path);
       if (!ctx.stillOwned()) throw new Error("compactLedger: lock lost before rename");
       fsOps.renameSync(tmp, path);
-      landedStats = { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
       fsOps.fsyncDir(dirname6(path));
       if (w && fenceTx !== null) {
         completeTransition(w.home, w.scopeKey, readLedgerBytes(path), fenceTx);
@@ -14739,13 +14516,6 @@ function compactLedger(rawPath, opts) {
       if (w && retractNonce !== null && preRewriteHash !== null) {
         try {
           if (sha256Hex(readLedgerBytes(path)) === preRewriteHash) discardTransition(w.home, w.scopeKey, retractNonce);
-        } catch {
-        }
-      }
-      if (e !== null && typeof e === "object") {
-        try {
-          if (landedStats !== null) e[LANDED_STATS] = landedStats;
-          else delete e[LANDED_STATS];
         } catch {
         }
       }
@@ -14789,13 +14559,6 @@ function appendWitnessedUnlocked(ledger, record2, home2, projectRoot2, op) {
     gateVerdict = classifyState(readScopeWitness(home2, key), bytes);
   }
   const shouldAdvance = advanceAllowed(gateVerdict);
-  const elevatedVerify = record2.type === "verify" && (record2.state === "Verified" || record2.state === "Corroborated");
-  if (gateVerdict.kind === "mismatch" && elevatedVerify) {
-    throw new WitnessBlockedError(
-      op,
-      `${op}: scope '${key}' is in a MISMATCH (rollback-alarm) state \u2014 refusing to mint an elevated grade over a ledger that does not descend from its witnessed head; establish that the current bytes are yours, then re-baseline the scope (helix-rebaseline) before retrying`
-    );
-  }
   appendRecordUnlocked(ledger, record2);
   const after = readLedgerBytes(ledger);
   if (shouldAdvance) {
@@ -14820,9 +14583,176 @@ function dirtyGate(a) {
   return a.reclaimable / a.rows >= a.cfg.dirtyRatio || a.reclaimableBytes >= a.cfg.minDirtyBytes;
 }
 
+// src/memory/history.ts
+var ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+var isIsoInstant = (s) => {
+  if (!ISO_Z.test(s)) return false;
+  const d = new Date(s);
+  return !Number.isNaN(d.getTime()) && d.toISOString() === s;
+};
+var isClosing = (t) => t === "supersede" || t === "invalidate" || t === "erase";
+function ledgerTruncated(records) {
+  const factIds = new Set(records.filter((r) => r.type === "assert" || r.type === "supersede").map((r) => r.id));
+  return records.some((r) => {
+    if (r.type === "verify" && r.supersedes === null && !r.mac && r.content === "") return true;
+    return r.type === "erase" && r.supersedes !== null && !factIds.has(r.supersedes);
+  });
+}
+function buildHistory(records) {
+  const live = buildProjection(records);
+  const anomalies = /* @__PURE__ */ new Set();
+  const factIndex = /* @__PURE__ */ new Map();
+  const markersByTarget = /* @__PURE__ */ new Map();
+  records.forEach((r, i) => {
+    if (r.type === "assert" || r.type === "supersede") {
+      if (factIndex.has(r.id)) anomalies.add(r.id);
+      else factIndex.set(r.id, i);
+    }
+    if (isClosing(r.type) && r.supersedes) {
+      const arr = markersByTarget.get(r.supersedes) ?? [];
+      arr.push({ kind: r.type, i, tx: r.tx, markerId: r.id });
+      markersByTarget.set(r.supersedes, arr);
+    }
+  });
+  const rows = [];
+  const emitted = /* @__PURE__ */ new Set();
+  for (const r of records) {
+    if (r.type !== "assert" && r.type !== "supersede") continue;
+    if (emitted.has(r.id)) continue;
+    emitted.add(r.id);
+    if (live.has(r.id)) {
+      rows.push({ record: r, txTo: null, closedBy: null });
+      continue;
+    }
+    const ri = factIndex.get(r.id);
+    const markers = markersByTarget.get(r.id) ?? [];
+    const after = markers.filter((m) => m.i > ri).sort((x, y) => x.i - y.i);
+    const C = after[0];
+    if (markers.some((m) => m.i < ri)) anomalies.add(r.id);
+    let txTo;
+    let closedBy;
+    if (C) {
+      closedBy = { kind: C.kind, markerId: C.markerId };
+      if (C.tx >= r.tx) {
+        txTo = C.tx;
+      } else {
+        txTo = r.tx;
+        anomalies.add(r.id);
+      }
+    } else {
+      const earliest = [...markers].sort((x, y) => x.i - y.i)[0];
+      closedBy = earliest ? { kind: earliest.kind, markerId: earliest.markerId } : null;
+      txTo = r.tx;
+      anomalies.add(r.id);
+    }
+    const record2 = closedBy?.kind === "erase" ? { ...r, content: "" } : r;
+    rows.push({ record: record2, txTo, closedBy });
+  }
+  const truncated = ledgerTruncated(records);
+  return { rows, anomalies, truncated };
+}
+
+// src/memory/verified-projection.ts
+function clampElevatedState(s) {
+  return s === "Verified" || s === "Corroborated" ? "Fresh" : s;
+}
+function clampElevated(p) {
+  const live = /* @__PURE__ */ new Map();
+  for (const [id, rec] of p.live) {
+    const state = clampElevatedState(rec.state);
+    live.set(id, state === rec.state ? rec : { ...rec, state });
+  }
+  return { live, compromised: p.compromised, keyAvailable: p.keyAvailable };
+}
+function enforceWitnessProjection(p, verdict) {
+  if (verdict.kind === "transition-interrupted") return { live: /* @__PURE__ */ new Map(), compromised: /* @__PURE__ */ new Set(), keyAvailable: p.keyAvailable };
+  if (verdict.kind === "mismatch") return clampElevated(p);
+  return p;
+}
+var isPromotion = (s) => s === "Verified" || s === "Corroborated";
+var TRUST_RANK = { Suspect: 0, Fresh: 1, Corroborated: 2, Verified: 3 };
+var KNOWN_STATES = /* @__PURE__ */ new Set(["Fresh", "Corroborated", "Verified", "Suspect"]);
+function isKnownState(s) {
+  return typeof s === "string" && KNOWN_STATES.has(s);
+}
+function resolveTargetGrade(verifies, liveDigest) {
+  const laneOf = (v) => v.macVersion === 1 ? 1 : v.macVersion === 2 ? 2 : 0;
+  const canonGen = (g) => BigInt(g ?? 0);
+  const byGen = /* @__PURE__ */ new Map();
+  for (const v of verifies) {
+    const g = canonGen(v.gen);
+    (byGen.get(g) ?? byGen.set(g, []).get(g)).push(v);
+  }
+  let conflict = false;
+  const active = [];
+  for (const slot of byGen.values()) {
+    const lanes = /* @__PURE__ */ new Map();
+    for (const v of slot) (lanes.get(laneOf(v)) ?? lanes.set(laneOf(v), []).get(laneOf(v))).push(v);
+    for (const members of lanes.values()) {
+      const s0 = members[0].state, d0 = members[0].targetDigest ?? null;
+      if (members.some((m) => m.state !== s0 || (m.targetDigest ?? null) !== d0)) {
+        conflict = true;
+        break;
+      }
+    }
+    if (conflict) break;
+    const l1 = lanes.get(1), l2 = lanes.get(2);
+    const r1 = l1?.[0], r2 = l2?.[0];
+    if (r1 && r2 && r1.state !== r2.state) {
+      active.push(...TRUST_RANK[r1.state] <= TRUST_RANK[r2.state] ? l1 : l2);
+      if (lanes.has(0)) active.push(...lanes.get(0));
+    } else {
+      active.push(...slot);
+    }
+  }
+  const toEvidence = (v, winner2) => ({
+    gen: v.gen ?? 0,
+    state: v.state,
+    tx: v.tx,
+    macVersion: v.macVersion ?? 0,
+    txAuthenticated: v.macVersion === 2 && typeof v.tx === "string" && isIsoInstant(v.tx),
+    applicable: !isPromotion(v.state) || v.targetDigest === liveDigest,
+    winner: winner2,
+    lane: laneOf(v)
+  });
+  if (conflict) return { grade: null, compromised: true, evidence: verifies.map((v) => toEvidence(v, false)) };
+  const sorted = [...active].sort((a, b) => {
+    const ga = canonGen(a.gen), gb = canonGen(b.gen);
+    return ga < gb ? -1 : ga > gb ? 1 : 0;
+  });
+  let winner = null;
+  for (const v of sorted) {
+    if (!isPromotion(v.state) || v.targetDigest === liveDigest) winner = v;
+  }
+  return { grade: winner ? winner.state : null, compromised: false, evidence: verifies.map((v) => toEvidence(v, v === winner)) };
+}
+function buildVerifiedProjection(records, opts) {
+  const nonVerify = records.filter((r) => r.type !== "verify");
+  const live = /* @__PURE__ */ new Map();
+  for (const [id, rec] of buildProjection(nonVerify)) live.set(id, { ...rec, state: "Fresh" });
+  const compromised = /* @__PURE__ */ new Set();
+  if (!opts.keyAvailable) return { live, compromised, keyAvailable: false };
+  const byTarget = /* @__PURE__ */ new Map();
+  for (const r of records) {
+    if (r.type !== "verify" || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue;
+    (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)).push(r);
+  }
+  for (const [target, verifies] of byTarget) {
+    const item = live.get(target);
+    if (!item) continue;
+    const { grade, compromised: c } = resolveTargetGrade(verifies, digestContent(item.content));
+    if (c) {
+      compromised.add(target);
+      continue;
+    }
+    if (grade) live.set(target, { ...item, state: grade });
+  }
+  return { live, compromised, keyAvailable: true };
+}
+
 // src/memory/asof.ts
 function buildAsOfEvidence(records, t, opts) {
-  const asOfRecords = withoutDuplicateFactIds(records).filter((r) => r.tx <= t);
+  const asOfRecords = records.filter((r) => r.tx <= t);
   const liveAt = buildProjection(asOfRecords.filter((r) => r.type !== "verify"));
   const facts = [];
   if (!opts.keyAvailable) {
@@ -14834,7 +14764,6 @@ function buildAsOfEvidence(records, t, opts) {
     if (r.type !== "verify" || !r.supersedes || !opts.verify(r) || !isKnownState(r.state)) continue;
     (byTarget.get(r.supersedes) ?? byTarget.set(r.supersedes, []).get(r.supersedes)).push(r);
   }
-  const forgedIds = forgedFactIds(records.filter((r) => r.tx <= t));
   for (const rec of liveAt.values()) {
     const item = { ...rec, state: "Fresh" };
     const verifies = byTarget.get(rec.id) ?? [];
@@ -14847,7 +14776,7 @@ function buildAsOfEvidence(records, t, opts) {
       record: grade ? { ...item, state: grade } : item,
       grade: grade ?? "Fresh",
       evidence,
-      integrity: compromised || forgedIds.has(rec.id) ? "compromised" : "ok"
+      integrity: compromised ? "compromised" : "ok"
     });
   }
   return { facts, keyAvailable: true };
@@ -14895,12 +14824,8 @@ function stripWrapper(t) {
 function isHexCore(t) {
   return /^[0-9a-fA-F]{24,}$/.test(stripWrapper(t));
 }
-var CITATION_LINE_REF = /^(.*\.[A-Za-z][A-Za-z0-9]{0,4}):\d{1,5}(?:[-:]\d{1,5})?$/;
-function stripLineRef(t) {
-  return CITATION_LINE_REF.exec(t)?.[1] ?? t;
-}
 function isBenignWordChain(t) {
-  const segments = stripLineRef(stripWrapper(t)).split(/[-._/]+/).filter((s) => s !== "");
+  const segments = stripWrapper(t).split(/[-._/]+/).filter((s) => s !== "");
   if (segments.length < 2) return false;
   return segments.every(
     (s) => /^[A-Za-z]+$/.test(s) || /^[0-9]{1,4}$/.test(s) || s.length <= 8 && /^[A-Za-z]+[0-9]{1,3}$/.test(s)
@@ -14913,44 +14838,13 @@ function mergeSpans(spans) {
     const last = out[out.length - 1];
     if (last && s.start < last.end) {
       last.end = Math.max(last.end, s.end);
-      for (const t of s.tiers) if (!last.tiers.includes(t)) last.tiers.push(t);
       if (TIER_RANK[s.tier] > TIER_RANK[last.tier]) {
         last.tier = s.tier;
         last.kind = s.kind;
       }
     } else {
-      out.push({ ...s, tiers: [...s.tiers] });
+      out.push({ ...s });
     }
-  }
-  return out;
-}
-function foldedTokenSpans(content) {
-  const out = [];
-  const tok = /\S+/g;
-  for (let m = tok.exec(content); m !== null; m = tok.exec(content)) {
-    const folded = m[0].normalize("NFKC");
-    if (folded === m[0]) continue;
-    let hit = null;
-    for (const { kind, tier, re } of PATTERNS) {
-      if (new RegExp(re.source, re.flags.replace("g", "")).test(folded)) {
-        hit = { kind, tier };
-        break;
-      }
-    }
-    if (hit === null && isHighEntropyToken(folded)) hit = { kind: "high-entropy", tier: "entropy" };
-    if (hit === null) continue;
-    const span = {
-      start: m.index,
-      end: m.index + m[0].length,
-      kind: hit.kind,
-      tier: hit.tier,
-      tiers: [hit.tier]
-    };
-    if (hit.tier === "entropy") {
-      span.entropyHex = isHexCore(folded);
-      span.entropyWordChain = isBenignWordChain(folded);
-    }
-    out.push(span);
   }
   return out;
 }
@@ -14959,7 +14853,7 @@ function findSecrets(content) {
   for (const { kind, tier, re } of PATTERNS) {
     const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
     for (let m = g.exec(content); m !== null; m = g.exec(content)) {
-      spans.push({ start: m.index, end: m.index + m[0].length, kind, tier, tiers: [tier] });
+      spans.push({ start: m.index, end: m.index + m[0].length, kind, tier });
       if (g.lastIndex === m.index) g.lastIndex++;
     }
   }
@@ -14971,13 +14865,11 @@ function findSecrets(content) {
         end: m.index + m[0].length,
         kind: "high-entropy",
         tier: "entropy",
-        tiers: ["entropy"],
         entropyHex: isHexCore(m[0]),
         entropyWordChain: isBenignWordChain(m[0])
       });
     }
   }
-  spans.push(...foldedTokenSpans(content));
   return mergeSpans(spans);
 }
 function redactSecrets(content, spans) {
@@ -15124,7 +15016,6 @@ function normalizeUntrusted(s, maxChars) {
 }
 var UNADOPTED_LEDGER_NOTE = "(an unadopted project memory file is present and excluded from results; adoption requires explicit user approval)";
 var WITNESS_MISMATCH_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; elevated grades are clamped to Fresh until an authorized re-baseline)";
-var WITNESS_MISMATCH_ASOF_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; this as-of view preserves the reconstructed historical grades present in the available bytes, which may omit later corrections and are not a current-authority verdict)";
 var WITNESS_TRANSITION_NOTE = "(a ledger rewrite for this scope was interrupted; its records are excluded until the transition is re-driven or re-baselined)";
 var WITNESS_INIT_NOTE = "(rollback witness: scope not yet witnessed; the current head will be adopted trust-on-first-use at the next write)";
 function witnessNoteFor(verdict) {
@@ -15138,9 +15029,6 @@ function witnessNoteFor(verdict) {
     default:
       return null;
   }
-}
-function asOfWitnessNotes(notes) {
-  return notes.map((n) => n === WITNESS_MISMATCH_NOTE ? WITNESS_MISMATCH_ASOF_NOTE : n);
 }
 function collectWitnessNotes(verdicts) {
   const seen = /* @__PURE__ */ new Set();
@@ -15634,14 +15522,13 @@ var MemoryStore = class {
       const keepValidVerify = this.keepValidVerifyFor(r.subkey);
       const provesKey = this.provesKeyFor(r.subkey);
       const { kept } = planCompaction(records, { erasedIds: /* @__PURE__ */ new Set(), keepValidVerify, provesKey });
-      const inputNonFence = records.filter((rec) => !isWitnessFence(rec));
+      const inputNonFence = records.filter((rec) => !rec.id.startsWith("witness_fence_"));
       const reclaimable = inputNonFence.length - kept.length;
       const reclaimableBytes = serializedBytes(inputNonFence) - serializedBytes(kept);
       if (!dirtyGate({ rows: records.length, reclaimable, reclaimableBytes, cfg })) continue;
       this.compactedThisSession = true;
       const started = performance.now();
       let stats = null;
-      let landedStats = null;
       try {
         stats = compactLedger(r.ledger, {
           erasedIds: /* @__PURE__ */ new Set(),
@@ -15651,20 +15538,17 @@ var MemoryStore = class {
           // advances the witness (plants a fence) — otherwise the next witnessed read would false-alarm.
           witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), r.root), now: () => this.now(), kind: "compaction" }
         });
-      } catch (e) {
-        landedStats = landedCompactionStats(e) ?? null;
+      } catch {
       }
       const durationMs = performance.now() - started;
       this.rankCache = null;
-      const real = stats ?? landedStats;
       this.opts.metricsSink?.emitCompaction({
         scope: r.root ? "project" : "global",
         durationMs,
-        droppedRows: real?.droppedRows ?? 0,
-        reclaimedBytes: real?.reclaimedBytes ?? 0,
-        droppedForgedVerifies: real?.droppedForgedVerifies ?? 0,
-        ok: stats !== null,
-        landed: real !== null
+        droppedRows: stats?.droppedRows ?? 0,
+        reclaimedBytes: stats?.reclaimedBytes ?? 0,
+        droppedForgedVerifies: stats?.droppedForgedVerifies ?? 0,
+        ok: stats !== null
       });
     }
   }
@@ -15911,24 +15795,12 @@ var MemoryStore = class {
     return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: collectWitnessNotes(verdicts) };
   }
   /** Explicitly adopt the active project ledger (trust its current contents). For team-shared
-   *  ledgers. Throws if no project layer is active, or if `expectedRoot` names a different one.
-   *
-   *  The caller must NAME the root it means. Adoption moves a trust boundary — it is the only other
-   *  tool besides confirm that changes what Helix trusts — and a zero-argument call gives the
-   *  approval prompt nothing to show, so a user could only ever approve the ACT, never the target.
-   *  Requiring the root means the prompt names the ledger, and an agent that guessed wrong adopts
-   *  nothing instead of silently adopting whatever scope happened to be active. The check lives
-   *  here rather than in the handler because this is where the authority is: a caller reaching the
-   *  store directly must clear the same gate. Returns the canonical scope for the audit row. */
-  adopt(expectedRoot) {
+   *  ledgers. Throws if no project layer is active. */
+  adopt() {
     const p = this.opts.project;
     if (!p) throw new Error("adopt: no project scope is active");
-    const active = canonicalRoot(p.root);
-    if (canonicalRoot(expectedRoot) !== active)
-      throw new Error(`adopt: the named project root is not the active project scope (${active})`);
     stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp });
     ensureMaster(this.homeDir());
-    return active;
   }
   /** Which marker family an id belongs to, or null for a normal id. `integrity_marker`/
    *  `horizon_marker` are single canonical fixpoint ids (exact match); a witness fence has no
@@ -16078,84 +15950,26 @@ function scanLegacyElevated(records, verify) {
   return { ok: offenders.length === 0, offenders };
 }
 
-// src/memory/home-permissions.ts
-import { lstatSync as lstatSync3, chmodSync as chmodSync2, readdirSync as readdirSync3 } from "node:fs";
-import { join as join6 } from "node:path";
-var OWNED_FILES = [
-  "memory.jsonl",
-  "audit.jsonl",
-  "sessions.jsonl",
-  "metrics.jsonl",
-  "trigger.jsonl",
-  "codex-log.jsonl",
-  "witness.json",
-  "witness-log.jsonl",
-  "projects.json",
-  "ledger-mac-master.key",
-  "config.json"
-];
-function hardenHomePermissions(home2, deps) {
-  if (process.platform === "win32") return;
-  try {
-    const dir = lstatSync3(home2);
-    if (dir.isDirectory() && (dir.mode & 63) !== 0) {
-      chmodSync2(home2, 448);
-      deps.warn(`helix: tightened HELIX_HOME ${home2} from 0${(dir.mode & 511).toString(8)} to 0700 (a group- or world-writable directory lets another local user replace files inside it, whatever their own mode)`);
-    }
-  } catch {
-  }
-  let present;
-  try {
-    present = new Set(readdirSync3(home2));
-  } catch {
-    return;
-  }
-  for (const name of OWNED_FILES) {
-    if (!present.has(name)) continue;
-    const path = join6(home2, name);
-    try {
-      const st = lstatSync3(path);
-      if (st.isSymbolicLink()) {
-        deps.warn(`helix: ${path} is a symlink \u2014 refusing to change permissions through it (repair or remove it by hand)`);
-        continue;
-      }
-      if (!st.isFile()) {
-        deps.warn(`helix: ${path} is not a regular file \u2014 refusing to change its permissions`);
-        continue;
-      }
-      if ((st.mode & 63) === 0) continue;
-      chmodSync2(path, 384);
-      deps.warn(`helix: tightened ${path} from 0${(st.mode & 511).toString(8)} to 0600`);
-    } catch {
-      deps.warn(`helix: could not repair permissions on ${path} \u2014 leaving it as it is`);
-    }
-  }
-}
-
 // src/memory/scope-target.ts
 function aliasesGlobalLedger(projectLedger2, globalLedger2) {
   return canonicalRoot(projectLedger2) === canonicalRoot(globalLedger2);
 }
 
 // src/memory/trust-store-layout.ts
-import { existsSync as existsSync4, readFileSync as readFileSync9, lstatSync as lstatSync4 } from "node:fs";
-import { dirname as dirname9, join as join7 } from "node:path";
+import { existsSync as existsSync4, readFileSync as readFileSync9, statSync as statSync4 } from "node:fs";
+import { dirname as dirname9, join as join6 } from "node:path";
 var TRUST_FILE_NAMES = ["ledger-mac-master.key", "projects.json", "witness.json", "witness-log.jsonl"];
-var MASTER_KEY_LEN = 32;
 function looksLikeOurs(name, path) {
   try {
-    const st = lstatSync4(path);
-    if (!st.isFile()) return false;
-    if (name === "ledger-mac-master.key") return st.size === MASTER_KEY_LEN;
-    if (name === "witness-log.jsonl") return st.size > 0;
+    if (name === "ledger-mac-master.key") return statSync4(path).isFile() && statSync4(path).size > 0;
+    if (name === "witness-log.jsonl") return statSync4(path).isFile();
     const parsed = JSON.parse(readFileSync9(path, "utf8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
-    const obj = parsed;
+    const values = Object.values(parsed);
     if (name === "projects.json") {
-      const values = Object.values(obj);
-      return values.length > 0 && values.every((v) => typeof v === "object" && v !== null && typeof v.stamp === "string" && typeof v.macNonce === "string");
+      return values.length > 0 && values.every((v) => typeof v === "object" && v !== null && "stamp" in v && "macNonce" in v);
     }
-    return typeof obj.scopes === "object" && obj.scopes !== null && !Array.isArray(obj.scopes);
+    return "scopes" in parsed || values.length > 0;
   } catch {
     return false;
   }
@@ -16164,57 +15978,13 @@ function strayTrustFiles(home2, globalLedger2) {
   const ledgerDir = dirname9(globalLedger2);
   if (canonicalRoot(ledgerDir) === canonicalRoot(home2)) return [];
   return TRUST_FILE_NAMES.filter((name) => {
-    const p = join7(ledgerDir, name);
+    const p = join6(ledgerDir, name);
     return existsSync4(p) && looksLikeOurs(name, p);
   });
 }
-function globalNonceAlreadyEstablished(home2) {
-  try {
-    const path = join7(home2, "projects.json");
-    if (!lstatSync4(path).isFile()) return false;
-    const parsed = JSON.parse(readFileSync9(path, "utf8"));
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
-    const entry = parsed["@global"];
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
-    const nonce = entry.macNonce;
-    return typeof nonce === "string" && nonce.length > 0;
-  } catch {
-    return false;
-  }
-}
-function readOnlyGlobalSubkey(home2) {
-  if (!globalNonceAlreadyEstablished(home2)) return null;
-  return subkeyForScope(home2);
-}
-function assessGradeLoss(home2, ledger) {
-  try {
-    return measureGradeLoss(home2, ledger);
-  } catch (e) {
-    return {
-      loses: true,
-      unverifiableRecordIds: [],
-      witnessMismatch: false,
-      clampedRecordIds: [],
-      undecidable: e instanceof Error ? e.message : String(e)
-    };
-  }
-}
-function measureGradeLoss(home2, ledger) {
-  const { records, verdict } = readLedgerWitnessed(ledger, home2);
-  const subkey = readOnlyGlobalSubkey(home2);
-  const scan = scanLegacyElevated(records, (r) => subkey ? verifyVerify(r, subkey) : false);
-  const clampedRecordIds = verdict.kind === "mismatch" ? [...verifiedProjectionWithSubkey(records, subkey).live.values()].filter((r) => clampElevatedState(r.state) !== r.state).map((r) => r.id) : [];
-  return {
-    loses: scan.offenders.length > 0 || clampedRecordIds.length > 0,
-    unverifiableRecordIds: scan.offenders,
-    witnessMismatch: verdict.kind === "mismatch",
-    clampedRecordIds,
-    undecidable: null
-  };
-}
 
 // src/server/helix-server.ts
-import { join as join11 } from "node:path";
+import { join as join10 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // node_modules/zod/v3/external.js
@@ -24311,8 +24081,8 @@ var EMPTY_COMPLETION_RESULT = {
 // src/config.ts
 import { readFileSync as readFileSync10 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join8 } from "node:path";
-var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy", "secretEntropyExempt"];
+import { join as join7 } from "node:path";
+var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy"];
 var DEFAULT_COMPACTION = {
   auto: false,
   dirtyRatio: 0.5,
@@ -24353,9 +24123,7 @@ var DEFAULT_CONFIG = {
     // Block every non-named egress leg to the external Codex model by default. User opts into risk
     // per-leg (a human edit, outside model control). Invalid/unknown => 'block'. Named secrets are
     // override-proof regardless of this map.
-    // secretEntropyExempt defaults to 'allow' so the shipped behaviour is byte-for-byte unchanged:
-    // a git SHA in design prose still does not block. What changes is that it is now REACHABLE.
-    egressPolicy: { memoryEcho: "block", piiHigh: "block", piiBulk: "block", secretHeuristic: "block", secretEntropy: "block", secretEntropyExempt: "allow" },
+    egressPolicy: { memoryEcho: "block", piiHigh: "block", piiBulk: "block", secretHeuristic: "block", secretEntropy: "block" },
     // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
     logContent: false
   },
@@ -24370,7 +24138,7 @@ function readJson(path) {
   }
 }
 function loadConfig(opts = {}) {
-  const globalPath = opts.globalPath ?? join8(homedir(), ".helix", "config.json");
+  const globalPath = opts.globalPath ?? join7(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
   const seen = /* @__PURE__ */ new Set();
   const warn = (msg) => {
@@ -24441,7 +24209,7 @@ function mergeCompaction(raw) {
   return c;
 }
 function compactionConfigFromGlobal(home2) {
-  return mergeCompaction(readJson(join8(home2, "config.json"))?.compaction);
+  return mergeCompaction(readJson(join7(home2, "config.json"))?.compaction);
 }
 
 // src/verify/agreement-map.ts
@@ -24458,40 +24226,18 @@ function jaccard(a, b) {
   return union2 === 0 ? 1 : inter / union2;
 }
 var SENTENCE_SIM = 0.5;
-var UNPREFIXED_NEGATIONS = ["unsafe", "unavailable", "unreachable"];
-var NEGATION_MARKER_RE = new RegExp(
-  String.raw`\bnot\b|n't\b|\bno\b|\bnever\b|\bcannot\b|\bun-|\b(?:${UNPREFIXED_NEGATIONS.join("|")})\b`,
-  "gi"
-);
-function negationParity(s) {
-  return (s.match(NEGATION_MARKER_RE) ?? []).length % 2;
-}
 function buildAgreementMap(helixAnswer, codexAnswer) {
   const helix = sentences(helixAnswer);
   const codex = sentences(codexAnswer);
   const helixTok = helix.map(tokenSet);
   const codexTok = codex.map(tokenSet);
-  const helixParity = helix.map(negationParity);
-  const codexParity = codex.map(negationParity);
-  let anyCandidate = false;
-  const agreesWithPool = (tok, parity, poolTok, poolParity) => {
-    let agree = false;
-    for (let j = 0; j < poolTok.length; j++) {
-      if (jaccard(tok, poolTok[j]) >= SENTENCE_SIM) {
-        anyCandidate = true;
-        if (parity === poolParity[j]) agree = true;
-      }
-    }
-    return agree;
-  };
-  const helixAgrees = helix.map((_, i) => agreesWithPool(helixTok[i], helixParity[i], codexTok, codexParity));
-  const codexAgrees = codex.map((_, j) => agreesWithPool(codexTok[j], codexParity[j], helixTok, helixParity));
-  const agreements = helix.filter((_, i) => helixAgrees[i]);
+  const matched = (t, pool) => pool.some((p) => jaccard(t, p) >= SENTENCE_SIM);
+  const agreements = helix.filter((_, i) => matched(helixTok[i], codexTok));
   const divergences = [
-    ...helix.filter((_, i) => !helixAgrees[i]),
-    ...codex.filter((_, j) => !codexAgrees[j])
+    ...helix.filter((_, i) => !matched(helixTok[i], codexTok)),
+    ...codex.filter((_, i) => !matched(codexTok[i], helixTok))
   ];
-  const verdict = !anyCandidate ? "indeterminate" : divergences.length === 0 ? "agree" : "diverge";
+  const verdict = agreements.length === 0 ? "indeterminate" : divergences.length === 0 ? "agree" : "diverge";
   return { verdict, agreements, divergences };
 }
 
@@ -24609,7 +24355,7 @@ function detectEcho(forms, ledger, opts = {}) {
   }
   return { memoryIds: ids };
 }
-var EGRESS_LEG_ORDER = ["memoryEcho", "piiHigh", "secretHeuristic", "secretEntropy", "secretEntropyExempt", "piiBulk"];
+var EGRESS_LEG_ORDER = ["memoryEcho", "piiHigh", "secretHeuristic", "secretEntropy", "piiBulk"];
 var AUDIT_LEG_ORDER = ["secret", "pii", "memory_echo"];
 var BULK_PII_N = 3;
 var CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[_-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token)/i;
@@ -24630,17 +24376,10 @@ function scanText(text) {
   const highHits = piiHits.filter((h) => h.severity === "high");
   return {
     secretHit: secretSpans.length > 0,
-    // Read `tiers` (every tier that matched these bytes), NOT `tier` (the highest-CONFIDENCE one).
-    // `tier` is for display and redaction kinds; gating on it let a merge decide policy, because
-    // confidence rank is not blocking strength — see SecretSpan.tiers.
-    secretNamed: secretSpans.some((s) => s.tiers.includes("named")),
-    secretHeuristic: secretSpans.some((s) => s.tiers.includes("heuristic")),
+    secretNamed: secretSpans.some((s) => s.tier === "named"),
+    secretHeuristic: secretSpans.some((s) => s.tier === "heuristic"),
     secretEntropy: secretSpans.some(
-      (s) => s.tiers.includes("entropy") && (!(s.entropyHex || s.entropyWordChain) || nearCredential(text, s.start, s.end))
-    ),
-    // The exact complement of the line above: report the exempt subclass, do not silently drop it.
-    secretEntropyExempt: secretSpans.some(
-      (s) => s.tiers.includes("entropy") && (s.entropyHex || s.entropyWordChain) && !nearCredential(text, s.start, s.end)
+      (s) => s.tier === "entropy" && (!(s.entropyHex || s.entropyWordChain) || nearCredential(text, s.start, s.end))
     ),
     piiKinds: [...new Set(piiHits.map((h) => h.kind))],
     highKinds: [...new Set(highHits.map((h) => h.kind))],
@@ -24688,7 +24427,6 @@ function classifyEgress(input) {
   const secretNamed = any((s) => s.secretNamed);
   const secretHeuristic = any((s) => s.secretHeuristic);
   const secretEntropy = any((s) => s.secretEntropy);
-  const secretEntropyExempt = any((s) => s.secretEntropyExempt);
   const piiKinds = [...new Set(scans.flatMap((s) => s.piiKinds))];
   const highKinds = [...new Set(scans.flatMap((s) => s.highKinds))];
   const highPii = any((s) => s.highPii);
@@ -24707,14 +24445,6 @@ function classifyEgress(input) {
     { hit: highPii, key: "piiHigh", label: `high-severity PII (${highKinds.length} kinds)` },
     { hit: secretHeuristic, key: "secretHeuristic", label: "secret keyword-assignment (low-confidence)" },
     { hit: secretEntropy, key: "secretEntropy", label: "high-entropy token (low-confidence)" },
-    // OPT-IN leg (deliberately unlike the four above, which are applicable whenever they hit). The
-    // exemption ships released, so making it applicable by default would relabel every design-prose
-    // SHA from `pass` to `allowed_override` and move the coarse `secret` leg out of auditOnlyLegs —
-    // churn on the exact false-positive class the exemption exists to serve, with nothing new
-    // transmitted. Applicable only when the operator asks for it, so `allow` reproduces the pre-D2
-    // audit-only pass byte-for-byte and `block` makes it a first-class blocking leg. Consulting the
-    // policy HERE is sound; the D2 defect was consulting it in the detector, where no leg can reach.
-    { hit: secretEntropyExempt && input.policy.secretEntropyExempt === "block", key: "secretEntropyExempt", label: "hex/word-chain entropy token (exemption closed by policy)" },
     { hit: bulkLowPii, key: "piiBulk", label: `bulk low-severity PII (${lowPiiCount} hits)` }
   ];
   const applicable = gated.filter((g) => g.hit);
@@ -24800,8 +24530,7 @@ async function dualVerify(params, deps) {
   const res = await deps.runner(prompt, {
     model: deps.config.dualVerify.model,
     effort: deps.config.dualVerify.effort,
-    timeoutMs: deps.config.dualVerify.timeoutMs,
-    signal: params.signal
+    timeoutMs: deps.config.dualVerify.timeoutMs
   });
   if (!res.ok) {
     return { ran: false, attempted: true, outcome: "error", reason: `codex run failed: ${res.error}`, egress: verdict };
@@ -24819,19 +24548,14 @@ import { dirname as dirname10 } from "node:path";
 function appendAudit(path, event) {
   mkdirSync6(dirname10(path), { recursive: true });
   const isNew = !existsSync5(path);
-  const fd = openSync5(path, "a", 384);
+  const fd = openSync5(path, "a");
   try {
     writeAll(realFsOps, fd, JSON.stringify(event) + "\n");
     fsyncSync4(fd);
   } finally {
     closeSync5(fd);
   }
-  if (isNew) {
-    try {
-      fsyncDir(dirname10(path));
-    } catch {
-    }
-  }
+  if (isNew) fsyncDir(dirname10(path));
 }
 
 // src/server/handlers.ts
@@ -24860,23 +24584,6 @@ function appendCodexLog(path, entry) {
 
 // src/server/handlers.ts
 var ok = (text) => ({ content: [{ type: "text", text }] });
-var MAX_ID_CHARS = 128;
-var ID_CHARSET_RE = /^[^\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]+$/u;
-function isValidId(id) {
-  return id.length >= 1 && id.length <= MAX_ID_CHARS && ID_CHARSET_RE.test(id);
-}
-function assertValidId(id) {
-  if (!isValidId(id)) {
-    throw new Error(
-      `invalid id: must be 1-${MAX_ID_CHARS} printable, non-control characters (got ${id.length}). An id from an adopted ledger that still fails this bound is not reachable through this MCP tool, but can be erased/rechecked/confirmed directly via the MemoryStore API from a script (operator-only, outside any conversation) \u2014 see docs/release/recovery-playbook.md.`
-    );
-  }
-}
-function presentId(id) {
-  if (!isValidId(id)) return safeId(id).slice(0, MAX_ID_CHARS);
-  const normalized = normalizeUntrusted(id);
-  return isValidId(normalized) ? id : safeId(id).slice(0, MAX_ID_CHARS);
-}
 function unadoptedNote(disposition) {
   return disposition === "unadopted-present" ? `
 
@@ -24905,7 +24612,7 @@ function handleRecall(store2, args) {
   const conflictIds = items.filter((i) => i.integrity === "compromised").map((i) => safeId(i.record.id));
   const conflictNote = conflictIds.length ? `
 
-(integrity conflict \u2014 equal-generation verify mismatch or duplicate fact id: ${conflictIds.join(", ")})` : "";
+(integrity conflict \u2014 equal-generation verify mismatch: ${conflictIds.join(", ")})` : "";
   return ok(framed + reverifyNote + egressNote + integrityNote + conflictNote + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
 }
 function handleInspect(store2, args) {
@@ -24914,14 +24621,13 @@ function handleInspect(store2, args) {
     if (args.history) return ok("inspect: history and asOf are mutually exclusive \u2014 pass one.");
     if (!isIsoInstant(args.asOf)) return ok("inspect: as-of cursor must be a canonical ISO-8601 instant (e.g. 2026-07-04T00:00:00.000Z).");
     const { facts, keyAvailable, truncated, projectDisposition: projectDisposition2, witnessNotes: witnessNotes2 } = store2.asOfView(args.asOf);
-    const asOfNotes = asOfWitnessNotes(witnessNotes2);
-    if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + unadoptedNote(projectDisposition2) + witnessNotesText(asOfNotes));
+    if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + unadoptedNote(projectDisposition2) + witnessNotesText(witnessNotes2));
     const lines = [];
     for (const f of facts) {
-      lines.push({ text: `${presentId(f.record.id)} ${f.record.content}`, mark: `DATA[${f.grade}:${f.scope}]| ` });
+      lines.push({ text: `${safeId(f.record.id)} ${f.record.content}`, mark: `DATA[${f.grade}:${f.scope}]| ` });
       for (const e of f.evidence) {
         const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? "Y" : "N"} applicable=${e.applicable ? "Y" : "N"}${e.winner ? " WINNER" : ""}`;
-        lines.push({ text: `${presentId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
+        lines.push({ text: `${safeId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
       }
     }
     const frame = makeDataFrame({ label: `MEMORY AS OF ${args.asOf}`, nonce: newNonce(), lines });
@@ -24929,11 +24635,11 @@ function handleInspect(store2, args) {
     if (!keyAvailable) notes.push("\n\n(integrity verification unavailable \u2014 trust grades shown are unverified)");
     if (facts.some((f) => f.integrity === "compromised")) notes.push(`
 
-(integrity conflict \u2014 equal-generation verify mismatch or duplicate fact id: ${facts.filter((f) => f.integrity === "compromised").map((f) => safeId(f.record.id)).join(", ")})`);
+(integrity conflict \u2014 equal-generation verify mismatch: ${facts.filter((f) => f.integrity === "compromised").map((f) => safeId(f.record.id)).join(", ")})`);
     if (facts.some((f) => f.evidence.some((e) => !e.txAuthenticated))) notes.push("\n\n(verify timing marked auth=N is declared, not authenticated \u2014 v1/legacy)");
     if (truncated) notes.push("\n\n(history may be truncated by a past compaction \u2014 reconstruction before the horizon is unreliable)");
     if (projectDisposition2 === "unadopted-present") notes.push(unadoptedNote(projectDisposition2));
-    for (const n of asOfNotes) notes.push(`
+    for (const n of witnessNotes2) notes.push(`
 
 ${n}`);
     return ok(frame + notes.join(""));
@@ -24947,7 +24653,7 @@ ${n}`);
       lines: rows2.map((r) => {
         const verb = r.closedBy ? r.closedBy.kind : r.record.state;
         const interval = `${iso(r.record.tx)}..${r.txTo === null ? "" : iso(r.txTo)}`;
-        return { text: `${presentId(r.record.id)} ${r.record.content}`, mark: `DATA[${verb}:${r.scope}:${interval}]| ` };
+        return { text: `${safeId(r.record.id)} ${r.record.content}`, mark: `DATA[${verb}:${r.scope}:${interval}]| ` };
       })
     });
     const notes = [];
@@ -24972,26 +24678,22 @@ ${n}`);
       // byte-for-byte, not reinvented). The SANITIZED id is prepended to the datamarked content so
       // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
       // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
-      text: `${presentId(record2.id)} ${record2.content}`,
+      text: `${safeId(record2.id)} ${record2.content}`,
       mark: `DATA[${record2.state}:${scope}]| `
     }))
   }) + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
 }
 function handleErase(store2, args, deps) {
-  assertValidId(args.id);
   store2.erase(args.id);
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   appendAudit(deps.auditPath, { kind: "erase", ts, id: args.id, soft: true });
   return ok(`erased ${args.id}`);
 }
-function handleAdopt(store2, args, deps) {
-  const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
-  const scope = store2.adopt(args.projectRoot);
-  appendAudit(deps.auditPath, { kind: "adopt", ts, scope });
-  return ok(`adopted ${scope}: this project ledger is now trusted by this Helix install`);
+function handleAdopt(store2, _args) {
+  store2.adopt();
+  return ok("adopted: this project ledger is now trusted by this Helix install");
 }
 function handleRecheck(store2, args, deps) {
-  assertValidId(args.id);
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   try {
     const { outcome, result } = store2.recheck(args.id, args.check);
@@ -25004,7 +24706,6 @@ function handleRecheck(store2, args, deps) {
   }
 }
 function handleConfirm(store2, args, deps) {
-  assertValidId(args.id);
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   try {
     store2.confirm(args.id);
@@ -25092,9 +24793,9 @@ function egressLine(v) {
   if (v.auditOnlyLegs.length > 0) return `egress: pass (audit-only; legs: ${v.auditOnlyLegs.join(", ")})`;
   return "egress: pass";
 }
-async function handleDualVerify(args, deps, signal) {
+async function handleDualVerify(args, deps) {
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
-  const result = await dualVerify({ ...args, signal }, deps);
+  const result = await dualVerify(args, deps);
   const persisted = persistedReason(result);
   const egress = result.egress;
   const decided = egress && egress.decision !== "pass";
@@ -25110,11 +24811,7 @@ async function handleDualVerify(args, deps, signal) {
     decidedLeg: decided ? deciderLeg(egress) : void 0,
     releasedLegs: egress && egress.releasedLegs.length ? egress.releasedLegs : void 0,
     piiKinds: egress && egress.piiKinds.length ? egress.piiKinds : void 0,
-    // LEAD-AUDIT-ID-UNCONSTRAINED: these ids come from LEDGER CONTENT (store.inspect(), read by
-    // detectEcho), not a caller-supplied argument -- bound, don't reject (see presentId's docstring
-    // for why this site can't use assertValidId's reject-outright rule; fix round 2 Minor: this
-    // comment was previously pasted twice verbatim here).
-    echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds.map(presentId) : void 0
+    echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds : void 0
   });
   if (deps.config.dualVerify.logContent) {
     const sent = result.outcome === "sent";
@@ -25166,17 +24863,12 @@ async function handleDualVerify(args, deps, signal) {
     // Zero-pair abstention guidance: a trusted derivation (fixed text, no untrusted bytes), so it
     // sits un-datamarked beside the verdict line. 'indeterminate' must never read as a divergence
     // finding — the caller's move is to read both answers. The 'no claim pairs found by aligner'
-    // fallback below fires ONLY in this branch now, not whenever agreements is empty: a fully
-    // polarity-discordant comparison (every claim pairs, but each pair disagrees — e.g. "is safe"
-    // vs "is not safe") also leaves agreements empty, but the aligner DID find pairs, it just
-    // classified all of them as divergent. That reads 'diverge', not 'indeterminate', and must
-    // say so — "no claim pairs found" would be a false statement about a comparison that found
-    // only disagreement (see agreement-map.ts's anyCandidate flag, which draws this distinction).
+    // fallback below fires exactly in this branch (agreements empty <=> indeterminate).
     ...indeterminate ? ["\u2014 could not match claims (form mismatch or total disagreement); read both answers"] : [],
     "--- EXTERNAL CODEX OUTPUT (data) ---",
     datamark(result.codexAnswer ?? "", "DATA| "),
     "--- end codex output ---",
-    indeterminate ? "no claim pairs found by aligner" : a.agreements.length ? "agreements:\n" + a.agreements.map((s) => datamark(s, "DATA| ")).join("\n") : "no agreements \u2014 every claim pair the aligner found is discordant",
+    a.agreements.length ? "agreements:\n" + a.agreements.map((s) => datamark(s, "DATA| ")).join("\n") : "no claim pairs found by aligner",
     a.divergences.length ? (indeterminate ? "unmatched claims:\n" : "divergences:\n") + a.divergences.map((d) => datamark(d, "DATA| ")).join("\n") : indeterminate ? "no unmatched claims" : "no divergences",
     frameClose(nonce)
   ].join("\n"));
@@ -25186,13 +24878,13 @@ async function handleDualVerify(args, deps, signal) {
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync as existsSync7, mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join10, win32 as winPath } from "node:path";
+import { join as join9, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync6, readdirSync as readdirSync4, lstatSync as lstatSync5, statSync as statSync4, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync3 } from "node:fs";
+import { existsSync as existsSync6, readdirSync as readdirSync3, lstatSync as lstatSync3, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync2 } from "node:fs";
 import { randomBytes as randomBytes7 } from "node:crypto";
-import { join as join9 } from "node:path";
+import { join as join8 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
 var SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
@@ -25211,10 +24903,10 @@ function ensureScratchRoot(root) {
   } catch {
   }
   try {
-    const st = lstatSync5(root);
+    const st = lstatSync3(root);
     if (!st.isDirectory()) return null;
     if (typeof process.getuid === "function" && st.uid !== process.getuid()) return null;
-    if ((st.mode & 63) !== 0) chmodSync3(root, 448);
+    if ((st.mode & 63) !== 0) chmodSync2(root, 448);
     return root;
   } catch {
     return null;
@@ -25235,26 +24927,26 @@ function publishStamp(stampPath) {
 function sweepScratchRoot(root, nowMs = Date.now()) {
   try {
     if (!existsSync6(root)) return;
-    const stampPath = join9(root, STAMP_NAME);
+    const stampPath = join8(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
-      stampMtimeMs = statSync4(stampPath).mtimeMs;
+      stampMtimeMs = statSync5(stampPath).mtimeMs;
     } catch {
       stampMtimeMs = null;
     }
     if (!shouldSweep(stampMtimeMs, nowMs, SWEEP_INTERVAL_MS)) return;
     const entries = [];
-    for (const d of readdirSync4(root, { withFileTypes: true })) {
+    for (const d of readdirSync3(root, { withFileTypes: true })) {
       if (!d.name.startsWith(SCRATCH_PREFIX)) continue;
       try {
-        const st = lstatSync5(join9(root, d.name));
+        const st = lstatSync3(join8(root, d.name));
         entries.push({ name: d.name, isDir: st.isDirectory(), mtimeMs: st.mtimeMs });
       } catch {
       }
     }
     for (const name of selectStaleScratch(entries, nowMs, FLOOR_MS)) {
       try {
-        rmSync2(join9(root, name), { recursive: true, force: true });
+        rmSync2(join8(root, name), { recursive: true, force: true });
       } catch {
       }
     }
@@ -25360,8 +25052,7 @@ function childEnv(parent = process.env) {
   }
   return out;
 }
-function runCodex(inv, args, input, timeoutMs, cwd, signal) {
-  if (signal?.aborted) return Promise.reject(new Error("codex run aborted"));
+function runCodex(inv, args, input, timeoutMs, cwd) {
   return new Promise((resolve2, reject) => {
     const child = spawn(inv.file, [...inv.argsPrefix, ...args], {
       stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"],
@@ -25370,7 +25061,7 @@ function runCodex(inv, args, input, timeoutMs, cwd, signal) {
     });
     let stdout = "";
     let stderr = "";
-    const killChild = () => {
+    const timer = setTimeout(() => {
       const spec = treeKillSpec(process.platform, child.pid ?? -1);
       if (spec && child.pid !== void 0) {
         try {
@@ -25387,22 +25078,8 @@ function runCodex(inv, args, input, timeoutMs, cwd, signal) {
         } catch {
         }
       }
-    };
-    const timer = setTimeout(() => {
-      killChild();
-      cleanup();
       reject(new Error(`codex timed out after ${timeoutMs}ms`));
     }, timeoutMs);
-    const onAbort = () => {
-      killChild();
-      cleanup();
-      reject(new Error("codex run aborted"));
-    };
-    const cleanup = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-    };
-    signal?.addEventListener("abort", onAbort);
     child.stdout?.on("data", (d) => {
       if (stdout.length < 65536) stdout += String(d);
     });
@@ -25410,11 +25087,11 @@ function runCodex(inv, args, input, timeoutMs, cwd, signal) {
       if (stderr.length < 8192) stderr += String(d);
     });
     child.on("error", (e) => {
-      cleanup();
+      clearTimeout(timer);
       reject(e);
     });
     child.on("close", (code) => {
-      cleanup();
+      clearTimeout(timer);
       resolve2({ code, stdout, stderr });
     });
     if (input !== null && child.stdin) {
@@ -25507,13 +25184,13 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
-    const scratchRoot = ensureScratchRoot(join10(tmpdir(), "helix"));
+    const scratchRoot = ensureScratchRoot(join9(tmpdir(), "helix"));
     if (scratchRoot !== null) sweepScratchRoot(scratchRoot);
-    const dir = mkdtempSync(scratchRoot !== null ? join10(scratchRoot, "codex-") : join10(tmpdir(), "helix-codex-"));
-    const outFile = join10(dir, "out.txt");
+    const dir = mkdtempSync(scratchRoot !== null ? join9(scratchRoot, "codex-") : join9(tmpdir(), "helix-codex-"));
+    const outFile = join9(dir, "out.txt");
     try {
       const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
-      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir, opts.signal);
+      const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir);
       if (code !== 0) {
         return { ok: false, error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ""}` };
       }
@@ -25539,7 +25216,6 @@ var realCodexRunner = createCodexRunner();
 import { appendFileSync, mkdirSync as mkdirSync9 } from "node:fs";
 import { dirname as dirname12 } from "node:path";
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { AsyncLocalStorage } from "node:async_hooks";
 var noopMetricsSink = {
   emitReplay: () => {
   },
@@ -25555,26 +25231,22 @@ function createMetricsSink(path, enabled, deps = {}) {
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const genId = deps.genId ?? (() => `o_${randomUUID2()}`);
-  const ctx = new AsyncLocalStorage();
+  let currentOpId = null;
+  let buffer = null;
   const safeAppend = (line) => {
     try {
       append(path, line);
     } catch {
     }
   };
-  const activeOp = () => {
-    const store2 = ctx.getStore();
-    return store2 && !store2.closed ? store2 : null;
-  };
   return {
     emitReplay(r) {
       try {
-        const active = activeOp();
         const line = JSON.stringify({
           v: 1,
           kind: "replay",
           ts: now(),
-          op_id: active ? active.opId : null,
+          op_id: currentOpId,
           scope: r.scope,
           rows: r.rows,
           live_rows: r.liveRows,
@@ -25584,47 +25256,50 @@ function createMetricsSink(path, enabled, deps = {}) {
           key_available: r.keyAvailable,
           caller: r.caller
         }) + "\n";
-        if (active) active.buffer.push(line);
+        if (buffer) buffer.push(line);
         else safeAppend(line);
       } catch {
       }
     },
     emitCompaction(c) {
       try {
-        const active = activeOp();
         const line = JSON.stringify({
           v: 1,
           kind: "compaction",
           ts: now(),
-          op_id: active ? active.opId : null,
+          op_id: currentOpId,
           scope: c.scope,
           duration_ms: c.durationMs,
           dropped_rows: c.droppedRows,
           reclaimed_bytes: c.reclaimedBytes,
           dropped_forged_verifies: c.droppedForgedVerifies,
-          ok: c.ok,
-          landed: c.landed
+          ok: c.ok
         }) + "\n";
-        if (active) active.buffer.push(line);
+        if (buffer) buffer.push(line);
         else safeAppend(line);
       } catch {
       }
     },
     async runOp(tool, fn) {
+      const prevOp = currentOpId;
+      const prevBuf = buffer;
       const opId = genId();
-      const store2 = { opId, buffer: [], closed: false };
+      const myBuf = [];
+      currentOpId = opId;
+      buffer = myBuf;
       const started = performance.now();
       let ok2 = true;
       let errorType = null;
       try {
-        return await ctx.run(store2, fn);
+        return await fn();
       } catch (e) {
         ok2 = false;
         errorType = e instanceof Error ? e.name : "NonError";
         throw e;
       } finally {
         const durationMs = performance.now() - started;
-        store2.closed = true;
+        currentOpId = prevOp;
+        buffer = prevBuf;
         try {
           safeAppend(JSON.stringify({
             v: 1,
@@ -25637,7 +25312,7 @@ function createMetricsSink(path, enabled, deps = {}) {
             ok: ok2,
             "error.type": errorType
           }) + "\n");
-          for (const line of store2.buffer) safeAppend(line);
+          for (const line of myBuf) safeAppend(line);
         } catch {
         }
       }
@@ -25646,20 +25321,17 @@ function createMetricsSink(path, enabled, deps = {}) {
 }
 
 // src/server/helix-server.ts
-var ID_SCHEMA = external_exports.string().refine(isValidId, {
-  message: `id must be 1-${MAX_ID_CHARS} printable, non-control characters`
-});
 function buildServer(store2, dualDeps, metrics2) {
   const m = metrics2 ?? noopMetricsSink;
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
-  const home2 = process.env.HELIX_HOME ?? join11(homedir2(), ".helix");
+  const home2 = process.env.HELIX_HOME ?? join10(homedir2(), ".helix");
   const dv = dualDeps ?? {
-    config: loadConfig({ globalPath: join11(home2, "config.json") }),
+    config: loadConfig({ globalPath: join10(home2, "config.json") }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
     echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-    auditPath: join11(home2, "audit.jsonl"),
-    codexLogPath: join11(home2, "codex-log.jsonl")
+    auditPath: join10(home2, "audit.jsonl"),
+    codexLogPath: join10(home2, "codex-log.jsonl")
   };
   const codexStatusDeps = {
     inspect: () => checkCodexStatus(),
@@ -25677,7 +25349,7 @@ function buildServer(store2, dualDeps, metrics2) {
       ),
       blastRadius: external_exports.enum(["read-only", "local-reversible", "hard-to-reverse", "external"]).optional(),
       classification: external_exports.enum(["normal", "personal"]).optional(),
-      supersedes: ID_SCHEMA.optional(),
+      supersedes: external_exports.string().optional(),
       scope: external_exports.enum(["project", "global"]).optional()
     }
   }, async (args) => m.runOp("helix_memory_commit", () => handleCommit(store2, args)));
@@ -25698,22 +25370,21 @@ function buildServer(store2, dualDeps, metrics2) {
   server2.registerTool("helix_memory_erase", {
     title: "Erase memory",
     description: "Erase a memory item by id. Soft: the item is removed from the live view (recall/inspect) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool itself never physically destroys content. By default (compaction off) the erased content stays recoverable on disk indefinitely; but if the user has enabled compaction.auto, that recoverability is time-bounded \u2014 an ordinary helix_memory_recall can then compact the ledger and physically destroy it once the grace window (graceMs) has passed.",
-    inputSchema: { id: ID_SCHEMA }
+    inputSchema: { id: external_exports.string() }
   }, async (args) => m.runOp("helix_memory_erase", () => handleErase(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   server2.registerTool("helix_memory_recheck", {
     title: "Recheck memory against reality",
     description: "Run a content-bound mechanical reality-check on a memory item. A pass yields the Corroborated trust state (machine-checked, NOT human-verified \u2014 it can NEVER reach Verified). The check is file-contains and BOTH path and pattern MUST appear in the item content, or the call is rejected (prevents laundering an unrelated passing check into trust). Use for objective, checkable facts.",
     inputSchema: {
-      id: ID_SCHEMA,
+      id: external_exports.string(),
       check: external_exports.object({ kind: external_exports.literal("file-contains"), path: external_exports.string(), pattern: external_exports.string() })
     }
   }, async (args) => m.runOp("helix_memory_recheck", () => handleRecheck(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   server2.registerTool("helix_memory_confirm", {
     title: "Confirm memory (user-vouched)",
     description: "Promote a memory item to the Verified state because THE USER explicitly vouched for it this turn. Requires explicit user approval; never self-confirm \u2014 call ONLY when the user directly confirmed the fact, never to confirm your own inference or a relayed claim. Only items committed with source=user are eligible (re-commit a relayed/inferred fact as source=user first). The user, not Helix, is the authority \u2014 do not allow-list this tool.",
-    inputSchema: { id: ID_SCHEMA }
+    inputSchema: { id: external_exports.string() }
   }, async (args) => m.runOp("helix_memory_confirm", () => handleConfirm(store2, args, { auditPath: dv.auditPath, now: dv.now })));
-  const dualVerifyInFlight = /* @__PURE__ */ new Set();
   server2.registerTool("helix_dual_verify", {
     title: "Dual-verify with Codex",
     description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor.",
@@ -25722,15 +25393,7 @@ function buildServer(store2, dualDeps, metrics2) {
       helixAnswer: external_exports.string(),
       stakes: external_exports.enum(["low", "medium", "high", "xhigh"]).optional()
     }
-  }, async (args, extra) => {
-    const call = m.runOp("helix_dual_verify", () => handleDualVerify(args, dv, extra?.signal));
-    dualVerifyInFlight.add(call);
-    try {
-      return await call;
-    } finally {
-      dualVerifyInFlight.delete(call);
-    }
-  });
+  }, async (args) => m.runOp("helix_dual_verify", () => handleDualVerify(args, dv)));
   server2.registerTool("helix_codex_status", {
     title: "Codex status",
     description: "Show whether Helix is connected to Codex (CLI/version, login, auth mode), the dual-verify config, and the content-log state. Free \u2014 no metered Codex call.",
@@ -25738,26 +25401,10 @@ function buildServer(store2, dualDeps, metrics2) {
   }, async () => m.runOp("helix_codex_status", () => handleCodexStatus(codexStatusDeps)));
   server2.registerTool("helix_memory_adopt", {
     title: "Adopt project memory",
-    description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean; a root that is not the active scope is refused and adopts nothing. This moves a trust boundary \u2014 everything in that ledger becomes recallable \u2014 so the user, not Helix, is the authority: do not allow-list this tool.",
-    inputSchema: { projectRoot: external_exports.string() }
-  }, async (args) => m.runOp("helix_memory_adopt", () => handleAdopt(store2, args, { auditPath: dv.auditPath, now: dv.now })));
-  return Object.assign(server2, {
-    // Bounded by construction: resolves once every tracked call has settled OR budgetMs elapses,
-    // whichever comes first -- never waits indefinitely, so a hung handler cannot turn a shutdown
-    // into a hang (that would just trade one defect for a worse one).
-    async drainInFlight(budgetMs) {
-      if (dualVerifyInFlight.size === 0) return;
-      let timer;
-      const timedOut = new Promise((resolve2) => {
-        timer = setTimeout(resolve2, budgetMs);
-      });
-      try {
-        await Promise.race([Promise.allSettled([...dualVerifyInFlight]), timedOut]);
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-  });
+    description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted.",
+    inputSchema: {}
+  }, async () => m.runOp("helix_memory_adopt", () => handleAdopt(store2, {})));
+  return server2;
 }
 
 // src/server/lifecycle.ts
@@ -25775,7 +25422,7 @@ function installSelfTermination(deps) {
       deps.exit(0);
     };
     deps.setTimer(finish, fallbackMs).unref();
-    Promise.resolve().then(() => deps.closeServer()).then(() => deps.drainInFlight?.(fallbackMs), () => deps.drainInFlight?.(fallbackMs)).then(finish, finish);
+    Promise.resolve().then(() => deps.closeServer()).then(finish, finish);
   };
   deps.stdin.on("end", () => shutdown("stdin-end"));
   deps.stdin.on("close", () => shutdown("stdin-close"));
@@ -25791,85 +25438,35 @@ function installSelfTermination(deps) {
 }
 
 // src/server/index.ts
-var home = process.env.HELIX_HOME ?? join12(homedir3(), ".helix");
-var globalLedger = process.env.HELIX_LEDGER ?? join12(home, "memory.jsonl");
+var home = process.env.HELIX_HOME ?? join11(homedir3(), ".helix");
+var globalLedger = process.env.HELIX_LEDGER ?? join11(home, "memory.jsonl");
 var projectRoot = process.cwd();
-var projectLedger = join12(projectRoot, ".helix", "memory.jsonl");
-var projectActive = existsSync8(join12(projectRoot, ".helix")) && !aliasesGlobalLedger(projectLedger, globalLedger);
+var projectLedger = join11(projectRoot, ".helix", "memory.jsonl");
+var projectActive = existsSync8(join11(projectRoot, ".helix")) && !aliasesGlobalLedger(projectLedger, globalLedger);
 var project = projectActive ? { ledger: projectLedger, root: projectRoot } : void 0;
-hardenHomePermissions(home, { warn: (m) => process.stderr.write(`${m}
-`) });
-var config2 = loadConfig({ globalPath: join12(home, "config.json") });
-if (existsSync8(join12(projectRoot, ".helix", "config.json"))) {
-  process.stderr.write(`helix: NOTE - ${join12(projectRoot, ".helix", "config.json")} is not read; dual-verify, egress and logging settings come only from ${join12(home, "config.json")}
+var config2 = loadConfig({ globalPath: join11(home, "config.json") });
+if (existsSync8(join11(projectRoot, ".helix", "config.json"))) {
+  process.stderr.write(`helix: NOTE - ${join11(projectRoot, ".helix", "config.json")} is not read; dual-verify, egress and logging settings come only from ${join11(home, "config.json")}
 `);
 }
-var metrics = createMetricsSink(join12(home, "metrics.jsonl"), config2.metrics.enabled);
+var metrics = createMetricsSink(join11(home, "metrics.jsonl"), config2.metrics.enabled);
 var stray = strayTrustFiles(home, globalLedger);
 if (stray.length > 0) {
-  const ledgerDir = dirname13(globalLedger);
-  const loss = assessGradeLoss(home, globalLedger);
-  if (!loss.loses) {
-    process.stderr.write(
-      // ASCII only
-      `helix: NOTE - trust-store-shaped files were found next to the ledger, but starting will NOT
-  lose any trust grade this ledger currently carries (measured, not inferred from key or file
-  presence alone).
+  process.stderr.write(
+    // ASCII only
+    `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME.
   found next to the ledger: ${stray.join(", ")}
-  ledger directory        : ${ledgerDir}
+  ledger directory        : ${dirname13(globalLedger)}
   HELIX_HOME              : ${home}
-They are most likely an inert leftover, from before the trust store's location was pinned to
-HELIX_HOME or from a repo-writing adversary. If they still hold state you need, move
-${stray.join(", ")} into HELIX_HOME by hand; otherwise it is safe to delete them from the
-ledger directory - this note will keep appearing until they are gone.
+These were created by an older version, which derived the trust store's location from HELIX_LEDGER.
+The signing key now always lives under HELIX_HOME, so starting would mint a NEW key and silently
+drop every trust grade the old one conferred. Two ways out, both deliberate:
+  1. Move ${stray.join(", ")} from the ledger directory into HELIX_HOME, keeping the ledger where it is.
+  2. Discard the old trust state (delete those files) and re-establish it with the re-baseline
+     ceremony: node bin/helix-rebaseline.mjs --scope global
 `
-    );
-  } else {
-    const causes = [];
-    if (loss.undecidable !== null) {
-      causes.push(
-        `  - HELIX_HOME's own trust state could not be read (${loss.undecidable}), so whether starting
-    is lossless could not be established at all - and neither could whether starting would
-    mint a fresh key over these files, since this cause is ANY unreadable ledger, witness, or
-    key: on an absent key with an unreadable ledger, starting does mint. What refusing
-    protects is the ADVICE - the other outcome of this check calls the stray files safe to
-    delete, and if they hold the only readable copy of this ledger's trust store, acting on
-    that cannot be undone.
-`
-      );
-    }
-    if (loss.unverifiableRecordIds.length > 0) {
-      causes.push(
-        `  - ${loss.unverifiableRecordIds.length} record(s) (${loss.unverifiableRecordIds.join(", ")}) do not verify
-    under HELIX_HOME's own signing key: their elevated grade would never be recognized again.
-`
-      );
-    }
-    if (loss.clampedRecordIds.length > 0) {
-      causes.push(
-        `  - HELIX_HOME's rollback witness for this ledger does not match its current content, which
-    would clamp ${loss.clampedRecordIds.length} already-elevated record(s) (${loss.clampedRecordIds.join(", ")})
-    to Fresh (store.ts's mismatch guard).
-`
-      );
-    }
-    process.stderr.write(
-      // ASCII only
-      `helix: REFUSING TO START - trust-store files were found next to the ledger instead of under HELIX_HOME,
-` + (loss.undecidable !== null ? `and whether starting would lose a trust grade this ledger carries could not be determined:
-` : `and starting would lose a trust grade this ledger currently carries:
-`) + `  found next to the ledger: ${stray.join(", ")}
-  ledger directory        : ${ledgerDir}
-  HELIX_HOME              : ${home}
-${causes.join("")}Two ways out, both deliberate:
-  1. Move ${stray.join(", ")} from the ledger directory into HELIX_HOME, keeping the ledger where it
-     is - the only remedy proven lossless (docs/issues/repros/f1-manual-remedy.ts).
-  2. Discard the old trust state (delete those files) and accept the loss deliberately with the
-     re-baseline ceremony: node bin/helix-rebaseline.mjs --scope global
-`
-    );
-    process.exit(78);
-  }
+  );
+  process.exit(78);
 }
 var store = new MemoryStore(globalLedger, { home, sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
 store.healWitness();
@@ -25891,8 +25488,8 @@ var server = buildServer(store, {
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
   echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
-  auditPath: join12(home, "audit.jsonl"),
-  codexLogPath: join12(home, "codex-log.jsonl")
+  auditPath: join11(home, "audit.jsonl"),
+  codexLogPath: join11(home, "codex-log.jsonl")
 }, metrics);
 var transport = new StdioServerTransport();
 await server.connect(transport);
@@ -25901,7 +25498,6 @@ installSelfTermination({
   stdout: process.stdout,
   transport,
   closeServer: () => server.close(),
-  drainInFlight: (budgetMs) => server.drainInFlight(budgetMs),
   onSignal: (sig, handler) => {
     process.on(sig, handler);
   },

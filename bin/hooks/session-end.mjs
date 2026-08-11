@@ -29,7 +29,7 @@ try {
     const home = process.env.HELIX_HOME ?? join(homedir(), ".helix");
     const path = process.env.HELIX_SESSIONS ?? join(home, "sessions.jsonl");
     mkdirSync(dirname(path), { recursive: true });
-    appendFileSync(path, JSON.stringify(record) + "\n", { mode: 384 });
+    appendFileSync(path, JSON.stringify(record) + "\n");
   }
 } catch {
 }
