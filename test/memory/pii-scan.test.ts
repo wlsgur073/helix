@@ -121,3 +121,58 @@ describe('email scanning is linear in the input', () => {
     expect(emails.every((h) => h.severity === 'low')).toBe(true);
   });
 });
+
+// The card candidate is 13-19 digits, Luhn-validated. Neither end of that window was measured, so a
+// window that had silently narrowed or widened would not have been noticed. Numbers are assembled at
+// runtime from a Luhn-valid seed rather than written as literals, matching this file's existing
+// discipline for RRNs.
+describe('card-length window boundaries', () => {
+  // Build a Luhn-valid digit string of exactly `len` digits.
+  const luhnOf = (len: number): string => {
+    const body = '4'.repeat(len - 1);
+    for (let c = 0; c <= 9; c++) {
+      const candidate = body + String(c);
+      let sum = 0, dbl = false;
+      for (let i = candidate.length - 1; i >= 0; i--) {
+        let d = candidate.charCodeAt(i) - 48;
+        if (dbl) { d *= 2; if (d > 9) d -= 9; }
+        sum += d; dbl = !dbl;
+      }
+      if (sum % 10 === 0) return candidate;
+    }
+    throw new Error(`no Luhn-valid check digit for length ${len}`);
+  };
+
+  it('accepts the shortest card in the window (13 digits)', () => {
+    expect(kinds(detectPII(`card ${luhnOf(13)} on file`))).toContain('credit_card');
+  });
+
+  it('accepts the longest card in the window (19 digits)', () => {
+    expect(kinds(detectPII(`card ${luhnOf(19)} on file`))).toContain('credit_card');
+  });
+
+  it('rejects one digit below the window (12 digits)', () => {
+    expect(kinds(detectPII(`card ${luhnOf(12)} on file`))).not.toContain('credit_card');
+  });
+});
+
+// The RRN gender/century digit (7th digit) is accepted for 1-8. Perturbing that accepted set by one
+// value (narrowing `gender > 8` to `gender > 7`) survived the whole suite, so neither end of this
+// range was measured either. Numbers are assembled at runtime via rrnWithChecksum, matching this
+// file's existing discipline.
+describe('RRN gender-digit range boundaries', () => {
+  it('accepts the lowest gender digit in the range (1)', () => {
+    const rrn = rrnWithChecksum('900101', '100001');
+    expect(kinds(detectPII(`id ${rrn} here`))).toContain('national_id');
+  });
+
+  it('accepts the highest gender digit in the range (8)', () => {
+    const rrn = rrnWithChecksum('900101', '800001');
+    expect(kinds(detectPII(`id ${rrn} here`))).toContain('national_id');
+  });
+
+  it('rejects one gender digit above the range (9)', () => {
+    const rrn = rrnWithChecksum('900101', '900001');
+    expect(kinds(detectPII(`id ${rrn} here`))).not.toContain('national_id');
+  });
+});
