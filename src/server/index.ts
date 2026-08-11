@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { MemoryStore } from '../memory/store.js';
 import { parseLedger } from '../memory/ledger.js';
-import { scanLegacyElevated } from '../memory/legacy-scan.js';
+import { scanLegacyElevated, classifyLegacyOffenders } from '../memory/legacy-scan.js';
 import { hardenHomePermissions } from '../memory/home-permissions.js';
 import { subkeyForScope } from '../memory/verified-read.js';
 import { aliasesGlobalLedger } from '../memory/scope-target.js';
@@ -155,6 +155,13 @@ store.healWitness();
 // the scan asks the exact same validity question the live projection does. ADVISORY only — wrapped so
 // a malformed/unreadable ledger (parseLedger rethrows non-ENOENT I/O errors) degrades to no-warning,
 // never blocks startup. Output stays content-free (a count only).
+//
+// TWO causes, two sentences. When no subkey resolves — key lost, HELIX_HOME moved, an adopted
+// ledger — the validity predicate answers false for EVERY record, so every correctly signed verify
+// landed in the offender list and was printed as forged. That accused the ledger of forgery on the
+// sole evidence that a key was unavailable. classifyLegacyOffenders separates the verify-typed
+// offenders, whose verdict was decided entirely by key availability, from baked non-Fresh
+// assert/supersede rows, which R1 would clamp whatever the key situation is.
 const scanScopes: Array<{ ledger: string; root?: string }> = [
   { ledger: globalLedger },
   ...(project ? [{ ledger: project.ledger, root: project.root }] : []),
@@ -162,8 +169,11 @@ const scanScopes: Array<{ ledger: string; root?: string }> = [
 for (const { ledger, root } of scanScopes) {
   try {
     const subkey = subkeyForScope(home, root);
-    const scan = scanLegacyElevated(parseLedger(ledger), (r) => (subkey ? verifyVerify(r, subkey) : false));
-    if (!scan.ok) process.stderr.write(`helix: WARNING - ${scan.offenders.length} forged/legacy elevated record(s) in ${ledger}; trust states there are not tool-minted\n`); // ASCII only
+    const records = parseLedger(ledger);
+    const scan = scanLegacyElevated(records, (r) => (subkey ? verifyVerify(r, subkey) : false));
+    const { forged, unverifiable } = classifyLegacyOffenders(records, scan.offenders, !!subkey);
+    if (forged.length > 0) process.stderr.write(`helix: WARNING - ${forged.length} forged/legacy elevated record(s) in ${ledger}; trust states there are not tool-minted\n`); // ASCII only
+    if (unverifiable.length > 0) process.stderr.write(`helix: WARNING - ${unverifiable.length} unverifiable verify record(s) in ${ledger}; no signing key resolved for this scope, so those grades will not apply\n`); // ASCII only
   } catch { /* advisory: never block startup */ }
 }
 

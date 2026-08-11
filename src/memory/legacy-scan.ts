@@ -42,3 +42,36 @@ export function scanLegacyElevated(
   }
   return { ok: offenders.length === 0, offenders };
 }
+
+/**
+ * Split a scan's offenders by what the evidence actually supports, so the caller can say each cause
+ * accurately instead of naming one and printing both.
+ *
+ * The validity predicate every caller passes is `(r) => subkey ? verifyVerify(r, subkey) : false`.
+ * When no subkey resolves — key lost, HELIX_HOME moved, an adopted ledger — it answers false for
+ * every record, so EVERY `verify` becomes an offender no matter how correctly it was signed. That
+ * outcome is right for `assessGradeLoss`, whose question is "would starting here lose a grade?"
+ * (it would: a fresh nonce would be minted that none of them were signed under). It is wrong for the
+ * startup advisory, whose sentence accuses the ledger of forgery — on the sole evidence that a key
+ * was unavailable.
+ *
+ * The split is not "everything is excused when the key is gone". A baked non-Fresh `assert`/
+ * `supersede` is a real legacy elevation that R1 would clamp regardless of any key, so it stays in
+ * `forged` either way. Only the verify-typed offenders — the ones whose verdict was decided ENTIRELY
+ * by key availability — move to `unverifiable`.
+ */
+export function classifyLegacyOffenders(
+  records: MemoryRecord[],
+  offenders: string[],
+  keyResolved: boolean,
+): { forged: string[]; unverifiable: string[] } {
+  if (keyResolved) return { forged: [...offenders], unverifiable: [] };
+  const typeById = new Map(records.map((r) => [r.id, r.type]));
+  const forged: string[] = [];
+  const unverifiable: string[] = [];
+  for (const id of offenders) {
+    if (typeById.get(id) === 'verify') unverifiable.push(id);
+    else forged.push(id);
+  }
+  return { forged, unverifiable };
+}

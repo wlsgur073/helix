@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { scanLegacyElevated } from '../../src/memory/legacy-scan.js';
+import { scanLegacyElevated, classifyLegacyOffenders } from '../../src/memory/legacy-scan.js';
 import { MemoryStore } from '../../src/memory/store.js';
 import { parseLedger } from '../../src/memory/ledger.js';
 import { subkeyForScope } from '../../src/memory/verified-read.js';
@@ -90,5 +90,53 @@ describe('scanLegacyElevated', () => {
     const scan = scanLegacyElevated([base({ id: 'a' }), horizon, integrity], pred(null));
     expect(scan.offenders).toEqual([]);
     expect(scan.ok).toBe(true);
+  });
+});
+
+// The startup scan in server/index.ts passes `(r) => subkey ? verifyVerify(r, subkey) : false`, so a
+// scope whose signing key does not resolve — key lost, HELIX_HOME moved, an adopted ledger — makes
+// the predicate return false for EVERY record. Its offenders were then printed as
+// "N forged/legacy elevated record(s) ... trust states there are not tool-minted", which accuses the
+// ledger of forgery on the sole evidence that a key was unavailable. Reproduced against a real store:
+// the SAME untouched ledger scans clean with the key and reports one offender without it.
+//
+// scanLegacyElevated itself is correct and must not change — assessGradeLoss depends on exactly this
+// behaviour, because "would starting here lose a grade?" genuinely answers yes when no key resolves.
+// What was wrong is the SENTENCE. classifyLegacyOffenders splits the two causes so each can be said
+// accurately, and it is exported because a 190-line top-level script had no seam a test could reach —
+// which is why nothing caught this.
+describe('classifyLegacyOffenders — a missing key is not evidence of forgery', () => {
+  const forgedVerify = base({ id: 'v_forged', type: 'verify', state: 'Verified' });
+  const bakedAssert = base({ id: 'a_baked', state: 'Corroborated' });
+
+  it('with the key resolved, every offender is a genuine forged/legacy elevation', () => {
+    const records = [forgedVerify, bakedAssert];
+    const { offenders } = scanLegacyElevated(records, pred(null));
+    const c = classifyLegacyOffenders(records, offenders, true);
+    expect(c.forged).toEqual(['v_forged', 'a_baked']);
+    expect(c.unverifiable).toEqual([]);
+  });
+
+  it('with NO key, a genuinely signed verify is unverifiable, never forged', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-legacy-'));
+    const ledger = join(home, 'memory.jsonl');
+    const store = new MemoryStore(ledger, { sessionId: 's', home });
+    const a = store.commit({ content: 'the staging db host is db.staging.internal', source: 'user' });
+    store.confirm(a.id); // a genuine, correctly signed verify
+    const records = parseLedger(ledger);
+
+    expect(scanLegacyElevated(records, pred(subkeyForScope(home))).ok).toBe(true); // clean WITH the key
+    const { offenders } = scanLegacyElevated(records, pred(null));                 // and not without it
+    const c = classifyLegacyOffenders(records, offenders, false);
+    expect(c.forged).toEqual([]);
+    expect(c.unverifiable).toHaveLength(1);
+  });
+
+  it('with NO key, a baked non-Fresh assert is STILL forged/legacy — key availability cannot excuse it', () => {
+    const records = [bakedAssert];
+    const { offenders } = scanLegacyElevated(records, pred(null));
+    const c = classifyLegacyOffenders(records, offenders, false);
+    expect(c.forged).toEqual(['a_baked']);   // R1 would clamp it regardless of any key
+    expect(c.unverifiable).toEqual([]);
   });
 });
