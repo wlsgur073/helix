@@ -1,5 +1,6 @@
 import type { MemoryRecord, HistoricalRecord } from '../types.js';
 import { buildProjection } from './projection.js';
+import { isIntegrityMarker, isHorizonMarker } from './ledger.js';
 
 export interface History {
   rows: HistoricalRecord[];
@@ -22,11 +23,19 @@ const isClosing = (t: MemoryRecord['type']): t is Closer['kind'] =>
 
 /** Best-effort "a past compaction dropped closed history" signal (spec §5): a content-free integrity/
  *  horizon tombstone, or an orphan erase tombstone whose fact row is gone. Exported so asOfView reuses
- *  the identical heuristic buildHistory uses. */
+ *  the identical heuristic buildHistory uses.
+ *
+ *  The marker test names the two KINDS, never the shared shape. Three marker kinds are verify-typed,
+ *  null-target, unsigned and content-free — integrity_, horizon_ and witness_fence_ — but only the
+ *  first two record dropped history; a fence records a re-baseline, which drops nothing. Testing the
+ *  shape made every re-baselined scope report `truncated: true` with nothing lost, in a note users
+ *  are told to act on. An ALLOWLIST is deliberate: a fourth marker kind must be added here
+ *  explicitly, and until it is it reads as "no truncation" rather than silently rejoining the
+ *  false-alarm class this pair of predicates exists to prevent. */
 export function ledgerTruncated(records: MemoryRecord[]): boolean {
   const factIds = new Set(records.filter((r) => r.type === 'assert' || r.type === 'supersede').map((r) => r.id));
   return records.some((r) => {
-    if (r.type === 'verify' && r.supersedes === null && !r.mac && r.content === '') return true;
+    if (isIntegrityMarker(r) || isHorizonMarker(r)) return true;
     return r.type === 'erase' && r.supersedes !== null && !factIds.has(r.supersedes);
   });
 }

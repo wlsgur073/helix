@@ -30,9 +30,11 @@ export const isMarkerShape = (r: MemoryRecord): boolean =>
 export const isHorizonMarker = (r: MemoryRecord): boolean => isMarkerShape(r) && r.id.startsWith('horizon_');
 
 /** The integrity-incident counterpart to isHorizonMarker: an audit signal that a compaction dropped
- *  >=1 forged verify (spec §5 delta). Module-private — external callers key off the `integrity_`
- *  prefix via parseLedger output (e.g. test assertions), never need the predicate itself. */
-const isIntegrityMarker = (r: MemoryRecord): boolean => isMarkerShape(r) && r.id.startsWith('integrity_');
+ *  >=1 forged verify (spec §5 delta). Exported alongside isHorizonMarker because history.ts's
+ *  truncation heuristic must name these two KINDS: it used to test the shared marker SHAPE, which a
+ *  witness fence also satisfies, so a re-baseline reported history as lost. Callers that only need
+ *  to spot the row in parseLedger output still key off the `integrity_` prefix directly. */
+export const isIntegrityMarker = (r: MemoryRecord): boolean => isMarkerShape(r) && r.id.startsWith('integrity_');
 
 /** A stale epoch fence — the marker SHAPE plus the family prefix, exactly like the two predicates
  *  above. Gating on the prefix alone (as this did until 2026-08-06) drops any live row wearing the

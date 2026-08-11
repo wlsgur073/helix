@@ -141,6 +141,35 @@ describe('buildHistory — anomaly + truncation signals', () => {
     expect(buildHistory([t]).truncated).toBe(true);
   });
 
+  it('truncated=true when a horizon tombstone is present', () => {
+    const t = rec({ id: 'horizon_x', type: 'verify', supersedes: null, content: '', state: 'Suspect' });
+    expect(buildHistory([t]).truncated).toBe(true);
+  });
+
+  // Three marker kinds now share one shape — verify-typed, null target, unsigned, content-free —
+  // and the truncation heuristic identified them by that SHAPE. Only integrity_ and horizon_ record
+  // dropped history; a witness_fence_ row records a RE-BASELINE, which drops nothing. So every
+  // re-baselined scope reported `truncated: true` in inspect and as-of views with no history lost —
+  // a false alarm in a note users are told to act on. Same id-prefix-versus-record-shape confusion
+  // planCompaction was already fixed for; this is the surface it was left on.
+  it('truncated=false when the only marker is a witness fence — a re-baseline drops no history', () => {
+    const a = rec({ id: 'a', tx: '2026-06-09T00:00:01.000Z' });
+    const fence = rec({
+      id: 'witness_fence_3_0123456789abcdef', type: 'verify', supersedes: null,
+      content: '', state: 'Suspect', tx: '2026-06-09T00:00:02.000Z',
+    });
+    expect(buildHistory([a, fence]).truncated).toBe(false);
+  });
+
+  it('a witness fence does not mask a genuine truncation reported alongside it', () => {
+    const fence = rec({
+      id: 'witness_fence_4_fedcba9876543210', type: 'verify', supersedes: null,
+      content: '', state: 'Suspect', tx: '2026-06-09T00:00:02.000Z',
+    });
+    const orphan = rec({ id: 'e', type: 'erase', supersedes: 'gone', content: '', tx: '2026-06-09T00:00:03.000Z' });
+    expect(buildHistory([fence, orphan]).truncated).toBe(true);
+  });
+
   it('determinism: same records -> identical rows + anomalies', () => {
     const input = [
       rec({ id: 'a', tx: '2026-06-09T00:00:01.000Z' }),
