@@ -47,6 +47,12 @@ function luhnValid(digits: string): boolean {
   for (let i = digits.length - 1; i >= 0; i--) {
     let d = digits.charCodeAt(i) - 48; // '0' === 48
     if (d < 0 || d > 9) return false;
+    // A mutation sweep reported `d > 9` -> `d >= 9` here as a SURVIVOR and recorded its bearing as
+    // "drops every card containing a 9". That bearing belongs to the domain guard above, not to this
+    // line, and a mutation there dies against any input containing a 9 — so it cannot be the
+    // survivor. Here `d` has just been doubled: d = 2k with k in [0,9], so d is even and d === 9 is
+    // unreachable. The two predicates select the same set and the mutant is EQUIVALENT, which is why
+    // it survives and why no test can kill it. Proved rather than assumed, so it is not re-reported.
     if (dbl) { d *= 2; if (d > 9) d -= 9; }
     sum += d;
     dbl = !dbl;
