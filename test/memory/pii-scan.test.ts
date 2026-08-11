@@ -157,9 +157,12 @@ describe('card-length window boundaries', () => {
 });
 
 // The RRN gender/century digit (7th digit) is accepted for 1-8. Perturbing that accepted set by one
-// value (narrowing `gender > 8` to `gender > 7`) survived the whole suite, so neither end of this
-// range was measured either. Numbers are assembled at runtime via rrnWithChecksum, matching this
-// file's existing discipline.
+// value at EITHER end survived the whole suite: narrowing `gender > 8` to `gender > 7` (upper bound),
+// and separately widening `gender < 1` to `gender < 0` (lower bound, which starts accepting 0). So
+// neither end of this range was measured. Numbers are assembled at runtime via rrnWithChecksum,
+// matching this file's existing discipline. (The pre-existing bad-checksum RRN test elsewhere in this
+// file also carries gender digit 0, but it fails on checksum, not on the gender digit — it does not
+// cover this boundary, which is why this case is assembled with a checksum-VALID gender-0 RRN.)
 describe('RRN gender-digit range boundaries', () => {
   it('accepts the lowest gender digit in the range (1)', () => {
     const rrn = rrnWithChecksum('900101', '100001');
@@ -173,6 +176,11 @@ describe('RRN gender-digit range boundaries', () => {
 
   it('rejects one gender digit above the range (9)', () => {
     const rrn = rrnWithChecksum('900101', '900001');
+    expect(kinds(detectPII(`id ${rrn} here`))).not.toContain('national_id');
+  });
+
+  it('rejects one gender digit below the range (0)', () => {
+    const rrn = rrnWithChecksum('900101', '000001');
     expect(kinds(detectPII(`id ${rrn} here`))).not.toContain('national_id');
   });
 });
