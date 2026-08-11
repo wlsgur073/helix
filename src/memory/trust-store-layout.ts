@@ -34,10 +34,20 @@ const MASTER_KEY_LEN = 32;
  *  file — bytes living anywhere else on disk — is rejected outright rather than followed. */
 function looksLikeOurs(name: string, path: string): boolean {
   try {
+    // This predicate gates an exit(78) refusal to start, so it must be hard to SATISFY with
+    // planted junk (startup-DoS finding): a loose shape check let five trivially plantable states
+    // deny every future session its memory. lstat, never stat — a symlink beside the ledger is a
+    // plantable redirection, not our state.
     const st = lstatSync(path);
-    if (!st.isFile()) return false;   // rejects symlinks, dirs, FIFOs, etc. — no dereferencing
-    if (name === 'ledger-mac-master.key') return st.size === MASTER_KEY_LEN;
-    if (name === 'witness-log.jsonl') return st.size > 0;
+    if (!st.isFile()) return false;
+    if (name === 'ledger-mac-master.key') return st.size === MASTER_KEY_LEN; // anything else is not our key
+    if (name === 'witness-log.jsonl') {
+      // our log has at least one parseable JSONL line; an empty or garbage file is not evidence
+      return readFileSync(path, 'utf8').split('\n').some((l) => {
+        if (!l.trim()) return false;
+        try { JSON.parse(l); return true; } catch { return false; }
+      });
+    }
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
     const obj = parsed as Record<string, unknown>;

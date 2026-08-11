@@ -93,7 +93,9 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
 
   const floor = deps.config.dualVerify.stakesFloor;
   if (params.stakes && STAKES_RANK[params.stakes] < STAKES_RANK[floor]) {
-    return { ran: false, attempted: false, outcome: 'skipped', reason: `stakes '${params.stakes}' below configured floor '${floor}'` };
+    // Actionable refusal (H4): name the lowest value that would run and where the floor lives.
+    // Both interpolations are enum values, so the persisted reason stays content-free.
+    return { ran: false, attempted: false, outcome: 'skipped', reason: `stakes '${params.stakes}' below configured floor '${floor}' — lowest accepted: '${floor}' (dualVerify.stakesFloor in ~/.helix/config.json)` };
   }
 
   // Build the EXACT outbound payload first, then gate it. The gate must clear the bytes that actually

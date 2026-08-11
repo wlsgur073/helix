@@ -36,6 +36,11 @@ describe('handleCodexStatus', () => {
     expect(text(res)).toMatch(/ChatGPT subscription \(inferred\)/i);
   });
 
+  it('reports the configured stakes floor so a caller can see the gate before spending a call (H4)', async () => {
+    const res = await handleCodexStatus(deps(LIVE, { config: enabledCfg() }));
+    expect(text(res)).toMatch(/stakes floor:\s+high/);
+  });
+
   it('not found renders NOT FOUND, not logged in, no version', async () => {
     const res = await handleCodexStatus(deps({ cliFound: false, available: false, authMode: 'none', reason: 'codex CLI not found' }));
     expect(text(res)).toMatch(/NOT FOUND/i);

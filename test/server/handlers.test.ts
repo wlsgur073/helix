@@ -33,6 +33,18 @@ describe('tool handlers', () => {
     expect(out).toContain('DATA[Fresh:global]| db is postgres');
   });
 
+  it('handleRecall maxChars caps each item with the ellipsis marker; omitting it keeps full content (H5)', () => {
+    const s = store();
+    handleCommit(s, { content: 'longfact ' + 'L'.repeat(500), source: 'user' });
+    const capped = text(handleRecall(s, { query: 'longfact', maxChars: 40 }));
+    const dataLines = capped.split('\n').filter((l) => l.startsWith('DATA['));
+    expect(dataLines.length).toBeGreaterThan(0);
+    for (const l of dataLines) expect(l.length).toBeLessThan(120);
+    expect(capped).toContain('…');
+    const full = text(handleRecall(s, { query: 'longfact' }));
+    expect(full).toContain('L'.repeat(500));
+  });
+
   it('handleInspect lists current memory', () => {
     const s = store();
     handleCommit(s, { content: 'one fact', source: 'user' });

@@ -77,7 +77,14 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     // is refused by schema validation before it reaches a handler at all — the same bounded-input
     // discipline `maxItems` and `asOf` already get. The store keeps the authoritative check (it also
     // bounds distinct TERMS, which needs the tokenizer) for callers that do not come through MCP.
-    inputSchema: { query: z.string().max(MAX_QUERY_CHARS), maxItems: z.number().int().positive().optional() },
+    inputSchema: {
+      query: z.string().max(MAX_QUERY_CHARS),
+      maxItems: z.number().int().positive().optional(),
+      // H5: count bounds are not size bounds — long prose items made a 30-item recall render
+      // 74.6 KB. Per-item character cap; truncation is marked with an ellipsis.
+      maxChars: z.number().int().positive().optional()
+        .describe('Per-item character cap for rendered content (truncated with …). Use when the caller can only read a bounded result.'),
+    },
   }, async (args) => m.runOp('helix_memory_recall', () => handleRecall(store, args)));
 
   server.registerTool('helix_memory_inspect', {
@@ -154,7 +161,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       'team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted. Pass ' +
       'the project root you mean; a root that is not the active scope is refused and adopts nothing. ' +
       'This moves a trust boundary — everything in that ledger becomes recallable — so the user, not ' +
-      'Helix, is the authority: do not allow-list this tool.',
+      'Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.',
     inputSchema: { projectRoot: z.string() },
   }, async (args) => m.runOp('helix_memory_adopt', () => handleAdopt(store, args, { auditPath: dv.auditPath, now: dv.now })));
 

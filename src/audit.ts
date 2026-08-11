@@ -1,4 +1,4 @@
-import { mkdirSync, openSync, existsSync, fsyncSync, closeSync } from 'node:fs';
+import { mkdirSync, openSync, fsyncSync, closeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeAll, realFsOps, fsyncDir } from './memory/fs-ops.js';
 import type { EgressLeg } from './config.js';
@@ -107,17 +107,23 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit | AdoptAudit
  *  failure, it would REPLACE the real rejection error the caller is about to re-throw with an
  *  unrelated fsync error, masking the actual diagnosis. Both outcomes are worse than the audit row
  *  silently missing — a gap this docstring already accepts. The row's own bytes stay unconditional:
- *  writeAll + fsyncSync(fd) above are untouched and still propagate. */
-export function appendAudit(path: string, event: AuditEvent): void {
+ *  writeAll + fsyncSync(fd) above are untouched and still propagate.
+ *
+ *  EVERY append fsyncs the directory, not just the first (2026-08-11): an exists-then-decide probe
+ *  raced concurrent first creation, so a non-creator's acknowledged row depended on the CREATOR
+ *  surviving to its own fsyncDir. Each appender now owns the directory-entry durability of the row
+ *  it acknowledges. Audit appends are low-frequency; the extra directory fsync is noise. */
+export function appendAudit(path: string, event: AuditEvent, io: { fsyncDir: typeof fsyncDir } = { fsyncDir }): void {
   mkdirSync(dirname(path), { recursive: true });
-  const isNew = !existsSync(path);
   const fd = openSync(path, 'a', 0o600);   // owner-only ON CREATE (the audit trail is unauthenticated; a group writer could rewrite it)
   try {
     // writeAll loops short writes (a truncated row is never fsynced) and guards a zero-progress write.
     writeAll(realFsOps, fd, JSON.stringify(event) + '\n');
     fsyncSync(fd);
   } finally { closeSync(fd); }
-  if (isNew) {
-    try { fsyncDir(dirname(path)); } catch { /* best-effort by design — see docstring above */ }
-  }
+  // Unconditional call, unconditionally swallowed here — narrower than fs-ops.ts's own fsyncDir
+  // contract, which now propagates a genuinely failed attempt. See the docstring above: at the two
+  // reject sites this runs inside a catch, immediately before re-throwing the caller's real error,
+  // so an escaping fsync error would REPLACE that diagnosis rather than add to it.
+  try { io.fsyncDir(dirname(path)); } catch { /* best-effort by design — see docstring above */ }
 }

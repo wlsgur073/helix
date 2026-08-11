@@ -30,6 +30,16 @@ vi.mock('../src/memory/fs-ops.js', async (importOriginal) => {
 });
 
 describe('appendAudit', () => {
+  it('fsyncs the directory on EVERY append, not only first creation (audit first-create race)', () => {
+    const p = tmpAudit();
+    const dirs: string[] = [];
+    const io = { fsyncDir: (d: string) => { dirs.push(d); } };
+    const e = { kind: 'erase', ts: 't', id: 'm_1' } as never;
+    appendAudit(p, e, io);
+    appendAudit(p, e, io);
+    expect(dirs).toHaveLength(2); // a non-creator appender owns the durability of the row it acknowledges
+  });
+
   it('appends one JSON line per event and reads back', () => {
     const p = tmpAudit();
     const e: AuditEvent = { kind: 'dual-verify', ts: '2026-06-09T00:00:00.000Z', enabled: true, spawned: true, verdict: 'agree' };

@@ -40,6 +40,31 @@ describe('strayTrustFiles', () => {
     expect(strayTrustFiles(home, join(elsewhere, 'memory.jsonl'))).toEqual(['ledger-mac-master.key']);
   });
 
+  it('the five plantable startup-DoS states are all rejected (f1-detector-startup-dos)', () => {
+    const { home, elsewhere } = layout();
+    const ledger = join(elsewhere, 'memory.jsonl');
+    writeFileSync(join(elsewhere, 'ledger-mac-master.key'), Buffer.from([1]));                             // (1) one-byte key
+    writeFileSync(join(elsewhere, 'projects.json'), JSON.stringify({ '/p': { stamp: 1, macNonce: 2 } }));  // (2) wrong-typed values
+    writeFileSync(join(elsewhere, 'witness.json'), JSON.stringify({ scopes: 1 }));                         // (3) scopes of wrong type
+    writeFileSync(join(elsewhere, 'witness-log.jsonl'), '');                                               // (4) empty log
+    expect(strayTrustFiles(home, ledger)).toEqual([]);
+    // (5) symlinked registry — the predicate must not follow links
+    rmSync(join(elsewhere, 'projects.json'));
+    const target = join(elsewhere, 'target.json');
+    writeFileSync(target, JSON.stringify({ '/p': { stamp: 'x', adoptedAt: 't', macNonce: 'n' } }));
+    symlinkSync(target, join(elsewhere, 'projects.json'));
+    expect(strayTrustFiles(home, ledger)).toEqual([]);
+  });
+
+  it('genuine trust state is still detected after the predicate tightening', () => {
+    const { home, elsewhere } = layout();
+    const ledger = join(elsewhere, 'memory.jsonl');
+    writeFileSync(join(elsewhere, 'ledger-mac-master.key'), randomBytes(32));
+    writeFileSync(join(elsewhere, 'witness.json'), JSON.stringify({ v: 1, scopes: { '@global': { headHash: 'h' } } }));
+    writeFileSync(join(elsewhere, 'witness-log.jsonl'), JSON.stringify({ e: 1 }) + '\n');
+    expect(strayTrustFiles(home, ledger)).toEqual(['ledger-mac-master.key', 'witness.json', 'witness-log.jsonl']);
+  });
+
   it('reports a witness and a registry only when they are shape-valid', () => {
     const { home, elsewhere } = layout();
     // `projects.json` and `witness.json` are generic enough names that a repo could hold unrelated

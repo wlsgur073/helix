@@ -25,8 +25,14 @@ describe('fs-ops seam', () => {
     expect(readFileSync(f, 'utf8')).toBe('abcdefghij');   // no fragment loss under short writes
     expect(calls).toBeGreaterThan(1);                      // the loop actually looped
   });
-  it('swallows the platform-cannot-fsync class: a real open failure, an injected open failure (Windows-style), and EINVAL/EISDIR/ENOTSUP/EOPNOTSUPP on the fsync itself', () => {
-    expect(() => fsyncDir('/definitely/not/a/dir')).not.toThrow();     // real open() failure — never attempted, nothing to report
+  // 2026-08-11 supersession: the open() leg used to swallow EVERY errno on the theory that a failed
+  // open means fsync was never attempted. That reported success for an EMFILE/EIO/ENOENT directory
+  // the caller had just been told was durable. Windows — the case the old rule protected — is now
+  // handled by the `platform` seam instead of by over-swallowing on every platform.
+  it('a missing directory PROPAGATES on POSIX — the entry it should persist cannot exist', () => {
+    expect(() => fsyncDir('/definitely/not/a/dir', undefined, 'linux')).toThrow();
+  });
+  it('swallows the platform-cannot-fsync class: an injected Windows-style open failure, and EINVAL/EISDIR/ENOTSUP/EOPNOTSUPP on the fsync itself', () => {
     const openFails: DirFsyncSyscalls = {
       openSync: () => { throw Object.assign(new Error('EPERM fake (Windows-style open failure)'), { code: 'EPERM' }); },
       fsyncSync: () => { throw new Error('unreachable: fsync must never run when open failed'); },
@@ -70,6 +76,19 @@ describe('fs-ops seam', () => {
     // And the reverse: a message that NAMES EIO but carries a swallow code must still be swallowed —
     // proves the check does not throw on any message mentioning EIO.
     expect(() => fsyncDir('/irrelevant', fsyncThrows('EINVAL', 'mentions EIO in its text'))).not.toThrow();
+  });
+  it('swallows only directory-unsupported codes; real I/O failures propagate; win32 stays wholesale best-effort', () => {
+    const err = (code: string) => Object.assign(new Error(code), { code });
+    const io = (over: Partial<{ openSync: () => number; fsyncSync: () => void; closeSync: () => void }>) =>
+      ({ openSync: () => 7, fsyncSync: () => {}, closeSync: () => {}, ...over }) as never;
+    expect(() => fsyncDir('/d', io({ fsyncSync: () => { throw err('EINVAL'); } }), 'linux')).not.toThrow();
+    expect(() => fsyncDir('/d', io({ openSync: () => { throw err('EACCES'); } }), 'linux')).not.toThrow();
+    expect(() => fsyncDir('/d', io({ fsyncSync: () => { throw err('EIO'); } }), 'linux')).toThrow('EIO');
+    expect(() => fsyncDir('/d', io({ openSync: () => { throw err('ENOENT'); } }), 'linux')).toThrow('ENOENT');
+    expect(() => fsyncDir('/d', io({ openSync: () => { throw err('EIO'); } }), 'win32')).not.toThrow();
+    let closed = 0;
+    expect(() => fsyncDir('/d', io({ fsyncSync: () => { throw err('EIO'); }, closeSync: () => { closed++; } }), 'linux')).toThrow();
+    expect(closed).toBe(1); // the fd is released even on the propagate path
   });
   it('writeAll writes raw Buffer bytes verbatim (no utf8 round-trip for binary trust-store writes)', () => {
     const d = mkdtempSync(join(tmpdir(), 'fsops-'));
