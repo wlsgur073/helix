@@ -620,6 +620,28 @@ describe('G2: the scan budget fails CLOSED', () => {
   });
 });
 
+// The cap refuses when the raw form OR the outbound form is too large. The existing case makes BOTH
+// oversized, so it passes identically whether the operator is `||` or `&&` — the disjunction, which
+// is what makes the round's own echo-truncation refutation true, was never measured. One case per
+// side, each with the OTHER side small.
+describe('egress scan cap — either side alone is enough to refuse', () => {
+  const ledger = [item('m_1', 'the deploy uses the blue cluster')];
+
+  it('refuses when only the RAW form exceeds the cap', () => {
+    const raw = 'z'.repeat(200_001);
+    const v = classifyEgress({ texts: [raw], outbound: 'small outbound form', ledger, policy: ALL('allow') });
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('scan_limit');
+  });
+
+  it('refuses when only the OUTBOUND form exceeds the cap', () => {
+    const outbound = 'z'.repeat(200_001);
+    const v = classifyEgress({ texts: ['small raw form'], outbound, ledger, policy: ALL('allow') });
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('scan_limit');
+  });
+});
+
 describe('D1: classifier reports leg OUTCOMES, not just detections', () => {
   it('a released piiHigh (card, policy allow) reports releasedLegs=[piiHigh], not the detected legs', () => {
     const v = classifyEgress(clean({ texts: ['card 4111 1111 1111 1111'], policy: { ...ALL('block'), piiHigh: 'allow' } }));
