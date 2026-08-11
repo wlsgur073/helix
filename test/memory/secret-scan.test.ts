@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { detectSecret, findSecrets, redactSecrets, isHexCore } from '../../src/memory/secret-scan.js';
+import { normalizeUntrusted } from '../../src/memory/content-frame.js';
 
 describe('secret scanner', () => {
   it('flags PEM private key blocks', () => {
@@ -227,6 +228,49 @@ describe('F6: findSecrets sees confusables that NFKC folds back into a credentia
   it('leaves ordinary prose alone — folding must not manufacture hits', () => {
     expect(findSecrets('The migration script rewrites the users table.')).toEqual([]);
     expect(findSecrets('ﬁle uses a ligature but carries no credential')).toEqual([]);
+  });
+});
+
+// F6 ROUND 2 — the fold above models NFKC ALONE, but the render path is
+// `breakFenceRuns(stripControls(s.normalize('NFKC')))`: it also deletes every Cc/Cf code point.
+// A zero-width or format character placed INSIDE a credential therefore survives the write scan
+// (no PATTERN matches the interrupted token, and NFKC does not remove it), lands verbatim on disk,
+// and is stripped back out at render — handing the model a working key. Same lesson as the
+// fullwidth case above, one transform later: the write scan must model what the render path
+// PRODUCES, not one chosen step of it. Exposure is on-disk and in-context; egress stays blocked
+// because trifecta.ts scans both the raw and the outbound form.
+describe('F6 round 2: findSecrets sees credentials broken by characters the render path strips', () => {
+  const AWS = 'AKIAIOSFODNN7EXAMPLE';
+  const INVISIBLES: Array<[string, string]> = [
+    ['ZWSP U+200B', String.fromCharCode(0x200b)],
+    ['ZWJ U+200D', String.fromCharCode(0x200d)],
+    ['SOFT HYPHEN U+00AD', String.fromCharCode(0x00ad)],
+    ['BOM U+FEFF', String.fromCharCode(0xfeff)],
+  ];
+
+  for (const [name, ch] of INVISIBLES) {
+    it(`flags a provider key interrupted by ${name}`, () => {
+      const raw = `deploy key AKIAIOSFODNN7${ch}EXAMPLE rotate quarterly`;
+      const spans = findSecrets(raw);
+      expect(spans).toHaveLength(1);
+      expect(spans[0]!.kind).toBe('aws-access-key');
+    });
+  }
+
+  // The decisive assertion, and the reason this suite imports the real renderer: what survives
+  // redaction is fed through the ACTUAL render transform. Binding to normalizeUntrusted rather
+  // than to a hand-copied fold is what keeps the two paths from drifting apart again.
+  it('what is persisted cannot be rendered back into a working credential', () => {
+    for (const [, ch] of INVISIBLES) {
+      const raw = `deploy key AKIAIOSFODNN7${ch}EXAMPLE rotate quarterly`;
+      const out = redactSecrets(raw, findSecrets(raw));
+      expect(normalizeUntrusted(out.content)).not.toContain(AWS);
+    }
+  });
+
+  it('leaves ordinary prose alone — stripping must not manufacture hits', () => {
+    const zwsp = String.fromCharCode(0x200b);
+    expect(findSecrets(`The migration${zwsp} script rewrites the users table.`)).toEqual([]);
   });
 });
 

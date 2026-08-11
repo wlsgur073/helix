@@ -18,8 +18,15 @@ function breakFenceRuns(s: string): string {
   return s.replace(FENCE_RUN, (run) => [...run].join(' '));
 }
 
-/** Strip Unicode control (Cc) and format/bidi/zero-width (Cf) chars, keeping only \n and \t. */
-function stripControls(s: string): string {
+/** Strip Unicode control (Cc) and format/bidi/zero-width (Cf) chars, keeping only \n and \t.
+ *
+ *  EXPORTED for the write-path secret scanner (F6 round 2), which must model what THIS path
+ *  produces rather than one chosen step of it. Folding NFKC alone left a gap: an invisible Cf code
+ *  point placed inside a credential survived the scan, was persisted verbatim, and was deleted here
+ *  at render — so the reader received a working key the scanner had declared absent. Any future
+ *  transform added to `normalizeUntrusted` has the same obligation; keep the scanner's fold and this
+ *  function in step. */
+export function stripControls(s: string): string {
   return s.replace(/[\p{Cc}\p{Cf}]/gu, (ch) => (ch === '\n' || ch === '\t' ? ch : ''));
 }
 

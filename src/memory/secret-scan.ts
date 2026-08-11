@@ -1,3 +1,4 @@
+import { stripControls } from './content-frame.js';
 export type SecretTier = 'named' | 'heuristic' | 'entropy';
 
 const TIER_RANK: Record<SecretTier, number> = { named: 2, heuristic: 1, entropy: 0 };
@@ -171,12 +172,19 @@ function mergeSpans(spans: SecretSpan[]): SecretSpan[] {
  *
  *  The RAW token's whole span is emitted, not a sub-range: a folded match's offsets mean nothing in
  *  the raw string, and redacting the entire confusable token is the conservative reading. Tokens
- *  that fold to themselves — nearly all of them — cost one comparison and are skipped. */
+ *  that fold to themselves — nearly all of them — cost one comparison and are skipped.
+ *
+ *  ROUND 2: the fold is `stripControls(NFKC(token))`, matching content-frame.ts's render transform
+ *  exactly. NFKC alone missed every invisible Cf code point — a zero-width space inside an AWS key
+ *  matched no pattern on the way in and was deleted on the way out. `RENDER_TOKEN` exists for the
+ *  same reason: `\S` counts U+FEFF as whitespace, so the default tokenizer SPLIT a credential the
+ *  render path silently rejoins, and no per-token fold could ever have seen it. */
+const RENDER_TOKEN = /[^\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/g;
 function foldedTokenSpans(content: string): SecretSpan[] {
   const out: SecretSpan[] = [];
-  const tok = /\S+/g;
+  const tok = new RegExp(RENDER_TOKEN.source, RENDER_TOKEN.flags);
   for (let m = tok.exec(content); m !== null; m = tok.exec(content)) {
-    const folded = m[0].normalize('NFKC');
+    const folded = stripControls(m[0].normalize('NFKC'));
     if (folded === m[0]) continue;                       // folding reveals nothing here
     let hit: { kind: string; tier: SecretTier } | null = null;
     for (const { kind, tier, re } of PATTERNS) {
