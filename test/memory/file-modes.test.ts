@@ -75,3 +75,31 @@ describe('every persisted Helix file is owner-only', () => {
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });
+
+// N2-MODE named TWO files: audit.jsonl and sessions.jsonl. The sweep above covers audit.jsonl,
+// because a real commit writes one. Nothing covered sessions.jsonl — measured, not assumed: removing
+// `{ mode: 0o600 }` from src/hooks/session-end.ts and running the whole suite produced no failure at
+// all. The hook is a top-level script with no exports, the same shape as server/index.ts, so the one
+// existing session-end e2e runs the SHIPPED bundle in bin/ — which is frozen for the pilot window and
+// therefore cannot witness a change to src/ either.
+//
+// So this bundles the SOURCE with the pinned esbuild and spawns it as plain node, the discipline
+// bundle-cli.ts exists for. It fails if the mode argument is dropped, which is what a guard has to do.
+describe('sessions.jsonl is created owner-only (N2-MODE, second site)', () => {
+  it('the session-end hook, built from source, creates its ledger 0600', async () => {
+    if (platform() === 'win32') return; // POSIX mode bits only
+    const { bundleCli } = await import('../helpers/bundle-cli.js');
+    const { execFileSync } = await import('node:child_process');
+    const cli = await bundleCli('src/hooks/session-end.ts');
+
+    const home = mkdtempSync(join(tmpdir(), 'helix-sessmode-'));
+    const sessions = join(home, 'sessions.jsonl');
+    execFileSync(process.execPath, [cli], {
+      input: '{"session_id":"s-mode","reason":"clear"}',
+      env: { ...process.env, HELIX_HOME: home, HELIX_SESSIONS: sessions },
+    });
+
+    expect(statSync(sessions).mode & 0o777).toBe(0o600);
+    rmSync(home, { recursive: true, force: true });
+  }, 30_000);
+});
