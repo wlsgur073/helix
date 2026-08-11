@@ -313,12 +313,20 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
   return ok(makeDataFrame({
     label: 'CURRENT MEMORY',
     nonce: newNonce(),
-    lines: rows.map(({ record, scope }) => ({
+    lines: rows.map(({ record, scope, contentDigest }) => ({
       // The mark is the SAME known-enum `DATA[state:scope]| ` label recall/SessionStart use (mirrored
       // byte-for-byte, not reinvented). The SANITIZED id is prepended to the datamarked content so
       // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
       // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
-      text: `${presentId(record.id)} ${record.content}`,
+      //
+      // The digest rides along for VERIFIED rows only. Superseding one now requires echoing it back as
+      // `supersedesDigest` (proof of read), so without it here the tool surface could never replace a
+      // verified fact at all. Verified-only keeps 64 hex characters off every other row: it is emitted
+      // exactly where it is needed, and it discloses nothing — a reader holding this line already holds
+      // the content it digests.
+      text: record.state === 'Verified' && contentDigest !== undefined
+        ? `${presentId(record.id)} ${record.content}\n    supersedesDigest=${contentDigest}`
+        : `${presentId(record.id)} ${record.content}`,
       mark: `DATA[${record.state}:${scope}]| `,
     })),
   }) + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));

@@ -69,6 +69,12 @@ export interface ScopedRecord {
    *  optional because plain pairings (pre-HMAC callers) may omit it. 'compromised' = equal-gen MAC
    *  conflict on the target. */
   integrity?: 'ok' | 'compromised';
+  /** SHA-256 of this record's content, as the ledger MAC computes it. Handed to readers so a caller
+   *  that wants to SUPERSEDE a guarded record can echo it back as `CommitInput.supersedesDigest` —
+   *  proof that it actually retrieved what it is about to replace. Discloses nothing new: a reader
+   *  holding this already holds the content it digests. Optional for the same reason `integrity`
+   *  is: plain pairings built outside the store's verified projection may omit it. */
+  contentDigest?: string;
 }
 
 /** A ledger record paired with its DERIVED system-time end. Produced only by buildHistory at read

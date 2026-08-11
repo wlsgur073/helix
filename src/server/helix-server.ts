@@ -66,6 +66,15 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       blastRadius: z.enum(['read-only', 'local-reversible', 'hard-to-reverse', 'external']).optional(),
       classification: z.enum(['normal', 'personal']).optional(),
       supersedes: ID_SCHEMA.optional(),
+      supersedesDigest: z
+        .string()
+        .regex(/^[0-9a-f]{64}$/, 'supersedesDigest must be a 64-character lowercase hex digest')
+        .optional()
+        .describe(
+          'Required only when superseding a VERIFIED fact: the `supersedesDigest=` value shown for ' +
+          'that row by helix_memory_inspect. Echoing it proves you retrieved the record you are ' +
+          'replacing; a supersede issued without having read the target is refused.',
+        ),
       scope: z.enum(['project', 'global']).optional(),
     },
   }, async (args) => m.runOp('helix_memory_commit', () => handleCommit(store, args)));

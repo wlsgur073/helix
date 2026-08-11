@@ -67,6 +67,11 @@ export interface CommitInput {
   /** Id of an existing item this commit replaces. Set => emit a 'supersede' (update-in-place)
    *  instead of an 'assert', so a changed fact replaces the old one rather than duplicating it. */
   supersedes?: string | null;
+  /** The target's `contentDigest`, as a read (recall / inspect) handed it back. REQUIRED when the
+   *  target is guarded — verified, or claiming a human author — and ignored otherwise. It is proof
+   *  the caller retrieved what it is replacing; a blind or prompt-injected supersede cannot produce
+   *  it. It is NOT a credential: see the gate in `commit` for why nothing here can be. */
+  supersedesDigest?: string;
   /** Where to store the fact. Default 'project' when a project layer is active, else 'global'. */
   scope?: MemoryScope;
 }
@@ -227,11 +232,59 @@ export class MemoryStore {
       if (targetLedger !== writeLedger) {
         throw new Error('commit: cannot supersede across scopes (target lives in a different ledger)');
       }
-      const targetIsAuthoritative = isVerifyingSource(target.provenance.source) || target.state === 'Verified';
-      if (targetIsAuthoritative && !isVerifyingSource(source)) {
+      // NOT an authorization boundary, and it never was: nothing a commit carries is authenticated.
+      // Three things used to be collapsed into one word here — `state` is cryptographically protected
+      // assurance, `provenance.source` is an untrusted attribution hint, and "may this be replaced"
+      // is an operation policy. The old test read BOTH sides' provenance, so the credential it
+      // checked was the caller's own claim: declaring source='user' walked past a Verified target,
+      // and stripping a target's claimed source (boundary write) stripped its protection.
+      //
+      // What is enforceable is PROOF OF READ. A caller that retrieved the target can echo the
+      // digest the read path handed it; one acting blind — the prompt-injected case this guard is
+      // really for — cannot. `source` no longer participates in either direction.
+      //
+      // The provenance disjunct stays, reframed: it selects WHICH records are guarded, and dropping
+      // it would leave a Fresh human-authored record with no protection at all. Residual, stated
+      // rather than hidden: an adversary who can guess the target's content byte-exactly can compute
+      // the digest without reading it — narrower than declaring an enum value, and short predictable
+      // facts are the weak case. Superseding a Verified record still costs the grade regardless: the
+      // signed verify binds (id, contentDigest), so replacement content replays as Fresh.
+      // TWO TIERS, because one word was doing two jobs. `state` is cryptographically protected
+      // assurance; `provenance.source` is an untrusted attribution hint; "may this be replaced" is an
+      // operation policy. Collapsing them made the caller's own claim the credential.
+      //
+      // Tier 1 — accident guard, behaviour unchanged and separately tested ("refuses a
+      // non-authoritative supersede of a user fact"). A commit that does not claim a human author may
+      // not displace one that does. Both sides are self-asserted, so this restrains honest callers
+      // only; that is all it was ever doing, and the error now says so.
+      const claimsHumanAuthor = isVerifyingSource(target.provenance.source);
+      const isVerified = target.state === 'Verified';
+      if ((claimsHumanAuthor || isVerified) && !isVerifyingSource(source)) {
         throw new Error(
-          'commit: cannot supersede an authoritative fact with a non-authoritative source ' +
-          '(user-relayed / agent-inference). Commit as source=user if you are authoring this, or reconcile via recall.',
+          'commit: refusing to supersede a human-authored or verified fact from a source that claims ' +
+          'neither (user-relayed / agent-inference). This is an accident guard, not an authorization ' +
+          'check — no field a commit carries is authenticated. Commit as source=user if you are ' +
+          'authoring this, or reconcile via recall.',
+        );
+      }
+      // Tier 2 — the actual fix. Tier 1's credential is a model-supplied enum, so declaring
+      // source='user' walked straight past a Verified target: the highest tier was protected by the
+      // cheapest possible claim. What IS enforceable is proof of read — a caller that retrieved the
+      // target can echo the digest the read path handed it; one acting blind, which is the
+      // prompt-injected case this exists for, cannot. Applied only to Verified targets: that is where
+      // `state` is MAC-covered, so the guard sits exactly on the authenticated boundary and does not
+      // tax the ordinary Fresh update path.
+      //
+      // Residual, stated rather than hidden: an adversary who can guess the content byte-exactly can
+      // compute the digest without reading it — far narrower than declaring an enum value, with short
+      // predictable facts the weak case. Superseding a Verified record still costs the grade either
+      // way: the signed verify binds (id, contentDigest), so replacement content replays as Fresh.
+      if (isVerified && input.supersedesDigest !== digestContent(target.content)) {
+        throw new Error(
+          'commit: supersedesDigest missing or stale. A verified fact may only be superseded by a ' +
+          'caller that has read it — recall or inspect the target and echo its `contentDigest` back ' +
+          'as `supersedesDigest`. Proof of read, not authorization: no field a commit carries is ' +
+          'authenticated.',
         );
       }
     }
@@ -402,7 +455,11 @@ export class MemoryStore {
       const t2 = performance.now();
       if (!proj.keyAvailable) available = false;
       for (const rec of proj.live.values()) {
-        scoped.push({ record: rec, scope: r.scope, integrity: proj.compromised.has(rec.id) ? 'compromised' : 'ok' });
+        scoped.push({
+          record: rec, scope: r.scope,
+          integrity: proj.compromised.has(rec.id) ? 'compromised' : 'ok',
+          contentDigest: digestContent(rec.content),   // proof-of-read token for a guarded supersede
+        });
       }
       this.opts.metricsSink?.emitReplay({
         scope: r.root ? 'project' : 'global', caller: 'store',
@@ -694,7 +751,13 @@ export class MemoryStore {
         parseMs: w.stats.parseMs, projectMs: w.stats.projectMs, keyAvailable: w.stats.keyAvailable,
       });
       const proj = enforceWitnessProjection(w.projection, w.verdict);
-      for (const r of proj.live.values()) records.push({ record: r, scope, integrity: proj.compromised.has(r.id) ? 'compromised' : 'ok' });
+      for (const r of proj.live.values()) {
+        records.push({
+          record: r, scope,
+          integrity: proj.compromised.has(r.id) ? 'compromised' : 'ok',
+          contentDigest: digestContent(r.content),   // proof-of-read token for a guarded supersede
+        });
+      }
       verdicts.push(w.verdict);
     };
     addScope(this.global, 'global', undefined);

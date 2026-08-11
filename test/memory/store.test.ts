@@ -380,8 +380,10 @@ describe('MemoryStore eviction protection', () => {
   it('refuses a non-authoritative supersede of a user fact; allows additive + user supersede', () => {
     const { store } = tmpStore();
     const a = store.commit({ content: 'prod deploys require approval', source: 'user' });
+    // Wording moved when the gate split into tiers: it no longer calls itself an authorization
+    // check, because neither side of the comparison is authenticated. The refusal itself is unchanged.
     expect(() => store.commit({ content: 'approval is obsolete', supersedes: a.id, source: 'user-relayed' }))
-      .toThrow(/authoritative/i);
+      .toThrow(/refusing to supersede/i);
     // additive (no supersedes) is fine — both facts coexist
     expect(() => store.commit({ content: 'approval is obsolete', source: 'user-relayed' })).not.toThrow();
     // a user supersede of a user fact is fine
