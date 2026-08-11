@@ -120,3 +120,60 @@ describe('tryParsePayload', () => {
     }
   });
 });
+
+// The non-Linux pid-reuse finding, stated precisely. On a platform without /proc the recorded
+// identity fields are all null, so a dead holder whose pid was reused by an unrelated live process
+// classifies alive-unknown; reclaim keys on 'dead', so acquisition blocks for the whole budget and
+// then throws. The obvious fix — steal a lock older than N — is refused on solid ground: age cannot
+// separate a suspended process from a dead one, and that misclassification is what resurrected
+// already-erased plaintext once before.
+//
+// These pin WHERE the gap actually is. The classifier is already platform-independent: it branches on
+// whether a start time was RECORDED, never on which platform recorded it. So the remaining work is
+// supplying that datum on macOS and Windows (PROC_PIDTBSDINFO / GetProcessTimes) — a probe change,
+// with no rule to redesign. Verified here by injection, since this machine is Linux and cannot run
+// either syscall.
+describe('pid reuse without /proc — the gap is the probe, not the rule', () => {
+  const foreign = { platform: 'darwin', bootId: null, pidNs: null };
+  const asForeign = (p: LockPayload): LockPayload => ({ ...p, ...foreign });
+
+  it('TODAY: no recorded start time, so a reused pid is indistinguishable from the holder', () => {
+    const recorded = mk({ ...foreign, pid: 4242, startTicks: null });
+    const cls = classifyHolder(recorded, asForeign(self()), probeOf({
+      kill0: () => 'alive',            // some live process holds that pid
+      startTicksOf: () => null,        // no /proc: the platform cannot say which one
+      stateOf: () => null,
+    }));
+    expect(cls).toBe('alive-unknown'); // never reclaimed -> the caller waits out the full budget
+  });
+
+  it('WITH a start time the SAME rule already reclaims it — nothing in the classifier is Linux-only', () => {
+    const recorded = mk({ ...foreign, pid: 4242, startTicks: '900000' });
+    const cls = classifyHolder(recorded, asForeign(self()), probeOf({
+      kill0: () => 'alive',            // the pid is live...
+      startTicksOf: () => '900123',    // ...but it is a DIFFERENT process than the one that locked
+      stateOf: () => null,
+    }));
+    expect(cls).toBe('dead');          // reclaimable, on a platform that is not Linux
+  });
+
+  it('a start time that MATCHES still means alive — the guard reclaims a reused pid, not a live holder', () => {
+    const recorded = mk({ ...foreign, pid: 4242, startTicks: '900000' });
+    const cls = classifyHolder(recorded, asForeign(self()), probeOf({
+      kill0: () => 'alive',
+      startTicksOf: () => '900000',    // same process, still running
+      stateOf: () => null,
+    }));
+    expect(cls).toBe('alive');
+  });
+
+  it('an unreadable start time stays alive-unknown — uncertainty never reclaims', () => {
+    const recorded = mk({ ...foreign, pid: 4242, startTicks: '900000' });
+    const cls = classifyHolder(recorded, asForeign(self()), probeOf({
+      kill0: () => 'alive',
+      startTicksOf: () => null,        // recorded one, cannot read one back
+      stateOf: () => null,
+    }));
+    expect(cls).toBe('alive-unknown');
+  });
+});

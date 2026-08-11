@@ -145,3 +145,27 @@ describe('shipped docs state what the code actually does', () => {
     expect(readme).toContain(`.helix/\` to your repo's \`.${NEEDLE}\``);
   });
 });
+
+// The non-Linux pid-reuse limitation lived only in a source comment, which is why it did not count as
+// an accepted limitation: a user cannot read it. Now that SECURITY.md states it, this binds the
+// sentence to the behaviour, so the disclosure cannot outlive the constraint or disappear before it.
+describe('SECURITY.md states the lock-liveness limitation the code actually has', () => {
+  it('the doc names the /proc dependency, and the classifier still behaves that way', async () => {
+    const { classifyHolder, selfIdentity, realProbe } = await import('../../src/memory/lock-liveness.js');
+    const foreign = { platform: 'darwin', bootId: null, pidNs: null };
+    const base = { ...selfIdentity('a'.repeat(32)), ...foreign };
+    const probe = { ...realProbe, kill0: () => 'alive' as const, startTicksOf: () => null, stateOf: () => null };
+
+    // No recorded start time: unreclaimable, exactly as the doc says.
+    expect(classifyHolder({ ...base, token: 'b'.repeat(32), pid: 4242, startTicks: null }, base, probe))
+      .toBe('alive-unknown');
+    // With one, the SAME rule reclaims — so the doc's "only the measurement is Linux-specific" is true.
+    expect(classifyHolder({ ...base, token: 'b'.repeat(32), pid: 4242, startTicks: '900000' }, base,
+      { ...probe, startTicksOf: () => '900123' })).toBe('dead');
+
+    const sec = doc('SECURITY.md');
+    expect(sec).toMatch(/\/proc/);
+    expect(sec).toMatch(/alive-unknown/);
+    expect(sec).toMatch(/age is deliberately not used/i);
+  });
+});

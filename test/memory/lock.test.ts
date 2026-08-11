@@ -181,3 +181,39 @@ describe('withFileLockAsync (holds across the await)', () => {
     expect(readdirSync(dir).filter((n: string) => n.includes('.lk-'))).toHaveLength(0); // no orphan src tmp
   });
 });
+
+// The timeout message is the ONLY thing an operator gets when acquisition fails, and it used to say:
+// "Verify liveness with: kill -0 <pid>. If (and only if) the holder is truly gone, remove the lock
+// file manually." That is the check that cannot decide the case. kill -0 answers "some process holds
+// this pid", never "the process that took this lock". On a platform with no recorded start time —
+// the exact situation that produces this timeout — a reused pid answers alive, so the instruction
+// hands the operator the same unsafe inference the code refuses to make for itself, and the remedy
+// it recommends is deleting a lock whose holder may still be running.
+describe('timeout guidance does not recommend an inference the code itself refuses', () => {
+  // A probe that reports the pid live but cannot identify it — exactly what a platform with no
+  // /proc gives a waiter, and the only situation in which this message is ever read.
+  const unidentifiable = { kill0: () => 'alive' as const, startTicksOf: () => null, stateOf: () => null };
+  const messageFor = (payload: object): string => {
+    const t = target();
+    writeLockFileForTest(lockPathOf(t), payload);
+    try {
+      withFileLock(t, () => 1, { maxWaitMs: 60, probe: { ...realProbe, ...unidentifiable } });
+      return '';
+    } catch (e) { return (e as Error).message; }
+  };
+
+  it('does not present kill -0 as sufficient', () => {
+    const msg = messageFor({ ...selfIdentity('e'.repeat(32)), pid: 999_999, startTicks: '4242' });
+    expect(msg).toMatch(/timed out/);
+    expect(msg).not.toMatch(/Verify liveness with: kill -0/);
+  });
+
+  it('names pid reuse when the holder recorded no start time, because that is what it might be', () => {
+    // All-null identity fields: what a non-Linux holder records today.
+    const msg = messageFor({
+      ...selfIdentity('f'.repeat(32)), pid: 999_998,
+      startTicks: null, bootId: null, pidNs: null,
+    });
+    expect(msg).toMatch(/reus/i);
+  });
+});

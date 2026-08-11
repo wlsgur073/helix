@@ -48,10 +48,28 @@ export function writeLockFileForTest(lockPath: string, payload: object): void {
   try { linkSync(src, lockPath); } finally { unlinkSync(src); }
 }
 
+/** The only thing an operator sees when acquisition fails, so it must not recommend an inference this
+ *  file refuses to make for itself. It used to say "Verify liveness with: kill -0 <pid>", which is the
+ *  one check that cannot decide the case: kill -0 answers that SOME process holds the pid, never that
+ *  it is the process that took the lock. On a platform that records no start time — the situation
+ *  that produces this timeout — a reused pid answers alive, so the advice handed the operator exactly
+ *  the misclassification that age-based stealing was rejected for, and then told them to delete the
+ *  lock on the strength of it. */
 function timeoutMessage(lockPath: string, holder: LockPayload | null, waitedMs: number): string {
-  const who = holder ? `held by pid ${holder.pid} (started ticks ${holder.startTicks ?? 'unknown'})` : 'holder unreadable (never auto-reclaimed)';
-  return `withFileLock: timed out after ${waitedMs}ms acquiring ${lockPath} — ${who}. ` +
-    `Verify liveness with: kill -0 <pid>. If (and only if) the holder is truly gone, remove the lock file manually.`;
+  const head = `withFileLock: timed out after ${waitedMs}ms acquiring ${lockPath}`;
+  if (holder === null) {
+    return `${head} — holder unreadable, so it is never auto-reclaimed. Inspect ${lockPath} by hand; ` +
+      `a lock file that does not parse was not written by this version.`;
+  }
+  const who = `held by pid ${holder.pid} (recorded start ${holder.startTicks ?? 'NONE — this platform does not expose one'})`;
+  const identify = holder.startTicks === null
+    ? `Because no start time was recorded, a waiter cannot tell the original holder from an unrelated ` +
+      `process that later reused pid ${holder.pid}; kill -0 cannot separate them either. Identify it: ` +
+      `ps -p ${holder.pid} -o pid,lstart,command — and confirm it is a Helix run before acting.`
+    : `The holder classified live on every attempt. Confirm it is the run that took the lock by ` +
+      `comparing its start time against the value above (ps -p ${holder.pid} -o pid,lstart,command).`;
+  return `${head} — ${who}. ${identify} ` +
+    `Removing the lock while its holder is merely SUSPENDED reintroduces the concurrency this lock prevents.`;
 }
 
 interface AcquiredLock { ctx: LockContext; release: () => void }

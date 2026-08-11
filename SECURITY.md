@@ -285,6 +285,16 @@ same one-time path as before; nothing about the key's secrecy changes, only when
   serialized, per-boot reaper gate). It does not defend against an adversary with code execution,
   and it presumes ONE kernel/boot-id domain on a LOCAL filesystem — a ledger reached from two
   kernels (e.g. a path under /mnt/c used by both WSL and native Windows) is out of scope.
+- **On Linux a reclaimed lock is proved dead; elsewhere it is only waited out.** A holder records its
+  pid together with the process start time read from `/proc`, and a waiter reclaims the lock only
+  when that recorded start time differs from the one the pid carries now — positive proof the
+  original process is gone. Platforms without `/proc` (macOS, Windows) expose no start time to this
+  code, so a dead holder whose pid was later reused by an unrelated live process cannot be told apart
+  from the holder itself: it classifies `alive-unknown`, acquisition waits out its full budget, and
+  then fails with guidance rather than stealing the lock. Age is deliberately NOT used as a
+  substitute — it cannot separate a suspended process from a dead one, and that misclassification is
+  what resurrected already-erased plaintext once before. The rule is not Linux-specific; only the
+  measurement is, so this closes when the start time can be read on those platforms.
 - **What erase guarantees:** durable namespace removal by helix's own write paths (compaction
   fsyncs its temp AND the directory; a lock-losing compactor is fenced by orphan-temp sweeps so a
   stale snapshot cannot resurrect erased plaintext). It is NOT media sanitization: freed blocks,
