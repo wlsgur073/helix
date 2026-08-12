@@ -87,6 +87,66 @@ describe('round-trip / tamper / anti-laundering / key-absent', () => {
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
+  // The journal-side counterpart of the tamper test above. deriveState checks both records with the
+  // same two-part condition, but only the ENTRY line was measured: mutating the JOURNAL line's `&&`
+  // to `||` left the whole suite green, while the same mutation on the entry line failed 14 files.
+  // The asymmetry was fixture difficulty, not design — an entry exists in nearly every fixture, a
+  // journal only mid-transaction.
+  //
+  // The entry is left VALID on purpose. `macInvalid` is an aggregate over both records, so corrupting
+  // both would let the entry's failure raise the flag and the journal's acceptance would be
+  // unobservable. The pre-corruption control reading is what attributes the flag to the journal.
+  it('tamper: flip one hex char of the stored JOURNAL mac on disk -> macInvalid, journal suppressed', () => {
+    const home = tmpHome();
+    try {
+      // An entry at epoch 1 plus a pending journal at epoch 2 — the only shape in which the journal
+      // line is exercised with an intact entry beside it.
+      const bytes = Buffer.from('row1\n', 'utf8');
+      advanceWitness(home, '@global', bytes, 'tx-1');
+      const target = Buffer.from('row1\nfence\n', 'utf8');
+      const p = planTransition(home, '@global', 'compaction');
+      openTransition(home, '@global', {
+        kind: 'compaction', epoch: p.epoch, nonce: p.nonce, predecessor: p.predecessor, supersedes: p.supersedes,
+        expected: { byteLength: target.length, prefixHash: sha256Hex(target) },
+        tx: '2026-08-12T00:00:00.000Z',
+      });
+
+      // CONTROL: both records present, both MACs verifying. Without this reading, a macInvalid below
+      // could not be attributed to the journal rather than to the fixture.
+      const before = readScopeWitness(home, '@global');
+      expect(before.macInvalid).toBe(false);
+      expect(before.entry).not.toBeNull();
+      expect(before.journal).not.toBeNull();
+
+      const originalText = readFileSync(witnessPath(home), 'utf8');
+      type MacPair = { scopes: Record<string, { entry: { mac: string }; journal: { mac: string } }> };
+      const raw = JSON.parse(originalText) as MacPair;
+      const mac = raw.scopes['@global']!.journal.mac;
+
+      // FORMAT-VALID corruption: one hex digit for a different hex digit, length preserved.
+      // Buffer.from(s, 'hex') does NOT throw on malformed input — it stops at the first invalid pair
+      // and returns a short buffer, which verifyMac rejects on its length comparison before
+      // timingSafeEqual ever runs. Breaking the format would therefore measure the length check
+      // rather than authentication.
+      expect(mac).toMatch(/^[0-9a-f]{64}$/);
+      const corrupted = (mac[0] === 'a' ? 'b' : 'a') + mac.slice(1);
+      expect(corrupted).toMatch(/^[0-9a-f]{64}$/);
+      expect(corrupted).not.toBe(mac);
+      raw.scopes['@global']!.journal.mac = corrupted;
+      writeFileSync(witnessPath(home), JSON.stringify(raw));
+
+      // Nothing but journal.mac moved: putting the original mac back must restore the whole document.
+      const check = JSON.parse(readFileSync(witnessPath(home), 'utf8')) as MacPair;
+      expect(check.scopes['@global']!.journal.mac).toBe(corrupted);
+      check.scopes['@global']!.journal.mac = mac;
+      expect(JSON.stringify(check)).toBe(JSON.stringify(JSON.parse(originalText)));
+
+      const state = readScopeWitness(home, '@global');
+      expect(state.macInvalid).toBe(true);
+      expect(state.journal).toBeNull();   // the reader's stated contract: an invalid record reads as null
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
   it('structurally-malformed witness.json fail-safes to first-contact — never throws (partial write / corruption)', () => {
     // The hex-flip case above is a WELL-FORMED shape with a wrong MAC. This covers the other class:
     // a witness.json that is structurally broken (unparseable, wrong-typed, missing fields). Each
