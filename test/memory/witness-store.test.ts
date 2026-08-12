@@ -96,6 +96,14 @@ describe('round-trip / tamper / anti-laundering / key-absent', () => {
   // The entry is left VALID on purpose. `macInvalid` is an aggregate over both records, so corrupting
   // both would let the entry's failure raise the flag and the journal's acceptance would be
   // unobservable. The pre-corruption control reading is what attributes the flag to the journal.
+  //
+  // Two things this case deliberately does NOT assert. It does not claim the still-valid entry
+  // survives the journal's tamper: every consumer reads `state.macInvalid ? null : state.entry` and
+  // discards BOTH records, so partial recovery is not a reader contract and pinning it here would
+  // block a wholesale-degrade refactor for no gain. And it does not claim the `&&` is otherwise
+  // unguarded — `tsc` rejects the `||` form today, since `master` narrows to `null` in the right
+  // operand, so the swap survives a vitest run but not a typecheck. That barrier lasts only as long
+  // as `master` is nullable at this point; the case below enforces the check at runtime regardless.
   it('tamper: flip one hex char of the stored JOURNAL mac on disk -> macInvalid, journal suppressed', () => {
     const home = tmpHome();
     try {
@@ -517,9 +525,11 @@ describe('journal never lowers (R1-F2 stale-journal replay / R4-F1 two-part clea
       expect(() => completeTransition(home, '@global', target, 'tx-1'))
         .toThrow(/stale journal.*reached or passed/);
 
+      // Whole objects, not just the epoch: a refusal that rewrote the entry to a different head at
+      // the same epoch would satisfy an epoch-only postcondition while still moving the witness.
       const after = readScopeWitness(home, '@global');
-      expect(after.entry!.epoch).toBe(journal.epoch);           // the witness did not move
-      expect(after.journal).not.toBeNull();                     // the refused journal is untouched
+      expect(after.entry).toEqual(afterComplete.entry);         // the witness did not move at all
+      expect(after.journal).toEqual(journal);                   // the refused journal is intact, not partly applied
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });
