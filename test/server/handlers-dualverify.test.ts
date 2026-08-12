@@ -528,6 +528,16 @@ describe('D1: the egress decision is disclosed on every sent result', () => {
 // own FIXTURE: it hands appendCodexLog an entry with no prompt and finds no prompt in the line.
 // appendCodexLog serialises whatever it is given — the invariant is enforced one layer up, at the
 // call site that chooses which fields to include. This measures it there.
+//
+// CAVEAT: that "one layer up" is actually TWO enforcement points, not one. dual-verify.ts sets
+// promptSent/codexAnswer ONLY on its two `outcome: 'sent'` returns, so both fields are structurally
+// undefined on every other outcome (including 'refused', here); separately, the call site's ternary
+// picks a different object literal (`{ reason: persisted }`) when not sent. Because of the first, a
+// mutation that breaks only the ternary — e.g. dropping its conditional exclusion so prompt/response/
+// reason are all spread unconditionally — still leaves the JSON output byte-identical: JSON.stringify
+// drops undefined-valued keys regardless of which branch supplied them, so prompt/response still
+// vanish here and reason still survives. Measured: that exact mutation leaves every test in this file
+// green. This case cannot discriminate that mutant class.
 describe('codex content log: a refused run persists no payload', () => {
   it('writes reason-only for a blocked run, with no prompt or response', async () => {
     const cfg = structuredClone(DEFAULT_CONFIG) as HelixConfig;

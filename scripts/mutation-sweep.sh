@@ -5,6 +5,23 @@
 # packaging.test.ts is excluded deliberately: it byte-compares a rebuild of bin/ against the
 # committed bundle, so it fails on ANY source edit and would score every mutant "killed", making the
 # whole sweep meaningless. It is also already red for the duration of the pilot freeze.
+#
+# This script's real product is a WORK LIST, not a coverage claim by itself — and that list otherwise
+# lives only in an untracked report, so a fresh clone keeps the tool and loses the findings. The last
+# full run (four-file sweep) surfaced two real, still-open gaps, both in src/memory/witness-store.ts:
+#   1. deriveState (~line 118): the pending-journal MAC check `if (master && verifyMac(scopeKey,
+#      master, raw.journal)) journal = raw.journal; else macInvalid = true;` is written with `&&`.
+#      Flipping it to `||` makes the `master` half alone sufficient, skipping MAC verification of the
+#      journal entirely whenever a master key is present. Nothing in the test tree tampers a journal's
+#      MAC to catch this — the only .mac-adjacent journal values in the suite are hardcoded
+#      placeholders in hand-built state doubles that bypass deriveState altogether.
+#   2. completeTransition (~line 287): the staleness guard `entry.epoch >= journal.epoch` can be
+#      weakened to `>`, which would miss the exact-epoch-equality boundary — a journal whose epoch
+#      exactly matches the current entry's should be refused as stale but would instead be allowed to
+#      complete. The existing "a journal can never lower the witness" test only drives a journal
+#      strictly BEHIND the entry's epoch, never one exactly equal to it, so it never exercises this
+#      boundary.
+# Re-run the sweep before trusting this list is still current.
 set -u
 cd "$(dirname "$0")/.."
 BAK=$(mktemp -d)

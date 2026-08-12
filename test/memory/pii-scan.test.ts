@@ -12,6 +12,23 @@ function rrnWithChecksum(yymmdd: string, first6OfSecond: string): string {
   return `${yymmdd}-${first6OfSecond}${check}`;
 }
 
+// Shared Luhn-valid digit-string builder (used by the card-length and domain-guard describe blocks
+// below, which previously duplicated this loop): appends whichever check digit (0-9) makes `body`
+// Luhn-valid, self-verified at runtime rather than hand-picked.
+function luhnAppendCheckDigit(body: string): string {
+  for (let c = 0; c <= 9; c++) {
+    const candidate = body + String(c);
+    let sum = 0, dbl = false;
+    for (let i = candidate.length - 1; i >= 0; i--) {
+      let d = candidate.charCodeAt(i) - 48;
+      if (dbl) { d *= 2; if (d > 9) d -= 9; }
+      sum += d; dbl = !dbl;
+    }
+    if (sum % 10 === 0) return candidate;
+  }
+  throw new Error(`no Luhn-valid check digit for body "${body}"`);
+}
+
 describe('detectPII', () => {
   it('detects an email as low severity', () => {
     const hits = detectPII('contact kim@example.com please');
@@ -122,26 +139,23 @@ describe('email scanning is linear in the input', () => {
   });
 });
 
-// The card candidate is 13-19 digits, Luhn-validated. Neither end of that window was measured, so a
-// window that had silently narrowed or widened would not have been noticed. Numbers are assembled at
-// runtime from a Luhn-valid seed rather than written as literals, matching this file's existing
-// discipline for RRNs.
+// The card candidate is 13-19 digits, Luhn-validated. Narrowing either end IS measured here: the two
+// accept cases below (13 and 19 digits) fail if either boundary moves inward, at any one of the sites
+// that enforces it. Widening the LOWER bound is a different story: it is enforced at THREE independent
+// sites — the CARD_RE regex quantifier `{13,19}`, the `digits.length >= 13` check at the detectPII call
+// site, and the same length floor inside luhnValid — and the "12 digits" reject case below only turns
+// red when all three move together. Measured: widening the regex alone leaves the suite green (the
+// call site still filters the resulting 12-digit digest out); widening both `>= 13` guards while
+// leaving the regex at `{13,19}` also leaves it green (CARD_RE then never matches a 12-digit run for
+// either downstream guard to see). So a single-site widening of the lower bound is NOT measured by
+// this suite. (The upper bound has no matching above-window case: a 20-digit input would not
+// discriminate either, because the call site's `<= 19` independently caps it regardless of what the
+// regex or luhnValid allow — that case would ship unable to fail.) Numbers are assembled at runtime
+// from a Luhn-valid seed rather than written as literals, matching this file's existing discipline for
+// RRNs.
 describe('card-length window boundaries', () => {
-  // Build a Luhn-valid digit string of exactly `len` digits.
-  const luhnOf = (len: number): string => {
-    const body = '4'.repeat(len - 1);
-    for (let c = 0; c <= 9; c++) {
-      const candidate = body + String(c);
-      let sum = 0, dbl = false;
-      for (let i = candidate.length - 1; i >= 0; i--) {
-        let d = candidate.charCodeAt(i) - 48;
-        if (dbl) { d *= 2; if (d > 9) d -= 9; }
-        sum += d; dbl = !dbl;
-      }
-      if (sum % 10 === 0) return candidate;
-    }
-    throw new Error(`no Luhn-valid check digit for length ${len}`);
-  };
+  // Build a Luhn-valid digit string of exactly `len` digits (all-4s body + Luhn check digit).
+  const luhnOf = (len: number): string => luhnAppendCheckDigit('4'.repeat(len - 1));
 
   it('accepts the shortest card in the window (13 digits)', () => {
     expect(kinds(detectPII(`card ${luhnOf(13)} on file`))).toContain('credit_card');
@@ -166,20 +180,7 @@ describe('card-length window boundaries', () => {
 describe('Luhn domain guard: a card containing digit 9 is still valid', () => {
   // Body carries a literal 9 (not just possibly in the trailing check digit), then solves for
   // whichever trailing digit makes the whole string Luhn-valid.
-  const luhnWithNine = (len: number): string => {
-    const body = '4'.repeat(len - 2) + '9';
-    for (let c = 0; c <= 9; c++) {
-      const candidate = body + String(c);
-      let sum = 0, dbl = false;
-      for (let i = candidate.length - 1; i >= 0; i--) {
-        let d = candidate.charCodeAt(i) - 48;
-        if (dbl) { d *= 2; if (d > 9) d -= 9; }
-        sum += d; dbl = !dbl;
-      }
-      if (sum % 10 === 0) return candidate;
-    }
-    throw new Error(`no Luhn-valid check digit for length ${len} with an embedded 9`);
-  };
+  const luhnWithNine = (len: number): string => luhnAppendCheckDigit('4'.repeat(len - 2) + '9');
 
   it('detects a Luhn-valid 16-digit card that contains a 9 as high severity', () => {
     const card = luhnWithNine(16);
