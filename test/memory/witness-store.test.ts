@@ -468,6 +468,60 @@ describe('journal never lowers (R1-F2 stale-journal replay / R4-F1 two-part clea
       expect(readScopeWitness(home, '@global').journal).not.toBeNull();
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
+
+  // The BOUNDARY sibling of the case above. That one drives the witness strictly PAST the stale
+  // journal; this one stops at equality, which is the half `>=` covers and `>` does not — swapping
+  // `>=` for `>` in completeTransition left the whole suite green.
+  //
+  // What this case is, and what it is not. The equality state is written to disk directly because no
+  // writer in this tree produces it: openTransition refuses a plan that does not advance past the
+  // entry, advanceWitness cannot run at all while a journal is pending (advanceAllowed admits none of
+  // the journal verdicts), and completeTransition advances the entry and clears the slot in one
+  // atomic write. So the guard is pinned here as the SECOND enforcement of an invariant
+  // openTransition establishes first — the enforcement that still runs on the startup-heal path
+  // (MemoryStore.healWitness), where the journal comes off disk and no openTransition ran in the same
+  // process; that caller's own comment names "stale" as an outcome it leaves alone, and this guard is
+  // its only producer. It is NOT a defence against an adversary who can write witness.json: SECURITY
+  // .md puts that file on the trusted side of the boundary and names a coordinated home restore as a
+  // limitation it documents rather than defends.
+  it('refuses a journal whose epoch the witness has exactly REACHED, not only one it has passed', () => {
+    const home = tmpHome();
+    try {
+      const target = Buffer.from('row1\nfence\n', 'utf8');
+      const p = planTransition(home, '@global', 'compaction');
+      const journal = openTransition(home, '@global', {
+        kind: 'compaction', epoch: p.epoch, nonce: p.nonce, predecessor: p.predecessor, supersedes: p.supersedes,
+        expected: { byteLength: target.length, prefixHash: sha256Hex(target) }, tx: 'tx-1',
+      });
+      completeTransition(home, '@global', target, 'tx-1');
+
+      const afterComplete = readScopeWitness(home, '@global');
+      expect(afterComplete.entry!.epoch).toBe(journal.epoch);   // completion sets entry.epoch = journal.epoch
+      expect(afterComplete.journal).toBeNull();
+
+      // Put the journal back beside the entry it just advanced — the module's own signed object,
+      // unmodified, so its MAC verifies and the refusal can only come from the epoch relation.
+      const raw = JSON.parse(readFileSync(witnessPath(home), 'utf8')) as {
+        scopes: Record<string, { journal: unknown }>;
+      };
+      raw.scopes['@global']!.journal = journal;
+      writeFileSync(witnessPath(home), JSON.stringify(raw));
+      const staged = readScopeWitness(home, '@global');
+      expect(staged.macInvalid).toBe(false);                    // both records authentic
+      expect(staged.entry!.epoch).toBe(staged.journal!.epoch);  // EXACTLY reached, not passed
+
+      // The bytes deliberately MATCH the journal's expected head, so completeTransition's byte check
+      // cannot be what refuses this. Weakened to `>`, the epoch check passes, the byte check passes,
+      // and the already-consumed journal is applied a second time. Asserting the message rather than
+      // merely "it threw" is what keeps this from passing on the wrong refusal.
+      expect(() => completeTransition(home, '@global', target, 'tx-1'))
+        .toThrow(/stale journal.*reached or passed/);
+
+      const after = readScopeWitness(home, '@global');
+      expect(after.entry!.epoch).toBe(journal.epoch);           // the witness did not move
+      expect(after.journal).not.toBeNull();                     // the refused journal is untouched
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
 });
 
 describe('orphan sweep', () => {
