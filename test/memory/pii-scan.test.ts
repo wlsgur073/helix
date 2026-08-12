@@ -156,6 +156,39 @@ describe('card-length window boundaries', () => {
   });
 });
 
+// The Luhn domain guard (`if (d < 0 || d > 9) return false;`) mutated to `d >= 9` survived the whole
+// suite: every existing Luhn-valid fixture in this file (`4111 1111 1111 1111`, and every length
+// `luhnOf` above produces for 13-19) happens to land no digit 9 anywhere in it, so a mutation that
+// rejects any card containing a 9 was never triggered. (That mutant is NOT the same as the one
+// recorded at the doubling branch in `src/memory/pii-scan.ts` — that one is unreachable/equivalent by
+// construction; this one is reachable and was a genuine gap.) This constructs a Luhn-valid card that
+// DOES contain a 9, self-verified at runtime rather than hand-picked, to close it.
+describe('Luhn domain guard: a card containing digit 9 is still valid', () => {
+  // Body carries a literal 9 (not just possibly in the trailing check digit), then solves for
+  // whichever trailing digit makes the whole string Luhn-valid.
+  const luhnWithNine = (len: number): string => {
+    const body = '4'.repeat(len - 2) + '9';
+    for (let c = 0; c <= 9; c++) {
+      const candidate = body + String(c);
+      let sum = 0, dbl = false;
+      for (let i = candidate.length - 1; i >= 0; i--) {
+        let d = candidate.charCodeAt(i) - 48;
+        if (dbl) { d *= 2; if (d > 9) d -= 9; }
+        sum += d; dbl = !dbl;
+      }
+      if (sum % 10 === 0) return candidate;
+    }
+    throw new Error(`no Luhn-valid check digit for length ${len} with an embedded 9`);
+  };
+
+  it('detects a Luhn-valid 16-digit card that contains a 9 as high severity', () => {
+    const card = luhnWithNine(16);
+    expect(card).toContain('9'); // guards the fixture itself, not just detectPII's answer
+    const hits = detectPII(`card ${card} on file`);
+    expect(hits.some((h) => h.kind === 'credit_card' && h.severity === 'high')).toBe(true);
+  });
+});
+
 // The RRN gender/century digit (7th digit) is accepted for 1-8. Perturbing that accepted set by one
 // value at EITHER end survived the whole suite: narrowing `gender > 8` to `gender > 7` (upper bound),
 // and separately widening `gender < 1` to `gender < 0` (lower bound, which starts accepting 0). So

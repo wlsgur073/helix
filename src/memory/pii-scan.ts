@@ -46,13 +46,18 @@ function luhnValid(digits: string): boolean {
   let dbl = false;
   for (let i = digits.length - 1; i >= 0; i--) {
     let d = digits.charCodeAt(i) - 48; // '0' === 48
+    // A mutation sweep reported `d > 9` -> `d >= 9` at this domain guard (line 37 in the audited
+    // revision) as a SURVIVOR, bearing "drops every card containing a 9". Confirmed: `d` here is the
+    // raw, undoubled digit, always in [0,9] as this function is actually called (detectPII strips to
+    // digits-only first), so d === 9 is reachable and the mutation really does reject any card
+    // containing a 9. That is a genuine, killable gap, not an equivalent mutant — closed by
+    // `test/memory/pii-scan.test.ts`'s "Luhn domain guard: a card containing digit 9 is still valid".
     if (d < 0 || d > 9) return false;
-    // A mutation sweep reported `d > 9` -> `d >= 9` here as a SURVIVOR and recorded its bearing as
-    // "drops every card containing a 9". That bearing belongs to the domain guard above, not to this
-    // line, and a mutation there dies against any input containing a 9 — so it cannot be the
-    // survivor. Here `d` has just been doubled: d = 2k with k in [0,9], so d is even and d === 9 is
-    // unreachable. The two predicates select the same set and the mutant is EQUIVALENT, which is why
-    // it survives and why no test can kill it. Proved rather than assumed, so it is not re-reported.
+    // `d > 9` recurs here in the doubling branch, and mutating THIS one to `d >= 9` is a separate,
+    // EQUIVALENT mutant, unrelated to the domain-guard survivor above: `d` has just been doubled,
+    // d = 2k with k in [0,9], so d is always even and d === 9 is unreachable at this site. The two
+    // predicates select the same set here, so no test can ever kill this one. If a future sweep
+    // reports it again, this is why — proved, not chased.
     if (dbl) { d *= 2; if (d > 9) d -= 9; }
     sum += d;
     dbl = !dbl;
