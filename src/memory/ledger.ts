@@ -287,30 +287,12 @@ export function readLedgerRaw(path: LedgerPath): { bytes: Buffer; records: Memor
   return { bytes, records, skippedNonBlank };
 }
 
-export interface CompactOptions {
+interface CompactOptionsCommon {
   /** Ids whose CONTENT must be physically erased (right-to-erasure / secrets). Doubles as the
    *  escape hatch for a planted/durable marker (F5): include its canonical id (`integrity_marker` /
    *  `horizon_marker`) to suppress re-minting it on this and every later compaction. Normal
    *  compactions pass an empty set, so the fixpoint behaviour below is unaffected. */
   erasedIds: Set<string>;
-  /**
-   * HMAC-aware compaction. When supplied, genuine SIGNED `verify` records whose target survives
-   * compaction are PRESERVED (so R2/R3 re-elevate them on replay) and forged ones are DROPPED.
-   * Returns true iff the verify is genuinely signed for the ledger being compacted.
-   *
-   * Why this is required: the live projection BAKES each verify's elevated state into the asset
-   * record and then drops the verify event. But the verifying replay (R1) ignores the `state` of
-   * every non-`verify` record and forces Fresh — so a baked elevation would be silently LOST.
-   * Preserving the original signed verify is the only way a genuine elevation survives a rewrite.
-   * Omitted => legacy behaviour (bake state, drop all verifies) is unchanged.
-   */
-  keepValidVerify?: (r: MemoryRecord) => boolean;
-  /** Chokepoint gate: does the resolved key GENUINELY validate this verify (current-key MAC only,
-   *  not the future-version clause)? A verify is dropped as forged ONLY when the key is proven (at
-   *  least one eligible verify validates) AND the ledger is a single keyId lineage — so a wrong/lost/
-   *  aliased nonce, or a genuine competing lineage, can never delete genuine verifies. FAIL-CLOSED:
-   *  when omitted, continuity is treated as UNPROVEN (preserve all), never assumed proven. */
-  provesKey?: (r: MemoryRecord) => boolean;
   /** Injectable durable-fs seam: tests assert the fsync TARGET/ORDER and simulate write failures
    *  (ENOSPC, an unremovable orphan). Production omits it => `realFsOps`. */
   fsOps?: DurableFsOps;
@@ -324,6 +306,50 @@ export interface CompactOptions {
   witness?: { home: string; scopeKey: string; now: () => string; kind?: 'compaction' | 'erase' };
 }
 
+/** HMAC-aware compaction (the production mode): genuine signed verifies whose target survives are
+ *  PRESERVED, forged ones dropped — see keepValidVerify/provesKey. Legacy bake-and-drop (drop ALL
+ *  verifies, keep baked states) is still available but only by NAMING it: `legacyBakeAndDrop: true`.
+ *  A predicate-less call used to select legacy behaviour silently — an API footgun that would
+ *  erase every re-elevatable trust grade on replay (C1.4 residual 2, round-5 registry compare). */
+export type CompactOptions =
+  | (CompactOptionsCommon & {
+      /**
+       * HMAC-aware compaction. When supplied, genuine SIGNED `verify` records whose target survives
+       * compaction are PRESERVED (so R2/R3 re-elevate them on replay) and forged ones are DROPPED.
+       * Returns true iff the verify is genuinely signed for the ledger being compacted.
+       *
+       * Why this is required: the live projection BAKES each verify's elevated state into the asset
+       * record and then drops the verify event. But the verifying replay (R1) ignores the `state` of
+       * every non-`verify` record and forces Fresh — so a baked elevation would be silently LOST.
+       * Preserving the original signed verify is the only way a genuine elevation survives a rewrite.
+       *
+       * REQUIRED in this arm — omitting it is a compile error, not a mode switch. It used to be
+       * optional and its absence silently SELECTED legacy bake-and-drop; that footgun is what the
+       * discriminated union closes (C1.4 residual 2). Legacy bake-and-drop is now reachable only by
+       * naming it on the other variant (`legacyBakeAndDrop: true`). A JS caller that casts past the
+       * union and omits this field does NOT fall back to legacy either — planCompaction's runtime
+       * guard throws. Both facts are pinned in the "legacy compaction is an explicit opt-in" suite.
+       */
+      keepValidVerify: (r: MemoryRecord) => boolean;
+      /** Chokepoint gate: does the resolved key GENUINELY validate this verify (current-key MAC only,
+       *  not the future-version clause)? A verify is dropped as forged ONLY when the key is proven (at
+       *  least one eligible verify validates) AND the ledger is a single keyId lineage — so a wrong/lost/
+       *  aliased nonce, or a genuine competing lineage, can never delete genuine verifies. FAIL-CLOSED:
+       *  when omitted, continuity is treated as UNPROVEN (preserve all), never assumed proven.
+       *  Keeps its FAIL-CLOSED runtime semantics for JS callers that evade the type system; see the
+       *  mixed-lineage test. */
+      provesKey: (r: MemoryRecord) => boolean;
+      legacyBakeAndDrop?: never;
+    })
+  | (CompactOptionsCommon & {
+      /** Explicit opt-in to legacy bake-and-drop: bake elevated states into the kept assets and
+       *  drop ALL verify records. On a verifying replay the baked states clamp to Fresh, so this
+       *  mode forfeits re-elevation — say so on purpose or pass the predicates. */
+      legacyBakeAndDrop: true;
+      keepValidVerify?: never;
+      provesKey?: never;
+    });
+
 /** Keep-set planner: the exact set of records compactLedger writes for `records` + `opts`.
  *  Shared by compactLedger (which writes it) AND the auto-compaction eligibility check (which counts
  *  it), so the two can never disagree — post-compaction reclaimable is exactly zero. Does NO IO and
@@ -332,6 +358,30 @@ export interface CompactOptions {
  *  randomUUID-stamped markers, this function IS pure: two calls over the same `records`/`opts`
  *  produce byte-identical output, and callers may use the kept-set for identity, not just counts. */
 export function planCompaction(records: MemoryRecord[], opts: CompactOptions): { kept: MemoryRecord[]; droppedForgedVerifies: number } {
+  // JS callers evade the union — refuse the silent-legacy shape at runtime as well. NOTE: this
+  // guards only the shape carrying no USABLE predicate. keepValidVerify WITHOUT provesKey stays legal
+  // at runtime and keeps its round-4 FAIL-CLOSED meaning (continuity unproven => preserve all);
+  // the mixed-lineage suite pins that branch via an explicit cast.
+  //
+  // The test is `typeof === 'function'`, and every other site below asks the SAME question, because
+  // three sites disagreeing is a reachable worst case rather than a style nit: this guard once tested
+  // `=== undefined`, `hmacAware` tested `!== undefined`, and the verify-preserve loop tested plain
+  // truthiness. A JS caller passing a FALSY NON-UNDEFINED value (null / false / 0) therefore sailed
+  // past the guard, counted as HMAC-aware (so every kept asset was reset to Fresh, discarding the
+  // baked states) and then failed the truthiness test (so every verify row was dropped) — losing the
+  // elevation twice over, by both mechanisms at once, which neither mode does on its own. MEASURED
+  // against the pre-fix code (2026-08-12), one live fact + one eligible verify, `keepValidVerify: null`:
+  // returned WITHOUT error, kept `m_1` reset to Fresh and the verify row gone — both halves, silently.
+  // A TRUTHY non-callable (e.g. a string) instead threw `TypeError: opts.keepValidVerify is not a
+  // function` partway through, i.e. after that Fresh reset had already been applied. Asking one
+  // question makes both unreachable: neither value is a function, so both throw here, before any
+  // rewrite work begins.
+  if (typeof opts.keepValidVerify !== 'function' && (opts as { legacyBakeAndDrop?: boolean }).legacyBakeAndDrop !== true) {
+    throw new Error(
+      'planCompaction/compactLedger: a predicate-less compaction silently drops all verify records — '
+      + 'pass keepValidVerify + provesKey, or opt in explicitly with legacyBakeAndDrop: true',
+    );
+  }
   // The live projection already excludes superseded/invalidated/erased targets and applies
   // verify states, so materializing it yields the canonical current facts.
   const live = buildProjection(records);
@@ -339,7 +389,9 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   // clamps non-verify state to Fresh anyway, so persisting a baked elevation here is misleading —
   // the re-kept signed verify (below) is the SOLE source of trust on replay. Legacy mode (no
   // keepValidVerify) must NOT reset, since it drops verifies and the baked state is all that's left.
-  const hmacAware = opts.keepValidVerify !== undefined;
+  // Same `typeof === 'function'` question as the guard above and as the verify-preserve loop below —
+  // this single flag is what those two sites now share, so mode selection cannot disagree with itself.
+  const hmacAware = typeof opts.keepValidVerify === 'function';
   // Duplicate-fact-id tamper evidence is PHYSICAL (verified-projection.forgedFactIds): it is detected
   // by two DIFFERING rows for one id co-existing in the file, not by a durable flag. `live` holds ONE
   // row per id, so collapsing a forged id here does not merely hide the alarm, it destroys it: the
@@ -398,7 +450,11 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   // drop forged ones. A verify whose target was superseded/erased is naturally excluded — its
   // target is no longer in `live`.
   let droppedForgedVerifies = 0;
-  if (opts.keepValidVerify) {
+  // `hmacAware`, not a fresh truthiness test on the field: this branch and the Fresh-reset above must
+  // agree on what mode we are in, or a caller can get both halves of the wrong answer (see the guard).
+  // The call below still narrows without a `!` because TS infers a type predicate for a const boolean
+  // that tests `typeof`, so the shared flag costs no type-safety to route through.
+  if (hmacAware) {
     const eligible = records.filter((r) => r.type === 'verify' && r.supersedes && live.has(r.supersedes));
     // Nonce-continuity chokepoint (round-4 mixed-lineage hardening, Codex compare). Compaction may DROP
     // a verify as "forged" ONLY when the resolved key proves a SINGLE lineage owns this ledger — BOTH

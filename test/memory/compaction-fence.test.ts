@@ -11,7 +11,7 @@ import type { MemoryRecord } from '../../src/types.js';
 
 const rec = (id: string, content = 'c'): MemoryRecord => ({ id, tx: '2026-01-01T00:00:00.000Z', validFrom: '2026-01-01T00:00:00.000Z', validTo: null, type: 'assert', state: 'Fresh', content, provenance: { source: 'user', sessionId: 's' }, supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal' });
 const seed = (f: string, ...rs: MemoryRecord[]): void => writeFileSync(f, rs.map((r) => JSON.stringify(r) + '\n').join(''));
-const noKeep = { keepValidVerify: () => false } as const;
+const noKeep = { keepValidVerify: () => false, provesKey: () => false } as const;
 
 let fenceWorker: string;
 beforeAll(async () => {

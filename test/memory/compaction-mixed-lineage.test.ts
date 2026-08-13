@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
-import { planCompaction, parseLedger } from '../../src/memory/ledger.js';
+import { planCompaction, parseLedger, type CompactOptions } from '../../src/memory/ledger.js';
 import type { MemoryRecord } from '../../src/types.js';
 
 // Round-4 (Codex compare) blocker: a MIXED-KEY ledger defeats the existential `keyProven` chokepoint.
@@ -67,8 +67,10 @@ describe('compaction: mixed-lineage never deletes a genuine cross-lineage verify
     const target = rec({ id: 'm_1', type: 'assert', content: 'fact' });
     const vX = rec({ id: 'vX', type: 'verify', state: 'Verified', supersedes: 'm_1', keyId: 'a'.repeat(64) });
     const keepValidVerify = () => false; // would drop everything it is consulted on
-    // NO provesKey passed: continuity is unproven, so compaction must NOT delete
-    const { kept, droppedForgedVerifies } = planCompaction([target, vX], { erasedIds: new Set(), keepValidVerify });
+    // Deliberately absent provesKey: this pins the runtime FAIL-CLOSED branch (continuity
+    // unproven => preserve all) for JS callers the CompactOptions union cannot reach.
+    const { kept, droppedForgedVerifies } = planCompaction([target, vX],
+      { erasedIds: new Set(), keepValidVerify } as unknown as CompactOptions);
     expect(kept.some((r) => r.id === 'vX')).toBe(true);
     expect(droppedForgedVerifies).toBe(0);
   });

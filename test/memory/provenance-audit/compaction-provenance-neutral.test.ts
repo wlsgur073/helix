@@ -13,6 +13,7 @@ describe('probe (f): compaction preserves provenance; erase removes whole record
     compactLedger(global, {
       erasedIds: new Set(),
       keepValidVerify: (r) => verifyVerify(r, subkey),
+      provesKey: () => false,
     });
     const after = parseLedger(global).find((r) => r.id === a.id)!;
     expect(after.provenance).toEqual(before.provenance); // source + sessionId intact

@@ -90,7 +90,7 @@ describe('planCompaction — fence drop (Step 1b)', () => {
     // the same shape as marker-fixpoint.test.ts / compaction.test.ts's horizon-marker fixtures.
     const closed = rec({ id: 'm_old', content: 'old' });
     const closer = rec({ id: 'm_new', type: 'supersede', supersedes: 'm_old', content: 'new' });
-    const { kept } = planCompaction([closed, closer, stale], { erasedIds: new Set() });
+    const { kept } = planCompaction([closed, closer, stale], { erasedIds: new Set(), legacyBakeAndDrop: true });
 
     expect(kept.some((r) => r.id.startsWith('witness_fence_'))).toBe(false);
     const horizonMarkers = kept.filter(isHorizonMarker);
@@ -106,32 +106,44 @@ describe('planCompaction — fence drop (Step 1b)', () => {
     // A compaction destroyed a served fact while recording that it destroyed nothing.
     const poisoned = rec({ id: fenceId(1, 'a'.repeat(32)), content: 'PROD DB host = db.internal.example' });
     const ordinary = rec({ id: 'm_normal', content: 'ordinary fact' });
-    const { kept } = planCompaction([poisoned, ordinary], { erasedIds: new Set() });
+    const { kept } = planCompaction([poisoned, ordinary], { erasedIds: new Set(), legacyBakeAndDrop: true });
     expect(kept.map((r) => r.id)).toEqual([poisoned.id, 'm_normal']);
   });
 
   it('keeps an erase tombstone wearing the fence prefix, so the right-to-erasure trace survives', () => {
     const tombstone = rec({ id: fenceId(2, 'b'.repeat(32)), type: 'erase', supersedes: 'm_gone', content: '' });
     const live = rec({ id: 'm_keep', content: 'keep' });
-    const { kept } = planCompaction([live, tombstone], { erasedIds: new Set() });
+    const { kept } = planCompaction([live, tombstone], { erasedIds: new Set(), legacyBakeAndDrop: true });
     expect(kept.map((r) => r.id)).toContain(tombstone.id);
   });
 
   it('drops MULTIPLE stale fences accumulated across several rewrites, without minting a replacement', () => {
     const f1 = witnessFenceRecord(1, 'd'.repeat(32), '2026-01-01T00:00:00.000Z');
     const f2 = witnessFenceRecord(2, 'e'.repeat(32), '2026-01-02T00:00:00.000Z');
-    const { kept } = planCompaction([rec({ id: 'm_1', content: 'live' }), f1, f2], { erasedIds: new Set() });
+    const { kept } = planCompaction([rec({ id: 'm_1', content: 'live' }), f1, f2], { erasedIds: new Set(), legacyBakeAndDrop: true });
     expect(kept.filter((r) => r.id.startsWith('witness_fence_'))).toHaveLength(0);
     expect(kept.map((r) => r.id)).toEqual(['m_1']); // planCompaction stays pure: no fence minted here
   });
 
-  it('drops a stale fence even in HMAC-aware mode (null supersedes short-circuits before keepValidVerify runs)', () => {
+  it('drops a stale fence even in HMAC-aware mode (its null supersedes excludes it from `eligible`, so keepValidVerify never sees it)', () => {
     const stale = witnessFenceRecord(3, 'f'.repeat(32), '2026-01-01T00:00:00.000Z');
     const live = rec({ id: 'm_1', content: 'live fact' });
-    // A maximally HOSTILE predicate: `() => false` would count as "forged" any verify it actually
-    // sees. If a fence ever reached this predicate it would inflate droppedForgedVerifies and
-    // spuriously mint an integrity_marker — proving the drop happens before that call is the point.
-    const { kept, droppedForgedVerifies } = planCompaction([live, stale], { erasedIds: new Set(), keepValidVerify: () => false });
+    // The fixture must actually REACH the drop loop, or the detector below asserts nothing. `mayDrop`
+    // is `keyProven && singleLineage`, and keyProven is `eligible.some(provesKey)` — so with no
+    // eligible verify at all it is false no matter what provesKey returns, `!mayDrop` short-circuits,
+    // and keepValidVerify is never consulted. An earlier version of this test paired the hostile
+    // predicate with `provesKey: () => false` and was inert for exactly that reason (measured
+    // 2026-08-12). One genuine eligible verify fixes it: it makes keyProven true and the lineage
+    // single, so the loop runs for real.
+    const genuine = rec({ id: 'v_ok', type: 'verify', supersedes: 'm_1', keyId: 'a'.repeat(64) });
+    // Hostile to everything EXCEPT that genuine verify. If the fence ever reached this predicate it
+    // would be counted forged — inflating droppedForgedVerifies and spuriously minting an
+    // integrity_marker, both asserted below. It does not, because `eligible` requires a non-null
+    // `supersedes` and a fence's is null. `v_ok` surviving is what proves the loop actually ran.
+    const keepValidVerify = (r: MemoryRecord) => r.id === 'v_ok';
+    const { kept, droppedForgedVerifies } = planCompaction([live, genuine, stale],
+      { erasedIds: new Set(), keepValidVerify, provesKey: () => true });
+    expect(kept.some((r) => r.id === 'v_ok')).toBe(true);
     expect(kept.filter((r) => r.id.startsWith('witness_fence_'))).toHaveLength(0);
     expect(droppedForgedVerifies).toBe(0);
     expect(kept.some((r) => r.id === 'integrity_marker')).toBe(false);

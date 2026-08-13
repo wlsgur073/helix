@@ -108,6 +108,7 @@ describe('Task 6 — witnessed rewrites', () => {
         erasedIds: new Set(),
         witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:01:00.000Z', kind: 'compaction' },
         fsOps: faultyFs,
+        legacyBakeAndDrop: true,
       })).toThrow(/injected rename failure/);
 
       expect(readLedgerBytes(ledger).equals(oldBytes)).toBe(true);            // ledger untouched
@@ -118,6 +119,7 @@ describe('Task 6 — witnessed rewrites', () => {
       compactLedger(ledger, {
         erasedIds: new Set(),
         witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:02:00.000Z', kind: 'compaction' },
+        legacyBakeAndDrop: true,
       });
       expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('in-sync');
       expect(readScopeWitness(home, '@global').journal).toBeNull();
@@ -135,7 +137,7 @@ describe('Task 6 — witnessed rewrites', () => {
       // Crash window A staged the honest way: journal a transition whose target bytes were never
       // written. The scope is 'transition-interrupted' — the alarm that says a rewrite MAY have
       // landed and been rolled back, which no after-the-fact reader can rule out.
-      const { kept } = planCompaction(parseLedger(ledger), { erasedIds: new Set() });
+      const { kept } = planCompaction(parseLedger(ledger), { erasedIds: new Set(), legacyBakeAndDrop: true });
       const plan0 = planTransition(home, '@global', 'compaction');
       const fence0 = witnessFenceRecord(plan0.epoch, plan0.nonce, '2026-07-18T00:01:00.000Z');
       const neverWritten = kept.concat(fence0).map((r) => JSON.stringify(r) + '\n').join('');
@@ -159,6 +161,7 @@ describe('Task 6 — witnessed rewrites', () => {
         erasedIds: new Set(),
         witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:02:00.000Z', kind: 'compaction' },
         fsOps: faultyFs,
+        legacyBakeAndDrop: true,
       })).toThrow(/injected rename failure/);
 
       expect(readLedgerBytes(ledger).equals(oldBytes)).toBe(true);              // nothing landed
@@ -169,6 +172,7 @@ describe('Task 6 — witnessed rewrites', () => {
       compactLedger(ledger, {
         erasedIds: new Set(),
         witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:03:00.000Z', kind: 'compaction' },
+        legacyBakeAndDrop: true,
       });
       expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('in-sync');
     } finally { rmSync(home, { recursive: true, force: true }); }
@@ -193,6 +197,7 @@ describe('Task 6 — witnessed rewrites', () => {
         erasedIds: new Set([a.id]),
         witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:01:00.000Z', kind: 'erase' },
         fsOps: faultyFs,
+        legacyBakeAndDrop: true,
       })).toThrow(/injected dir fsync failure/);
 
       expect(readScopeWitness(home, '@global').journal).not.toBeNull();          // NOT retracted
@@ -215,7 +220,7 @@ describe('Task 6 — witnessed rewrites', () => {
 
       // Simulate a crash AFTER the rename landed the new bytes but BEFORE completeTransition — plan +
       // open the transition, write the exact rewrite bytes to the ledger ourselves, and stop.
-      const { kept } = planCompaction(parseLedger(ledger), { erasedIds: new Set() });
+      const { kept } = planCompaction(parseLedger(ledger), { erasedIds: new Set(), legacyBakeAndDrop: true });
       const plan = planTransition(home, '@global', 'compaction');
       const fence = witnessFenceRecord(plan.epoch, plan.nonce, '2026-07-18T00:01:00.000Z');
       const finalText = kept.concat(fence).map((r) => JSON.stringify(r) + '\n').join('');
@@ -292,7 +297,7 @@ describe('Task 6 — witnessed rewrites', () => {
       store.commit({ content: 'bravo fact', source: 'user' });
 
       // Case A: a pending transition-heal (crash window B state) -> healWitness completes it.
-      const { kept } = planCompaction(parseLedger(ledger), { erasedIds: new Set() });
+      const { kept } = planCompaction(parseLedger(ledger), { erasedIds: new Set(), legacyBakeAndDrop: true });
       const plan = planTransition(home, '@global', 'compaction');
       const fence = witnessFenceRecord(plan.epoch, plan.nonce, '2026-07-18T00:01:00.000Z');
       const finalText = kept.concat(fence).map((r) => JSON.stringify(r) + '\n').join('');

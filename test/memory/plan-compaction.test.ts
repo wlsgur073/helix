@@ -10,9 +10,9 @@ function assert(id: string): MemoryRecord {
 function supersede(id: string, target: string): MemoryRecord { return { ...assert(id), type: 'supersede', supersedes: target }; }
 
 describe('planCompaction', () => {
-  it('drops a superseded fact and keeps the replacement (no keepValidVerify => legacy)', () => {
+  it('drops a superseded fact and keeps the replacement (explicit legacyBakeAndDrop mode)', () => {
     const records = [assert('a'), supersede('b', 'a')];
-    const { kept } = planCompaction(records, { erasedIds: new Set() });
+    const { kept } = planCompaction(records, { erasedIds: new Set(), legacyBakeAndDrop: true });
     // 'a' superseded away, 'b' the live replacement. Dropping the closed 'a' row also emits ONE
     // content-free horizon marker (spec B, locked by compaction.test.ts:162) — an audit artifact,
     // not a fact — so filter it out to assert the surviving fact set.
@@ -21,7 +21,7 @@ describe('planCompaction', () => {
 
   it('a LIVE fact whose id merely starts with witness_fence_ survives compaction (fence-prefix finding)', () => {
     const records = [assert('witness_fence_trap')];
-    const { kept } = planCompaction(records, { erasedIds: new Set() });
+    const { kept } = planCompaction(records, { erasedIds: new Set(), legacyBakeAndDrop: true });
     expect(kept.map((r) => r.id)).toContain('witness_fence_trap');
   });
 

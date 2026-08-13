@@ -60,6 +60,7 @@ describe('anti-laundering — a witnessed rewrite never advances the witness ove
         compactLedger(ledger, {
           erasedIds: new Set(),
           witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:05:00.000Z', kind: 'compaction' },
+          legacyBakeAndDrop: true,
         });
       } catch (e) { caught = e; }
       expect(caught).toBeInstanceOf(WitnessBlockedError);
@@ -97,7 +98,7 @@ describe('anti-laundering — a witnessed rewrite never advances the witness ove
       expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('mismatch');
       let caught: unknown;
       try {
-        compactLedger(ledger, { erasedIds: new Set(), witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:05:00.000Z', kind: 'erase' } });
+        compactLedger(ledger, { erasedIds: new Set(), witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:05:00.000Z', kind: 'erase' }, legacyBakeAndDrop: true });
       } catch (e) { caught = e; }
       expect(caught).toBeInstanceOf(WitnessBlockedError);
       expect((caught as WitnessBlockedError).op).toBe('permanent-erase');
@@ -200,6 +201,7 @@ describe('anti-laundering — a witnessed rewrite never advances the witness ove
       compactLedger(ledger, {
         erasedIds: new Set(),
         witness: { home, scopeKey: '@global', now: () => '2026-07-18T00:06:00.000Z', kind: 'compaction' },
+        legacyBakeAndDrop: true,
       });
       expect(readLedgerWitnessed(ledger, home).verdict.kind).toBe('in-sync');
       const after = readScopeWitness(home, '@global');

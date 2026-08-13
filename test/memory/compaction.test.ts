@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, existsSync, readdirSync, appendFileSync, mkdirSync, writeFileSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { appendRecord, parseLedger, compactLedger, isHorizonMarker, landedCompactionStats } from '../../src/memory/ledger.js';
+import {
+  appendRecord, parseLedger, compactLedger, planCompaction, isHorizonMarker, landedCompactionStats,
+  type CompactOptions,
+} from '../../src/memory/ledger.js';
 import { buildHistory } from '../../src/memory/history.js';
 import { buildProjection } from '../../src/memory/projection.js';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -31,6 +34,47 @@ function tmpStore() {
   return { store, ledger, home };
 }
 
+describe('legacy compaction is an explicit opt-in (C1.4 residual 2)', () => {
+  it('a predicate-less call without the legacy marker throws instead of silently dropping verifies', () => {
+    expect(() => planCompaction([], { erasedIds: new Set() } as unknown as CompactOptions))
+      .toThrow(/legacyBakeAndDrop/);
+  });
+  it('the options type refuses a predicate-less object at compile time', () => {
+    // @ts-expect-error — neither predicates nor the explicit legacy marker: must not compile
+    const bad: CompactOptions = { erasedIds: new Set<string>() };
+    void bad;
+  });
+
+  // A FALSY NON-UNDEFINED keepValidVerify used to sail past the guard (`=== undefined`) and then land
+  // in the worst state in the option space, because two later sites asked the question differently:
+  // `hmacAware` (`!== undefined`) counted it as HMAC-aware and reset every kept asset to Fresh,
+  // discarding the baked states, while the verify-preserve loop's truthiness test skipped entirely and
+  // dropped every verify row. Both mechanisms for losing an elevation firing at once — worse than
+  // either mode alone. MEASURED against the pre-fix code (2026-08-12) with one live fact and one
+  // eligible verify and `keepValidVerify: null`: it returned with NO error, the fact kept at Fresh and
+  // the verify row gone. All three sites now ask `typeof === 'function'`, so the value cannot get in.
+  // Labelled with String(), not JSON.stringify(): the latter renders NaN as "null" and would give two
+  // of these cases the same test name.
+  for (const bogus of [null, false, 0, '', Number.NaN]) {
+    it(`a falsy non-undefined keepValidVerify (${String(bogus)}) throws instead of selecting the worst mode`, () => {
+      expect(() => planCompaction([], { erasedIds: new Set(), keepValidVerify: bogus } as unknown as CompactOptions))
+        .toThrow(/legacyBakeAndDrop/);
+    });
+  }
+
+  it('a NON-CALLABLE truthy keepValidVerify is refused at the guard, not deeper in', () => {
+    // Truthiness was the wrong question in BOTH directions: it admitted values that are not callable at
+    // all. Under the old `=== undefined` guard such a value got through, and what happened next depended
+    // on the ledger — measured on this fixture (an empty record list, so no eligible verify ever reaches
+    // the predicate) NOTHING threw; the call simply returned having silently selected HMAC-aware mode.
+    // A ledger that does reach the predicate would instead throw a TypeError partway through, after the
+    // Fresh reset had already been applied. Refusing at the entry guard collapses both outcomes into one
+    // loud failure and keeps the rewrite all-or-nothing.
+    expect(() => planCompaction([], { erasedIds: new Set(), keepValidVerify: 'yes' } as unknown as CompactOptions))
+      .toThrow(/legacyBakeAndDrop/);
+  });
+});
+
 describe('compactLedger', () => {
   it('drops the erased item from the live set but keeps a content-free tombstone', () => {
     const p = tmpLedger();
@@ -38,7 +82,7 @@ describe('compactLedger', () => {
     appendRecord(p, rec({ id: 'secret', content: 'PASSWORD', classification: 'personal' }));
     appendRecord(p, rec({ id: 'e_1', type: 'erase', supersedes: 'secret', content: '' }));
 
-    compactLedger(p, { erasedIds: new Set(['secret']) });
+    compactLedger(p, { erasedIds: new Set(['secret']), legacyBakeAndDrop: true });
 
     const after = parseLedger(p);
     expect(after.find((r) => r.id === 'm_1')?.content).toBe('keep me'); // unaffected fact kept
@@ -54,7 +98,7 @@ describe('compactLedger', () => {
     appendRecord(p, rec({ id: 'm_1', content: 'old' }));
     appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
 
-    compactLedger(p, { erasedIds: new Set() });
+    compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true });
 
     const ids = parseLedger(p).map((r) => r.id);
     expect(ids).not.toContain('m_1');
@@ -64,7 +108,7 @@ describe('compactLedger', () => {
   it('leaves no temp file behind (atomic rename)', () => {
     const p = tmpLedger();
     appendRecord(p, rec({ id: 'm_1' }));
-    compactLedger(p, { erasedIds: new Set() });
+    compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true });
     const files = readdirSync(dirname(p));
     expect(files.filter((f) => f.endsWith('.tmp'))).toHaveLength(0);
     expect(existsSync(p)).toBe(true);
@@ -82,7 +126,7 @@ describe('compactLedger', () => {
     const rowsBefore = parseLedger(p).length;
     const bytesBefore = statSync(p).size;
 
-    const stats = compactLedger(p, { erasedIds: new Set() });
+    const stats = compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true });
 
     const rowsAfter = parseLedger(p).length;
     const bytesAfter = statSync(p).size;
@@ -101,7 +145,7 @@ describe('compactLedger', () => {
     appendRecord(p, rec({ id: 'e_1', type: 'erase', supersedes: 'm_1', content: '' }));  // closes it
     const bytesBefore = statSync(p).size;
 
-    const stats = compactLedger(p, { erasedIds: new Set() });
+    const stats = compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true });
 
     const bytesAfter = statSync(p).size;
     // Kept: the erase tombstone + a freshly minted horizon marker (m_1's assert row is now closed).
@@ -136,7 +180,7 @@ describe('compactLedger — a failure AFTER the rename lands still reports the R
 
     let caught: unknown = null;
     try {
-      compactLedger(p, { erasedIds: new Set(), fsOps: faultyFs });
+      compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true, fsOps: faultyFs });
     } catch (e) { caught = e; }
 
     expect(caught).toBeInstanceOf(Error);
@@ -167,7 +211,7 @@ describe('compactLedger — a failure AFTER the rename lands still reports the R
     const faultyFs: DurableFsOps = { ...realFsOps, renameSync: () => { throw new Error('injected rename failure (pre-landing)'); } };
     let caught: unknown = null;
     try {
-      compactLedger(p, { erasedIds: new Set(), fsOps: faultyFs });
+      compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true, fsOps: faultyFs });
     } catch (e) { caught = e; }
 
     expect(caught).toBeInstanceOf(Error);
@@ -192,7 +236,7 @@ describe('compactLedger — a failure AFTER the rename lands still reports the R
 
     let caught: unknown = null;
     try {
-      compactLedger(p, { erasedIds: new Set(), fsOps: faultyFs });
+      compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true, fsOps: faultyFs });
     } catch (e) { caught = e; }
 
     expect(caught).toBe(frozen);                                              // the SAME object, not a TypeError
@@ -216,7 +260,7 @@ describe('compactLedger — a failure AFTER the rename lands still reports the R
     appendRecord(landedLedger, rec({ id: 'm_4', type: 'supersede', supersedes: 'm_3', content: 'newer' }));
     const faultyFsLanded: DurableFsOps = { ...realFsOps, fsyncDir: () => { throw shared; } };
     let caught1: unknown = null;
-    try { compactLedger(landedLedger, { erasedIds: new Set(), fsOps: faultyFsLanded }); } catch (e) { caught1 = e; }
+    try { compactLedger(landedLedger, { erasedIds: new Set(), legacyBakeAndDrop: true, fsOps: faultyFsLanded }); } catch (e) { caught1 = e; }
     expect(caught1).toBe(shared);
     expect(landedCompactionStats(shared)).toBeDefined(); // sanity: the first call really did attach
 
@@ -226,7 +270,7 @@ describe('compactLedger — a failure AFTER the rename lands still reports the R
     appendRecord(untouchedLedger, rec({ id: 'x_1', content: 'unrelated fact' }));
     const faultyFsPre: DurableFsOps = { ...realFsOps, renameSync: () => { throw shared; } };
     let caught2: unknown = null;
-    try { compactLedger(untouchedLedger, { erasedIds: new Set(), fsOps: faultyFsPre }); } catch (e) { caught2 = e; }
+    try { compactLedger(untouchedLedger, { erasedIds: new Set(), legacyBakeAndDrop: true, fsOps: faultyFsPre }); } catch (e) { caught2 = e; }
     expect(caught2).toBe(shared);
     expect(landedCompactionStats(shared)).toBeUndefined(); // must NOT still report call 1's stats
   });
@@ -256,6 +300,7 @@ describe('compactLedger — a failure AFTER the rename lands still reports the R
         erasedIds: new Set([c.id, d.id]), // 2 dropped so the net survives the fence row's own drop-cost
         witness: { home, scopeKey: '@global', now: () => '2026-06-09T00:00:00.000Z', kind: 'erase' },
         fsOps: sabotageFs,
+        legacyBakeAndDrop: true,
       });
     } catch (e) { caught = e; }
 
@@ -379,7 +424,7 @@ describe('compactLedger — horizon marker (spec B)', () => {
     const p = tmpLedger();
     appendRecord(p, rec({ id: 'm_1', content: 'old' }));
     appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
-    compactLedger(p, { erasedIds: new Set() });
+    compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true });
     expect(parseLedger(p).filter(isHorizonMarker)).toHaveLength(1);
   });
 
@@ -387,7 +432,7 @@ describe('compactLedger — horizon marker (spec B)', () => {
     const p = tmpLedger();
     appendRecord(p, rec({ id: 'm_1', content: 'fact' }));
     appendRecord(p, rec({ id: 'inv_1', type: 'invalidate', supersedes: 'm_1', content: '' }));
-    compactLedger(p, { erasedIds: new Set() });
+    compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true });
     expect(parseLedger(p).filter(isHorizonMarker)).toHaveLength(1);
   });
 
@@ -395,14 +440,14 @@ describe('compactLedger — horizon marker (spec B)', () => {
     const p = tmpLedger();
     appendRecord(p, rec({ id: 'm_1', content: 'fact' }));
     appendRecord(p, rec({ id: 'e_1', type: 'erase', supersedes: 'm_1', content: '' }));
-    compactLedger(p, { erasedIds: new Set(['m_1']) });
+    compactLedger(p, { erasedIds: new Set(['m_1']), legacyBakeAndDrop: true });
     expect(parseLedger(p).filter(isHorizonMarker)).toHaveLength(1);
   });
 
   it('emits NO horizon marker when nothing closed is dropped (all-live)', () => {
     const p = tmpLedger();
     appendRecord(p, rec({ id: 'm_1', content: 'only live fact' }));
-    compactLedger(p, { erasedIds: new Set() });
+    compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true });
     expect(parseLedger(p).filter(isHorizonMarker)).toHaveLength(0);
   });
 
@@ -410,7 +455,7 @@ describe('compactLedger — horizon marker (spec B)', () => {
     const p = tmpLedger();
     appendRecord(p, rec({ id: 'm_1', content: 'old' }));
     appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
-    compactLedger(p, { erasedIds: new Set() });
+    compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true });
     expect(buildHistory(parseLedger(p)).truncated).toBe(true);
   });
 
@@ -418,7 +463,7 @@ describe('compactLedger — horizon marker (spec B)', () => {
     const p = tmpLedger();
     appendRecord(p, rec({ id: 'm_1', content: 'old' }));
     appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
-    compactLedger(p, { erasedIds: new Set() });
+    compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true });
     const recs = parseLedger(p);
     const marker = recs.find(isHorizonMarker)!;
     expect(buildProjection(recs).has(marker.id)).toBe(false);
@@ -428,9 +473,9 @@ describe('compactLedger — horizon marker (spec B)', () => {
     const p = tmpLedger();
     appendRecord(p, rec({ id: 'm_1', content: 'old' }));
     appendRecord(p, rec({ id: 'm_2', type: 'supersede', supersedes: 'm_1', content: 'new' }));
-    compactLedger(p, { erasedIds: new Set() });            // drops m_1 -> emits one marker
+    compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true });            // drops m_1 -> emits one marker
     expect(parseLedger(p).filter(isHorizonMarker)).toHaveLength(1);
-    compactLedger(p, { erasedIds: new Set() });            // all-live now: must PRESERVE the marker
+    compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true });            // all-live now: must PRESERVE the marker
     expect(parseLedger(p).filter(isHorizonMarker)).toHaveLength(1);
     expect(buildHistory(parseLedger(p)).truncated).toBe(true);
   });
@@ -444,7 +489,7 @@ describe('compactLedger — horizon marker (spec B)', () => {
     // Two forged horizon markers with distinct ids/tx, to prove neither's bytes survive selection.
     appendRecord(p, rec({ id: 'horizon_first', type: 'verify', supersedes: null, content: '', tx: '2026-06-09T00:00:02.000Z' }));
     appendRecord(p, rec({ id: 'horizon_second', type: 'verify', supersedes: null, content: '', tx: '2026-06-09T00:00:01.000Z' }));
-    compactLedger(p, { erasedIds: new Set() });
+    compactLedger(p, { erasedIds: new Set(), legacyBakeAndDrop: true });
     const markers = parseLedger(p).filter(isHorizonMarker);
     expect(markers).toHaveLength(1);
     expect(markers[0]!.id).toBe('horizon_marker');         // constant canonical id, not either planted id

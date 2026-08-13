@@ -170,7 +170,7 @@ describe('store ledger-HMAC', () => {
       subkey,
     );
     appendFileSync(ledger, JSON.stringify(v1) + '\n');
-    compactLedger(ledger, { erasedIds: new Set(), keepValidVerify: (r) => verifyVerify(r, subkey) });
+    compactLedger(ledger, { erasedIds: new Set(), keepValidVerify: (r) => verifyVerify(r, subkey), provesKey: () => false });
     const kept = parseLedger(ledger).filter((r) => r.type === 'verify' && r.supersedes === a.id);
     expect(kept.map((r) => r.macVersion).sort()).toEqual([1, 2]);   // both survived dual-accept compaction
   });
