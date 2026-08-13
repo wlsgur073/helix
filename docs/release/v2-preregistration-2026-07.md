@@ -167,9 +167,10 @@ blocks. What changes is exposure:
 > condition binding exactly as in v1.
 
 `Es = 0` is the expected state. Measured 2026-07-31 over the live corpus
-(`/home/kim/dev/helix-dogfood/tinytask/.helix/memory.jsonl` plus the global ledger): **33 rows,
-every one an `assert`, zero `supersede` / `invalidate` / `erase` rows across the corpus's entire
-43-day history**, of which 8 postdate the v1 cutoff. So the condition is expected to report
+(the dogfood tinytask project ledger plus the global ledger; path de-identified 2026-08-12,
+measurement content unchanged): **33 rows, every one an `assert`, zero `supersede` / `invalidate` /
+`erase` rows across the corpus's entire 43-day history**, of which 8 postdate the v1 cutoff. So the
+condition is expected to report
 `UNEXPOSED` unless the owner corrects or retracts something during the window — which is precisely
 why its consequence is disclosure rather than a block.
 
@@ -548,9 +549,11 @@ own `rule` and `artifact` fields so a file identifies itself without reference t
 
 The decisions in §§1–9 came from an independent draft, four symmetric peer-review rounds, and
 measurement-decided divergences, recorded in
-`docs/superpowers/specs/2026-07-29-v2-gate-composition-design.md` §9 (a local operating doc — see
-also `2026-07-26-o67-class-rule-design.md` §8 for the membership rule). The substantive reversals
-worth naming here, because no code or changelog preserves them:
+the 2026-07-29 v2-gate-composition design spec §9 (a local operating doc — see
+also `2026-07-26-o67-class-rule-design.md` §8 for the membership rule). *(Edited 2026-08-12:
+the workspace-path citation was replaced by the spec's title — de-identification only, no
+content change.)* The substantive reversals worth naming here, because no code or changelog
+preserves them:
 
 - the claim was **narrowed** to process integrity (§1) after "a rule not adjusted after seeing
   results" was found to contradict D5;

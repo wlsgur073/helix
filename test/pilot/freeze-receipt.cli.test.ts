@@ -35,8 +35,8 @@ const fixture = (runtimeBody?: unknown) => {
   writeFileSync(runtime, typeof runtimeBody === 'string' ? runtimeBody : JSON.stringify(runtimeBody ?? {
     gitCommitSha: RUNTIME,
     loadPaths: [
-      { path: '/home/kim/.claude/plugins/cache/helix/helix/bin/helix-mcp.mjs', gitCommitSha: RUNTIME },
-      { path: '/home/kim/.claude/plugins/marketplaces/helix/bin/helix-mcp.mjs', gitCommitSha: RUNTIME },
+      { path: '/opt/claude/plugins/cache/helix/helix/bin/helix-mcp.mjs', gitCommitSha: RUNTIME },
+      { path: '/opt/claude/plugins/marketplaces/helix/bin/helix-mcp.mjs', gitCommitSha: RUNTIME },
     ],
   }, null, 1) + '\n');
   return { dir, config, runtime, out: join(dir, 'freeze-receipt.json') };

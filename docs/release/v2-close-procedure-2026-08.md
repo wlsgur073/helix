@@ -117,7 +117,7 @@ document.
 ### 2. The close chain is bound to the deployment machine
 
 `scripts/pilot/input-pins.ts` unconditionally reads the configuration path recorded in the receipt
-— `/home/kim/.helix/config.json` — with no flag to skip it. An unreadable path is an invocation
+(`config.path`) with no flag to skip it. An unreadable path is an invocation
 error (exit 2), not a refusal of the pins. The chain therefore cannot be run to completion on any
 machine that lacks that file, whatever tree it is invoked from.
 
