@@ -113,12 +113,16 @@ const UN_FORM_RE = new RegExp(String.raw`\bun-|\b(?:${UNPREFIXED_NEGATIONS.join(
  *  the M12 widening. What the allowed markup adds is one more spelling of a pre-existing hole, and
  *  what round 2 removed was the punctuation route that made ordinary prose hit it. Recorded as such
  *  rather than claimed closed.
- *  Measured residue: `_` is in the class but is ALSO a regex word character, so for a BARE listed
- *  un-word the `\b` in CANCELLING_PAIR_RE's `\b(?:unsafe|...)\b` fails against it and "not _unsafe_"
- *  does not collapse — while "not _un-safe_" does, since the `un-` alternative carries no leading
- *  `\b`. `_` therefore earns its place for the hyphenated spelling only. Closing the bare-word half
- *  means changing that boundary (the twin-regex asymmetry left alone on 2026-08-12) and needs its own
- *  measurement; the residue's direction is false-'diverge', not false-'agree'. Both halves pinned.
+ *  Measured residue: `_` is in the class but is ALSO a regex word character, so the
+ *  `\b(?:unsafe|...)\b` alternative fails against it in BOTH regexes that carry it — the pair does
+ *  not collapse (CANCELLING_PAIR_RE) AND the un-bit does not set (UN_FORM_RE). "not _unsafe_"
+ *  therefore scores polarity 1, indistinguishable from a plain negation rather than the 3 a set
+ *  un-bit would give, so the residue has NO fixed direction: false-'diverge' against an affirmative
+ *  partner, false-'agree' against a negated one — the same partner-dependence NEGATOR_ALTERNATIVES
+ *  records for idiomatic "no doubt". "not _un-safe_" still collapses, since the `un-` alternative
+ *  carries no leading `\b`, so `_` earns its place for the hyphenated spelling only. Closing the
+ *  bare-word half means changing that boundary (the twin-regex asymmetry left alone on 2026-08-12)
+ *  and needs its own measurement. Both directions and both spellings pinned.
  *  The trailing `+` cannot be tightened to `*` observably, and a sweep reporting that as a survivor is
  *  reporting an EQUIVALENT mutant (proved 2026-08-12): every negator alternative ends in `\b` and every
  *  un- form starts with a word character, so a ZERO-length gap would need a word boundary between two

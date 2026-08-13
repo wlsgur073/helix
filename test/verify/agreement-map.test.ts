@@ -378,13 +378,22 @@ describe('agreement map', () => {
     }
   });
 
-  it('M12 residue: UNDERSCORE emphasis around a BARE un-word still defeats the collapse, though the hyphenated form survives it', () => {
+  it('M12 residue: UNDERSCORE emphasis around a BARE un-word defeats BOTH the collapse and the un-bit, though the hyphenated form survives it', () => {
     // Measured, not missed. `_` is the one character in COLLAPSE_GAP that is also a regex WORD
-    // character, so for a bare listed un-word the `\b` in `\b(?:unsafe|...)\b` fails against the
-    // preceding underscore and nothing collapses — polarity 3 against an affirmative partner's 0,
-    // i.e. false-'diverge' (the declared-safe direction), not a false-'agree'.
+    // character, so the `\b(?:unsafe|...)\b` alternative fails against the preceding underscore in
+    // BOTH regexes that carry it: the pair never collapses AND the un-bit never sets. The sentence
+    // therefore scores polarity 1 — indistinguishable from a plain negation, not the 3 a set un-bit
+    // would give. So the residue has no fixed direction: it reads false-'diverge' against an
+    // affirmative partner and false-'agree' against a negated one, the same partner-dependence
+    // NEGATOR_ALTERNATIVES already records for the idiomatic "no doubt" false positive. Both
+    // directions are asserted below so the claim cannot go stale on half a measurement.
     const bare = buildAgreementMap('The migration is safe to apply.', 'The migration is not _unsafe_ to apply.');
     expect(bare.verdict).toBe('diverge');
+    // The other half, and the one that costs: "not _unsafe_" MEANS safe, so against a genuinely
+    // negated partner this is a contradiction — and it renders as agreement.
+    const againstNegated = buildAgreementMap(
+      'The migration is not safe to apply.', 'The migration is not _unsafe_ to apply.');
+    expect(againstNegated.verdict).toBe('agree');
     // The HYPHENATED spelling collapses through the same underscores, because the `un-` alternative
     // carries no leading `\b` — the twin-regex boundary asymmetry the 2026-08-12 triage deliberately
     // left alone. Keeping `_` in the gap class is what makes this half work, so it is not dead.
