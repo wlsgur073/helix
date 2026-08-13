@@ -17,6 +17,7 @@ describe('provenance source classification', () => {
     expect(isVerifyingSource('reality-check')).toBe(true);
     expect(isVerifyingSource('user-relayed')).toBe(false);
     expect(isVerifyingSource('agent-inference')).toBe(false);
+    expect(isVerifyingSource('agent-test-verified')).toBe(false);
     expect(isVerifyingSource('codex-agree')).toBe(false);
     // fail-closed: an unknown/legacy value is non-authoritative
     expect(isVerifyingSource('legacy-mystery' as unknown as ProvenanceSource)).toBe(false);
@@ -64,7 +65,7 @@ describe('resolveTransition (write-side authority)', () => {
   // including unknown/legacy values. This is what fails if the disjunct is ever reintroduced.
   it('INVARIANT: the write-side authority ignores provenance — a claimed source cannot change any verdict', () => {
     const SOURCES: ProvenanceSource[] = [
-      'user', 'user-relayed', 'agent-inference', 'reality-check', 'codex-agree',
+      'user', 'user-relayed', 'agent-inference', 'agent-test-verified', 'reality-check', 'codex-agree',
       'legacy-mystery' as ProvenanceSource,
     ];
     for (const targetState of ['Fresh', 'Corroborated', 'Verified', 'Suspect'] as const) {

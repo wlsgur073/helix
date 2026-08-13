@@ -56,12 +56,14 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     inputSchema: {
       content: z.string(),
       source: z
-        .enum(['user', 'user-relayed', 'agent-inference'])
+        .enum(['user', 'user-relayed', 'agent-inference', 'agent-test-verified'])
         .describe(
           "Provenance (required). 'user' = a fact the user stated as their own knowledge/preference/instruction. " +
           "'user-relayed' = content the user pasted/forwarded from a third party (web page, email, README, tool output) " +
           '— use this whenever the user is relaying, not authoring. ' +
-          "'agent-inference' = a conclusion you derived this session, not yet confirmed against reality.",
+          "'agent-inference' = a conclusion you derived this session, not yet confirmed against reality. " +
+          "'agent-test-verified' = a conclusion you derived AND mechanically verified this session (e.g. by running tests); " +
+          'still non-authoritative — it does not elevate trust.',
         ),
       blastRadius: z.enum(['read-only', 'local-reversible', 'hard-to-reverse', 'external']).optional(),
       classification: z.enum(['normal', 'personal']).optional(),

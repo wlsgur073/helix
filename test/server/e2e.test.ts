@@ -117,6 +117,28 @@ describe('Helix MCP server (end-to-end via in-memory transport)', () => {
     expect(out).toMatch(/needs re-verify before acting/);
   });
 
+  it('accepts source=agent-test-verified and stores it as non-authoritative (needs re-verify)', async () => {
+    const client = await connectedClient();
+    const res = await client.callTool({
+      name: 'helix_memory_commit',
+      arguments: { content: 'the scoped sweep passes on node 24', source: 'agent-test-verified' },
+    });
+    expect(res.isError).toBeFalsy();
+    // Non-authoritative: the recall must carry the re-verify note — proof the mechanically-verified
+    // label did NOT elevate trust past the boundary.
+    const out = textOf(await client.callTool({ name: 'helix_memory_recall', arguments: { query: 'scoped sweep node 24' } }));
+    expect(out).toContain('the scoped sweep passes on node 24');
+    expect(out).toMatch(/needs re-verify before acting/);
+  });
+
+  it('rejects an out-of-enum source string at the tool boundary (zod, previously untested)', async () => {
+    const client = await connectedClient();
+    const res = await client.callTool({
+      name: 'helix_memory_commit', arguments: { content: 'x', source: 'made-up-source' },
+    });
+    expect(res.isError).toBe(true);
+  });
+
   it('commit with supersedes replaces the prior item over the protocol (update, not duplicate)', async () => {
     const client = await connectedClient();
     const first = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'the db is postgres', source: 'user' } });

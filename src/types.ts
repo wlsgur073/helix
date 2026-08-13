@@ -16,8 +16,11 @@ export type RecordType = 'assert' | 'verify' | 'supersede' | 'invalidate' | 'era
 /** Where a record's authority comes from. `user` is the only *human-authoritative* item source;
  *  `reality-check` is a verify-EVENT source that caps at Corroborated (never Verified) — see
  *  firewall.resolveTransition. Classified by set membership (firewall.isVerifyingSource); unknown/
- *  legacy values fall non-authoritative (fail-closed). */
-export const PROVENANCE_SOURCES = ['user', 'user-relayed', 'agent-inference', 'reality-check', 'codex-agree'] as const;
+ *  legacy values fall non-authoritative (fail-closed). `agent-test-verified` = a conclusion the
+ *  agent derived AND mechanically verified this session (e.g. its tests ran green); still
+ *  non-authoritative — the verification is self-asserted, so it mints no grade (Corroborated only
+ *  via recheck, Verified only via confirm). */
+export const PROVENANCE_SOURCES = ['user', 'user-relayed', 'agent-inference', 'agent-test-verified', 'reality-check', 'codex-agree'] as const;
 export type ProvenanceSource = typeof PROVENANCE_SOURCES[number];
 
 /** Content classification for the erasure/secret paths (spec §7.4). */
