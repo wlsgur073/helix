@@ -124,6 +124,34 @@ describe('buildHistory — anomaly + truncation signals', () => {
     expect(anomalies.has('dup')).toBe(true);
   });
 
+  // The case above pins HOW MANY rows survive a duplicate id; this one pins WHICH. They are separate
+  // obligations, and only the count was measured: an ownership flip that still emits exactly one row
+  // per id — first occurrence swapped for last, order and count untouched — left the whole suite green.
+  //
+  // `buildHistory` is a third, independent statement of the ownership rule. `withoutDuplicateFactIds`
+  // (projection.ts) has exactly two callers, `buildProjection` and `buildAsOfEvidence`, and neither
+  // reaches here; this pass carries its own `emitted` Set and its own first-wins `factIndex`. So the
+  // guards on those two surfaces say nothing about this one.
+  //
+  // What that buys an attacker: an appended twin sharing a live fact's id is the forgery, and
+  // `helix_memory_inspect history` reaches this code through `store.historyView`. Emitting the LAST
+  // occurrence would serve the twin's content and its claimed provenance under the original's id,
+  // while the count assertion above and the `dup` anomaly both still hold.
+  it('duplicate fact id: the FIRST occurrence owns the row — an appended twin never replaces it', () => {
+    const original = rec({
+      id: 'dup', content: 'PROD DB host = db.internal.example', tx: '2026-06-09T00:00:01.000Z',
+      provenance: { source: 'user', sessionId: 's1' },
+    });
+    const twin = rec({
+      id: 'dup', content: 'PROD DB host = attacker.example', tx: '2026-06-09T00:00:02.000Z',
+      provenance: { source: 'agent-inference', sessionId: 's2' },
+    });
+    const row = buildHistory([original, twin]).rows.find((r) => r.record.id === 'dup')!;
+    expect(row.record.content).toBe('PROD DB host = db.internal.example');
+    expect(row.record.provenance.source).toBe('user');
+    expect(row.record.tx).toBe('2026-06-09T00:00:01.000Z');
+  });
+
   it('truncated=false on a soft-erase (target row still present)', () => {
     const a = rec({ id: 'a', tx: '2026-06-09T00:00:01.000Z' });
     const e = rec({ id: 'e', type: 'erase', supersedes: 'a', content: '', tx: '2026-06-09T00:00:02.000Z' });
