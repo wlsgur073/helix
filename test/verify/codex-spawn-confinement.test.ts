@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { createCodexRunner } from '../../src/verify/codex.js';
@@ -22,15 +22,18 @@ beforeAll(() => {
   // Stands in for the codex CLI: reports the two things the confinement is about, through the same
   // `-o <file>` channel the real CLI writes its answer to.
   writeFileSync(stub, `
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, realpathSync } from 'node:fs';
 const argv = process.argv.slice(2);
 const out = argv[argv.indexOf('-o') + 1];
 const ci = argv.indexOf('-C');
+// process.cwd() is symlink-RESOLVED while -C carries whatever spelling the caller built from
+// os.tmpdir(). On a platform where the temp root is a symlink (macOS: /tmp -> /private/tmp) the two
+// differ for reasons that have nothing to do with the guarantee, so the flag is reported resolved.
 writeFileSync(out, JSON.stringify({
   cwd: process.cwd(),
   canary: process.env.HELIX_F5_CANARY ?? null,
   hasPath: typeof process.env.PATH === 'string' && process.env.PATH.length > 0,
-  cFlag: ci === -1 ? null : argv[ci + 1],
+  cFlag: ci === -1 ? null : realpathSync(argv[ci + 1]),
 }));
 `);
 });
@@ -72,8 +75,10 @@ describe('the codex subprocess is confined', () => {
     expect(observed.cFlag, '-C named a directory other than the one the child runs in').toBe(observed.cwd);
   }, 30_000);
 
-  // ensureScratchRoot's own vetting is well covered in scratch-gc.test.ts — symlink, squatting file,
-  // over-permissive mode, foreign owner. What nothing covered is that the CALL SITE consults the
+  // ensureScratchRoot's own vetting is covered in scratch-gc.test.ts for the cases an unprivileged
+  // suite can build — symlink, squatting file, over-permissive mode. (The foreign-owner branch is not
+  // among them: creating a directory owned by another uid needs privilege this suite does not have,
+  // and it is tracked separately as an unmeasured leg.) What nothing covered is that the CALL SITE consults the
   // verdict. A correct vetting function is inert if its caller ignores the null and mkdtemps into the
   // shared corral anyway, and that is exactly what the suite could not see: replacing the conditional
   // with an unconditional `join(tmpdir(), 'helix', 'codex-')` left everything green, because no test
@@ -83,7 +88,9 @@ describe('the codex subprocess is confined', () => {
   // root is planted under a private TMPDIR rather than in the run's shared one — squatting the shared
   // corral would reach into whatever else is running in parallel.
   it('falls back to a private directory when the shared corral fails vetting', async () => {
-    const priv = mkdtempSync(join(tmpdir(), 'helix-f9e-'));
+    // realpath'd for the same reason the stub resolves -C: the child reports a resolved cwd, so a
+    // symlinked temp root would make every comparison below fail for an irrelevant reason.
+    const priv = realpathSync(mkdtempSync(join(tmpdir(), 'helix-f9e-')));
     writeFileSync(join(priv, 'helix'), 'a squatter, not a directory');   // ensureScratchRoot -> null
     const saved = process.env.TMPDIR;
     process.env.TMPDIR = priv;
