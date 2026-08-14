@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { createCodexRunner } from '../../src/verify/codex.js';
 
 // The dual-verify subprocess used to be spawned with ONLY `stdio` set — no cwd, no env. It therefore
@@ -70,6 +70,32 @@ describe('the codex subprocess is confined', () => {
     const observed = await runStubbed();
     expect(observed.cFlag, 'no -C reached the CLI, so it is free to infer a project directory').not.toBeNull();
     expect(observed.cFlag, '-C named a directory other than the one the child runs in').toBe(observed.cwd);
+  }, 30_000);
+
+  // ensureScratchRoot's own vetting is well covered in scratch-gc.test.ts — symlink, squatting file,
+  // over-permissive mode, foreign owner. What nothing covered is that the CALL SITE consults the
+  // verdict. A correct vetting function is inert if its caller ignores the null and mkdtemps into the
+  // shared corral anyway, and that is exactly what the suite could not see: replacing the conditional
+  // with an unconditional `join(tmpdir(), 'helix', 'codex-')` left everything green, because no test
+  // ever presented a root that FAILS vetting.
+  //
+  // The corral path is computed from os.tmpdir(), which re-reads TMPDIR on every call, so the hostile
+  // root is planted under a private TMPDIR rather than in the run's shared one — squatting the shared
+  // corral would reach into whatever else is running in parallel.
+  it('falls back to a private directory when the shared corral fails vetting', async () => {
+    const priv = mkdtempSync(join(tmpdir(), 'helix-f9e-'));
+    writeFileSync(join(priv, 'helix'), 'a squatter, not a directory');   // ensureScratchRoot -> null
+    const saved = process.env.TMPDIR;
+    process.env.TMPDIR = priv;
+    try {
+      const observed = await runStubbed();
+      // The separator matters: `<priv>/helix` is a string prefix of `<priv>/helix-codexAbC`, so a
+      // bare startsWith would call the fallback a corral hit and pass no matter what the code did.
+      expect(observed.cwd.startsWith(join(priv, 'helix') + sep), 'the runner used the corral it was told to refuse').toBe(false);
+      expect(observed.cwd.startsWith(join(priv, 'helix-codex-')), 'the fallback did not land beside the refused corral').toBe(true);
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = saved;
+    }
   }, 30_000);
 
   it('still receives a PATH, without which the launcher cannot resolve at all', async () => {
