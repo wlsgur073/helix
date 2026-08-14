@@ -91,17 +91,25 @@ describe('shipped docs state what the code actually does', () => {
     // supposed. An assertion a document can keep satisfying while saying the opposite thing is not a
     // guard. Each place the finding named is pinned separately instead, so rewording any ONE of them
     // fails here.
+    // FOUR sites, not three. The intro paragraph is the one a first-time reader actually meets, and
+    // the first version of this repair left it out — the pins covered the Quick-start parenthetical,
+    // the tools-table row and the Right-to-erasure bullet, so reversing the intro alone kept every
+    // assertion green. That is the same shape as the loose alternation it replaced, one paragraph
+    // narrower.
     const readme = doc('README.md');
+    expect(readme).toContain('reversible by default — physical destruction is a separate step');
     expect(readme).toContain('(a soft erase — it leaves every live view immediately, and stays reversible by default)');
     expect(readme).toContain('(soft: tombstoned and audited, recoverable until a compaction)');
     expect(readme).toContain('The `helix_memory_erase` tool is a **soft** erase: it appends a content-free tombstone');
 
     // A line-scoped negative would be wrong here: the Right-to-erasure bullet legitimately explains
     // that "Physical destruction — rewriting the ledger without the record — is the operator-run
-    // `permanent` path", on the same line as the tool name. The claim being excluded is narrower —
-    // that the TOOL performs a physical erase.
+    // `permanent` path", on the same line as the tool name. This excludes one specific phrasing —
+    // the tool described as a physical erase — and no more; the four pins above are what actually
+    // hold the guarantee. An earlier draft also asserted that "is a **soft** erase" appeared exactly
+    // once, which was worse than useless: it forbade adding that wording to any OTHER site, i.e. it
+    // stood in the way of closing the intro gap it was meant to help guard.
     expect(readme).not.toMatch(/`helix_memory_erase`[^\n.]*\bis a \*\*physical\*\*/);
-    expect(readme.match(/is a \*\*soft\*\* erase/g) ?? []).toHaveLength(1);
   });
 
   // ---- D4 ----------------------------------------------------------------------------------
