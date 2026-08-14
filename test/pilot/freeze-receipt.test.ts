@@ -37,6 +37,10 @@ describe('hashTools', () => {
     // ordering receipt and the release record, plus the hashing they share. §10's table predates
     // them and does not list them; pinning the method while leaving the programs that ISSUE the
     // method's evidence unpinned would leave the chain's own tooling free to change unnoticed.
+    // The last row joined at the SECOND freeze: the adjudication producer issues the `--adjudication`
+    // input the score phase requires, and building it inside the first window is what reset that
+    // window — so the path the Reset clause has already been triggered by is one the mechanical
+    // divergence check now covers. Its test is not here on purpose; no test file is.
     expect(PINNED_TOOL_PATHS).toEqual([
       'scripts/pilot/derive.ts', 'scripts/pilot/generate-manifest.ts', 'scripts/pilot/snapshot.ts',
       'scripts/pilot/classify-o67.ts', 'scripts/pilot/candidate-universe.ts', 'scripts/pilot/gate-set.ts',
@@ -47,6 +51,7 @@ describe('hashTools', () => {
       'src/memory/retrieval.ts', 'src/memory/store.ts', 'src/memory/expansion.ts',
       'src/memory/ownership.ts', 'src/memory/verified-read.ts', 'src/memory/verified-projection.ts',
       'src/memory/witness-store.ts', 'src/memory/witness-read.ts', 'src/memory/witness-core.ts',
+      'scripts/close/adjudication-skeleton.ts',
     ]);
     const tools = hashTools(process.cwd());
     expect(Object.keys(tools)).toEqual([...PINNED_TOOL_PATHS]);

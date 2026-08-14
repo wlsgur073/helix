@@ -163,7 +163,20 @@ export const gitHashObject = (bytes: Buffer | string): string => {
  *
  *  `segment-oracle.ts` is absent because v2 has no oracle side (§1), and adding it would pin a
  *  program the measured method never runs. The order is fixed by construction: it is the key order
- *  of the `tools` map, and that map is inside a hashed payload. */
+ *  of the `tools` map, and that map is inside a hashed payload.
+ *
+ *  The last row is the only entry outside `scripts/pilot/` and `src/memory/`, and it was added at
+ *  the SECOND freeze rather than the first. `scripts/close/adjudication-skeleton.ts` writes the
+ *  `--adjudication` input `score-gate.ts` requires, which puts it squarely inside this list's
+ *  boundary — it issues evidence the gate then reads. It is pinned for a second reason the other
+ *  rows did not need: writing it inside the first window is what RESET that window under the
+ *  preregistration's Reset clause, and the clause is about the ACT of building method tooling, not
+ *  about where the file sits. Leaving it unpinned would have left the mechanical check (which
+ *  covers exactly the paths in this list) blind to the one edit class that has already voided a
+ *  window once. Its TEST is deliberately NOT pinned: the list pins no test file, for any of the
+ *  sixteen pilot tools either, and a test neither decides a rank nor issues evidence — pinning it
+ *  would criminalise ordinary in-window test work while protecting nothing, since the program it
+ *  covers is already sealed by the row above. */
 export const PINNED_TOOL_PATHS = [
   'scripts/pilot/derive.ts',
   'scripts/pilot/generate-manifest.ts',
@@ -190,6 +203,7 @@ export const PINNED_TOOL_PATHS = [
   'src/memory/witness-store.ts',
   'src/memory/witness-read.ts',
   'src/memory/witness-core.ts',
+  'scripts/close/adjudication-skeleton.ts',
 ] as const;
 
 /** The BINDING rule documents, pinned by sha256 of their bytes.

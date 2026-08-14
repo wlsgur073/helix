@@ -20,11 +20,15 @@ CLAUDE.md
 #            project memory; team sharing is opt-in (un-ignore + helix_memory_adopt).
 #            Global/user-level state (audit, sessions, registry) lives in ~/.helix/, not here.
 # .remember/ = session-continuity buffer (also self-ignored within)
+# .superpowers/ = subagent working notes (review rounds, handoffs). Ignored rather
+#            than committed because a frozen candidate must not carry scratch that
+#            outlives the run that wrote it — stale plans here have been read as current before.
 # vault/ + **/.obsidian/ = Obsidian vault, personal notes / WIP
 # .playwright-mcp/ = Playwright MCP server local output (screenshots, traces)
 .claude/
 .helix/
 .remember/
+.superpowers/
 vault/
 **/.obsidian/
 .playwright-mcp/
