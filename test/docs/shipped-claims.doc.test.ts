@@ -84,7 +84,24 @@ describe('shipped docs state what the code actually does', () => {
     // SECURITY.md names the schema shape explicitly; README carries the user-facing wording.
     const sec = doc('SECURITY.md');
     expect(sec).toContain(`\`helix_memory_erase\`'s schema is \`{${keys.join(', ')}}\` only`);
-    expect(doc('README.md')).toMatch(/helix_memory_erase[^\n]*\*\*soft\*\*|soft erase/);
+
+    // The README half used to be one loose alternation, /helix_memory_erase[^\n]*\*\*soft\*\*|soft
+    // erase/. README satisfies that at TWO independent sentences ~19.5 kB apart, so reverting the
+    // NORMATIVE one to the pre-fix physical-erasure claim left the assertion green — measured, not
+    // supposed. An assertion a document can keep satisfying while saying the opposite thing is not a
+    // guard. Each place the finding named is pinned separately instead, so rewording any ONE of them
+    // fails here.
+    const readme = doc('README.md');
+    expect(readme).toContain('(a soft erase — it leaves every live view immediately, and stays reversible by default)');
+    expect(readme).toContain('(soft: tombstoned and audited, recoverable until a compaction)');
+    expect(readme).toContain('The `helix_memory_erase` tool is a **soft** erase: it appends a content-free tombstone');
+
+    // A line-scoped negative would be wrong here: the Right-to-erasure bullet legitimately explains
+    // that "Physical destruction — rewriting the ledger without the record — is the operator-run
+    // `permanent` path", on the same line as the tool name. The claim being excluded is narrower —
+    // that the TOOL performs a physical erase.
+    expect(readme).not.toMatch(/`helix_memory_erase`[^\n.]*\bis a \*\*physical\*\*/);
+    expect(readme.match(/is a \*\*soft\*\* erase/g) ?? []).toHaveLength(1);
   });
 
   // ---- D4 ----------------------------------------------------------------------------------
