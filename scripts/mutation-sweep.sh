@@ -21,10 +21,14 @@
 #      drove a journal strictly BEHIND the entry's epoch, never one exactly equal to it. Closed by the
 #      same file's "refuses a journal whose epoch the witness has exactly REACHED, not only one it has
 #      passed".
-# Re-measured after the fact, not taken from the commits that claim them: each mutation was re-applied
-# against the whole suite and each produced exactly ONE new failure, the named test. Line numbers are
-# omitted on purpose — they drift as the file changes, and a stale line number sends a later reader to
-# unrelated code. Grep the symbol.
+# Re-measured after the fact rather than taken from the commits that claim them: each mutation was
+# re-applied here and the whole suite re-run. Line numbers are omitted on purpose — they drift, and a
+# stale one sends a later reader to unrelated code. Grep the symbol instead.
+#
+# Correction to the commit that made this change: its message said the two line numbers this header
+# used to carry (~118, ~287) "had already stopped pointing at the guards they named". That was wrong —
+# checked afterwards, both were still exact at the parent commit. Dropping them is a policy about what
+# survives future edits, not a repair of something already broken, and the message should have said so.
 # Re-run the sweep before trusting any list here is still current.
 set -u
 cd "$(dirname "$0")/.."
