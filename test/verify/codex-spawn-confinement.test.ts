@@ -25,10 +25,12 @@ beforeAll(() => {
 import { writeFileSync } from 'node:fs';
 const argv = process.argv.slice(2);
 const out = argv[argv.indexOf('-o') + 1];
+const ci = argv.indexOf('-C');
 writeFileSync(out, JSON.stringify({
   cwd: process.cwd(),
   canary: process.env.HELIX_F5_CANARY ?? null,
   hasPath: typeof process.env.PATH === 'string' && process.env.PATH.length > 0,
+  cFlag: ci === -1 ? null : argv[ci + 1],
 }));
 `);
 });
@@ -37,11 +39,12 @@ const CANARY = 'this-must-not-reach-the-subprocess';
 afterEach(() => { delete process.env.HELIX_F5_CANARY; });
 
 /** Run through the production runner with only the launcher swapped for the stub. */
-async function runStubbed(): Promise<{ cwd: string; canary: string | null; hasPath: boolean }> {
+type Observed = { cwd: string; canary: string | null; hasPath: boolean; cFlag: string | null };
+async function runStubbed(): Promise<Observed> {
   const runner = createCodexRunner(async () => ({ file: process.execPath, argsPrefix: [stub] }));
   const res = await runner('any question');
   if (!res.ok) throw new Error(`stub runner failed: ${res.error}`);
-  return JSON.parse(res.answer) as { cwd: string; canary: string | null; hasPath: boolean };
+  return JSON.parse(res.answer) as Observed;
 }
 
 describe('the codex subprocess is confined', () => {
@@ -54,6 +57,19 @@ describe('the codex subprocess is confined', () => {
     process.env.HELIX_F5_CANARY = CANARY;
     const observed = await runStubbed();
     expect(observed.canary, 'an environment variable leaked into the external model\'s process').toBeNull();
+  }, 30_000);
+
+  // `buildCodexExecArgs` is pinned as a pure function by an exact-array assertion in codex.test.ts,
+  // so the FLAG is guarded. Nothing observed the WIRING: dropping the third argument at the only call
+  // site left the whole suite green, because the spawn's own `cwd` already places the child in the
+  // scratch directory and no test read argv for `-C`. The two are independent guarantees — the spawn
+  // decides where the process starts, the flag decides which directory the CLI treats as its project,
+  // and a CLI that infers its project from somewhere else is exactly what F5 was about. This asserts
+  // the flag on a REAL invocation rather than on the builder's return value.
+  it('tells the CLI to treat the scratch directory as its project (-C on a real invocation)', async () => {
+    const observed = await runStubbed();
+    expect(observed.cFlag, 'no -C reached the CLI, so it is free to infer a project directory').not.toBeNull();
+    expect(observed.cFlag, '-C named a directory other than the one the child runs in').toBe(observed.cwd);
   }, 30_000);
 
   it('still receives a PATH, without which the launcher cannot resolve at all', async () => {
