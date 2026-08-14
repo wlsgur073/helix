@@ -1,0 +1,67 @@
+{
+ "artifact": "freeze-receipt",
+ "payloadSha256": "360ffe80f6baf853fdc5acb4bc949a14b84838c3827cbeb56832da56bfcc7332",
+ "payload": {
+  "rule": "v2-gate-composition-2026-07-29",
+  "artifactKind": "freeze-receipt",
+  "candidateCommit": "94dd136925253be74c58df92392044c550aa6ec2",
+  "runtime": {
+   "gitCommitSha": "94dd136925253be74c58df92392044c550aa6ec2",
+   "loadPaths": [
+    {
+     "path": "/home/kim/.claude/plugins/marketplaces/helix/bin/helix-mcp.mjs",
+     "gitCommitSha": "94dd136925253be74c58df92392044c550aa6ec2"
+    },
+    {
+     "path": "/home/kim/.claude/plugins/cache/helix/helix/0.1.0/bin/helix-mcp.mjs",
+     "gitCommitSha": "94dd136925253be74c58df92392044c550aa6ec2"
+    }
+   ]
+  },
+  "config": {
+   "path": "/home/kim/.helix/config.json",
+   "sha256": "16f6d97fffb6b9934f82bcb03570af8657464d9899c22deb89c9cb61555ef9c3",
+   "redactionAcknowledged": true
+  },
+  "k": 20,
+  "txAfter": "2026-08-14T06:20:01.000Z",
+  "txClose": "2026-09-11T06:20:01.000Z",
+  "windowDays": 28,
+  "tools": {
+   "scripts/pilot/derive.ts": "68065a1b12d4b38655af432873d609a07c8d2070",
+   "scripts/pilot/generate-manifest.ts": "45ffe35803ac8f9eae938c9a4deb42182a5d5d21",
+   "scripts/pilot/snapshot.ts": "e4cf939d2ac42bbf13d9409eee4f6d0ffb92a26c",
+   "scripts/pilot/classify-o67.ts": "2f0f2ccbd8753fdafddcebe06e64c63757678b7c",
+   "scripts/pilot/candidate-universe.ts": "8d78e7a420798b5d836ed40f1505359475837af3",
+   "scripts/pilot/gate-set.ts": "54c8b767fb6da35349062d1baedc1dcde8ede6f9",
+   "scripts/pilot/prepare-gate.ts": "38a29589ecf705fcd2d0ba8efb013d9e76f37f5f",
+   "scripts/pilot/score-gate.ts": "bc49663e43210d8f06ff77075b5b68a6d689750e",
+   "scripts/pilot/binomial.ts": "5bdc0c6dc6879de2caa3872869636cbfe0ff6ef3",
+   "scripts/pilot/run-pilot.ts": "4c5383d8786a508169d8251a938ef89c15edbf73",
+   "scripts/pilot/freeze-receipt.ts": "72c89a51b57121cd512b9851044c7440120f9c13",
+   "scripts/pilot/input-pins.ts": "abc4f4fb90a09033dee9f709fa45b57dd1b52dbe",
+   "scripts/pilot/ordering-receipt.ts": "72a5bd1b8b0d11317632e4821ce04ecd43a41b45",
+   "scripts/pilot/release-record.ts": "40fbe797ccca53e6dd0d4cff78c84e034f8c874f",
+   "scripts/pilot/pin-hashes.ts": "5a327593ad8c5b743d802b8b13dbb178158b64d5",
+   "scripts/pilot/artifact-io.ts": "9fe42a028e349fd6c02f2cfb40e480cdffe95eb5",
+   "src/memory/retrieval.ts": "65d877c7cceabdcd26b947211472aff0f22cdad0",
+   "src/memory/store.ts": "89219c6b3a75bfc96c645ce03ac2a92117129dc3",
+   "src/memory/expansion.ts": "88d472e3bdb6494684fdd161bceaf7a0ae233dbf",
+   "src/memory/ownership.ts": "8906b3f2111df9a1fd288da620e17c5ec774cd50",
+   "src/memory/verified-read.ts": "027333ed8a4abf12b2295fcf837d686db7a9416f",
+   "src/memory/verified-projection.ts": "9d02572f53e13de5fdcdfd4749d3e2f319587784",
+   "src/memory/witness-store.ts": "e52b3e0f0111ee75bec0f967b12f03e0e58ff88a",
+   "src/memory/witness-read.ts": "c948a73cf740d1c2c580d1aaa916c70abca3af09",
+   "src/memory/witness-core.ts": "e22468f91eb971a99616dda7c74e56e4134f4cfa",
+   "scripts/close/adjudication-skeleton.ts": "adb31cc40073ba119c567531b65ff08c303ff67b"
+  },
+  "methodDocs": {
+   "docs/release/o67-class-rule-2026-07.md": "c1fe768ca0ec2b117bc41a73e8c45546d83a2d3b7d8f344fe143114814b8a448",
+   "docs/release/gate-decision-2026-07-22.md": "e51e29373d73f50e0a26fd6e538b3d45460550205221aaa66a2b4543d4522258"
+  }
+ },
+ "receipts": {
+  "issuedAt": "2026-08-14T06:20:34.216Z",
+  "attestation": "self-reported wall clock; §9 states that no self-attested timestamp proves no earlier pass occurred, so this field dates the receipt and proves nothing about what ran before it"
+ }
+}

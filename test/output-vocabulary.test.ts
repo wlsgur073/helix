@@ -93,8 +93,15 @@ describe('output vocabulary', () => {
   // real leaks like `path=/home/<user>/...`), so the wider guard stays and the comment states it.
   const PRIVATE_RE =
     ['(^|[^A-Za-z0-9._', '/-])(/home', '|/mnt/c/Users)/', '[A-Za-z0-9._', '-]+'].join(''); // join(): this test must not match itself
+  // Two entries since 2026-08-14, not a widened rule. The first window was reset, and a freeze
+  // receipt is immutable evidence: the superseded one is RENAMED, never scrubbed or deleted, so its
+  // three load-path lines survive under the void filename and carry the same by-design exemption
+  // the live receipt has. Each window that resets adds exactly one more row here, by name and by
+  // count — which is the point of listing counts rather than globbing the receipts: this test is
+  // what forced the question to be decided rather than absorbed.
   const PRIVATE_ALLOW: Record<string, number> = {
     'docs/release/v2-freeze-receipt-2026-08.json': 3,
+    'docs/release/v2-freeze-receipt-2026-08-02-void.json': 3,
   };
 
   it('no tracked file carries a leading /home or /mnt/c/Users path beyond the by-design receipt (other private-path spellings are NOT checked — see above)', () => {

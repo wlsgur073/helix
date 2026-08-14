@@ -1,14 +1,24 @@
 # Helix — preregistered recall pilot, protocol v2
 
-Date drafted: 2026-07-31 · §10 filled: 2026-08-02 · Status: **IN FORCE from the commit that
-carries this filled table — that commit is the freeze.**
+Date drafted: 2026-07-31 · §10 filled: 2026-08-02 · **§10 RE-filled 2026-08-14 after a §8 window
+reset** · Status: **IN FORCE from the commit that carries this filled table — that commit is the
+freeze.**
 
 §10's pin table is **filled** from the freeze receipt
 ([`v2-freeze-receipt-2026-08.json`](./v2-freeze-receipt-2026-08.json), payload
-`55720757298abee064f5a319bd4e31ef723c2ed18d21f36fc0d7b8418d24a89c`), issued by the committed
+`360ffe80f6baf853fdc5acb4bc949a14b84838c3827cbeb56832da56bfcc7332`), issued by the committed
 `freeze-receipt.ts` after it verified the working tree equal to the candidate commit for every
 pinned path and the cutoff equal to that commit's authored time. The measurement window is
-`2026-08-02T11:35:05.000Z < tx ≤ 2026-08-30T11:35:05.000Z`. `gate-decision-2026-07-22.md` D2 is
+`2026-08-14T06:20:01.000Z < tx ≤ 2026-09-11T06:20:01.000Z`.
+
+**These are the SECOND window's identities.** The first (candidate `27b4373d…`, window
+`2026-08-02T11:35:05.000Z .. 2026-08-30T11:35:05.000Z`) was reset under §8 on 2026-08-13, because a
+close-day producer was built inside it and §8's Reset paragraph says building any of the method's
+tooling after the freeze **does** reset the window. Its receipt is retained unedited as
+[`v2-freeze-receipt-2026-08-02-void.json`](./v2-freeze-receipt-2026-08-02-void.json) — a freeze
+receipt is evidence and is never rewritten, so a moved window is a NEW receipt against a new
+candidate, never an amended one. The ten probe rows accrued under the old cutoff fall below the new
+one and leave the probe population; nothing in §§1–9 changed. `gate-decision-2026-07-22.md` D2 is
 explicit that v2 becomes *prospective* only when its actual method is frozen — a half-pinned
 document is not a preregistration, which is why this header carried **DRAFT — NOT YET IN FORCE**
 until the table below was filled.
@@ -464,22 +474,29 @@ and reset the window (§8).
 
 ## 10. Frozen identities and hashes
 
-**FILLED 2026-08-02, from the freeze receipt** (`v2-freeze-receipt-2026-08.json`, payload
-`55720757298abee064f5a319bd4e31ef723c2ed18d21f36fc0d7b8418d24a89c`) — the commit carrying this
-filled table is the freeze. The runtime was redeployed at the candidate commit the same day per
-`deploy-runbook.md` (three shas equal, both load paths byte-identical), so the candidate and
-runtime pins coincide; they remain separate rows because they CAN drift, and both are verified
-again at the close.
+**RE-FILLED 2026-08-14, from the re-issued freeze receipt** (`v2-freeze-receipt-2026-08.json`,
+payload `360ffe80f6baf853fdc5acb4bc949a14b84838c3827cbeb56832da56bfcc7332`) — the commit carrying this
+table is the freeze, and for this window that is the SECOND such commit. The runtime was redeployed
+at the candidate commit the same day per `deploy-runbook.md` (three shas equal — repository HEAD,
+marketplace clone HEAD, and both `installed_plugins.json` entries — with all nine runtime surfaces
+byte-identical in both load paths), so the candidate and runtime pins coincide; they remain separate
+rows because they CAN drift, and both are verified again at the close.
+
+Six `src/memory` rows below differ from the first window's values. That is not drift to be
+explained: those files were edited legitimately as UNPINNED-window source work under the first
+freeze, and the new candidate simply contains them. The disclosure question the first window carried
+— pinned files whose bytes had moved past the candidate they were pinned against — does not exist
+here, because the re-freeze re-pins them at their current bytes.
 
 Identities are pinned **separately**, because they can drift independently:
 
 | pin | value |
 |---|---|
-| candidate commit (protocol / classifier / tooling) | `27b4373d64d13c7b258aab011570be2d973c34da` |
-| runtime bytes actually serving recall — installed plugin `gitCommitSha`, both load paths | `27b4373d64d13c7b258aab011570be2d973c34da` — both load paths verified byte-identical, 2026-08-02 redeploy per `deploy-runbook.md` |
+| candidate commit (protocol / classifier / tooling) | `94dd136925253be74c58df92392044c550aa6ec2` |
+| runtime bytes actually serving recall — installed plugin `gitCommitSha`, both load paths | `94dd136925253be74c58df92392044c550aa6ec2` — both load paths verified byte-identical, 2026-08-14 redeploy per `deploy-runbook.md` |
 | configuration actually serving recall (`~/.helix/config.json`, redacted) | `sha256 16f6d97fffb6b9934f82bcb03570af8657464d9899c22deb89c9cb61555ef9c3` |
-| holdout cutoff (canonical UTC) | `2026-08-02T11:35:05.000Z` |
-| close instant (cutoff + 28 days, canonical UTC) | `2026-08-30T11:35:05.000Z` |
+| holdout cutoff (canonical UTC) | `2026-08-14T06:20:01.000Z` |
+| close instant (cutoff + 28 days, canonical UTC) | `2026-09-11T06:20:01.000Z` |
 | K | **20** |
 | `git hash-object` — `scripts/pilot/derive.ts` | `68065a1b12d4b38655af432873d609a07c8d2070` |
 | `git hash-object` — `scripts/pilot/generate-manifest.ts` | `45ffe35803ac8f9eae938c9a4deb42182a5d5d21` |
@@ -491,23 +508,24 @@ Identities are pinned **separately**, because they can drift independently:
 | `git hash-object` — `scripts/pilot/score-gate.ts` | `bc49663e43210d8f06ff77075b5b68a6d689750e` |
 | `git hash-object` — `scripts/pilot/binomial.ts` | `5bdc0c6dc6879de2caa3872869636cbfe0ff6ef3` |
 | `git hash-object` — `scripts/pilot/run-pilot.ts` | `4c5383d8786a508169d8251a938ef89c15edbf73` |
-| `git hash-object` — `scripts/pilot/freeze-receipt.ts` *(added 2026-08-02)* | `72c89a51b57121cd512b9851044c7440120f9c13` |
-| `git hash-object` — `scripts/pilot/input-pins.ts` *(added 2026-08-02)* | `abc4f4fb90a09033dee9f709fa45b57dd1b52dbe` |
-| `git hash-object` — `scripts/pilot/ordering-receipt.ts` *(added 2026-08-02)* | `72a5bd1b8b0d11317632e4821ce04ecd43a41b45` |
-| `git hash-object` — `scripts/pilot/release-record.ts` *(added 2026-08-02)* | `40fbe797ccca53e6dd0d4cff78c84e034f8c874f` |
-| `git hash-object` — `scripts/pilot/pin-hashes.ts` *(added 2026-08-02)* | `bf9276386ff52ba4e83db675f991047b2facf37d` |
-| `git hash-object` — `scripts/pilot/artifact-io.ts` *(added 2026-08-02)* | `9fe42a028e349fd6c02f2cfb40e480cdffe95eb5` |
-| `git hash-object` — `src/memory/retrieval.ts` (primitive + tokenizer) | `52b15217ecbb5cd5a391d76a8b55619f67919515` |
-| `git hash-object` — `src/memory/store.ts` *(added 2026-08-02)* | `80f0688d93a251150efc77334e306e3f213831a7` |
-| `git hash-object` — `src/memory/expansion.ts` *(added 2026-08-02)* | `88d472e3bdb6494684fdd161bceaf7a0ae233dbf` |
-| `git hash-object` — `src/memory/ownership.ts` *(added 2026-08-02)* | `bb9d3999b8b43be105957c39b2332bee29d72d6d` |
-| `git hash-object` — `src/memory/verified-read.ts` *(added 2026-08-02)* | `027333ed8a4abf12b2295fcf837d686db7a9416f` |
-| `git hash-object` — `src/memory/verified-projection.ts` *(added 2026-08-02)* | `80192ba43815b4a2b3a0134519c268431a7bd885` |
-| `git hash-object` — `src/memory/witness-store.ts` *(added 2026-08-02)* | `8f381105a7dcdaf9a3ef850009ef7348af7ac28d` |
-| `git hash-object` — `src/memory/witness-read.ts` *(added 2026-08-02)* | `c948a73cf740d1c2c580d1aaa916c70abca3af09` |
-| `git hash-object` — `src/memory/witness-core.ts` *(added 2026-08-02)* | `bde7f616306dcf220bed67f62f2cafdf2d0cd575` |
+| `git hash-object` — `scripts/pilot/freeze-receipt.ts` | `72c89a51b57121cd512b9851044c7440120f9c13` |
+| `git hash-object` — `scripts/pilot/input-pins.ts` | `abc4f4fb90a09033dee9f709fa45b57dd1b52dbe` |
+| `git hash-object` — `scripts/pilot/ordering-receipt.ts` | `72a5bd1b8b0d11317632e4821ce04ecd43a41b45` |
+| `git hash-object` — `scripts/pilot/release-record.ts` | `40fbe797ccca53e6dd0d4cff78c84e034f8c874f` |
+| `git hash-object` — `scripts/pilot/pin-hashes.ts` | `5a327593ad8c5b743d802b8b13dbb178158b64d5` |
+| `git hash-object` — `scripts/pilot/artifact-io.ts` | `9fe42a028e349fd6c02f2cfb40e480cdffe95eb5` |
+| `git hash-object` — `src/memory/retrieval.ts` | `65d877c7cceabdcd26b947211472aff0f22cdad0` |
+| `git hash-object` — `src/memory/store.ts` | `89219c6b3a75bfc96c645ce03ac2a92117129dc3` |
+| `git hash-object` — `src/memory/expansion.ts` | `88d472e3bdb6494684fdd161bceaf7a0ae233dbf` |
+| `git hash-object` — `src/memory/ownership.ts` | `8906b3f2111df9a1fd288da620e17c5ec774cd50` |
+| `git hash-object` — `src/memory/verified-read.ts` | `027333ed8a4abf12b2295fcf837d686db7a9416f` |
+| `git hash-object` — `src/memory/verified-projection.ts` | `9d02572f53e13de5fdcdfd4749d3e2f319587784` |
+| `git hash-object` — `src/memory/witness-store.ts` | `e52b3e0f0111ee75bec0f967b12f03e0e58ff88a` |
+| `git hash-object` — `src/memory/witness-read.ts` | `c948a73cf740d1c2c580d1aaa916c70abca3af09` |
+| `git hash-object` — `src/memory/witness-core.ts` | `e22468f91eb971a99616dda7c74e56e4134f4cfa` |
+| `git hash-object` — `scripts/close/adjudication-skeleton.ts` *(added 2026-08-14)* | `adb31cc40073ba119c567531b65ff08c303ff67b` |
 | sha256 — `o67-class-rule-2026-07.md` | `c1fe768ca0ec2b117bc41a73e8c45546d83a2d3b7d8f344fe143114814b8a448` |
-| sha256 — `gate-decision-2026-07-22.md` *(added 2026-08-02)* | `ebdbb307e13310a948f789f686aa4819a8f92f6e5dba037646d61d2d0b4424ae` |
+| sha256 — `gate-decision-2026-07-22.md` | `e51e29373d73f50e0a26fd6e538b3d45460550205221aaa66a2b4543d4522258` |
 | sha256 — this document's parent commit blob | *(n/a — see below)* |
 
 *(Rows added 2026-08-02, in two groups mirroring `pin-hashes.ts`'s `PINNED_TOOL_PATHS` /
@@ -520,7 +538,11 @@ the structural reason the witness/registry/expansion substitutions existed. The 
 divergence refusal covers exactly the pinned paths, so membership in this table is what makes a
 file's drift from the candidate commit visible at all. The second method-doc row exists because
 the preregistration's own governing-texts line names `gate-decision-2026-07-22.md` BINDING, and
-no other pin covered it.)*
+no other pin covered it. A twenty-sixth row was added 2026-08-14: `adjudication-skeleton.ts`
+issues the `--adjudication` input the score phase requires, which puts it inside this table's
+boundary — and building it inside the first window is what reset that window, so the one edit
+class that has already cost a window is now covered by the mechanical divergence check instead of
+by anyone remembering the rule. Its test is deliberately not pinned; no test file is.)*
 
 The **runtime** pin and the **candidate commit** pin are separate on purpose: a repository commit
 is not proof of what is installed, and this deployment has already produced a window where the

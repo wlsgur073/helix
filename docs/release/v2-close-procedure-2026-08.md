@@ -1,7 +1,10 @@
 # v2 close procedure — the tree the close chain runs from
 
-Written 2026-08-06, during the open v2 window (`2026-08-02T11:35:05.000Z < tx ≤
-2026-08-30T11:35:05.000Z`).
+Written 2026-08-06, during the first v2 window. **Re-pointed 2026-08-14:** that window was reset
+under §8 and its bounds are void; the open window is now `2026-08-14T06:20:01.000Z < tx ≤
+2026-09-11T06:20:01.000Z`. The procedure itself did not change — only the identity it points at,
+which is why this file names the receipt as the authority below instead of repeating a sha that a
+future reset would silently falsify.
 
 ## What this document is, and what it is not
 
@@ -22,8 +25,9 @@ the close-time comparison.
 
 ## The rule
 
-> **The close chain runs from a clean checkout of the candidate commit
-> `27b4373d64d13c7b258aab011570be2d973c34da`, not from the working tree.**
+> **The close chain runs from a clean checkout of the candidate commit — `payload.candidateCommit`
+> in `v2-freeze-receipt-2026-08.json`, currently `94dd136925253be74c58df92392044c550aa6ec2` — not
+> from the working tree.**
 
 `scripts/freeze-guard.ts` states it in its header contract: working-tree divergence from the pins
 is WARN-only before `txClose`, because *"Undeployed repo work during the window is legitimate; the
@@ -81,7 +85,9 @@ Operationally:
 
 1. Materialise a clean checkout of the candidate commit (`git worktree add` to a scratch path, or
    a detached checkout in a separate clone). Do **not** run the chain from the development tree.
-2. Confirm the checkout is clean and at `27b4373d64d13c7b258aab011570be2d973c34da`.
+2. Confirm the checkout is clean and at the receipt's `payload.candidateCommit` — read it from the
+   receipt rather than from this sentence, then compare (`94dd136925253be74c58df92392044c550aa6ec2`
+   for the second window).
 3. Run the chain from inside that checkout, in the §9 order above.
 4. Record in the final report that the chain was run from a candidate-commit checkout, per §9a's
    requirement to carry "the pins re-verified at the close".

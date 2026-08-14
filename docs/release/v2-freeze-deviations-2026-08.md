@@ -102,9 +102,31 @@ control/provenance deviation with continuous runtime bytes.
 
 **Remediation.** Clone `reset --hard` to `27b4373` on `feat/helix-v1` (same owner-approved
 action as D-2026-08-09), re-verified 2026-08-10: symbolic-ref intact, HEAD = candidate, guard
-exit 0. Standing exposure until close: every Claude startup may move the clone again; the
-window's byte-safety therefore rests on (a) the standing discipline that no in-window commit
-rebuilds `bin/` and (b) the guard's detection. **Recurrence handling DECIDED by the owner
+exit 0. Standing exposure until close: every Claude startup may move the clone again.
+
+**CORRECTION 2026-08-13 — what the window's byte-safety actually rests on.** This paragraph
+previously named "(a) the standing discipline that no in-window commit rebuilds `bin/`" as one of
+two supports. **That clause is false and is withdrawn.** One in-window commit did rebuild the
+bundles: `d701735`, *build: rebuild the committed bundles so this branch verifies what it ships*,
+2026-08-06T05:46:34Z, four files under `bin/` — `git diff --stat 27b4373 d701735 -- bin/` reports
+167 insertions and 56 deletions against the candidate. Those bytes reached the mainline through
+merge `02c7c9d` (2026-08-10T05:29:35Z) and stood for about 26 hours, until `b4997cd`,
+*freeze(pilot): return `bin/` to the candidate bytes* (2026-08-11T07:30:00Z), restored them. The
+non-identical interval is exactly 15 first-parent commits, `02c7c9d` through `2c2d1d2`, all carrying
+`bin/` tree `abd4f14f`; the candidate and the branch tip both carry `8ed67526`.
+
+The supports that do hold, each checkable from the repository:
+- **No clone HEAD the runtime ever reached carried non-candidate bundles.** Every head recorded in
+  this ledger — the in-window auto-pull targets `324dbbb`, `e66384c`, `dc64f6e`, the recurrence
+  target `2fdc1ca`, and the auto-heal heads `b4997cd` and `0bbb000` — has `bin/` tree `8ed67526`,
+  identical to the candidate's. The rebuilt bytes existed only on the development mainline, which is
+  not a runtime load path.
+- **The guard's byte check, not a discipline.** `freeze-runtime-check.sh` compares the runtime
+  surface bytes under **both** load paths against the pin list and hard-fails on any mismatch. It
+  never did, across the whole interval above.
+
+The close report's §4.4 carries the same correction, and cites this entry for the evidence rather
+than restating it; the two must not drift apart. **Recurrence handling DECIDED by the owner
 2026-08-10: guard auto-heal.** `freeze-runtime-check.sh` now mechanizes the twice-approved
 remediation under a strict condition — the SOLE violation is clone-HEAD drift and every
 byte/pin/flag/receipt check passed — resetting the clone to the candidate, appending to
@@ -112,3 +134,89 @@ byte/pin/flag/receipt check passed — resetting the clone to the candidate, app
 stderr notice, and exiting healthy. Any other violation combination (byte drift, flag drift,
 past-close, dirty clone) still hard-fails, so the dogfood `ExecStartPre` blocks only on real
 incidents. Verified by fixture drills (12/12 incl. the heal path) on 2026-08-10.
+
+---
+
+## Deviation D-2026-08-13-in-window-tooling — WINDOW RESET
+
+**Status: the window is RESET.** This entry records the trigger, the owner's ruling and the
+reading it rests on. The reset's execution — new candidate, re-issued receipt, new freeze commit —
+is a separate act and is recorded where it lands, not here.
+
+**What happened.** On 2026-08-13, inside the window, a program was written to produce one close-day
+input: `scripts/close/adjudication-skeleton.ts`, with its test. It stamps the adjudication file
+that the pinned scorer requires through its `--adjudication` flag. It was written because a
+verification pass found the close chain had no producer, no template and no example for that
+artifact, and would have dead-ended on close day between the runs and the score.
+
+**The governing sentence**, quoted rather than paraphrased:
+
+> Any intervening **system, config, rule, or metric** change resets the window, which restarts from
+> the change. … Building any of the method's tooling *after* the freeze **does** reset it, because
+> implementing an unspecified detail resolves a method choice.
+> — `v2-preregistration-2026-07.md`, the Reset paragraph
+
+**Three readings were put to the owner, each with its measured cost.** (1) The trailing clause
+limits the rule, so a program that resolves no unspecified detail is not reached — the pinned
+scorer already specifies completeness, non-duplication and both hash bindings, and every judgment
+is stamped `UNJUDGED` and refused until a human replaces it. (2) The program is kept out of the
+chain and the adjudication is hand-authored — measured at 10 real probe ids, the file is 1,134
+bytes, ≈2.9 KB at the ~26 probes expected at close, and all five hand-authoring mistake classes are
+refused by the pinned scorer rather than silently accepted. (3) Building the tooling is itself the
+trigger, whatever is done with it afterwards.
+
+**The owner ruled reading (3) on 2026-08-13: the window RESETS.** Building alone triggers it, so
+keeping the program out of the chain does not answer the question, and the disclosure reading is
+not taken.
+
+**A first ruling, taken earlier the same day, was withdrawn.** It was taken on a paraphrase of the
+rule that omitted the word **does**, and it went the other way. The paraphrase was mine. It is
+recorded here because a pilot whose claim is process integrity cannot keep the one place where its
+own rule was nearly read too lightly out of its own ledger — and because the correction is the
+evidence that the rule was read, in the end, as written.
+
+**Measured consequences, as of the ruling.** The close instant moves from 2026-08-30T11:35:05Z to
+28 days after the new cutoff. The 10 probe rows accrued so far (one per day, 08-03 through 08-13)
+fall below the new cutoff and leave the probe population permanently, while remaining live
+competitors; the sample-sufficiency clock restarts at zero against a measured accrual of about
+0.87 rows per day. Mechanically the reset is indistinguishable from a re-freeze: the receipt's
+close instant is derived, not supplied, and its cutoff must equal the candidate commit's authored
+time, so a moved window requires a new candidate commit, a re-issued receipt and a new freeze
+commit. The difference the ledger preserves is that no defect in the frozen method is asserted and
+nothing had to be fixed first.
+
+**Remediation EXECUTED 2026-08-14.** Recorded here in the order the dependencies force, because the
+order is the part that is easy to get wrong: pinned bytes must be final before the candidate commit
+(the receipt hashes the working tree and refuses any pinned path that diverges from `--commit`),
+and everything that quotes the receipt's own values must come after it.
+
+1. Candidate `d581e7e` — the producer and its test committed, `PINNED_TOOL_PATHS` widened 25 → 26 to
+   include `scripts/close/adjudication-skeleton.ts`, and `bin/` rebuilt from source. The rebuild was
+   pulled forward from close day deliberately: 62 source commits had accumulated behind the first
+   candidate's bundles, and activating them all at once on a one-shot day was the larger risk. The
+   full suite was the gate rather than the packaging test alone — 2215 pass, and the
+   packaging-freshness test, red BY DESIGN for the whole first window, went green.
+2. Candidate `94dd136` — superseded `d581e7e` within the hour. `gate-decision-2026-07-22.md` is a
+   PINNED method document and its 2026-08-02 addendum asserted the void window in the present
+   tense; correcting it after the receipt was issued would have been the violation, so it was
+   corrected first and the candidate re-cut. `src/memory/firewall.ts` lost a hard-coded
+   `2026-08-30` in the same commit — it told a future maintainer when a field on a pinned file
+   becomes deletable, and the reset would have made that instruction fire four weeks early.
+3. Runtime redeployed to `94dd136` per `deploy-runbook.md` (uninstall + marketplace update +
+   install, at BOTH registry scopes — the `user`-scope uninstall does not touch a `local`-scope
+   entry, which left one entry on the old sha until it was reinstalled from its own project root).
+   Three shas equal; all nine runtime surfaces byte-identical in both load paths.
+4. Receipt re-issued: payload `360ffe80f6baf853fdc5acb4bc949a14b84838c3827cbeb56832da56bfcc7332`,
+   window `2026-08-14T06:20:01.000Z .. 2026-09-11T06:20:01.000Z`, 26 tools + 2 method docs, anchors
+   verified by `freeze-guard`. The superseded receipt is retained unedited as
+   `v2-freeze-receipt-2026-08-02-void.json`.
+5. `scripts/freeze-runtime-check.sh` re-anchored (CANDIDATE / PAYLOAD_SHA / TX_CLOSE; CONFIG_SHA
+   unchanged) and the runtime pin list regenerated — exactly the five `bin/` entries moved, the
+   four non-build surfaces did not. **Leaving TX_CLOSE alone would have hard-failed the guard from
+   2026-08-30 and blocked the daily dogfood run through its `ExecStartPre`.**
+
+**Two things the reset paid for rather than cost.** The pinned-source disclosure question the first
+window carried — six `src/memory` files whose bytes had moved past the candidate they were pinned
+against — does not exist in the second window, because the new candidate contains them and the
+re-freeze re-pins them where they are. And the 28 days ahead are now real-use verification of the
+rebuilt bundles instead of a close-day activation of 62 unverified commits.
