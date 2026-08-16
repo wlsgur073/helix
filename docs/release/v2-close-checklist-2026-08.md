@@ -1436,14 +1436,20 @@ bash ~/dev/helix/scripts/freeze-runtime-check.sh; echo "exit=$?"
 At and just after `txClose` the suite changes in three places at once. **This is designed
 behaviour, not a failed close.** Read this block before running `npm test` on close day.
 
-- [ ] **E1. `test/plugin/packaging.test.ts` — already red, and has been for the window.**
+- [ ] **E1. `test/plugin/packaging.test.ts` — red ONLY IF a post-candidate `src/` commit landed.**
   Case: *"rebuilding from src reproduces bin/ byte-for-byte (else: run npm run build)"*
   (`packaging.test.ts:65-75`). It rebuilds from `src/` into a temp dir (`HELIX_BUILD_OUT`) and
-  byte-compares against the committed `bin/`. It is **not** date-driven — it went red the moment
-  the first post-candidate `src/` commit landed and clears **only** after the rebuild in Block F.
-  *(rehearsed 2026-08-13)* → `Tests 1 failed | 6 passed (7)`, failing at `packaging.test.ts:74`
-  with `bin/helix-mcp.mjs is stale — run npm run build and commit bin/`.
-  **This test is what proves the rebuild reproduced.**
+  byte-compares against the committed `bin/`. It is **not** date-driven — it goes red the moment
+  the first post-candidate `src/` commit lands and clears **only** after the rebuild in Block F.
+  **This line said "already red, and has been for the window" until 2026-08-16, and that is now
+  false.** It described the FIRST window, where `bin/` sat 62 commits behind the candidate. The
+  second window opened with `bin/` rebuilt and deployed, so measure before predicting:
+  `git log --oneline $CANDIDATE..HEAD -- src/ | wc -l` → **0 as of 2026-08-16**, packaging **7/7
+  green**. If that count is still 0 at close, E1 is GREEN, this is not a failure to explain, and
+  Block F's rebuild is a no-op that must reproduce `bin/` byte-for-byte.
+  *(rehearsed 2026-08-13, under the first window)* → `Tests 1 failed | 6 passed (7)`, failing at
+  `packaging.test.ts:74` with `bin/helix-mcp.mjs is stale — run npm run build and commit bin/`.
+  **This test is what proves the rebuild reproduced** — in either direction.
 
 - [ ] **E2. `test/output-vocabulary.test.ts` — flips red AT `txClose`.**
   `expected = Date.now() > freezeWindowClosesAt() ? {} : ALLOW`, with
@@ -1466,10 +1472,13 @@ behaviour, not a failed close.** Read this block before running `npm test` on cl
   predicts: `cd ~/dev/helix && npm test`.
   **Which set depends on whether D2 has run**, and in this sheet's order it has: D2 removes the 3
   citations, so `test/output-vocabulary.test.ts` is already green again by the time you get here.
-  - after D2 (the normal path): **exactly E1 + E3**;
-  - before D2 (if you are running Block E early): **exactly E1 + E2 + E3**.
+  **E1 is now conditional** — it appears only if a post-candidate `src/` commit landed (see E1;
+  measured 0 on 2026-08-16). So:
+  - after D2 (the normal path): **E3, plus E1 only if that count is non-zero**;
+  - before D2 (if you are running Block E early): **E2 + E3, plus E1 on the same condition**.
 
-  Any failure outside that set is a real one.
+  Any failure outside that set is a real one — and so is E1 appearing when the count is 0, or
+  failing to appear when it is not.
 
 ---
 

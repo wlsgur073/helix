@@ -434,8 +434,33 @@ packaging-freshness test, red BY DESIGN for the whole first window, went green),
 redeployed to the candidate. So the second window's 28 days are real-use verification of exactly
 the bytes the report will describe, instead of a one-shot activation on close day of bytes nothing
 had yet exercised. The largest behavioural change carried in is the dual_verify agreement map's
-negation handling: over 19,377 generated pairs, contradictions silently rendering as agreement fall
-from 9,445 under the previously deployed bytes — which had no negation handling at all — to 638.
+negation handling. It was justified by a differential measurement over 19,377 generated pairs, in
+which contradictions silently rendering as agreement fell from 9,445 under the previously deployed
+bytes — which had no negation handling at all — to 638.
+
+**Those three figures are reported here as HISTORICAL AND UNREPRODUCIBLE, and the qualifier is the
+point of the sentence.** The generator, its seed and its labels were never committed: a repo-wide
+sweep including gitignored paths finds `19,377` and `9,445` in this sentence and nowhere else, and
+the intermediate `3,889` nowhere at all. So no reader — including a later reader of this project —
+can re-derive them, check the labelling rule, or tell a real regression from a change in how pairs
+were generated. They are recorded because deleting a measurement that actually drove a design
+decision would be worse than reporting it with its provenance gap stated; they are not evidence
+anyone can act on, and nothing in this report's gate or verdict rests on them.
+
+Two things were done about it rather than promised. Four adversarial cases were pinned in
+`test/verify/agreement-map.test.ts` on 2026-08-16 — unlisted negators, multi-claim absorption, a
+role swap at identical token sets, and a bare figure substitution — each asserting the *current
+wrong* answer, so the limit class is now measured in the suite instead of only asserted in a
+comment. And the module's limits header was corrected: it had named "true antonym pairs" as the
+boundary when the real class is any contradiction not carried by negation morphology.
+
+**What was deliberately NOT done: re-measuring the corpus now and restating this section around the
+new number.** A newly built in-window metric that a §9a-mandatory section is rewritten around lands
+on the Reset clause's first limb — *"Any intervening system, config, rule, or **metric** change
+resets the window"* — whereas correcting prose about a subsystem the pilot does not measure is
+covered by the same clause's carve-out for amending a document that changes no measured rule. The
+distinction is narrow and it is the whole reason this section states a gap instead of closing it.
+Rebuilding the corpus is post-close work.
 
 What remains close-day follow-up (§10) is only the redeploy of whatever source work accrues inside
 the SECOND window.

@@ -264,3 +264,46 @@ Recorded so the close report states the exposure rather than implying continuous
 **No action taken beyond the heal**, and none is available: prevention remains unachievable with
 documented configuration, so detection + reset stays the operating mode for the rest of this window
 too. Expect further instances; each is appended here.
+
+## Ruling R-2026-08-16 — two in-window edit classes ruled NOT a reset
+
+Recorded here because this ledger is the §9a report's source for reset history, and "this was
+considered and ruled not a reset" is part of that history. Neither item is a deviation; both are
+edits made after the ruling.
+
+**The clause was put to the owner verbatim**, not paraphrased — a paraphrase that dropped the word
+*does* is what produced the withdrawn first ruling on 2026-08-13, and the same mistake here would
+cost the same thing.
+
+**(a) `.github/workflows/ci.yml` — `npm run typecheck` moved from a step of the `test` job into its
+own job.** Ruled NOT a reset. Two grounds, and the second is the stronger one.
+
+- *Scope.* The Reset clause's measured surface is "code, config and the frozen rules", and this
+  receipt enumerates it in four maps — `payload.tools` (26), `payload.methodDocs` (2),
+  `payload.config` (`~/.helix/config.json`), `payload.runtime`. A CI workflow is in none of them and
+  no close step reads a CI result. Nothing is *built* either: `npm run typecheck` already existed in
+  `package.json` and was already invoked by this file; only when it runs changed.
+- *Precedent, which is on record rather than argued.* `git log -- .github/workflows/ci.yml` returns
+  exactly four commits, all 2026-08-03 — `53feba4`, `3efb94e`, `61a42dd`, `315322a` — every one of
+  them inside the FIRST window, one of which (`3efb94e`) added the `freeze-guard` job that reads the
+  receipt. That window then ran ten more days and was reset on 08-13 for the adjudication producer,
+  not for any of these.
+
+**Why it was worth doing at all.** For the whole first window `test/plugin/packaging.test.ts` was
+red BY DESIGN, so `npm test` exited non-zero on every push and `npm run typecheck` — the next step
+in the same job — NEVER RAN. The compile-time protection that is the entire point of the
+`CompactOptions` discriminated union went unenforced for the window that most needed it. The
+pre-window rebuild made packaging green, so typecheck currently runs *by accident*; splitting the
+job is what makes it independent of whether some other test happens to be failing.
+
+**(b) A comment-only edit to `src/verify/agreement-map.ts`.** Ruled prose, NOT a reset. Settled by
+measurement rather than by categorisation: `build.mjs:17` sets `legalComments: 'none'`, so no source
+comment reaches `bin/`, and the packaging test — which rebuilds from `src/` and byte-compares
+against the committed bundles — stayed 7/7 green across the edit. `src/verify/` is also absent from
+all 26 pinned tool paths and is not on the recall rank path the pilot measures.
+
+**Standing scope of both rulings.** They cover these two edit classes and nothing wider. In
+particular they do NOT license: editing any of the 28 pinned paths; rebuilding `bin/`; or
+re-measuring a metric that a §9a-mandatory report section is then rewritten around — that last one
+lands on the clause's first limb and was refused on 2026-08-16 for exactly that reason (see the
+close report §4.5).
