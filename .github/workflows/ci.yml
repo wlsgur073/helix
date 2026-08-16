@@ -26,6 +26,29 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm test
+  # Its own job, not a step after `npm test`, and the reason is measured rather than stylistic.
+  # For the whole first freeze window `test/plugin/packaging.test.ts` was red BY DESIGN — it
+  # rebuilds from src/ and byte-compares against the pinned bin/, which cannot match while source
+  # fixes accumulate behind a frozen candidate. `npm test` therefore exited non-zero on every push
+  # from 2026-08-05 to 2026-08-14, the job stopped there, and `npm run typecheck` NEVER RAN. The
+  # compile-time protection that is the entire point of the CompactOptions discriminated union
+  # (src/memory/ledger.ts) was unenforced for the window that most needed it. A pre-window rebuild
+  # made packaging green again, so typecheck currently runs by accident; splitting it is what makes
+  # that independent of whether any other test happens to be failing.
+  typecheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # No fetch-depth: `tsc --noEmit` reads no git history, unlike the test job's
+          # anchor-verification case.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          cache: npm
+      - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
   freeze-guard:
     runs-on: ubuntu-24.04
