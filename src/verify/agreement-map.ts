@@ -226,12 +226,41 @@ function negationPolarity(s: string): number {
  *           negator ("hardly", "rarely", "seldom") still reads as unnegated. Its apostrophe
  *           sub-case, where a LISTED negator failed on the codepoint ("doesn’t" with U+2019), was a
  *           different defect and is closed (I2); this hole is about words that are absent, not
- *           spellings that were missed.
- *       (2) TRUE ANTONYM PAIRS with unrelated word roots and no negation morphology at all — "safe"
- *           vs "dangerous", "safe" vs "risky" — are categorically outside what a marker scan can
- *           ever catch, negated or not; there is no marker to find. A contradiction phrased purely
- *           as antonyms renders 'agree' today and will keep doing so under this design; see the
- *           "true antonym pair" test for a pinned example.
+ *           spellings that were missed. Adding a word closes that word and nothing else. Named here
+ *           since the polarity work and tested NOWHERE until 2026-08-16, when all three were
+ *           measured false-'agree' and pinned — a limit that only a comment asserts is a limit
+ *           nothing can stop from drifting.
+ *       (2) CONTENT-CARRIED CONTRADICTION. Among lexical candidates the sole test is polarity
+ *           equality (see agreesWithPool), so a contradiction is visible ONLY when it moves bit 0
+ *           or bit 1. An earlier version of this line said "TRUE ANTONYM PAIRS" and named one
+ *           instance as though it were the boundary. The boundary is wider, and the honest
+ *           statement is the general one: any contradiction NOT carried by negation morphology is
+ *           invisible here. Measured 2026-08-16, every one rendering 'agree' as a lone pair —
+ *           figure substitution ("the retry limit is 3" / "is 30"), unit substitution ("25 minutes"
+ *           / "25 seconds"), polar adjectives ("safe" / "dangerous"), quantifier and modality
+ *           shifts ("every" / "some", "must" / "may"), direction reversals ("before" / "after",
+ *           "increases" / "decreases"), and ROLE SWAPS where both sides carry an IDENTICAL token
+ *           set (jaccard 1.0) and differ only in which noun fills which slot. The role swap is what
+ *           bounds the whole approach: there is no lexical difference to find, so no rule over
+ *           token sets can separate them — a fix would have to read structure, which this module
+ *           does not have and does not claim to.
+ *           SCOPE, stated because the unqualified version is false. "Renders 'agree' with an EMPTY
+ *           divergence list" is the LONE-PAIR case. Add one ordinary unpaired sentence and the
+ *           verdict flips to 'diverge' for a reason unrelated to the contradiction, which is then
+ *           printed under `agreements:` — the caller sees a tool that appears to have found a
+ *           conflict and is pointed at the wrong sentence. That is hole (4) seen from the caller's
+ *           side, and it is arguably worse than silent agreement; see the pinned multi-claim
+ *           absorption test.
+ *           Splitting out the token-VISIBLE corner (differing digits or identifiers inside a
+ *           high-overlap pair) was considered 2026-08-16 and DEFERRED as unmeasurable rather than
+ *           unsound: it reaches the figure and unit rows above but not the role swap, and it turns
+ *           legitimate agreements that quote different numbers into false-'diverge'. The suite
+ *           contained no case of agreement across differing figures, so it could not see that cost
+ *           at all — every test stayed green either way. One was added the same day for exactly
+ *           this reason, which is what makes the trade measurable next time. Note also that such a
+ *           rule must run on the RAW sentence, as NEGATOR_RE already does: tokenSet has by then
+ *           shredded "agreement-map.ts:130" into five tokens. See the "true antonym pair" and role
+ *           swap tests for pinned examples.
  *       (3) UN-BIT ATTACHMENT (re-derived 2026-08-12 after the two-bit change): bit 1 records that an
  *           un- form is PRESENT, not what it attaches to. The pair this hole used to be stated as —
  *           a separated cancellation "cannot be unsafe" agreeing with the genuine negation "cannot be

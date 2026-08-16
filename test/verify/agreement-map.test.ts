@@ -512,4 +512,71 @@ describe('agreement map', () => {
     const map = buildAgreementMap('read [the spec](docs/release/spec.md) first', 'something else entirely here');
     expect(map.divergences).toContain('read [the spec](docs/release/spec.md) first');
   });
+
+  // ─── The four cases below pin limits the header NAMED and this file tested NOWHERE (2026-08-16).
+  // Every one asserts the CURRENT WRONG answer. They exist because a limit stated only in a comment
+  // drifts silently: the header's own list was found to understate its class, and the reason it
+  // could was that no case here could contradict it. See the limits block in agreement-map.ts.
+
+  it.each([
+    ['hardly', 'The lock is hardly safe under concurrent writers.', 'The lock is safe under concurrent writers.'],
+    ['rarely', 'The sweep rarely reclaims the orphaned rows.', 'The sweep reclaims the orphaned rows.'],
+    ['seldom', 'The guard seldom blocks the daily run.', 'The guard blocks the daily run.'],
+  ])('open hole 1: the unlisted negator "%s" reads as unnegated, so the contradiction renders agree', (_word, negated, plain) => {
+    // NEGATOR_ALTERNATIVES is a bounded list of English negators, not a parser. These three carry
+    // negation semantically and none of them moves either polarity bit, so both sides score the same
+    // and pair. Adding a word to the list closes THAT WORD and nothing else — which is why this is
+    // pinned as a limit rather than fixed here. Distinct from the apostrophe sub-case (I2), where a
+    // LISTED negator failed on the codepoint: that was a spelling miss and is closed. This is about
+    // words that are absent. Measured 2026-08-16; pinned so a future reader sees it was measured, not
+    // missed. Not asserting desired behavior.
+    const m = buildAgreementMap(negated, plain);
+    expect(m.verdict).toBe('agree');
+    expect(m.divergences).toHaveLength(0);
+  });
+
+  it('open hole 4, caller-visible face: the contradicted claim is emitted INSIDE agreements while an unrelated sentence drives the verdict to diverge', () => {
+    // The lone-pair statement of the content-carried limit — "renders agree with an empty divergence
+    // list" — is the SINGLE-SENTENCE case, and stating it without that qualifier is false. Add one
+    // ordinary unpaired sentence and the verdict flips to 'diverge' for a reason that has nothing to
+    // do with the contradiction, which is then printed under `agreements:` by handlers.ts. The reader
+    // is steered AWAY from the real conflict by a tool that appears to have found a conflict, which is
+    // arguably worse than silent agreement: false confidence with a wrong pointer attached.
+    // Measured 2026-08-16; pinned so a future reader sees it was measured, not missed.
+    const m = buildAgreementMap(
+      'The retry limit is 3. The cache directory is purged on startup.',
+      'The retry limit is 30.',
+    );
+    expect(m.verdict).toBe('diverge');
+    expect(m.agreements).toEqual(['The retry limit is 3']);
+    expect(m.divergences).toEqual(['The cache directory is purged on startup']);
+  });
+
+  it('open hole 2: a role swap with an IDENTICAL token set renders agree — there is no lexical difference to find', () => {
+    // Both sides carry exactly the same content tokens (jaccard 1.0) and state opposite claims; only
+    // which noun fills which slot differs. This is the case that bounds the whole approach: it is not
+    // that the rule is too narrow, it is that NO rule over token sets can separate these, because the
+    // token sets are equal. Any fix must read structure, which this module does not have and does not
+    // claim to. Pinned as the exhibit the limits header cites. Measured 2026-08-16; not asserting
+    // desired behavior.
+    const m = buildAgreementMap(
+      'The hook blocks the run when the checker fails.',
+      'The checker blocks the run when the hook fails.',
+    );
+    expect(m.verdict).toBe('agree');
+    expect(m.divergences).toHaveLength(0);
+  });
+
+  it('open hole 2: a bare figure substitution renders agree — the suite could not see this class until now', () => {
+    // Kept separate from the role swap because it has the opposite property: here there IS a lexical
+    // difference to find ("3" vs "30"), so unlike the swap this class is at least reachable by a rule.
+    // That matters for a specific pending decision — splitting out token-visible differences inside a
+    // high-overlap pair. Before this case the file's 48 tests contained no instance of agreement across
+    // differing figures, so such a rule could be added, break real agreements that legitimately quote
+    // different numbers, and leave the suite entirely green. A change nothing can measure is not a
+    // change worth making; this is the case that makes the trade measurable. Measured 2026-08-16.
+    const m = buildAgreementMap('The retry limit is 3.', 'The retry limit is 30.');
+    expect(m.verdict).toBe('agree');
+    expect(m.divergences).toHaveLength(0);
+  });
 });
