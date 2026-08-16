@@ -1443,10 +1443,21 @@ behaviour, not a failed close.** Read this block before running `npm test` on cl
   the first post-candidate `src/` commit lands and clears **only** after the rebuild in Block F.
   **This line said "already red, and has been for the window" until 2026-08-16, and that is now
   false.** It described the FIRST window, where `bin/` sat 62 commits behind the candidate. The
-  second window opened with `bin/` rebuilt and deployed, so measure before predicting:
-  `git log --oneline $CANDIDATE..HEAD -- src/ | wc -l` → **0 as of 2026-08-16**, packaging **7/7
-  green**. If that count is still 0 at close, E1 is GREEN, this is not a failure to explain, and
-  Block F's rebuild is a no-op that must reproduce `bin/` byte-for-byte.
+  second window opened with `bin/` rebuilt and deployed, so measure before predicting — and measure
+  the right thing:
+
+  ```bash
+  git diff --quiet $CANDIDATE HEAD -- bin/ && echo "E1 GREEN expected" || echo "E1 RED expected"
+  ```
+
+  **Predict from `bin/`, NOT from a commit count.** A first draft of this line used
+  `git log $CANDIDATE..HEAD -- src/ | wc -l` and that predictor is wrong: a comment-only `src/`
+  commit increments it while `build.mjs` (`legalComments: 'none'`) strips the comment, so the
+  rebuild still reproduces `bin/` and E1 stays GREEN. That exact case landed the same day
+  (`5797346`, the aligner limits header) — the count is 1 and packaging is 7/7 green. Predicting
+  from the count would have shown the close-day operator a failure that never comes and sent them
+  looking for a cause. If `git diff --quiet` succeeds at close, E1 is GREEN, that is not a failure
+  to explain, and Block F's rebuild is a no-op that must reproduce `bin/` byte-for-byte.
   *(rehearsed 2026-08-13, under the first window)* → `Tests 1 failed | 6 passed (7)`, failing at
   `packaging.test.ts:74` with `bin/helix-mcp.mjs is stale — run npm run build and commit bin/`.
   **This test is what proves the rebuild reproduced** — in either direction.
@@ -1472,13 +1483,14 @@ behaviour, not a failed close.** Read this block before running `npm test` on cl
   predicts: `cd ~/dev/helix && npm test`.
   **Which set depends on whether D2 has run**, and in this sheet's order it has: D2 removes the 3
   citations, so `test/output-vocabulary.test.ts` is already green again by the time you get here.
-  **E1 is now conditional** — it appears only if a post-candidate `src/` commit landed (see E1;
-  measured 0 on 2026-08-16). So:
-  - after D2 (the normal path): **E3, plus E1 only if that count is non-zero**;
+  **E1 is now conditional** — it appears only if `git diff --quiet $CANDIDATE HEAD -- bin/` FAILS
+  (see E1; it succeeded on 2026-08-16, so E1 was green). So:
+  - after D2 (the normal path): **E3, plus E1 only if that diff is non-empty**;
   - before D2 (if you are running Block E early): **E2 + E3, plus E1 on the same condition**.
 
-  Any failure outside that set is a real one — and so is E1 appearing when the count is 0, or
-  failing to appear when it is not.
+  Any failure outside that set is a real one — and so is E1 disagreeing with the `git diff` in
+  either direction, which would mean the rebuild is not reproducing what the committed bundles
+  contain.
 
 ---
 
