@@ -246,8 +246,9 @@ this report**. Each is summarized here in the substance that binds the report; t
 including the reflog extracts and the file-history verdicts, is
 `v2-freeze-deviations-2026-08.md` in this directory.
 
-Deviations occurring inside the SECOND window are added below at the close. As of the freeze there
-are none.
+Deviations occurring inside the SECOND window are §4.7, and there is already one: the clone-HEAD
+drift D-2026-08-10 predicted as a standing exposure arrived on 2026-08-15. Further instances are
+appended there.
 
 ### 4.0 The first window's reset — D-2026-08-13-in-window-tooling
 
@@ -607,6 +608,37 @@ the Reset paragraph's main clause is unconditional. Recorded as `D-2026-08-13-in
 with their measured costs, and the step-by-step remediation executed on 2026-08-14. The first
 window ended and was not published; this report is the second window's, and §4.0 carries the reset
 as the head of the deviation history rather than as a footnote to it.
+
+### 4.7 Second-window deviations — D-2026-08-15-autoupdate-second-window
+
+**One so far, and it is the predicted one.** The marketplace clone fast-forwarded off the candidate
+on 2026-08-15 11:26:24Z — `pull origin HEAD: Fast-forward`, `94dd136 -> 3bd63d0` — with both
+`autoUpdate` flags `false` and `DISABLE_AUTOUPDATER=1` exported and inherited. §4.2 established for
+CLI 2.1.226 that the startup clone refresh consults neither, and closed with "every Claude startup
+may move the clone again"; this is that. The instant is corroborated independently of the reflog by
+`known_marketplaces.json`'s `helix.lastUpdated`, `2026-08-15T11:26:24.026Z`.
+
+**Byte continuity unbroken.** `git diff 94dd136 3bd63d0 -- bin/ .claude-plugin/ hooks/ data/` is
+empty; the freeze commit touches only `docs/release/`, `scripts/` and `test/`. All nine runtime
+surfaces re-verified byte-identical under both load paths after the heal. Same wording as §§4.1-4.3:
+a control/provenance deviation with continuous runtime bytes. **The clone-HEAD identity pin did not
+hold continuously in this window either, and this report does not say it did.**
+
+**Healed automatically** at 2026-08-16 01:43:44Z back to the candidate — the fourth heal overall
+(§4.3 carries the first window's three) and the first of this window.
+
+**Detection latency 14 h 17 m 20 s, stated because the alternative is implying monitoring that does
+not exist.** `freeze-runtime-check.sh` is point-in-time: it fires on interactive shell start and on
+the dogfood unit's `ExecStartPre`, and between the pull and the next such invocation the clone stood
+off-pin undetected. This window survives it because the bytes never moved; a drift that also moved
+bytes would have gone unnoticed for the same interval. That is the honest shape of the control.
+
+**The wrinkle that makes it look harmless for the wrong reason.** The commit drifted TO is the
+freeze commit itself. That is an artefact of ordering — the freeze commit is exactly one past the
+candidate by construction, so it is the likeliest drift target and the least alarming-looking one.
+The safety comes from the measured byte identity, not from the target's identity.
+
+- Final second-window deviation list and heal count: <<FILL AT CLOSE: every entry appended to `v2-freeze-deviations-2026-08.md` after 2026-08-14, and the total line count of the heal log | the deviation ledger and `~/.cache/freeze-guard-heals.log`, read at the close. Prevention is not available (§4.2), so more instances are expected; a window with none would itself be worth remarking on >>
 
 ---
 

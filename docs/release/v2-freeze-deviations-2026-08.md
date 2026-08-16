@@ -220,3 +220,47 @@ window carried — six `src/memory` files whose bytes had moved past the candida
 against — does not exist in the second window, because the new candidate contains them and the
 re-freeze re-pins them where they are. And the 28 days ahead are now real-use verification of the
 rebuilt bundles instead of a close-day activation of 62 unverified commits.
+
+## Deviation D-2026-08-15-autoupdate-second-window
+
+**This is the SECOND window's first deviation, and it is not a new failure — it is the standing
+exposure D-2026-08-10 predicted, arriving on schedule.** That entry closed with "every Claude
+startup may move the clone again", having falsified both preventive controls. It did.
+
+**Statement.** The marketplace clone fast-forwarded off the candidate on 2026-08-15 20:26:24 KST
+(11:26:24Z): `pull origin HEAD: Fast-forward`, HEAD `94dd136 -> 3bd63d0`. Corroborated
+independently of the reflog by `known_marketplaces.json`'s `helix.lastUpdated`, which reads
+`2026-08-15T11:26:24.026Z` — the same instant to the second. Both `autoUpdate` flags were `false`
+at the time and remain so, and `DISABLE_AUTOUPDATER=1` is exported and verifiably inherited by
+non-interactive shells. Nothing in the documented configuration surface was misconfigured; the
+refresh simply does not consult it (D-2026-08-10's conclusion for CLI 2.1.226, unchanged).
+
+**Byte continuity.** Unbroken. `git diff 94dd136 3bd63d0 -- bin/ .claude-plugin/ hooks/ data/` is
+empty — the freeze commit touches only `docs/release/`, `scripts/` and `test/`. All nine runtime
+surfaces verified byte-identical against the pin list under BOTH load paths after the heal. Same
+wording bound as before: **control/provenance deviation with continuous runtime bytes**; the
+clone-HEAD identity pin FAILED for the interval below, and no report may say "all runtime identity
+pins held".
+
+**A wrinkle worth naming, because it makes the deviation look harmless and is not the reason it is
+harmless.** The commit the clone drifted TO is the freeze commit itself — the very commit that
+opened this window. That is a coincidence of ordering, not a safety property: the guard compares
+clone HEAD against the CANDIDATE, and the freeze commit is one commit past it by construction, so
+the freeze commit is precisely the drift target most likely to occur and least likely to alarm a
+reader. What actually makes it safe is the measured byte identity above.
+
+**Remediation — automatic, and the first exercise of the auto-heal inside this window.** Healed
+2026-08-16 01:43:44Z back to `94dd136`, logged to `~/.cache/freeze-guard-heals.log`. That is the
+**fourth** heal overall and the first of the second window; §4.3 of the close report carries the
+first window's three.
+
+**Detection latency: 14 h 17 m 20 s**, and it is a property of the design rather than a failure of
+it. `freeze-runtime-check.sh` is point-in-time, not continuous — it fires on interactive shell
+start and on the dogfood unit's `ExecStartPre`. Between the pull and the next such invocation the
+clone stood off-pin, undetected. The window survives this because runtime BYTES are what serve
+recall and they never moved; a drift that also moved bytes would have stood for the same interval.
+Recorded so the close report states the exposure rather than implying continuous monitoring.
+
+**No action taken beyond the heal**, and none is available: prevention remains unachievable with
+documented configuration, so detection + reset stays the operating mode for the rest of this window
+too. Expect further instances; each is appended here.
