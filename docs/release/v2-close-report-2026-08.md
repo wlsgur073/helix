@@ -21,10 +21,13 @@
        * If a step refuses (exit 1), the refusal is the result: record it verbatim in
          §11 and do not re-run to obtain a different one (`v2-preregistration-2026-07.md` §11).
        * Every PINNED MEASUREMENT step runs from a clean checkout of the candidate commit,
-         not from the development tree (`v2-close-procedure-2026-08.md`, "The rule"). Two
-         post-candidate helpers cannot: they do not exist at that commit. §2.3 records the
-         exception and the byte-identity measurement that licenses it — do not simplify it
-         back into "the whole chain ran from the checkout", which is false.
+         not from the development tree (`v2-close-procedure-2026-08.md`, "The rule"). ONE
+         pre-chain helper cannot: `npm run freeze-guard` reads a receipt issued AGAINST the
+         candidate, which therefore cannot exist inside it. §2.3 records that exception and
+         the byte-identity measurement that licenses it — do not simplify it back into "the
+         whole chain ran from the checkout", which is false, and do not restore the older
+         "two post-candidate helpers", which was the FIRST window's count (corrected
+         2026-08-17: the re-freeze moved the adjudication skeleton into the candidate).
        * Prose in this document is the report's own voice and stays in the published
          file. Do not convert it into instructions.
      ============================================================================== -->
@@ -415,10 +418,27 @@ ledger for the evidence rather than restating it. The ledger now carries the sam
 supports as the bullets above; if the two ever disagree, they are describing one set of commits and
 one of them is wrong.
 
-The disposition is recorded as its own entry in the deviation ledger, and this report cites it
-there rather than restating the evidence:
+**No disclosure entry was ever written, and none is owed** — the obligation dissolved with the
+condition. The ledger records the dissolution rather than a disclosure, in
+`D-2026-08-13-in-window-tooling`, under "Two things the reset paid for rather than cost":
 
-- <<FILL AT CLOSE: the ledger entry id for the pinned-src disclosure, plus its statement, disposition and owner-approval date | a new entry in `v2-freeze-deviations-2026-08.md` — **owed, not yet written** as of this draft; it must exist before this report is published, because §9a's deviation history is what cites it >>
+> The pinned-source disclosure question the first window carried — six `src/memory` files whose
+> bytes had moved past the candidate they were pinned against — does not exist in the second
+> window, because the new candidate contains them and the re-freeze re-pins them where they are.
+
+*(Corrected 2026-08-17. This bullet was a close-time fill marker demanding "the ledger entry id for
+the pinned-src disclosure … **owed, not yet written**", inside a section whose own heading says the
+condition was DISSOLVED and one line below a sentence claiming in the present tense that the entry
+exists. It was the only marker in this report whose artifact had to be created BEFORE publication
+rather than produced by the close chain itself — the surviving markers all await something the
+close day generates (a run artifact, a receipt, a release record) or observes, and are fillable by
+transcription on the day; this one awaited a decision and a ledger write that were never going to
+happen. So H1 — which refuses publication while any marker survives — was blocked by a demand that
+could not honestly be met. Filling it with `D-2026-08-13`'s id was considered and
+rejected: that entry records the question's elimination, not a disclosure, and citing it as one
+would misrepresent it. Writing a fresh first-window entry now was rejected for two reasons — it
+would be false history, and being dated after 2026-08-14 it would be swept into §4.7's marker for
+second-window ledger appends.)*
 
 ### 4.5 Deployment status of in-window source work *(first window; superseded by the pre-window rebuild)*
 
@@ -604,9 +624,15 @@ The grounds offered for the recommendation, stated as grounds rather than as a s
    satisfies them rather than choosing them (point 1 above).
 3. **It cannot move the gate in either direction** — it can neither cause an adjudication to be
    accepted that would otherwise be refused, nor the reverse (point 3 above, the decisive test).
-4. **It lives outside the pinned tool set** — the freeze pins sixteen pilot tools as a fixed list,
-   not a directory glob, so it creates neither value nor set-wise drift in `input-pins`
-   ("Where it lives" above).
+4. ~~**It lives outside the pinned tool set**~~ — **this point was true when the case was put and
+   is false now, and it is retained struck through rather than deleted because it is one of the
+   arguments the ruling rejected.** At the first freeze the pin list named sixteen pilot tools as a
+   fixed list rather than a directory glob, so a file placed elsewhere created neither value nor
+   set-wise drift in `input-pins`. The second freeze added
+   `scripts/close/adjudication-skeleton.ts` to `PINNED_TOOL_PATHS` as its twenty-sixth entry, so
+   the program is now inside the pinned set and its drift IS caught mechanically. See "Where it
+   lives" above, which records why the location argument answered the wrong question in the first
+   place.
 5. **The chain runs without it** — the same file can be hand-authored, as the preregistration
    always assumed, which makes it a labour-saving helper rather than a method component.
 
@@ -633,6 +659,18 @@ the Reset paragraph's main clause is unconditional. Recorded as `D-2026-08-13-in
 with their measured costs, and the step-by-step remediation executed on 2026-08-14. The first
 window ended and was not published; this report is the second window's, and §4.0 carries the reset
 as the head of the deviation history rather than as a footnote to it.
+
+**And the question does not recur in THIS window.** §8 reaches tooling built after the freeze it
+governs. This window's freeze is `3bd63d0` and its candidate `94dd136` already contains both the
+producer and its test — `git ls-tree -r --name-only 94dd136 -- scripts/close test/close` returns
+exactly `scripts/close/adjudication-skeleton.ts` and `test/close/adjudication-skeleton.test.ts` —
+and the producer is pinned as the 26th `payload.tools` entry, with its blob row in §2.1. So the
+close-day chain runs no program that post-dates this freeze, and no second §8 ruling is owed.
+**Scope of that claim, stated so it is not read wider than it is measured:** the evidence above is
+producer-scoped. It establishes that the one program §9b identified as missing predates the freeze;
+it is not a survey of everything authored during the window. The general assurance rests on the
+standing rule — no close-day tooling is built inside the window — and on the run-sheet using no
+close-day program other than this one.
 
 ### 4.7 Second-window deviations — D-2026-08-15-autoupdate-second-window
 
@@ -726,11 +764,15 @@ yet.
 **Element 6 — adjudication artifact binding the runner-output hash and quoting both sides of every
 judgment.** The human judgments are ingested, never decided by the tooling. The file's mechanical
 half — the two hash bindings and one entry per frozen probe — may be stamped by
-`scripts/close/adjudication-skeleton.ts`, an unpinned close-day program written in-window and
-disclosed with its §8 disposition in §4.6; it writes every verdict as `UNJUDGED`, which the gate
-refuses over a non-empty denominator (§4.6 states the zero-probe boundary), so nothing it emits is a
-judgment. It is invoked from the development tree, for the reason §2.3 records. Hand-authoring the
-file instead is equally valid and reaches the same gate.
+`scripts/close/adjudication-skeleton.ts`, a **PINNED** close-day program — the 26th entry of the
+receipt's `payload.tools`, whose hash row appears in §2.1. It was written in-window during the
+FIRST window; §4.6 records the §8 disposition that followed (RESET) and the re-freeze that then
+brought it inside the candidate. It writes every verdict as `UNJUDGED`, which the gate refuses over
+a non-empty denominator (§4.6 states the zero-probe boundary), so nothing it emits is a judgment.
+It is invoked **from the candidate checkout**, with the rest of the chain. Hand-authoring the file
+instead is equally valid and reaches the same gate. *(Corrected 2026-08-17: this passage called the
+program "unpinned" and placed its invocation "from the development tree" — both were first-window
+facts, and both are contradicted by §2.1, §4.6 and the run-sheet's C8 in this same document set.)*
 - <<FILL AT CLOSE: the adjudication file path, its `gateSetSha256` and `runPayloadSha256` bindings, and its sha256 as the scorer computed it | the operator authors the adjudication against run 1's payload hash; the scorer records `adjudicationSha256` = sha256 of the parsed object in the score payload >>
 - <<FILL AT CLOSE: contradiction judgment counts — total judgments, how many `contradiction` and how many `none`, with both quoted texts retained for every positive call | the adjudication's `contradictions` array, which must cover every frozen probe exactly once; the scorer refuses `adjudication-incomplete`, `adjudication-duplicate` or `adjudication-uncertain` otherwise >>
 - <<FILL AT CLOSE: stale judgment counts — how many `violation` and how many `none`, with the `closedId` / `currentId` pair on every positive call, or the statement that no stale judgments were required | the adjudication's `staleViolations` array; judgments are required for every probe only when the snapshot holds at least one closer relationship, and a `violation` additionally names the closed record served and its current form, which §7.4 reports >>

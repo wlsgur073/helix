@@ -61,15 +61,19 @@ way; the 2026-08-13 rehearsal printed the FIRST window's values and they are voi
 ## Block A — owner-owed BEFORE close day
 
 These are not close-day steps. If they are not done before the window closes they either cannot be
-done at all (A1), or they stay open and the report says so (A2, A3) — with one exception: **A4 is a
-ledger entry the report cites, and an unwritten entry blocks publication** rather than being
-reported open.
+done at all (A1), or they stay open and the report says so (A2, A3). **A4 is discharged** — it is
+retained below as the record of a question that was ruled and does not recur in this window.
+*(Until 2026-08-17 this paragraph named A4 as an exception whose unwritten ledger entry blocked
+publication. The entry was written 2026-08-14 at `3bd63d0`; see A4.)*
 
 - [ ] **A1. Home-machine pin verification** — prepared, needs a **transfer + one bash run** by the
   owner. Script: `docs/issues/2026-08-12-home-pin-check.sh` (strictly read-only: writes nothing,
   changes no git state, no heal/reset/pull; expected values are embedded so it needs neither the
   repository nor a network). Paired doc: `docs/issues/2026-08-03-freeze-pin-verification-home-machine.md`
-  (**confirm the v2 banner** before running).
+  (**confirm the v3.1 banner** before running — the paired doc was re-anchored to this window as v3
+  on 2026-08-14 and corrected to v3.1 on 2026-08-17, when five first-window expected values were
+  found still live in its manual path and judgment table; a v2 or v3 copy will mis-verify the
+  transfer and mis-judge a correct machine).
 
   Both files must be **transferred to the home machine first** — it has no copy of this repository,
   so the repo-relative paths above name them only on the box you are reading this on. Put them in
@@ -109,28 +113,29 @@ reported open.
   carry the command for. Either add the encryption step to §6 and take the snapshot, or record Q4
   as open in the report. **Do not treat a plain-tar backup as discharging Q4.**
 
-- [ ] **A4. The owner must RULE on the in-window producer's §8 disposition** — owed and **not yet
-  made**, and the one Block A item that blocks publication rather than being reported open.
-  `scripts/close/adjudication-skeleton.ts` was written 2026-08-13, inside the window, and the
-  Reset paragraph of `v2-preregistration-2026-07.md` says building any of the method's tooling
-  after the freeze **does** reset it — quote that sentence to the owner rather than summarising
-  it, which is the discipline a first withdrawn ruling on this question established. Three courses
-  are open: **RESET** (the main clause read as unconditional; this window ends); **DISCLOSURE**
-  (the trailing clause read as limiting, so the rule does not reach a program that resolves no
-  unspecified detail — report §4.6 sets out that case); or **do not use the producer at all** and
-  hand-author the adjudication at C8, which removes the question rather than answering it and
-  costs only the operator's time. Whatever is ruled is recorded in the ledger before publication.
+- [x] **A4. The in-window producer's §8 disposition — RULED, and it does not arise again in this
+  window. Nothing is owed here.** *(Corrected 2026-08-17. This item read "the owner must RULE …
+  owed and **not yet made**" until then, and that was false when written: the ruling was made
+  2026-08-13 and its ledger entry was committed 2026-08-14 at `3bd63d0`, two days before `21b47b4`
+  authored this paragraph.)*
 
-  What is still owed is a new entry in `docs/release/v2-freeze-deviations-2026-08.md` recording the
-  ruling, its date and its grounds — exactly as §4.4's pinned-src disclosure entry is owed and for
-  the same reason: **§9a's deviation history cites the ledger rather than restating it**, so a
-  report published without the entry cites nothing. Report §4.6's one remaining marker asks for
-  that entry's id, so an unwritten entry is an unfilled marker, and H1 refuses to publish while any
-  marker remains.
+  **What was ruled.** `scripts/close/adjudication-skeleton.ts` was written 2026-08-13 inside the
+  FIRST window. The owner ruled **RESET**, and the reset was executed: the window ended, a new
+  candidate `94dd136` was cut, and the re-freeze put the producer INSIDE that candidate and pinned
+  it as the 26th entry of `payload.tools`. The ruling and its grounds are recorded in
+  `docs/release/v2-freeze-deviations-2026-08.md` (`D-2026-08-13-in-window-tooling`) and in report
+  §4.6; report §4.6 carries **zero** markers.
 
-  This is the one Block A item that is not merely reported open if unexecuted. Deadline: **before
-  the report is published**, which is earlier than close-day cleanup; H3 confirms it. Both owed
-  ledger entries can be written in the same pass.
+  **Why no second-window instance exists.** §8 reaches tooling built AFTER the freeze it governs.
+  This window's freeze is `3bd63d0` and its candidate already contains the producer and its test
+  (`git ls-tree -r --name-only 94dd136 -- scripts/close test/close` → 2 files), so no post-freeze
+  build occurred inside it. The question is answered, not deferred, and there is nothing for the
+  owner to rule before publication.
+
+  **What C8 must therefore check** is not a ruling. The producer is a pinned path, and step 0.5
+  does compare it against its candidate blob — but 0.5 hashes the DEVELOPMENT tree and reaches only
+  17 of the 26 `payload.tools` paths, so it says nothing about the checkout C8 now runs in. C8
+  therefore carries its own preflight over the checkout. See C8.
 
 ---
 
@@ -144,11 +149,29 @@ cannot hold for one pre-chain check whose input cannot exist at the candidate co
 tree runs what" (after this block) before running anything, and never restate the rule without its
 exception. The report's §2.3 carries the scoped version.
 
-This is not ceremony. Measured at HEAD on 2026-08-13, the development tree **diverges from the
-pins**: `src/memory/{ownership,retrieval,store,verified-projection,witness-core,witness-store}.ts`
-(6 of the 9 pinned memory modules) and `docs/release/gate-decision-2026-07-22.md` all differ from
-the candidate blob. `scripts/pilot/input-pins.ts` re-hashes `process.cwd()`, so invoked in this
-tree it refuses **`method-drift`** (exit 1) — correctly, by its own contract.
+This is not ceremony — but the reason it is not has CHANGED, and the change removed a guard rather
+than the need for one. Read both measurements; the second is the one that governs today.
+
+**As measured at HEAD on 2026-08-13** (first window, retained as dated fact): the development tree
+diverged from the pins —
+`src/memory/{ownership,retrieval,store,verified-projection,witness-core,witness-store}.ts` (6 of the
+9 pinned memory modules) and `docs/release/gate-decision-2026-07-22.md` all differed from the
+candidate blob. `scripts/pilot/input-pins.ts` re-hashes `process.cwd()`, so invoked in this tree it
+refused **`method-drift`** (exit 1) — correctly, by its own contract. That refusal was, in effect,
+a fail-closed guard against running the chain from the wrong tree.
+
+**As measured on 2026-08-17** (second window, and this is the operative state): the re-freeze
+re-pinned all seven of those paths at their current bytes. `git diff --name-only 94dd136 HEAD`
+lists 12 changed paths and its intersection with the 28 pinned paths is **empty**. So
+`input-pins.ts` invoked in the development tree would **NOT** refuse today —
+it would proceed, and produce an artifact indistinguishable from one produced in the checkout.
+
+**The consequence, stated plainly: the mechanical protection this block used to rely on is gone,
+and the rule is now enforced only by the operator following it.** C8 therefore carries an inline
+fail-closed preflight that asserts the execution tree directly rather than inferring it from
+content drift — content identity and tree identity are different properties, and only the second
+is what "run from the candidate checkout" asserts. *(This paragraph stated the 08-13 divergence
+alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
 
 - [ ] **0.1 Capture the terminal transcript — FIRST, before any other command.** The report's §6
   execution log and §11 refusal record are sourced from this file, and nothing else captures one.
@@ -264,9 +287,17 @@ tree it refuses **`method-drift`** (exit 1) — correctly, by its own contract.
   `note: out of scope (deploy-machine state): payload.config sha256, payload.runtime identity`,
   then `freeze-guard: anchors verified`, `exit=0`.
 
-  On close day those 7 warnings are **gone**: the worktree-divergence loop is guarded by
-  `if (now <= p.txClose)` (freeze-guard.ts:90). Their absence is expected and is not a change of
-  state.
+  **Expect ZERO warnings today, and for a reason that is NOT the txClose guard.** *(Corrected
+  2026-08-17.)* The 7 warnings above were the FIRST window's; the re-freeze re-pinned all seven
+  paths at their current bytes, so the worktree-divergence loop finds nothing to warn about —
+  measured 2026-08-17, the intersection of the changed set with the 28 pins is empty. Their absence
+  before `txClose` therefore says the tree matches the pins, which is information. Their absence
+  AFTER `txClose` says only that the loop is guarded by `if (now <= p.txClose)`
+  (freeze-guard.ts:90) and says nothing about the tree. **On close day you are past `txClose`, so
+  read no reassurance from a quiet run**; the pre-close readings are where that evidence lives.
+  Note also that this loop's findings go to `warnings` and are excluded from `ok`, so
+  `npm run freeze-guard` exits 0 on a drifted pin either way — it is the ANCHOR loop, not this one,
+  that hard-fails.
 
   Success: exit 0 with a final `freeze-guard: anchors verified`.
   Refusal: any `anchor:` / `pin-omitted:` / `payload-sha256:` line, or a final
@@ -298,17 +329,34 @@ tree it refuses **`method-drift`** (exit 1) — correctly, by its own contract.
   `PINNED_TOOL_PATHS` names 16 of them; the odd one out is `segment-oracle.ts`, which v2's
   ledger-only population never invokes. Checking a superset of the pinned list is deliberate: this
   step is about what the dev-tree helpers might *reach*, not about what the receipt pins.
-  Success: no `DIFFERS` line. Refusal: **any** `DIFFERS` line — stop. The dev-tree exception is no
-  longer safe and C8's producer must not be run until the divergence is understood. **Paste this
-  output into the report**: it is what makes the exception defensible rather than convenient.
+  Success: no `DIFFERS` line. Refusal: **any** `DIFFERS` line — stop, and diagnose before Blocks
+  D–F edit the repository; a pinned path that moved in the development tree is a finding about the
+  chain whatever else is true. *(Corrected 2026-08-17: this line used to continue "…and C8's
+  producer must not be run until the divergence is understood." That coupling was the first
+  window's, when C8 loaded its modules from this tree. C8 now runs in the candidate checkout behind
+  its own preflight, so a `DIFFERS` line here is not a verdict on C8. Do not reinstate the coupling
+  — and note the paragraph below, which says the same thing 20 lines later.)* **Paste this output
+  into the report**: it is what makes the remaining 0.4 exception defensible rather than convenient.
 
   **Run this check TWICE and paste both readings — here, and again immediately before C8.** The
   licence it issues is point-in-time, not standing: `~/dev/helix` is written by a second clone, and
   during the 2026-08-13 rehearsal alone the tree advanced five commits (`c744266`, `5320bb4`,
   `c843e77`, `f8e2bf0`, `a8f07b7`) from another session while the sheet was being written, with
-  three matching clone drifts in `~/.cache/freeze-guard-heals.log`. A reading taken at the top of
-  Block B says nothing about the bytes C8 will actually load hours later. If the second reading
-  differs from the first, C8 does not run: hand-author the adjudication instead (C8 says how).
+  three matching clone drifts in `~/.cache/freeze-guard-heals.log`.
+
+  **What the second reading is FOR has changed, and the C8 framing is retained only as a
+  convenient point in the sequence.** *(Corrected 2026-08-17.)* It used to be C8's licence: under
+  the first window C8 loaded its modules out of `~/dev/helix` — `../../src/entry-point.js` and
+  `../pilot/artifact-io.js`, both covered by 0.5's loop; it imports nothing from `src/memory` —
+  so "a reading taken at the top of
+  Block B says nothing about the bytes C8 will actually load hours later" was the whole argument.
+  C8 now runs from the candidate checkout, whose bytes are fixed by the commit and asserted
+  directly by C8's own preflight, so **the second reading no longer licenses C8**. It survives for
+  its other stated purpose — catching the development tree drifting away from the candidate
+  mid-close, which is a finding about the whole chain and about 0.4's dev-tree invocation — and
+  "immediately before C8" is kept as a defined, roughly mid-run point rather than renumbering the
+  sheet. A second reading that DIFFERS from the first is therefore no longer a reason to skip C8;
+  it is a finding to record, and to diagnose before Blocks D–F edit the repository.
 
 - [ ] **0.6 THE WRITE FREEZE — stop the dogfood timer BEFORE the close instant.**
   *(close day, before `2026-09-11T06:20:01.000Z` = 15:20:01 KST)*
@@ -403,13 +451,23 @@ candidate and showed the other's real reason was different; see R2.)*
   `tsx` drives it. *(rehearsed 2026-08-13: a probe placed in the checkout printed
   `resolves to: …/close-candidate/src/memory/expansion.ts` and `expansion available: true` both
   when run with cwd = the checkout and when run with cwd = `~/dev/helix` via an absolute script
-  path; the probe was removed and `git status --porcelain` was empty again.)* The development
-  tree's `src/memory` diverges from the pins on 6 files, so its copies would measure a method the
-  receipt does not describe. This is also why R3's dev-tree interpreter is harmless: `$TSX` chooses
+  path; the probe was removed and `git status --porcelain` was empty again.)* *(Corrected
+  2026-08-17: this passage continued "The development tree's `src/memory` diverges from the pins on
+  6 files, so its copies would measure a method the receipt does not describe." That was the FIRST
+  window's state. The re-freeze re-pinned those files at their current bytes and the divergence is
+  now zero — so the rule below stands on the FILE-decides-the-bytes property alone, which is
+  structural, and not on a divergence that would make a wrong-tree run visible. Run from the
+  checkout because the rule says so, not because you expect a refusal.)* This is also why R3's
+  dev-tree interpreter is harmless: `$TSX` chooses
   nothing about module resolution.
 - *The CWD decides what `input-pins` hashes.* `input-pins.ts:290-291` calls
-  `hashTools(process.cwd())` and `hashMethodDocs(process.cwd())`. Run it anywhere else and it
-  refuses **`method-drift`** — correctly, by its own contract.
+  `hashTools(process.cwd())` and `hashMethodDocs(process.cwd())`, so the cwd decides which bytes
+  become the pins of record. **It refuses `method-drift` only when those bytes DIFFER from the
+  receipt** — and measured 2026-08-17 they do not differ in the development tree either, so today
+  the wrong cwd produces a wrong-provenance artifact SILENTLY rather than a refusal. *(Corrected
+  2026-08-17: this bullet read "Run it anywhere else and it refuses `method-drift` — correctly, by
+  its own contract." The contract is unchanged; what changed is that the condition triggering it no
+  longer holds.)*
 
 **R2 — the one step whose INPUT cannot exist in the checkout: the DEV TREE, with `cd ~/dev/helix`.**
 Exactly one: `npm run freeze-guard` (step 0.4). It reads the freeze receipt, and a freeze receipt is
@@ -464,16 +522,26 @@ addressed absolutely, never checkout-relative** — the freeze receipt in C4 is 
 | H7 transcript close | anywhere | cwd-independent; the one step that must NOT run inside 0.1's shell |
 
 **Where the report carries this.** §2.3 and H5 must NOT claim the whole chain ran from the candidate
-checkout. Two steps did not, by necessity, and the honest claim is "every pinned measurement step
-(C2–C7, C9, C9b, C10) ran from the candidate checkout; the two post-candidate helpers ran from the
-development tree under the byte-identity check of step 0.5". The report's §2.3 bullet that opens
-**"Where the chain ran from"** is written in exactly those words, and its §4.6 paragraph
-**"Which tree it runs from, and why that is not the checkout"** names the dev-tree invocation; if
-either ever reads otherwise, this section is the one that is right. *(Both are named by their
-heading text rather than by position: §2.3 has five bullets and §4.6 four bold paragraphs, and an
-ordinal pointer silently rots the next time one is inserted — this pair had already rotted once,
-naming §2.3's third bullet, which is the runtime-pin one, and §4.6's "Where it lives", which is
-about the file's location outside the pinned surface.)*
+checkout. **ONE step does not, by necessity** — and naming it precisely is the point, because
+forcing the count to zero would be as false as leaving it at two. The honest claim is "every chain
+step that runs a pinned tool (C2–C8, C9, C9b, C10) ran from the candidate checkout; the ONE
+pre-chain helper — `npm run freeze-guard` (0.4) — ran from the development tree, because the
+receipt it reads is issued AGAINST the candidate and so can never exist inside it". *(Phrased as
+"runs a pinned tool", not "pinned measurement step": C8 belongs in this row because it executes a
+pinned program, but it measures nothing — it stamps `UNJUDGED` and the pinned scorer refuses that
+over a non-empty denominator. Calling it a measurement step would contradict §5 element 6.)* The report's §2.3 bullet that opens
+**"Where the chain ran from"** is the one that must say this; if it and this section ever disagree,
+this section is the one that is right. *(Corrected 2026-08-17. This paragraph said "two
+post-candidate helpers" until then, which was the FIRST window's count: the re-freeze moved
+`scripts/close/adjudication-skeleton.ts` into the candidate, so C8 now runs in the checkout with
+the rest of the chain and only the structural freeze-guard exception remains — as the run-sheet
+header at the top of this file already said.)* *(The report bullet above is named by its **heading
+text**, never by position: §2.3 has five bullets and §4.6 thirteen bold-opening paragraphs
+(measured 2026-08-17 — the older "four" was itself an ordinal that had rotted), and an ordinal
+pointer silently rots the next time one is inserted. This pointer had already rotted once, naming
+§2.3's third bullet, which is the runtime-pin one. **It named a §4.6 paragraph too until
+2026-08-17**; that half was dropped, because §4.6's "Which tree it runs from" now records the
+producer running in the CHECKOUT and is no longer the place that carries a dev-tree claim.)*
 
 ---
 
@@ -716,14 +784,22 @@ $TSX scripts/pilot/input-pins.ts \
   it survives every re-freeze because a receipt is always issued against the candidate it pins. A `worktree add --detach`
   materialises only the commit's tracked tree. A checkout-relative `--freeze` therefore exits **2**
   on an unreadable input before a single pin is derived. **Do not "fix" that by moving the chain to
-  `~/dev/helix`** — that would trip `method-drift` on the very next line, and it is exactly what
-  Block B exists to prevent. The receipt is an input handed to the checkout, not a file of it.
+  `~/dev/helix`.** The receipt is an input handed to the checkout, not a file of it. *(Corrected
+  2026-08-17: this warning used to promise that moving the chain "would trip `method-drift` on the
+  very next line". Measured today, it would not — the intersection of the changed set with the 28
+  pins is empty, so `input-pins` invoked in the development tree satisfies every pin and exits 0.
+  Nothing mechanical now stops a chain that has been moved; only this instruction does. See Block
+  B, and C8's preflight for the one step that asserts its own tree.)*
 - [ ] **K and both window bounds are copied from the receipt and cannot be passed** — there is no
   flag for them. That is the mechanism that keeps close day from re-deciding the method.
 - [ ] Success: `pins.json` written, bound back to the freeze by `freezeSha256`.
 - [ ] Refusals to expect and what each means:
-  - `method-drift` → you are in the wrong tree (Block B) **or** `~/.helix/config.json` no longer
-    hashes to `16f6d97f…`. Live tuning of that file during the window converts silently into this.
+  - `method-drift` → the tools or method docs under the cwd differ from the receipt, **or**
+    `~/.helix/config.json` no longer hashes to `16f6d97f…`. Live tuning of that file during the
+    window converts silently into this. *(Corrected 2026-08-17: this line read "you are in the
+    wrong tree (Block B)". The wrong tree only produces this refusal while that tree diverges from
+    the pins, and as of the re-freeze it does not — so absence of `method-drift` is NOT evidence
+    that you are in the right tree.)*
   - `freeze-receipt-tampered` / `freeze-receipt-incomplete` / `not-a-freeze-receipt` → the receipt
     itself; stop.
   - `manifest-not-the-pinned-file` / `manifest-method-mismatch` → the manifest is not the one C2
@@ -883,9 +959,15 @@ file.)*
 
 ### C8. Adjudication — skeleton, then the human pass
 
-The producer is **`scripts/close/adjudication-skeleton.ts`** (new, deliberately outside
-`scripts/pilot/` so the pinned surface stays untouched; test:
-`test/close/adjudication-skeleton.test.ts`).
+The producer is **`scripts/close/adjudication-skeleton.ts`** — a **PINNED** path, the 26th entry of
+the receipt's `payload.tools`; its test `test/close/adjudication-skeleton.test.ts` is deliberately
+not pinned, as no test is for any of the other 25 tools. *(Corrected 2026-08-17. This sentence read
+"new, deliberately outside `scripts/pilot/` so the pinned surface stays untouched" until then. That
+was the FIRST window's rationale, and report §4.6 records that the §8 ruling **destroyed** it —
+"§8 turns on the ACT of building the method's tooling, not on which directory receives it". It was
+also, by then, factually false: the second freeze added the path to `PINNED_TOOL_PATHS` precisely
+so the edit class that cost a window is caught mechanically rather than by anyone remembering the
+rule.)*
 
 > **R1 — THIS STEP RUNS FROM `~/close-candidate`, LIKE THE REST OF THE CHAIN.** Under the first
 > window it was an R2 dev-tree exception, because `scripts/close/` did not exist at that candidate.
@@ -896,39 +978,121 @@ The producer is **`scripts/close/adjudication-skeleton.ts`** (new, deliberately 
 > too, so the checkout stays clean for 0.2's `git status --porcelain` evidence.
 >
 > **Re-run step 0.5 NOW, immediately before the command below, and paste this second reading too.**
-> The licence is point-in-time: `~/dev/helix` is written by a second clone, and hours will have
-> passed since Block B. A `DIFFERS` line here means the exception no longer holds — do not run the
-> producer; hand-author the adjudication instead (the shape is the one this step describes, and the
-> report's §4.6 already records hand-authoring as the equally valid route).
+> `~/dev/helix` is written by a second clone and hours will have passed since Block B. *(Corrected
+> 2026-08-17: this reading no longer gates C8 and a `DIFFERS` line here is no longer a reason to
+> skip it. C8 runs from the checkout, so the development tree's bytes are not what it loads; the
+> preflight below asserts what C8 actually depends on. The reading is still taken and pasted
+> because dev-tree drift mid-close is a finding about the chain and about 0.4's invocation —
+> record it, diagnose it before Blocks D–F edit the repository, and do not let it silently
+> redirect this step.)*
+
+**The whole block runs inside `( … )`, and that is not cosmetic.** Almost every step of this
+run-sheet executes inside the `script` capture shell opened at 0.1 — H7 is the documented exception
+and must not. A bare `exit` in a pasted block would terminate THAT shell, ending the close-day
+transcript H7 closes and hashes and that §6 and §11 of the report are sourced from. Inside a
+subshell a failed check exits the subshell and leaves the capture running.
 
 ```bash
-cd ~/dev/helix
-$TSX scripts/close/adjudication-skeleton.ts \
-  --gate-set ~/close-run/gate-set.json \
-  --run ~/close-run/run1.json \
-  --out ~/close-run/adjudication.json
+( set -u
+  # --- preflight: assert the EXECUTION TREE, fail closed -------------------
+  # Step 0.5 hashes the dev tree; this block runs in the checkout, so 0.5 says
+  # nothing about what executes here. These four arms are what does.
+  expected_candidate=94dd136925253be74c58df92392044c550aa6ec2
+  [ ! -L ~/close-candidate ] || { echo "PREFLIGHT: ~/close-candidate is a symlink — 0.2 creates a real worktree; refusing to run somewhere else under its name" >&2; exit 1; }
+  candidate_root="$(cd -P ~/close-candidate 2>/dev/null && pwd -P)"
+  [ -n "$candidate_root" ] || { echo "PREFLIGHT: ~/close-candidate is absent or unreadable" >&2; exit 1; }
+  cd -P "$candidate_root" || { echo "PREFLIGHT: cannot enter $candidate_root" >&2; exit 1; }
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "PREFLIGHT: not a git repository" >&2; exit 1; }
+  actual_root="$(cd -P "$top" && pwd -P)" || exit 1
+  [ "$actual_root" = "$candidate_root" ] || { echo "PREFLIGHT: wrong execution tree ($actual_root)" >&2; exit 1; }
+  [ "$(git rev-parse --verify 'HEAD^{commit}')" = "$expected_candidate" ] || { echo "PREFLIGHT: wrong candidate commit" >&2; exit 1; }
+  # tracked drift, content-true: --no-optional-locks + re-stat defeats assume-unchanged
+  git update-index -q --really-refresh 2>/dev/null || true
+  git diff --quiet --exit-code "$expected_candidate" -- || { echo "PREFLIGHT: candidate worktree has tracked changes" >&2; exit 1; }
+  # untracked files too: 0.2's evidence is `git status --porcelain` EMPTY, not `git diff` quiet
+  [ -z "$(git status --porcelain)" ] || { echo "PREFLIGHT: candidate worktree is not clean:" >&2; git status --porcelain >&2; exit 1; }
+  [ -n "${TSX:-}" ] || { echo "PREFLIGHT: \$TSX is unset — bind it at 0.3, in THIS shell" >&2; exit 1; }
+  echo "PREFLIGHT OK: $actual_root @ $expected_candidate, status --porcelain empty"
+
+  # --- the step itself ------------------------------------------------------
+  "$TSX" scripts/close/adjudication-skeleton.ts \
+    --gate-set ~/close-run/gate-set.json \
+    --run ~/close-run/run1.json \
+    --out ~/close-run/adjudication.json
+)
 ```
 
-**§8 disposition — the producer was written INSIDE the window (2026-08-13) and that must be
-disclosed, not hidden.** `v2-preregistration-2026-07.md:344` resets the window for tooling built
-after the freeze, "because implementing an unspecified detail resolves a method choice". **The
-owner RULED on 2026-08-13: DISCLOSURE, not reset** — made after both outcomes were put explicitly,
-including that RESET was a real alternative that would have cost this window. The ruling is
-recorded in report §4.6 under "Owner ruling"; what is still owed is its **ledger entry** (Block
-A4), not the decision. The grounds it was made on: the program decides no
-verdict (every entry is stamped `UNJUDGED`, which the pinned scorer refuses), it selects no probe
-(the entry set is the frozen gate set's `recallDenominator`), and it emits only the fields
-`score-gate.ts:430,433,437,473-480` already demands — so it resolves no unspecified method detail,
-it saves the operator from hand-typing a file whose shape the pinned scorer already fixes. The one
-thing it does decide is the **emission order** of `contradictions` / `staleViolations`, and
-`adjudicationSha256` is order-sensitive by design (score-gate.ts:497). That is a provenance fact
-about one artifact's bytes, not a measurement choice: any ordering yields the same verdicts.
-**Where the report carries this:** §4.6 in full (the producer, its authoring date, its unpinned
-location, the four-point reasoning, the honest residue, and the owner's ruling of 2026-08-13) and
-§5's element 6 marker in one sentence. §4.6 records the ruling as **made**, and its one remaining
-marker asks for the ledger entry id alone; this sheet says the same thing in the same words, and if
-the two ever diverge the report is the one that is right. A close report whose §1 claim is "the
-method was frozen before the window" cannot leave an in-window build unnamed.
+*(The candidate id is a full literal rather than `$CANDIDATE`, so this block refuses on its own
+terms even in a shell where the loader was never run. Both variable failure modes would in fact
+also fail closed — `set -u` aborts on unset, and an empty value fails the string comparison — so
+the literal is a belt-and-braces choice, not a repair of a hole. **The explicit `-L` test is there
+because `cd -P` did NOT fix what it appeared to fix.** `cd -P` resolves a symlinked
+`~/close-candidate` to its target and `git rev-parse --show-toplevel` then reports that same target,
+so the two agree and the root arm passes — measured after the `-P` hardening, still `PREFLIGHT OK`.
+Only refusing the symlink outright catches it. Similarly `git diff` never reports untracked files,
+so a stray `adjudication.json` in the checkout passed a check that printed the word "clean"; the
+`status --porcelain` arm is what makes the printed claim equal 0.2's own cleanliness evidence.
+Corrected 2026-08-17 — this block read `cd ~/dev/helix` until then, contradicting the R1 banner
+immediately above it and sending the one step the re-freeze MOVED into the candidate back to the
+tree it was moved out of. Hardened the same day after an adversarial review reproduced the symlink,
+untracked-file, empty-`cd`, `assume-unchanged` and unquoted-`$TSX` cases.)*
+
+*(preflight drilled 2026-08-17, **8/8**. The first pass was 5/5 against a throwaway *clone*;
+it was re-drilled against a real `git worktree add --detach`, which is what step 0.2 actually
+creates — a clone and a linked worktree are different objects and the first drill tested the wrong
+one. All drills ran under a throwaway `HOME` in the session scratchpad; the development tree and its
+`.git` were not written to. `bash -n` clean. **Positive**: real worktree, correct commit, clean →
+`PREFLIGHT OK: <root> @ 94dd136925253be74c58df92392044c550aa6ec2, status --porcelain empty`, exit 0,
+producer invoked. **Negatives, each exit 1 with the producer NOT invoked**:
+(1) absent → `~/close-candidate is absent or unreadable`;
+(2) HEAD at the freeze commit → `wrong candidate commit`;
+(3) one tracked file modified → `candidate worktree has tracked changes`;
+(4) `~/close-candidate` → the DEVELOPMENT tree → `wrong candidate commit`;
+(5) untracked stray in an otherwise clean checkout → `candidate worktree is not clean:` followed by
+`?? adjudication.json`;
+(6) symlink to another checkout at the same commit → `~/close-candidate is a symlink …`;
+(7) `assume-unchanged` + tampered `package.json` → `candidate worktree has tracked changes` (the
+`--really-refresh` is what makes this one fire; a plain `git diff --quiet` returns clean);
+(8) `$TSX` unset → `$TSX is unset — bind it at 0.3, in THIS shell`, instead of R3's two unhelpful
+signatures. Note which arm catches case 4: the dev tree is its own toplevel, so the root comparison
+passes and the COMMIT check is what refuses. Both arms are needed — the root check catches a
+`~/close-candidate` lying inside another repository, where the commit could legitimately match.)*
+
+**§8 disposition — RULED RESET for the first window, and it does not arise in this one.**
+*(Corrected 2026-08-17. This paragraph asserted "**The owner RULED on 2026-08-13: DISCLOSURE, not
+reset**" until then. That is the opposite of what happened: the owner ruled **RESET**, the first
+window ended, and this window exists because of that ruling. An operator reading the old text would
+have run the producer on the strength of a disposition that was never given.)*
+
+The producer was written 2026-08-13, inside the FIRST window. `v2-preregistration-2026-07.md:344`
+*(**candidate-relative, like every preregistration citation in this sheet** — measured 2026-08-17:
+the quoted sentence is at `:344` in `94dd136` and at `:354` at HEAD, and the Reset paragraph opens
+at `:340` / `:350` respectively. The preregistration is NOT among the 28 pinned paths, so nothing
+mechanically holds its line numbers and the working copy has already drifted ten lines; read these
+citations against the candidate, and re-measure rather than assume if a citation misses.)*
+resets the window for tooling built after the freeze, "because implementing an unspecified detail
+resolves a method choice"; the owner read the main clause as governing and ruled **RESET**. Report
+§4.6 carries the ruling, the DISCLOSURE case that was put and not taken, and the reasoning behind
+both — it is the record, and if this sheet and the report ever disagree the report is right.
+
+**Why nothing is owed here now.** The reset was executed: candidate `94dd136` was cut on 2026-08-14
+and the re-freeze put this producer INSIDE it, pinned as the 26th `payload.tools` entry. §8 reaches
+tooling built after the freeze it governs, and no such build happened inside this window
+(`git ls-tree -r --name-only 94dd136 -- scripts/close test/close` → 2 files). So this step needs no
+ruling, no ledger entry and no disclosure of an in-window build. What it needs is the pin check
+below, which is mechanical.
+
+**Where the report carries this step:** §4.6 in full (the producer, its authoring date, its pin
+status, the reasoning, the honest residue, the RESET ruling, and the paragraph recording that the
+question does not recur in this window) and **§5's element 6**, in one sentence.
+
+**What the producer does and does not decide**, retained because §9a must state it: it stamps no
+verdict (every entry is `UNJUDGED`, which the pinned scorer refuses), selects no probe (the entry
+set is the frozen gate set's `recallDenominator`), and emits only fields
+`score-gate.ts:430,433,437,473-480` already demands. The one thing it decides is the **emission
+order** of `contradictions` / `staleViolations`, and `adjudicationSha256` is order-sensitive by
+design (score-gate.ts:497) — a provenance fact about one artifact's bytes, not a measurement
+choice: any ordering yields the same verdicts.
 
 **The fail-closed claim has a boundary and the report states it too:** `adjudication-uncertain` is
 raised by a LOOP over the contradiction calls (`score-gate.ts:437`), so it holds over a **non-empty**
@@ -942,12 +1106,25 @@ read it as a signal to go back and check C2 and C5, not as a clean file.
 `--run is the run whose payload the adjudication binds: pass the SAME file you will pass to
 score-gate as --run1, which is the run its adjudication check reads (score-gate.ts:425).`
 
-- [ ] **STOP unless A4 has been ruled.** Running this producer is what puts a post-freeze program
-  into the method, so the §8 question must be answered before this step, not after it. If the
-  ruling was RESET, you are not here. If it was DISCLOSURE, run it and make sure A4's ledger entry
-  is written before publication. If the ruling was to keep the producer out of the chain,
-  **skip this step and hand-author the adjudication** from the frozen probe list — the gate treats
-  a hand-authored file and a stamped one identically, so nothing downstream changes.
+- [ ] **STOP unless the producer's PIN still holds.** *(Corrected 2026-08-17. This gate read "STOP
+  unless A4 has been ruled … If the ruling was RESET, you are not here" until then — and since the
+  ruling WAS reset, the gate as written halts the close chain of the window that ruling produced.
+  It was a first-window gate on an open question; the question is closed and the producer is now a
+  pinned path, so the thing worth checking here is drift, not disposition.)*
+
+  The producer is the 26th pinned tool. **What actually guarantees the bytes it runs is the
+  preflight above, not step 0.5** — measured 2026-08-17, 0.5 iterates 19 paths
+  (`git ls-tree … -- scripts/pilot scripts/close` = 18, plus `src/entry-point.ts`) of which 17 are
+  pinned tools, and it hashes them in `~/dev/helix`, which is not the tree this step runs in. The
+  preflight asserts the checkout's identity, its commit and its cleanliness directly, so a producer
+  whose bytes had moved could not be at that commit with a clean tree.
+
+  0.5 still matters here for a different reason: **a `DIFFERS` line naming
+  `scripts/close/adjudication-skeleton.ts` is a finding about the DEVELOPMENT tree** — the pinned
+  surface moved there — and it must be reported, not repaired. It is not a reason to skip this step,
+  which no longer loads anything from that tree. If for any other reason you choose not to run the
+  producer, **hand-author the adjudication** from the frozen probe list: the gate treats a
+  hand-authored file and a stamped one identically, so nothing downstream changes.
 - [ ] **Pass `run1.json` here and as `--run1` to `score-gate`.** They must be the same file.
 - [ ] Success: the skeleton lands with one entry per frozen probe, complete and unduplicated by
   construction, both hashes recomputed from bytes, and the program prints how many judgments are
@@ -1092,7 +1269,9 @@ else echo "REFUSED locally — one of PROBE_ID / TARGET_ROW_ID / RETURNED_ROW_ID
 
 ### C9. Score
 
-*(R1 — **back to `cd ~/close-candidate`** after C8's dev-tree step.)*
+*(R1 — `cd ~/close-candidate`, unchanged: C8 runs there too since the re-freeze. This line read
+"**back to** `cd ~/close-candidate` after C8's dev-tree step" until 2026-08-17, which described the
+first window's routing.)*
 
 ```bash
 cd ~/close-candidate
@@ -1349,8 +1528,10 @@ currently identical — verified 2026-08-13). The instant `txClose` passes,
 Do it in the wrong order and you have edited a pinned method doc while the close receipt that
 records "the pins were re-verified at the close" does not yet exist: the re-verification can no
 longer be performed in this tree, any chain step re-run from `~/dev/helix` now refuses
-`method-drift` for a *second*, unrelated reason, and the receipt chain's final link is written
-about a state that no longer exists.
+`method-drift` — for THIS reason, the edited method doc, which as of the re-freeze is the only
+reason it would refuse there — and the receipt chain's final link is written about a state that no
+longer exists. *(Corrected 2026-08-17: "a *second*, unrelated reason" presupposed a first, Block
+B's pin divergence, which the re-freeze removed.)*
 
 - [ ] **D1. Write the validated close receipt** — only **after** `release-record.json` validated,
   and only **after C11** has observed the runtime pin. Its existence alone is nothing;
@@ -1684,12 +1865,24 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
 
 - [ ] **G7. Delete the ACTIVE FREEZE section from `CLAUDE.md`** (local-only, never committed).
 
-- [ ] **G8. Pinned-src disposition = DISCLOSURE.** The owner has decided: the 6 pinned
-  `src/memory` files modified in-window (`ownership`, `retrieval`, `store`, `verified-projection`,
-  `witness-core`, `witness-store` — the divergence measured in Block B) are **disclosed as a new
-  entry in `docs/release/v2-freeze-deviations-2026-08.md`**, cited from the §9a report. **Revert
-  was rejected**: it would reopen two verified fixes — witness-laundering (`witness-core.ts`) and
-  the rename-witness metric (`store.ts`). Write the entry; do not revert.
+- [x] **G8. Pinned-src disposition — DISSOLVED by the re-freeze. Write nothing.** *(Corrected
+  2026-08-17. This step ordered a new deviation-ledger entry disclosing 6 pinned `src/memory` files
+  modified in-window. That was a FIRST-window obligation and the re-freeze extinguished it: the new
+  candidate contains those six files and re-pins them at their current bytes, so no in-window
+  pinned-edit history remains to disclose.)*
+
+  The dissolution is already recorded — `docs/release/v2-freeze-deviations-2026-08.md`,
+  `D-2026-08-13-in-window-tooling`, under "Two things the reset paid for rather than cost":
+  *"The pinned-source disclosure question the first window carried … does not exist in the second
+  window, because the new candidate contains them and the re-freeze re-pins them where they are."*
+  Report §4.4 carries the same measurement and is titled DISSOLVED. **Do not write a new entry**: a
+  first-window disclosure dated after 2026-08-14 would be false history AND would be swept up by
+  §4.7's marker, which asks for entries appended after that date.
+
+  *(The old step also cited "the divergence measured in Block B" as its input. Block B's divergence
+  was the first window's; the current intersection of changed paths with the 28 pins is empty. This
+  was the only step that consumed that measurement, so correcting Block B leaves no dangling
+  reference.)*
 
 ---
 
@@ -1708,9 +1901,16 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
 
   *(rehearsed 2026-08-13, twice as the draft grew — the invariant, not the number, is what to
   check: openings `<<FILL AT CLOSE` and closings `>>` are **equal**, and the bare phrase exceeds
-  them by exactly **1**, the front-matter line at report:14 that H2 deletes. Measured 60 / 60 / 61
-  at the last reading; the absolute count moves with every edit to the draft, so re-measure rather
-  than compare against a number written here.)*
+  them by exactly **1**, the front-matter line at report:14 that H2 deletes. Measured **59 / 59 /
+  60** on 2026-08-17, after §4.4's dissolved marker was removed; it read 60 / 60 / 61 when
+  rehearsed 2026-08-13. The absolute count moves with every edit to the draft, so re-measure rather
+  than compare against a number written here — the two readings are given precisely to show that
+  the NUMBER is not the invariant.)*
+
+  *(One limitation of the command as written, so it is not mistaken for a stronger check: `grep -c`
+  counts LINES, not occurrences. Today every marker is alone on its line and the two agree, but a
+  close-day fill whose transcribed content itself contains `>>` would break the identity silently.
+  If a filled value would contain `>>`, count with `grep -o … | wc -l` instead.)*
   **REFUSE TO PUBLISH while the opening count is above 0.** A report containing one of these
   markers is incomplete by construction. An opening count that differs from the `>>` count means a
   marker was half-deleted — find it before anything else.
@@ -1795,17 +1995,23 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
 - [ ] **H3. Confirm the report carries all of §9a's required content**: the freeze commit and every
   §10 pinned hash *plus the pins re-verified at the close*; cutoff and close with the
   `cutoff < tx ≤ close` demonstration; the prepared-artifact hash with its pre-run timestamp and
-  the ordering evidence; the full reset-and-deviation history (including G5's heal count, G8's
-  pinned-src disclosure and **C8's §8 disposition for the in-window producer**); evidence the
-  declared consequence was actually applied; the D5 disclosures in full, not by reference; and the
+  the ordering evidence; the full reset-and-deviation history (including G5's heal count, the
+  **first window's RESET over the in-window producer**, and the **dissolution** of both the
+  pinned-src disclosure (G8, report §4.4) and — as a statement the report must ACQUIRE, since no
+  section carries it today — the fact that no post-freeze method tooling was built inside the
+  SECOND window (A4)); evidence the declared
+  consequence was actually applied; the D5 disclosures in full, not by reference; and the
   §1 claim + coverage statement **verbatim alongside every reported number**.
   Also confirm the report carries **Block A's outcomes**: the home-machine pin report or the
   explicit statement that the second machine's pins were never observed (A1 — it cannot be
-  reconstructed after the close), the open/closed status of Q1, Q2 and Q4 (A2, A3), and **the
-  ledger entry id for the owner's §8 ruling on the in-window producer (A4)**, which report §4.6's
-  one remaining marker asks for — the ruling itself is already recorded there as made on
-  2026-08-13. A4 is the one Block A item that cannot be reported open: an unwritten entry is an
-  unfilled marker, and H1 refuses to publish while any remain.
+  reconstructed after the close), and the open/closed status of Q1, Q2 and Q4 (A2, A3).
+  *(Corrected 2026-08-17. This paragraph also demanded "the ledger entry id for the owner's §8
+  ruling on the in-window producer (A4), which report §4.6's one remaining marker asks for", and
+  called A4 the one Block A item that cannot be reported open. Three things in that were false:
+  the ruling's ledger entry exists (`D-2026-08-13-in-window-tooling`, committed 2026-08-14 at
+  `3bd63d0`); **report §4.6 contains ZERO markers** — the single marker in that neighbourhood was
+  §4.4's, about the pinned-src disclosure, and it is removed as dissolved; and A4 is discharged
+  rather than owed. Nothing in Block A now blocks publication.)*
   And confirm these six, each of which has exactly one marker and no second home in the report:
   - the **close-day interpreter** (§2.3) — 0.3's two version lines;
   - **where the chain ran from, with the exception** (§2.3) — 0.2's `rev-parse` plus BOTH readings
@@ -1826,14 +2032,19 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   their evidence actually lives: the freeze receipt, the as-of-close snapshot hash, and the
   append-only prepare-before-run receipt.
 
-- [ ] **H5. Record where the chain ran from — with the exception, not without it.** The claim that
-  survives scrutiny is: *every pinned measurement step (C2–C7, C9, C9b, C10) ran from a clean
-  checkout of the candidate commit; two post-candidate helpers — `npm run freeze-guard` (0.4) and
-  the adjudication skeleton (C8) — ran from the development tree because they do not exist at the
-  candidate, under the byte-identity check of step 0.5, whose output is recorded.* Do **not** write
-  "the whole chain ran from the candidate checkout": it is false, and a false clause in the
-  clean-checkout evidence is worse than the exception it hides. Paste step 0.5's output and step
-  0.2's `rev-parse` + empty `status --porcelain`.
+- [ ] **H5. Record where the chain ran from — with the exception, not without it, and not with one
+  that no longer exists.** The claim that survives scrutiny is: *every pinned measurement step
+  (C2–C8, C9, C9b, C10 — every step that runs a pinned tool; C8 executes one but measures nothing)
+  ran from a clean checkout of the candidate commit; ONE pre-chain helper —
+  `npm run freeze-guard` (0.4) — ran from the development tree, because the receipt it reads is
+  issued against the candidate and so cannot exist inside it, under the byte-identity check of step
+  0.5, whose output is recorded.* Do **not** write "the whole chain ran from the candidate
+  checkout": it is false, and a false clause in the clean-checkout evidence is worse than the
+  exception it hides. Equally, do **not** carry the old two-helper wording: the re-freeze moved the
+  adjudication skeleton into the candidate, so C8 runs in the checkout and naming it as an
+  exception overstates the departure. Paste step 0.5's output and step 0.2's `rev-parse` + empty
+  `status --porcelain`. *(Corrected 2026-08-17 — this step said "two post-candidate helpers … C8 …
+  because they do not exist at the candidate"; C8's files do exist at `94dd136`.)*
 
 - [ ] **H6. Remove the candidate worktree** (Block B, step 0.7) and run `npm test` once more:
   green except for anything genuinely open.
@@ -1880,7 +2091,7 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
 
 | code | raised by | first thing to check |
 |---|---|---|
-| `method-drift` | `input-pins` | wrong tree (Block B) or `~/.helix/config.json` bytes |
+| `method-drift` | `input-pins` | tools/method-docs under the cwd differ from the receipt, or `~/.helix/config.json` bytes. NOT a wrong-tree detector since the re-freeze — see Block B |
 | `scope-did-not-participate` | `candidate-universe` via `classify-o67` | `projects.json` realpath key (C1.3) |
 | `degraded-run` | `prepare-gate`, `run-pilot` | same — project scope contributed nothing |
 | `snapshot-after-close` | `prepare-gate` | a row later than `txClose` reached the snapshot |
