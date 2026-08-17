@@ -674,7 +674,11 @@ close-day program other than this one.
 
 ### 4.7 Second-window deviations — D-2026-08-15-autoupdate-second-window
 
-**One so far, and it is the predicted one.** The marketplace clone fast-forwarded off the candidate
+**Two as of 2026-08-17, both of the predicted kind; the second is written up after the first.**
+*(This section opened "One so far" until 2026-08-17. The count is provisional by construction — the
+marker at the end of this section is what fixes it at the close.)*
+
+**Instance 1.** The marketplace clone fast-forwarded off the candidate
 on 2026-08-15 11:26:24Z — `pull origin HEAD: Fast-forward`, `94dd136 -> 3bd63d0` — with both
 `autoUpdate` flags `false` and `DISABLE_AUTOUPDATER=1` exported and inherited. §4.2 established for
 CLI 2.1.226 that the startup clone refresh consults neither, and closed with "every Claude startup
@@ -700,6 +704,33 @@ bytes would have gone unnoticed for the same interval. That is the honest shape 
 freeze commit itself. That is an artefact of ordering — the freeze commit is exactly one past the
 candidate by construction, so it is the likeliest drift target and the least alarming-looking one.
 The safety comes from the measured byte identity, not from the target's identity.
+
+**Instance 2 — 2026-08-17, and it is the one that changes an operating assumption.** The clone
+fast-forwarded again at 2026-08-17 05:32:54Z, `94dd136 -> 0d2e55f`, 16 seconds after a Claude Code
+session start, on CLI `2.1.233`; healed at 06:55:31Z, the **fifth** heal overall and the second of
+this window; detection latency **1 h 22 m 37 s**. Byte continuity was measured, not assumed: at the
+drifted commit all four runtime trees are git-identical to the candidate's (`bin/` `e6bd010a`,
+`.claude-plugin/` `e47c958f`, `hooks/` `3e1b6a4a`, `data/` `c2732f2f`) and each of the nine pinned
+runtime files hashes to its pinned value. The twelve differing paths are CI config, one `src/`
+module, the guard script and nine docs-and-receipt paths — none loaded by the plugin.
+
+**What it establishes beyond the tally: the automatic healing opportunity is one instant per day,
+and it precedes the run.** The guard is the dogfood unit's `ExecStartPre`, so it completes before
+`ExecStart` — a run that later dies has already taken its healing pass. On 2026-08-16 that path did
+the work: the unit started 10:43:44 KST and its `ExecStartPre` healed `3bd63d0` back to the
+candidate. On 2026-08-17 the unit started 14:31:55 KST and found nothing to heal, because the drift
+arrived **59 seconds later**; it then stood 1 h 22 m until an interactive shell start caught it. So
+the exposure is set by WHEN the unit starts, not by whether the run succeeds, and start times have
+ranged 10:43–20:01 KST under catch-up scheduling. This also means instance 1's 14 h 17 m and
+instance 2's 1 h 22 m measure how soon a shell happened to open, not how well the check works. The
+runner's own failures — 08-15 on a weekly quota, 08-17 on the `ISSUE-0006` entitlement refusal,
+with 08-16 completing — bear on §5 accrual, not on this control. The ledger carries the same
+finding; if the two disagree the ledger is the record.
+
+**Provenance of the heal, stated so it is not read as remediation anyone chose.** It fired from a
+subagent's shell start during an unrelated verification pass, under the auto-heal mode approved
+2026-08-10 and gated to the case where clone-HEAD drift is the sole violation and every byte check
+passes. Both conditions held.
 
 - Final second-window deviation list and heal count: <<FILL AT CLOSE: every entry appended to `v2-freeze-deviations-2026-08.md` after 2026-08-14, and the total line count of the heal log | the deviation ledger and `~/.cache/freeze-guard-heals.log`, read at the close. Prevention is not available (§4.2), so more instances are expected; a window with none would itself be worth remarking on >>
 

@@ -227,6 +227,11 @@ rebuilt bundles instead of a close-day activation of 62 unverified commits.
 exposure D-2026-08-10 predicted, arriving on schedule.** That entry closed with "every Claude
 startup may move the clone again", having falsified both preventive controls. It did.
 
+> **This entry carries MORE THAN ONE instance.** Its closing paragraph says each further instance
+> is appended here, and one was, on 2026-08-17 — see *Instance 2* at the end. Read the whole entry
+> before quoting a count from its opening; the close report's §4.7 marker asks for the list, not
+> for this heading.
+
 **Statement.** The marketplace clone fast-forwarded off the candidate on 2026-08-15 20:26:24 KST
 (11:26:24Z): `pull origin HEAD: Fast-forward`, HEAD `94dd136 -> 3bd63d0`. Corroborated
 independently of the reflog by `known_marketplaces.json`'s `helix.lastUpdated`, which reads
@@ -264,6 +269,60 @@ Recorded so the close report states the exposure rather than implying continuous
 **No action taken beyond the heal**, and none is available: prevention remains unachievable with
 documented configuration, so detection + reset stays the operating mode for the rest of this window
 too. Expect further instances; each is appended here.
+
+### Instance 2 — 2026-08-17, and the shape of the healer's daily coverage became visible
+
+**Statement.** The clone fast-forwarded off the candidate again on 2026-08-17 05:32:54Z
+(14:32:54 KST): `pull origin HEAD: Fast-forward`, HEAD `94dd136 -> 0d2e55f`. Corroborated
+independently of the reflog by `known_marketplaces.json`'s `helix.lastUpdated`, which reads
+`2026-08-17T05:32:54.068Z` with `autoUpdate` `false`. The pull landed 16 seconds after a Claude
+Code session start — the same signature as instance 1, on CLI `2.1.233`.
+
+**Runtime bytes never moved, and this was measured rather than assumed.** Against the drifted
+commit `0d2e55f`, all four runtime trees are git-identical to the candidate's — `bin/` `e6bd010a`,
+`.claude-plugin/` `e47c958f`, `hooks/` `3e1b6a4a`, `data/` `c2732f2f` — and each of the nine files
+in `v2-freeze-runtime-pins-2026-08.txt` hashes to its pinned value at that commit. The 12 paths
+that differ between the two commits are `.github/workflows/ci.yml`, `src/verify/agreement-map.ts`,
+`scripts/freeze-runtime-check.sh` and nine `docs/`-and-receipt paths, none of which is loaded by
+the plugin. So this is the same control-and-provenance class as instance 1, not a measurement
+exposure.
+
+**Healed 2026-08-17 06:55:31Z** (15:55:31 KST) back to `94dd136`, logged as the fifth line of
+`~/.cache/freeze-guard-heals.log`. **Detection latency: 1 h 22 m 37 s.**
+
+**What is new, and it is the reason this instance is worth more than a tally mark: the automatic
+healing opportunity is a single instant per day, and it precedes the run.** The guard is wired as
+the dogfood unit's `ExecStartPre` (drop-in `freeze-guard.conf`), so it completes before
+`ExecStart`; a run that later dies has already taken its healing pass, and run failure therefore
+costs no heal. Two measurements on consecutive days show both sides of this. On 2026-08-16 the unit
+started 10:43:44 KST and its `ExecStartPre` healed `3bd63d0` back to the candidate, logged as the
+fourth line of the heal log (`2026-08-16T01:43:44Z`) — the dogfood path doing the work. On
+2026-08-17 the unit started 14:31:55 KST and its `ExecStartPre` logged nothing, because the clone
+was still on the candidate; the drift arrived 14:32:54 KST, **59 seconds later**, and so stood
+until an interactive shell start healed it 1 h 22 m on.
+
+**The dependency is therefore on WHEN the unit starts, not on whether the run succeeds** — a
+distinction this ledger had not drawn, and one that changes what the latency numbers mean. Coverage
+is one instant per day at a start time that has ranged 10:43–20:01 KST across the four scheduled
+runs since 2026-08-14, because catch-up scheduling places the run wherever the machine was first
+awake. Any drift landing after that instant waits for a human. That is what raises the expected
+off-pin interval for later instances in this window, and it is why instance 2's 1 h 22 m and
+instance 1's 14 h 17 m are not comparable as evidence about the guard: they measure how soon a
+shell happened to open, not how well the check works.
+
+**The runner's own failures are recorded here, but they belong to §5, not to this control.** Of the
+three scheduled runs inside the window, 2026-08-15 stopped on a weekly quota limit, 2026-08-16
+completed, and 2026-08-17 stopped at its `claude -p` step on an entitlement refusal — `ISSUE-0006`,
+`Your organization has disabled Claude subscription access for Claude Code`, distinct from the
+08-15 quota stall. Two of the three failed, for unrelated reasons. That bears on sample accrual and
+is treated there; it does not reduce this control's coverage, for the reason just given.
+
+**Ordering note, so the heal's provenance is not overstated.** The heal was not an operator
+decision taken in response to an observation: it fired from a subagent's shell start during an
+unrelated verification pass, under the auto-heal mode the owner approved 2026-08-10 and which is
+gated to the case where clone-HEAD drift is the sole violation and every byte check passes. Both
+conditions held. It is recorded here as what it was — the standing mechanism working — rather than
+as remediation anyone chose.
 
 ## Ruling R-2026-08-16 — two in-window edit classes ruled NOT a reset
 
