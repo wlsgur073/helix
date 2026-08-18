@@ -14174,7 +14174,10 @@ import { dirname as dirname6, join as join6 } from "node:path";
 // src/memory/ownership.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync3, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
-import { join as join5, resolve, dirname as dirname5 } from "node:path";
+import { join as join5, resolve, dirname as dirname5, isAbsolute } from "node:path";
+function isReviewableRoot(projectRoot2) {
+  return isAbsolute(projectRoot2);
+}
 function canonicalRoot(projectRoot2) {
   try {
     return canonical(projectRoot2);
@@ -16048,6 +16051,8 @@ var MemoryStore = class {
    *  store directly must clear the same gate. Returns the canonical scope for the audit row. */
   adopt(expectedRoot) {
     const p = this.opts.project;
+    if (!isReviewableRoot(expectedRoot))
+      throw new Error("adopt: projectRoot must be an absolute path \u2014 a relative or empty root resolves to wherever the server is running, so the approval prompt has no target to show");
     if (!p) throw new Error("adopt: no project scope is active");
     const active = canonicalRoot(p.root);
     if (canonicalRoot(expectedRoot) !== active)
@@ -25757,6 +25762,9 @@ function createMetricsSink(path, enabled, deps = {}) {
 var ID_SCHEMA = external_exports.string().refine(isValidId, {
   message: `id must be 1-${MAX_ID_CHARS} printable, non-control characters`
 });
+var PROJECT_ROOT_SCHEMA = external_exports.string().refine(isReviewableRoot, {
+  message: "projectRoot must be an absolute path, so the approval prompt can show which ledger is being trusted"
+});
 function buildServer(store2, dualDeps, metrics2) {
   const m = metrics2 ?? noopMetricsSink;
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
@@ -25856,7 +25864,7 @@ function buildServer(store2, dualDeps, metrics2) {
   server2.registerTool("helix_memory_adopt", {
     title: "Adopt project memory",
     description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean; a root that is not the active scope is refused and adopts nothing. This moves a trust boundary \u2014 everything in that ledger becomes recallable \u2014 so the user, not Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.",
-    inputSchema: { projectRoot: external_exports.string() }
+    inputSchema: { projectRoot: PROJECT_ROOT_SCHEMA }
   }, async (args) => m.runOp("helix_memory_adopt", () => handleAdopt(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   return Object.assign(server2, {
     // Bounded by construction: resolves once every tracked call has settled OR budgetMs elapses,

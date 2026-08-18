@@ -9,6 +9,7 @@ import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, ha
 import { loadConfig } from '../config.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus, checkCodexModel } from '../verify/codex.js';
 import { noopMetricsSink, type MetricsSink } from '../metrics.js';
+import { isReviewableRoot } from '../memory/ownership.js';
 
 // LEAD-AUDIT-ID-UNCONSTRAINED: mirrors handlers.ts's assertValidId at the MCP tool boundary itself.
 // `.refine(isValidId)` (not a parallel `.min().max().regex()` chain) so the schema and the
@@ -20,6 +21,15 @@ import { noopMetricsSink, type MetricsSink } from '../metrics.js';
 // (also an id-lookup value, just never audited). Exported (fix round 1 Minor) per the brief.
 export const ID_SCHEMA = z.string().refine(isValidId, {
   message: `id must be 1-${MAX_ID_CHARS} printable, non-control characters`,
+});
+
+/** adopt's `projectRoot`, mirroring the ID_SCHEMA split above: the SAME predicate the store enforces
+ *  (isReviewableRoot from ownership.ts), so the client-facing rejection and the authoritative one
+ *  cannot drift. A relative or empty root resolves against the server's cwd — which IS the active
+ *  project root — so it would clear the store's equality check while leaving the approval prompt with
+ *  nothing to render. See isReviewableRoot's docstring for why absoluteness is the whole rule. */
+export const PROJECT_ROOT_SCHEMA = z.string().refine(isReviewableRoot, {
+  message: 'projectRoot must be an absolute path, so the approval prompt can show which ledger is being trusted',
 });
 
 /** Build a Helix MCP server with the memory tools registered against `store`. The returned object
@@ -173,7 +183,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       'the project root you mean; a root that is not the active scope is refused and adopts nothing. ' +
       'This moves a trust boundary — everything in that ledger becomes recallable — so the user, not ' +
       'Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.',
-    inputSchema: { projectRoot: z.string() },
+    inputSchema: { projectRoot: PROJECT_ROOT_SCHEMA },
   }, async (args) => m.runOp('helix_memory_adopt', () => handleAdopt(store, args, { auditPath: dv.auditPath, now: dv.now })));
 
   return Object.assign(server, {

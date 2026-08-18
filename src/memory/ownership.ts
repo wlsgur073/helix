@@ -1,8 +1,30 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, isAbsolute } from 'node:path';
 import { withFileLock, canonical } from './lock.js';
 import { ensureHelixDir } from './home-permissions.js';
+
+/** The single predicate BOTH enforcement layers use (MemoryStore.adopt, and helix-server.ts's
+ *  PROJECT_ROOT_SCHEMA via `z.string().refine(...)`) — one rule, not a zod chain that could drift
+ *  from the store's independently, exactly as isValidId/ID_SCHEMA already pair.
+ *
+ *  WHY ABSOLUTENESS IS THE WHOLE RULE. `adopt` has no approval gate and can carry none: MCP gives a
+ *  server no user-presence signal. What stands in for one is that the call NAMES the ledger it is
+ *  about to trust, so the client's approval prompt has a target to render (the reasoning is spelled
+ *  out in test/memory/adopt-requires-its-target.test.ts). A relative spelling is resolved against
+ *  the SERVER's cwd — and the server's cwd IS the active project root, since that is the condition
+ *  the project layer activates on. So `''`, `'.'`, `'./'` and `'../<name-of-cwd>'` every one resolve
+ *  back to the active scope and clear the equality check below, while showing the approving user
+ *  nothing: the prompt renders `projectRoot: ""`, and the user can only approve the act, never the
+ *  target. Requiring an absolute path is precisely the property that makes the argument mean the
+ *  same thing to the caller, to the approval prompt, and to this process.
+ *
+ *  REJECTS rather than resolving: silently expanding `''` to cwd would hand back a root the caller
+ *  never named, which is the failure this is here to prevent. A caller that genuinely means the
+ *  active project already knows its absolute path — the server is running in it. */
+export function isReviewableRoot(projectRoot: string): boolean {
+  return isAbsolute(projectRoot);
+}
 
 /** Canonical (symlink-resolved) project key so two path spellings of ONE physical project — a symlink,
  *  a case alias — map to a SINGLE registry entry and nonce, matching the realpath-based ledger lock.

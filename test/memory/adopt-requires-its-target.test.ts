@@ -27,6 +27,7 @@ import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { handleAdopt } from '../../src/server/handlers.js';
 import { isOwned, canonicalRoot } from '../../src/memory/ownership.js';
+import { PROJECT_ROOT_SCHEMA } from '../../src/server/helix-server.js';
 
 /** A store with a project layer active but NOT yet adopted — the state a real adopt call starts from. */
 function unadoptedProjectStore() {
@@ -85,5 +86,57 @@ describe('adopt names the ledger it moves, and refuses anything else (D3.e)', ()
     expect(rows).toHaveLength(1);                       // exactly one — the refusal above added none
     expect(rows[0]!.kind).toBe('adopt');
     expect(rows[0]!.scope).toBe(canonicalRoot(root));   // the canonical scope, recovered from the code
+  });
+});
+
+// The gap the three cases above left open. Each of them names a root that is REAL and WRONG, and the
+// equality check catches it. None of them names a root that resolves to the RIGHT place while naming
+// nothing — and that is the reachable one, because the server's cwd IS the active project root (the
+// project layer activates on <cwd>/.helix existing). Measured live 2026-08-18 against the shipped
+// bundle: `helix_memory_adopt({projectRoot: ""})` was ACCEPTED, wrote .owner, wrote the registry
+// entry, wrote the audit row, and a following recall served the project ledger's contents — the same
+// outcome as passing the correct absolute path. The prompt the user approves renders `projectRoot: ""`.
+//
+// Note what a unit store CANNOT show: here cwd is the repo, so canonicalRoot('') resolves to the repo
+// and the equality check refuses it for an unrelated reason. That is why the reachability case lives
+// in test/acceptance/project-ledger.e2e.test.ts, where the server really does run inside the project.
+// These cases pin the RULE cwd-independently: the refusal must be about the argument's shape.
+describe('adopt refuses a root that names nothing, at both enforcement layers', () => {
+  const NAMES_NOTHING = ['', '.', './', './.', '..', '../sibling', 'proj', ' '];
+
+  it('the store refuses every non-absolute spelling, and says why', () => {
+    const { store, home, root } = unadoptedProjectStore();
+
+    for (const spelling of NAMES_NOTHING) {
+      // The message, not just the throw: before this rule these refused (in this cwd) as "not the
+      // active project scope", which is the incidental answer that disappears the moment the server
+      // runs where it really runs. Asserting the reason is what distinguishes the fix from the
+      // accident.
+      expect(() => store.adopt(spelling), JSON.stringify(spelling)).toThrow(/must be an absolute path/);
+    }
+
+    expect(isOwned(root, home), 'a root that named nothing still adopted the active scope').toBe(false);
+  });
+
+  it('an absolute root still reaches the scope check, so the rule adds a gate and removes none', () => {
+    const { store, home, root } = unadoptedProjectStore();
+    const other = mkdtempSync(join(tmpdir(), 'helix-d3e-other-'));
+
+    // Absolute-but-wrong must still fail on scope, not on shape — otherwise the new check would be
+    // masking the original guarantee rather than adding to it.
+    expect(() => store.adopt(other)).toThrow(/not the active project scope/);
+
+    store.adopt(root);
+    expect(isOwned(root, home), 'the absolute, correct root was refused').toBe(true);
+  });
+
+  it('PROJECT_ROOT_SCHEMA rejects the same spellings at the MCP boundary, before the handler runs', () => {
+    // Same split as ID_SCHEMA/isValidId: the schema gives every MCP caller a clean, client-facing
+    // rejection before the handler (and its audit call) runs at all, while the store check above
+    // protects any caller that reaches past it. ONE predicate, so the two cannot drift.
+    for (const spelling of NAMES_NOTHING) {
+      expect(PROJECT_ROOT_SCHEMA.safeParse(spelling).success, JSON.stringify(spelling)).toBe(false);
+    }
+    expect(PROJECT_ROOT_SCHEMA.safeParse('/tmp/some-project').success).toBe(true);
   });
 });

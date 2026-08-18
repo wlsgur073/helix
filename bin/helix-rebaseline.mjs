@@ -1,7 +1,7 @@
 // scripts/rebaseline-cli.ts
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
-import { isAbsolute, dirname as dirname8, join as join7 } from "node:path";
+import { isAbsolute as isAbsolute2, dirname as dirname8, join as join7 } from "node:path";
 import { mkdirSync as mkdirSync5 } from "node:fs";
 
 // src/memory/lock.ts
@@ -512,7 +512,7 @@ import { readFileSync as readFileSync4 } from "node:fs";
 import { dirname as dirname6, join as join6 } from "node:path";
 
 // src/memory/ownership.ts
-import { join as join5, resolve, dirname as dirname5 } from "node:path";
+import { join as join5, resolve, dirname as dirname5, isAbsolute } from "node:path";
 function canonicalRoot(projectRoot) {
   try {
     return canonical(projectRoot);
@@ -797,7 +797,7 @@ function parseScope(argv) {
   if (argv.length !== 2 || argv[0] !== "--scope") return null;
   const scope = argv[1];
   if (!scope) return null;
-  if (scope !== "global" && !isAbsolute(scope)) return null;
+  if (scope !== "global" && !isAbsolute2(scope)) return null;
   return scope;
 }
 function resolveHome(env) {

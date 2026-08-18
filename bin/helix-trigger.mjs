@@ -53,7 +53,7 @@ function writeAll(fs, fd, data) {
 
 // src/memory/ownership.ts
 import { existsSync, mkdirSync, readFileSync as readFileSync2, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync2, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
-import { join as join2, resolve, dirname as dirname2 } from "node:path";
+import { join as join2, resolve, dirname as dirname2, isAbsolute } from "node:path";
 
 // src/memory/lock.ts
 import { readFileSync, writeFileSync, unlinkSync as unlinkSync2, linkSync as linkSync2, lstatSync, realpathSync, rmSync, readdirSync as readdirSync2 } from "node:fs";

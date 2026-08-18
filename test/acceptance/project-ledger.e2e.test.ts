@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
+import { dirname, basename } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
@@ -126,6 +126,52 @@ describe('project-ledger e2e (over bin/)', () => {
       arguments: { query: 'foreign secret blueprint' },
     }));
     expect(outAfter).toContain('foreign secret blueprint');
+  }, 30_000);
+
+  it('a projectRoot that names nothing is refused, so the prompt always has a target to show', async () => {
+    // The reviewability substitute (see test/memory/adopt-requires-its-target.test.ts): adopt has no
+    // approval gate, and what stands in for one is that the call NAMES the ledger it is about to
+    // trust. The server's cwd IS the project root, so every spelling that resolves to cwd — "" first
+    // among them — satisfies an equality check against the active scope while giving the client's
+    // approval prompt nothing to render. Measured HERE, at the bundle, because that resolution only
+    // happens when the server process actually runs inside the project directory: a unit store's cwd
+    // is the repo, where "" refuses for an unrelated reason and the defect is invisible.
+    const homeDir = mkdtempSync(join(tmpdir(), 'helix-proj-home-'));
+    const projDir = mkdtempSync(join(tmpdir(), 'helix-proj-cwd-'));
+    const foreignLedgerDir = join(projDir, '.helix');
+    mkdirSync(foreignLedgerDir, { recursive: true });
+    writeFileSync(join(foreignLedgerDir, 'memory.jsonl'), JSON.stringify({
+      id: 'm_foreign_002',
+      tx: '2024-01-01T00:00:00.000Z',
+      validFrom: '2024-01-01T00:00:00.000Z',
+      validTo: null,
+      type: 'assert',
+      state: 'Verified',
+      content: 'foreign unnamed-adopt blueprint',
+      provenance: { source: 'user', sessionId: 'foreign-session' },
+      supersedes: null,
+      blastRadius: null,
+      reverifyTrigger: null,
+      classification: 'normal',
+    }) + '\n');
+
+    const client = await connectWithProject(projDir, homeDir);
+
+    // Every one of these resolves to the active scope from the server's cwd, and every one of them
+    // shows the user nothing they could review. `../<name>` is included because naming a parent and
+    // walking back is exactly as unreviewable as naming nothing.
+    for (const projectRoot of ['', '.', './', `../${basename(projDir)}`]) {
+      const res = await client.callTool({ name: 'helix_memory_adopt', arguments: { projectRoot } });
+      expect(res.isError, `adopt(${JSON.stringify(projectRoot)}) was accepted`).toBe(true);
+    }
+
+    // The refusal is the cheap half. This is the half that matters: an adopt that threw *after*
+    // stamping ownership would satisfy the loop above and still have handed over the ledger.
+    const out = text(await client.callTool({
+      name: 'helix_memory_recall',
+      arguments: { query: 'foreign unnamed-adopt blueprint' },
+    }));
+    expect(out, 'an unnamed adopt moved the trust boundary').not.toContain('foreign unnamed-adopt blueprint');
   }, 30_000);
 
   it('project and global ledgers are stored in separate files', async () => {

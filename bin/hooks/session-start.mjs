@@ -23,7 +23,7 @@ import { dirname as dirname6, join as join6 } from "node:path";
 // src/memory/ownership.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3, renameSync, unlinkSync as unlinkSync2, lstatSync as lstatSync3, openSync, writeSync, fsyncSync, closeSync } from "node:fs";
-import { join as join3, resolve, dirname as dirname3 } from "node:path";
+import { join as join3, resolve, dirname as dirname3, isAbsolute } from "node:path";
 
 // src/memory/lock.ts
 import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync as realpathSync2, rmSync, readdirSync } from "node:fs";

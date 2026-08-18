@@ -17,7 +17,7 @@ import { rankWithArtifacts, buildRankArtifacts, assertQueryWithinBounds, type Ex
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce, collectWitnessNotes } from './content-frame.js';
-import { isOwned, stampOwnership, projectDispositionOf, canonicalRoot, type ProjectDisposition } from './ownership.js';
+import { isOwned, stampOwnership, projectDispositionOf, canonicalRoot, isReviewableRoot, type ProjectDisposition } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedLiveWitnessed, verifiedProjectionWithSubkey } from './verified-read.js';
@@ -877,6 +877,10 @@ export class MemoryStore {
    *  store directly must clear the same gate. Returns the canonical scope for the audit row. */
   adopt(expectedRoot: string): string {
     const p = this.opts.project;
+    // BEFORE the scope lookup, so a root that names nothing fails as ONE clean rejection naming the
+    // real problem, instead of being resolved against cwd and then passing the equality check below.
+    if (!isReviewableRoot(expectedRoot))
+      throw new Error('adopt: projectRoot must be an absolute path — a relative or empty root resolves to wherever the server is running, so the approval prompt has no target to show');
     if (!p) throw new Error('adopt: no project scope is active');
     const active = canonicalRoot(p.root);
     if (canonicalRoot(expectedRoot) !== active)
