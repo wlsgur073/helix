@@ -150,4 +150,41 @@ posixOnly('scratch root is owner-only, and an existing one is inspected rather t
     writeFileSync(root, '');
     expect(ensureScratchRoot(root)).toBeNull();
   });
+
+  // F9.d — the one vetting conjunct nothing reached: a root owned by ANOTHER uid. Every root the
+  // cases above builds is ours, and an unprivileged suite cannot create a foreign-owned directory, so
+  // deleting `st.uid !== process.getuid()` left the whole suite green (measured, kills=0).
+  //
+  // It needs no seam. The branch takes a plain path, and the host already has directories owned by
+  // somebody else. Restricting the candidates to modes with NO group or other bits is a SAFETY
+  // property, not a stylistic one: the statement immediately after the refusal is
+  // `chmodSync(root, 0o700)`, so a candidate like /tmp (mode 1777) would be MODIFIED by this test the
+  // moment the guard it measures is removed. A test must never be able to damage the host when the
+  // code under measurement is mutated, and the mode-unchanged assertion states that rather than
+  // trusting it.
+  //
+  // The same predicate handles the run-as-root case without a separate check: as uid 0 all three
+  // candidates are ours, none qualifies, and the case skips. That is deliberate — the foreign-owned
+  // directories available to root are ordinary user directories, whose modes DO carry group and other
+  // bits, so selecting one would reintroduce exactly the hazard the mode restriction removes.
+  const foreign = ['/root', '/etc/ssl/private', '/var/lib/private'].find((c) => {
+    try {
+      const st = lstatSync(c);
+      return st.isDirectory() && st.uid !== process.getuid?.() && (st.mode & 0o077) === 0;
+    } catch { return false; }                          // absent on this host
+  });
+
+  it.skipIf(!foreign)('refuses a root owned by another uid, and does not touch it (F9.d)', () => {
+    const root = foreign!;
+    expect(lstatSync(root).uid, 'the candidate is no longer somebody else\'s').not.toBe(process.getuid?.());
+    const before = lstatSync(root).mode;
+
+    expect(ensureScratchRoot(root)).toBeNull();
+
+    // Refused BEFORE the hardening step, which is the point of the ordering: a corral we do not own
+    // must be neither adopted nor repaired. On this candidate chmod would be skipped anyway, so this
+    // asserts the invariant the candidate rule relies on rather than the branch itself — if a future
+    // edit reorders the vetting, the test that proves the reorder is safe is this line.
+    expect(lstatSync(root).mode).toBe(before);
+  });
 });
