@@ -453,7 +453,10 @@ function atomicWriteRegistry(home, reg) {
 function readOwner(projectRoot) {
   const path = ownerFile(projectRoot);
   try {
-    if (!lstatSync3(path).isFile()) return null;
+    if (lstatSync3(dirname3(path)).isSymbolicLink()) return null;
+    const st = lstatSync3(path);
+    if (!st.isFile()) return null;
+    if (st.nlink > 1) return null;
     return readFileSync3(path, "utf8").trim();
   } catch {
     return null;

@@ -14287,7 +14287,10 @@ function atomicWriteOwner(projectRoot2, stamp) {
 function readOwner(projectRoot2) {
   const path = ownerFile(projectRoot2);
   try {
-    if (!lstatSync3(path).isFile()) return null;
+    if (lstatSync3(dirname5(path)).isSymbolicLink()) return null;
+    const st = lstatSync3(path);
+    if (!st.isFile()) return null;
+    if (st.nlink > 1) return null;
     return readFileSync4(path, "utf8").trim();
   } catch {
     return null;

@@ -151,7 +151,21 @@ function atomicWriteOwner(projectRoot: string, stamp: string): void {
 function readOwner(projectRoot: string): string | null {
   const path = ownerFile(projectRoot);
   try {
-    if (!lstatSync(path).isFile()) return null;   // symlink, directory, socket -> not our stamp
+    // The PARENT first. A `.helix -> elsewhere` symlink redirects the whole store out of the repo,
+    // and `stampOwnership` already refuses to write through exactly that shape — so it can never
+    // have been adopted legitimately, and refusing it here strands no working layout (pinned by the
+    // sibling case in ownership.test.ts). What it does close is the swap AFTER adoption: nothing
+    // re-checked the parent, so an owned project could have its store relocated behind a link, and
+    // then reads served out-of-repo bytes with no disclosure while commits wrote the user's memory
+    // into that directory — invisible to `git status`, which sees only the link.
+    if (lstatSync(dirname(path)).isSymbolicLink()) return null;
+    const st = lstatSync(path);
+    if (!st.isFile()) return null;                // symlink, directory, socket -> not our stamp
+    // A hard link is a real file to lstat, so the rule above cannot see it — but a second name means
+    // some other path keeps live, in-place write control over the bytes that decide ownership, which
+    // is the property the symlink rule exists to deny, reached by a different spelling. Our own
+    // writer renames a fresh inode into place, so a legitimate stamp always has exactly one link.
+    if (st.nlink > 1) return null;
     return readFileSync(path, 'utf8').trim();
   } catch { return null; }                        // absent or unreadable -> not owned
 }

@@ -125,7 +125,10 @@ function readRegistry(home) {
 function readOwner(projectRoot) {
   const path = ownerFile(projectRoot);
   try {
-    if (!lstatSync2(path).isFile()) return null;
+    if (lstatSync2(dirname2(path)).isSymbolicLink()) return null;
+    const st = lstatSync2(path);
+    if (!st.isFile()) return null;
+    if (st.nlink > 1) return null;
     return readFileSync2(path, "utf8").trim();
   } catch {
     return null;

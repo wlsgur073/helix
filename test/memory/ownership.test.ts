@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, lstatSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, lstatSync, unlinkSync, cpSync, rmSync, linkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { isOwned, stampOwnership, projectLedgerPath, scopeNonce, globalScopeNonce } from '../../src/memory/ownership.js';
@@ -306,5 +306,66 @@ describe('ownership re-adoption idempotency (PR-1)', () => {
     expect(scopeNonce(proj, home)).toBe(nonce1);
     expect(readFileSync(join(proj, '.helix', '.owner'), 'utf8')).toBe(stamp1);
     expect(isOwned(proj, home)).toBe(true);
+  });
+});
+
+// The symlinked-.owner fix closed the FINAL component. Two shapes one step out survived it, and the
+// worse of the two is the parent: `.helix` itself replaced by a symlink AFTER a legitimate adoption.
+// stampOwnership already refuses to write THROUGH that shape ("a symlinked .helix parent would
+// redirect the .owner (and ledger) write out of the repo"), so it can never have been adopted
+// legitimately — verified below — but nothing re-checked it afterwards, so an owned project could be
+// swapped after the fact. Measured at the MCP surface before this: recall served the relocated
+// content with no disclosure, and helix_memory_commit wrote the user's new memory into the
+// out-of-repo directory, which `git status` cannot see because the repo holds only the link.
+describe('ownership is decided by bytes the repo actually contains (F5/F7, read side)', () => {
+  it('a .helix parent symlinked after adoption stops the project being owned', () => {
+    const { home, proj } = dirs();
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    mkdirSync(home, { recursive: true });
+    stampOwnership(proj, home);
+    expect(isOwned(proj, home)).toBe(true);          // control: a real .helix is owned
+
+    // The swap: the whole store, genuine .owner included, moves out of tree behind a link.
+    const outside = join(home, 'relocated-helix');
+    cpSync(join(proj, '.helix'), outside, { recursive: true });
+    rmSync(join(proj, '.helix'), { recursive: true, force: true });
+    symlinkSync(outside, join(proj, '.helix'));
+
+    expect(isOwned(proj, home), 'a project whose store lives outside the repo is still owned').toBe(false);
+    expect(projectDispositionOf({ root: proj, ledger: projectLedgerPath(proj), home }))
+      .not.toBe('owned');
+  });
+
+  it('the write side has always refused that shape, so refusing it on read breaks no adoptable layout', () => {
+    // Non-vacuity for the case above: if a symlinked .helix WERE adoptable, refusing it on the read
+    // path would strand a working layout instead of closing a swap.
+    const { home, proj } = dirs();
+    mkdirSync(proj, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    const shared = join(home, 'shared-helix');
+    mkdirSync(shared, { recursive: true });
+    symlinkSync(shared, join(proj, '.helix'));
+
+    expect(() => stampOwnership(proj, home)).toThrow(/symlinked \.helix/i);
+  });
+
+  it('a .owner HARD-LINKED to an out-of-repo file is not honoured either', () => {
+    // lstat cannot see a hard link: the name is a real file. But a second link means an out-of-repo
+    // path keeps live, in-place write control over the bytes that decide ownership — the same
+    // property the symlink rule exists to deny, reached by a different spelling.
+    const { home, proj } = dirs();
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    mkdirSync(home, { recursive: true });
+    stampOwnership(proj, home);
+    const ownerPath = join(proj, '.helix', '.owner');
+    const stamp = readFileSync(ownerPath, 'utf8');
+
+    const outside = join(home, 'stamp-hardlink-source');
+    writeFileSync(outside, stamp);
+    unlinkSync(ownerPath);
+    linkSync(outside, ownerPath);                    // same inode, two names, one outside the repo
+
+    expect(lstatSync(ownerPath).isFile(), 'the fixture is not a hard link — lstat sees a plain file').toBe(true);
+    expect(isOwned(proj, home), 'ownership was decided by an inode the repo shares with an outside path').toBe(false);
   });
 });
