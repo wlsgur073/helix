@@ -182,7 +182,7 @@ still confirm which ledger it physically lives in (read the ledger JSONL directl
   not transfer to another machine (e.g. a Windows vs. WSL clone) — elevations signed elsewhere
   replay as `Fresh` until you re-`confirm` on that machine.
 - **A `Corroborated` grade can originate from, and be lost to, a non-authoritative source.**
-  `recheck`'s mechanical reality-check can raise an `agent-inference`/`user-relayed` record to
+  `recheck`'s mechanical reality-check can raise an `agent-inference`/`agent-test-verified`/`user-relayed` record to
   `Corroborated` because the checked evidence (e.g. a file's contents) is plantable by the same
   agent — deliberately so: `Corroborated` is the weaker, mechanical grade, only a `user`-sourced,
   human-approved `confirm` reaches `Verified`, and `requiresReverifyBeforeUse` still flags any

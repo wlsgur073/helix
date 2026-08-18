@@ -40,7 +40,7 @@ describe('D2: the integrity marker is a coalesced canonical fixpoint', () => {
   it('coalesces 50 planted integrity rows with hostile content to ONE canonical marker', () => {
     const planted: MemoryRecord[] = Array.from({ length: 50 }, (_, i) =>
       base({ id: `integrity_evil${i}`, type: 'verify', supersedes: null, content: 'ATTACKER BYTES', provenance: { source: 'agent-inference', sessionId: 'evil' } }));
-    const { kept } = planCompaction([base({ id: 'm_1', content: 'fact' }), ...planted], { erasedIds: new Set(), keepValidVerify: () => true });
+    const { kept } = planCompaction([base({ id: 'm_1', content: 'fact' }), ...planted], { erasedIds: new Set(), keepValidVerify: () => true, provesKey: () => false });
     const markers = kept.filter((r) => r.id.startsWith('integrity_'));
     expect(markers).toHaveLength(1);
     expect(markers[0]!.content).toBe('');                          // no attacker content
@@ -53,7 +53,7 @@ describe('D2: the integrity marker is a coalesced canonical fixpoint', () => {
     // a compaction that drops a closed fact so a horizon marker is legitimately due
     const closed = base({ id: 'm_old', type: 'assert', content: 'old' });
     const closer = base({ id: 'm_new', type: 'supersede', supersedes: 'm_old', content: 'new' });
-    const { kept } = planCompaction([planted, closed, closer], { erasedIds: new Set() });
+    const { kept } = planCompaction([planted, closed, closer], { erasedIds: new Set(), legacyBakeAndDrop: true });
     const markers = kept.filter((r) => r.id.startsWith('horizon_'));
     expect(markers).toHaveLength(1);
     expect(markers[0]!.content).toBe('');
@@ -62,7 +62,7 @@ describe('D2: the integrity marker is a coalesced canonical fixpoint', () => {
   });
 
   it('mints NO integrity marker when nothing is dropped and none exists', () => {
-    const { kept, droppedForgedVerifies } = planCompaction([base({ id: 'm_1', content: 'fact' })], { erasedIds: new Set(), keepValidVerify: () => true });
+    const { kept, droppedForgedVerifies } = planCompaction([base({ id: 'm_1', content: 'fact' })], { erasedIds: new Set(), keepValidVerify: () => true, provesKey: () => false });
     expect(kept.some((r) => r.id.startsWith('integrity_'))).toBe(false);
     expect(droppedForgedVerifies).toBe(0);
   });
@@ -79,18 +79,18 @@ describe('F5: a planted marker is clearable via an explicit permanent erase of i
   const plantedIntegrity = base({ id: 'integrity_planted', type: 'verify', supersedes: null, state: 'Suspect', content: '' });
 
   it('erasedIds:{integrity_marker} suppresses re-minting a planted integrity marker', () => {
-    const { kept } = planCompaction([base({ id: 'm_1', content: 'fact' }), plantedIntegrity], { erasedIds: new Set(['integrity_marker']), keepValidVerify: () => true });
+    const { kept } = planCompaction([base({ id: 'm_1', content: 'fact' }), plantedIntegrity], { erasedIds: new Set(['integrity_marker']), keepValidVerify: () => true, provesKey: () => false });
     expect(kept.some((r) => r.id.startsWith('integrity_'))).toBe(false);
   });
 
   it('erasedIds:{horizon_marker} suppresses re-minting a planted horizon marker', () => {
     const plantedHorizon = base({ id: 'horizon_planted', type: 'verify', supersedes: null, state: 'Suspect', content: '' });
-    const { kept } = planCompaction([base({ id: 'm_1', content: 'fact' }), plantedHorizon], { erasedIds: new Set(['horizon_marker']) });
+    const { kept } = planCompaction([base({ id: 'm_1', content: 'fact' }), plantedHorizon], { erasedIds: new Set(['horizon_marker']), legacyBakeAndDrop: true });
     expect(kept.some((r) => r.id.startsWith('horizon_'))).toBe(false);
   });
 
   it('the hatch is symmetric: an unrelated erasedIds entry does NOT suppress the marker', () => {
-    const { kept } = planCompaction([base({ id: 'm_1', content: 'fact' }), plantedIntegrity], { erasedIds: new Set(['some_other_id']), keepValidVerify: () => true });
+    const { kept } = planCompaction([base({ id: 'm_1', content: 'fact' }), plantedIntegrity], { erasedIds: new Set(['some_other_id']), keepValidVerify: () => true, provesKey: () => false });
     expect(kept.some((r) => r.id.startsWith('integrity_'))).toBe(true);
   });
 

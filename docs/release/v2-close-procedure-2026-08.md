@@ -1,7 +1,10 @@
 # v2 close procedure — the tree the close chain runs from
 
-Written 2026-08-06, during the open v2 window (`2026-08-02T11:35:05.000Z < tx ≤
-2026-08-30T11:35:05.000Z`).
+Written 2026-08-06, during the first v2 window. **Re-pointed 2026-08-14:** that window was reset
+under §8 and its bounds are void; the open window is now `2026-08-14T06:20:01.000Z < tx ≤
+2026-09-11T06:20:01.000Z`. The procedure itself did not change — only the identity it points at,
+which is why this file names the receipt as the authority below instead of repeating a sha that a
+future reset would silently falsify.
 
 ## What this document is, and what it is not
 
@@ -22,8 +25,9 @@ the close-time comparison.
 
 ## The rule
 
-> **The close chain runs from a clean checkout of the candidate commit
-> `27b4373d64d13c7b258aab011570be2d973c34da`, not from the working tree.**
+> **The close chain runs from a clean checkout of the candidate commit — `payload.candidateCommit`
+> in `v2-freeze-receipt-2026-08.json`, currently `94dd136925253be74c58df92392044c550aa6ec2` — not
+> from the working tree.**
 
 `scripts/freeze-guard.ts` states it in its header contract: working-tree divergence from the pins
 is WARN-only before `txClose`, because *"Undeployed repo work during the window is legitimate; the
@@ -45,7 +49,7 @@ refuses with `method-drift` (exit 1) on any set-wise difference in either direct
 tree carrying post-freeze work and it refuses — correctly, by its own contract. Run it from a
 clean candidate checkout and every pin is satisfied by construction.
 
-`input-pins.ts` is itself one of the 25 pinned tools, so this asymmetry cannot be resolved by
+`input-pins.ts` is itself one of the 26 pinned tools, so this asymmetry cannot be resolved by
 editing it during the window. It is resolved by **invoking the chain in the right tree**, which is
 what this document fixes in writing.
 
@@ -81,7 +85,9 @@ Operationally:
 
 1. Materialise a clean checkout of the candidate commit (`git worktree add` to a scratch path, or
    a detached checkout in a separate clone). Do **not** run the chain from the development tree.
-2. Confirm the checkout is clean and at `27b4373d64d13c7b258aab011570be2d973c34da`.
+2. Confirm the checkout is clean and at the receipt's `payload.candidateCommit` — read it from the
+   receipt rather than from this sentence, then compare (`94dd136925253be74c58df92392044c550aa6ec2`
+   for the second window).
 3. Run the chain from inside that checkout, in the §9 order above.
 4. Record in the final report that the chain was run from a candidate-commit checkout, per §9a's
    requirement to carry "the pins re-verified at the close".
@@ -99,25 +105,31 @@ and restores both marketplace `autoUpdate` flags to true.
 These are known now. Meeting them for the first time on close day, when they cannot be
 distinguished from a genuine failure, is the outcome this section prevents.
 
-### 1. `gate-decision-2026-07-22.md` differs from the receipt in the working tree
+### 1. Both pinned method docs MATCH the receipt — expect no divergence, and treat one as a finding
 
-The freeze receipt pins `ebdbb307e13310a9…`; the working tree holds `400d586565665ec1…`. The
-freeze commit itself appended the `**Update (2026-08-02; D1–D5 still unchanged).**` block to that
-document in the same commit that issued the receipt against the preceding candidate commit, so the
-receipt and the tree disagree by construction from minute zero.
+**This condition INVERTED at the second freeze and the old text would now send an operator hunting
+for a mismatch that is not there.** In the first window the receipt pinned
+`ebdbb307e13310a9…` while the tree held `400d586565665ec1…`, because that freeze commit appended its
+update block to `gate-decision-2026-07-22.md` in the same commit that issued the receipt against the
+preceding candidate — receipt and tree disagreed by construction from minute zero.
 
-Under the rule above this is a **non-event**: the candidate-commit checkout carries the pinned
-bytes, so `refuseMethodDrift` sees no divergence. It is recorded here because it is the single
-most likely thing to be misread as an integrity failure, and because the alternative treatment —
-reverting the file — would restore a sentence (`NOT YET IN FORCE`) that is now false in a BINDING
-document.
+The reset forced the ordering to be got right: a pinned method document must be final BEFORE the
+candidate commit, since the receipt hashes the working tree and refuses any pinned path that
+diverges from `--commit`. The 2026-08-14 update recording the first window as void therefore lands
+INSIDE candidate `94dd136`. Measured 2026-08-14 and re-measured 2026-08-16:
 
-`o67-class-rule-2026-07.md` is clean: pinned `c1fe768ca0ec2b11…`, tree identical.
+- `gate-decision-2026-07-22.md` — pinned `e51e29373d73f50e…`, tree identical.
+- `o67-class-rule-2026-07.md` — pinned `c1fe768ca0ec2b11…`, tree identical.
+
+⇒ At the close, expect **both to match**. A divergence in either is no longer the known non-event
+it was in the first window; it is a finding to record and report. The one legitimate exception is
+`o67-class-rule-2026-07.md` after run-sheet step D2, which deliberately removes three citations
+AFTER the validated close receipt is written — see the close report §2.2.
 
 ### 2. The close chain is bound to the deployment machine
 
 `scripts/pilot/input-pins.ts` unconditionally reads the configuration path recorded in the receipt
-— `/home/kim/.helix/config.json` — with no flag to skip it. An unreadable path is an invocation
+(`config.path`) with no flag to skip it. An unreadable path is an invocation
 error (exit 2), not a refusal of the pins. The chain therefore cannot be run to completion on any
 machine that lacks that file, whatever tree it is invoked from.
 
@@ -151,6 +163,10 @@ State it here so a future reader does not have to reconstruct it:
   the whole window, the window did not open under the identity the receipt declares. Whether that
   is a reset (drift after a correct freeze, with dated evidence) or an abort (never correct) turns
   on when the divergence began, and current file mtimes cannot establish that retroactively.
-- If any of the 25 pinned tool paths or 2 pinned method docs differs between the candidate commit
-  and the receipt, the anchor set itself is broken and no checkout rescues it. `npm run
+- If any of the **26** pinned tool paths or 2 pinned method docs differs between the candidate
+  commit and the receipt, the anchor set itself is broken and no checkout rescues it. *(26, not the
+  25 this line carried until 2026-08-16: the second freeze added
+  `scripts/close/adjudication-skeleton.ts`. Read the count from
+  `PINNED_TOOL_PATHS` rather than from this sentence — a cardinality that only prose records is one
+  a value-by-value sweep cannot correct, and this sentence is the operative HARD-fail judgment.)* `npm run
   freeze-guard` checks exactly this and is HARD-failing on it.

@@ -37,6 +37,10 @@ describe('hashTools', () => {
     // ordering receipt and the release record, plus the hashing they share. §10's table predates
     // them and does not list them; pinning the method while leaving the programs that ISSUE the
     // method's evidence unpinned would leave the chain's own tooling free to change unnoticed.
+    // The last row joined at the SECOND freeze: the adjudication producer issues the `--adjudication`
+    // input the score phase requires, and building it inside the first window is what reset that
+    // window — so the path the Reset clause has already been triggered by is one the mechanical
+    // divergence check now covers. Its test is not here on purpose; no test file is.
     expect(PINNED_TOOL_PATHS).toEqual([
       'scripts/pilot/derive.ts', 'scripts/pilot/generate-manifest.ts', 'scripts/pilot/snapshot.ts',
       'scripts/pilot/classify-o67.ts', 'scripts/pilot/candidate-universe.ts', 'scripts/pilot/gate-set.ts',
@@ -47,6 +51,7 @@ describe('hashTools', () => {
       'src/memory/retrieval.ts', 'src/memory/store.ts', 'src/memory/expansion.ts',
       'src/memory/ownership.ts', 'src/memory/verified-read.ts', 'src/memory/verified-projection.ts',
       'src/memory/witness-store.ts', 'src/memory/witness-read.ts', 'src/memory/witness-core.ts',
+      'scripts/close/adjudication-skeleton.ts',
     ]);
     const tools = hashTools(process.cwd());
     expect(Object.keys(tools)).toEqual([...PINNED_TOOL_PATHS]);
@@ -103,8 +108,8 @@ const RUNTIME = 'b'.repeat(40);
 /** §10 line 436 pins the runtime as "installed plugin gitCommitSha, **both load paths**". Two
  *  paths, therefore, and a scalar has nowhere to record that they agreed. */
 const loadPaths = () => [
-  { path: '/home/kim/.claude/plugins/cache/helix/helix/bin/helix-mcp.mjs', gitCommitSha: RUNTIME },
-  { path: '/home/kim/.claude/plugins/marketplaces/helix/bin/helix-mcp.mjs', gitCommitSha: RUNTIME },
+  { path: '/opt/claude/plugins/cache/helix/helix/bin/helix-mcp.mjs', gitCommitSha: RUNTIME },
+  { path: '/opt/claude/plugins/marketplaces/helix/bin/helix-mcp.mjs', gitCommitSha: RUNTIME },
 ];
 /** The pinned bytes the fixture's commit "contains". Hashes are one-way, so the fixture is built
  *  bytes-first: pick the bytes, derive the working-tree hashes FROM them, and let the injected
@@ -120,7 +125,7 @@ const pinnedBytesAt = (over: Record<string, Buffer | null> = {}) =>
 const base = {
   candidateCommit: 'a'.repeat(40),
   runtime: { gitCommitSha: RUNTIME, loadPaths: loadPaths() },
-  configPath: '/home/kim/.helix/config.json',
+  configPath: '/opt/helix/config.json',
   configBytes: Buffer.from('{"redacted":true}\n', 'utf8'),
   cutoff: CUTOFF,
   k: 20,
@@ -297,7 +302,7 @@ describe('freezeReceipt — the identity pins', () => {
 
   it('records WHICH file was hashed, since a bare hash names nothing', () => {
     const receipt = freezeReceipt(base);
-    expect(receipt.payload.config.path).toBe('/home/kim/.helix/config.json');
+    expect(receipt.payload.config.path).toBe(base.configPath);
     // A declaration the program does NOT verify, and named so: §10 pins the redacted form, and
     // nothing here inspects the file for secrets.
     expect(receipt.payload.config.redactionAcknowledged).toBe(true);

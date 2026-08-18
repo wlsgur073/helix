@@ -181,7 +181,7 @@ describe('duplicate fact id survives a ledger rewrite', () => {
       { ...base, id: 'Y', state: 'Suspect' },                                  // state-only twin
       { ...base, id: 'other', content: 'an unrelated fact' },
     ];
-    const opts = { erasedIds: new Set<string>() };
+    const opts = { erasedIds: new Set<string>(), legacyBakeAndDrop: true } as const;
     const lines = (rs: MemoryRecord[]): string[] => rs.map((r) => JSON.stringify(r));
 
     const pass1 = planCompaction(records, opts).kept;
@@ -213,10 +213,10 @@ describe('duplicate fact id survives a ledger rewrite', () => {
 
     // Premise: WITHOUT the erasure both occurrences are preserved — so the assertion below is about
     // erasure winning, not about the preserve branch being inert.
-    const preserved = planCompaction(records, { erasedIds: new Set() }).kept;
+    const preserved = planCompaction(records, { erasedIds: new Set(), legacyBakeAndDrop: true }).kept;
     expect(preserved.filter((r) => r.id === 'X')).toHaveLength(2);
 
-    const { kept } = planCompaction(records, { erasedIds: new Set(['X']) });
+    const { kept } = planCompaction(records, { erasedIds: new Set(['X']), legacyBakeAndDrop: true });
     expect(kept.filter((r) => r.id === 'X')).toHaveLength(0);       // erasure wins over the evidence
     expect(JSON.stringify(kept)).not.toContain(SECRET);             // physical destruction, not just delisting
     expect(kept.some((r) => r.id === 'other')).toBe(true);          // and it erased only what was asked

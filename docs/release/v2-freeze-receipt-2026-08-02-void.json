@@ -1,20 +1,20 @@
 {
  "artifact": "freeze-receipt",
- "payloadSha256": "360ffe80f6baf853fdc5acb4bc949a14b84838c3827cbeb56832da56bfcc7332",
+ "payloadSha256": "55720757298abee064f5a319bd4e31ef723c2ed18d21f36fc0d7b8418d24a89c",
  "payload": {
   "rule": "v2-gate-composition-2026-07-29",
   "artifactKind": "freeze-receipt",
-  "candidateCommit": "94dd136925253be74c58df92392044c550aa6ec2",
+  "candidateCommit": "27b4373d64d13c7b258aab011570be2d973c34da",
   "runtime": {
-   "gitCommitSha": "94dd136925253be74c58df92392044c550aa6ec2",
+   "gitCommitSha": "27b4373d64d13c7b258aab011570be2d973c34da",
    "loadPaths": [
     {
      "path": "/home/kim/.claude/plugins/marketplaces/helix/bin/helix-mcp.mjs",
-     "gitCommitSha": "94dd136925253be74c58df92392044c550aa6ec2"
+     "gitCommitSha": "27b4373d64d13c7b258aab011570be2d973c34da"
     },
     {
      "path": "/home/kim/.claude/plugins/cache/helix/helix/0.1.0/bin/helix-mcp.mjs",
-     "gitCommitSha": "94dd136925253be74c58df92392044c550aa6ec2"
+     "gitCommitSha": "27b4373d64d13c7b258aab011570be2d973c34da"
     }
    ]
   },
@@ -24,8 +24,8 @@
    "redactionAcknowledged": true
   },
   "k": 20,
-  "txAfter": "2026-08-14T06:20:01.000Z",
-  "txClose": "2026-09-11T06:20:01.000Z",
+  "txAfter": "2026-08-02T11:35:05.000Z",
+  "txClose": "2026-08-30T11:35:05.000Z",
   "windowDays": 28,
   "tools": {
    "scripts/pilot/derive.ts": "68065a1b12d4b38655af432873d609a07c8d2070",
@@ -42,26 +42,25 @@
    "scripts/pilot/input-pins.ts": "abc4f4fb90a09033dee9f709fa45b57dd1b52dbe",
    "scripts/pilot/ordering-receipt.ts": "72a5bd1b8b0d11317632e4821ce04ecd43a41b45",
    "scripts/pilot/release-record.ts": "40fbe797ccca53e6dd0d4cff78c84e034f8c874f",
-   "scripts/pilot/pin-hashes.ts": "5a327593ad8c5b743d802b8b13dbb178158b64d5",
+   "scripts/pilot/pin-hashes.ts": "bf9276386ff52ba4e83db675f991047b2facf37d",
    "scripts/pilot/artifact-io.ts": "9fe42a028e349fd6c02f2cfb40e480cdffe95eb5",
-   "src/memory/retrieval.ts": "65d877c7cceabdcd26b947211472aff0f22cdad0",
-   "src/memory/store.ts": "89219c6b3a75bfc96c645ce03ac2a92117129dc3",
+   "src/memory/retrieval.ts": "52b15217ecbb5cd5a391d76a8b55619f67919515",
+   "src/memory/store.ts": "80f0688d93a251150efc77334e306e3f213831a7",
    "src/memory/expansion.ts": "88d472e3bdb6494684fdd161bceaf7a0ae233dbf",
-   "src/memory/ownership.ts": "8906b3f2111df9a1fd288da620e17c5ec774cd50",
+   "src/memory/ownership.ts": "bb9d3999b8b43be105957c39b2332bee29d72d6d",
    "src/memory/verified-read.ts": "027333ed8a4abf12b2295fcf837d686db7a9416f",
-   "src/memory/verified-projection.ts": "9d02572f53e13de5fdcdfd4749d3e2f319587784",
-   "src/memory/witness-store.ts": "e52b3e0f0111ee75bec0f967b12f03e0e58ff88a",
+   "src/memory/verified-projection.ts": "80192ba43815b4a2b3a0134519c268431a7bd885",
+   "src/memory/witness-store.ts": "8f381105a7dcdaf9a3ef850009ef7348af7ac28d",
    "src/memory/witness-read.ts": "c948a73cf740d1c2c580d1aaa916c70abca3af09",
-   "src/memory/witness-core.ts": "e22468f91eb971a99616dda7c74e56e4134f4cfa",
-   "scripts/close/adjudication-skeleton.ts": "adb31cc40073ba119c567531b65ff08c303ff67b"
+   "src/memory/witness-core.ts": "bde7f616306dcf220bed67f62f2cafdf2d0cd575"
   },
   "methodDocs": {
    "docs/release/o67-class-rule-2026-07.md": "c1fe768ca0ec2b117bc41a73e8c45546d83a2d3b7d8f344fe143114814b8a448",
-   "docs/release/gate-decision-2026-07-22.md": "e51e29373d73f50e0a26fd6e538b3d45460550205221aaa66a2b4543d4522258"
+   "docs/release/gate-decision-2026-07-22.md": "ebdbb307e13310a948f789f686aa4819a8f92f6e5dba037646d61d2d0b4424ae"
   }
  },
  "receipts": {
-  "issuedAt": "2026-08-14T06:20:34.216Z",
+  "issuedAt": "2026-08-02T11:48:35.264Z",
   "attestation": "self-reported wall clock; §9 states that no self-attested timestamp proves no earlier pass occurred, so this field dates the receipt and proves nothing about what ran before it"
  }
 }

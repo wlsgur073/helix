@@ -170,9 +170,13 @@ describe('store ledger-HMAC', () => {
       subkey,
     );
     appendFileSync(ledger, JSON.stringify(v1) + '\n');
-    compactLedger(ledger, { erasedIds: new Set(), keepValidVerify: (r) => verifyVerify(r, subkey) });
+    compactLedger(ledger, { erasedIds: new Set(), keepValidVerify: (r) => verifyVerify(r, subkey), provesKey: () => false });
     const kept = parseLedger(ledger).filter((r) => r.type === 'verify' && r.supersedes === a.id);
-    expect(kept.map((r) => r.macVersion).sort()).toEqual([1, 2]);   // both survived dual-accept compaction
+    // Both survived, but NOT because the predicate accepted them: `provesKey: () => false` leaves
+    // continuity unproven, so the drop branch never runs and every eligible verify is preserved
+    // unconditionally. What this pins is that dual-accept compaction keeps a v1 and a v2 verify
+    // side by side; whether verifyVerify accepts each one is measured elsewhere.
+    expect(kept.map((r) => r.macVersion).sort()).toEqual([1, 2]);
   });
 
   it('compaction is total over a malformed verify: erasure completes, forged line dropped, ONE tombstone (spec §5 delta)', () => {

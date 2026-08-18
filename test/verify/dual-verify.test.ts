@@ -325,7 +325,7 @@ describe('persistedReason (content-free reason for the durable sinks)', () => {
   });
 
   it("reduces the 'unavailable' preflight-failure reason to a static label (raw exception text never reaches the sinks)", () => {
-    const raw = 'codex preflight failed: spawn codex ENOENT /home/kim/.local/bin';
+    const raw = 'codex preflight failed: spawn codex ENOENT /opt/codex/bin';
     expect(persistedReason({ outcome: 'unavailable', reason: raw })).toBe('codex preflight failed');
     expect(persistedReason({ outcome: 'unavailable', reason: raw })).not.toContain('ENOENT');
     // interpretPreflight's static strings still pass through untouched

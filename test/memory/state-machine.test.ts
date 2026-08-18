@@ -26,7 +26,7 @@ describe('state machine', () => {
   });
 
   it('always flags a non-authoritative source, even at low/unknown blast radius', () => {
-    for (const source of ['user-relayed', 'agent-inference', 'codex-agree'] as const) {
+    for (const source of ['user-relayed', 'agent-inference', 'agent-test-verified', 'codex-agree'] as const) {
       expect(requiresReverifyBeforeUse({ state: 'Fresh', blastRadius: 'read-only', source })).toBe(true);
       expect(requiresReverifyBeforeUse({ state: 'Fresh', blastRadius: null, source })).toBe(true);
       expect(requiresReverifyBeforeUse({ state: 'Fresh', blastRadius: 'external', source })).toBe(true);

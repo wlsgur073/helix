@@ -106,6 +106,20 @@ reported unexercised — not silently validated.
 > `2026-08-02T11:35:05.000Z < tx ≤ 2026-08-30T11:35:05.000Z`. The locked claim template above is
 > superseded by the preregistration's own §1 claim for results produced under it; v1's failed
 > O_67 result remains unwaived and reported exactly as D1 fixed it.
+>
+> **Update (2026-08-14; D1–D5 still unchanged). That window was RESET and the bounds above are
+> void.** On 2026-08-13 a close-day producer (`scripts/close/adjudication-skeleton.ts`) was written
+> inside the window, and the preregistration's Reset clause says building any of the method's
+> tooling after the freeze **does** reset it, because implementing an unspecified detail resolves a
+> method choice. The owner ruled on the strictest reading: the act of building triggers it whether
+> or not the program is ever run. A moved window cannot be edited into the old receipt — `txClose`
+> is derived from the cutoff, and the cutoff is verified against the candidate commit's authored
+> time — so the window was re-frozen from scratch against a new candidate, and the superseded
+> receipt is kept as `v2-freeze-receipt-2026-08-02-void.json`. The v2 window now runs
+> `2026-08-14T06:12:55.000Z < tx ≤ 2026-09-11T06:12:55.000Z`; the ten probe rows accrued under the
+> old bounds fall below the new cutoff and leave the probe population. Nothing about D1–D5, the
+> class rule, or the claim template changed — only the identities and the two instants.
+> `v2-freeze-deviations-2026-08.md` carries the full record as `D-2026-08-13-in-window-tooling`.
 
 - **Pre-registered position** (assistant, before external review): choose (b); no third
   waiver; drift, waiver-credibility, and class-not-instance arguments; a self-registered

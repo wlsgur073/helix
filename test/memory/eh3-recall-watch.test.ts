@@ -39,7 +39,7 @@ function ledgerRec(id: string, content: string, tx: string): MemoryRecord {
   };
 }
 
-// Exact ledger from /mnt/c/Users/kim/helix-dogfood/tinytask/.helix/memory.jsonl (2026-06-18).
+// Exact ledger from the dogfood tinytask project ledger (2026-06-18).
 const LEDGER: MemoryRecord[] = [
   ledgerRec('storage', 'Storage is a local JSON file at ~/.tinytask/tasks.json.', '2026-06-18T12:51:01.954Z'),
   ledgerRec('iso', 'Timestamps are ISO 8601.', '2026-06-18T12:51:02.828Z'),
@@ -58,8 +58,8 @@ const LEDGER: MemoryRecord[] = [
   ),
 ];
 
-// The two verbatim queries the dogfood agent issued (transcripts:
-// ~/.claude/projects/C--Users-kim-helix-dogfood-tinytask).
+// The two verbatim queries the dogfood agent issued (recovered from that project's Claude Code
+// transcript directory; the queries are the datum here, the transcript location is not).
 const QUERY_RM_RUN = 'tinytask CLI conventions decisions commands store mutators';
 const QUERY_NEXT_RUN = 'tinytask CLI conventions decisions storage commands done rm tags';
 

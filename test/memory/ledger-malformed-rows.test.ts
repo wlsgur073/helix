@@ -56,7 +56,7 @@ function compactOver(lines: string[]): { records: MemoryRecord[]; threw: string 
     const path = join(dir, 'memory.jsonl');
     writeFileSync(path, lines.join('\n') + '\n');
     try {
-      compactLedger(path, { erasedIds: new Set() });
+      compactLedger(path, { erasedIds: new Set(), legacyBakeAndDrop: true });
       return { records: parseLedger(path), threw: null };
     } catch (e) {
       return { records: [], threw: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };

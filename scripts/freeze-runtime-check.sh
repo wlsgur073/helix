@@ -5,12 +5,17 @@
 # continuous monitoring. Env seams (FRC_*) exist so drills never touch live
 # state. Spec + why-log: the 2026-08-09 autoupdate-guard-restore design doc.
 # Pinned constants derived 2026-08-09 from the anchored freeze receipt and
-# recorded in docs/release/v2-freeze-deviations-2026-08.md.
+# recorded in docs/release/v2-freeze-deviations-2026-08.md. RE-DERIVED 2026-08-14
+# for the SECOND window: the first was reset (D-2026-08-13-in-window-tooling), and
+# because txClose is derived from a cutoff that is verified against the candidate's
+# authored time, a moved window means new values here, not an edited receipt. All
+# four must move together — a half-updated set fails the anchor check in step 1,
+# which is the intended behaviour and not a bug to work around.
 
-CANDIDATE="${FRC_CANDIDATE:-27b4373d64d13c7b258aab011570be2d973c34da}"
-PAYLOAD_SHA="${FRC_PAYLOAD_SHA:-55720757298abee064f5a319bd4e31ef723c2ed18d21f36fc0d7b8418d24a89c}"
+CANDIDATE="${FRC_CANDIDATE:-94dd136925253be74c58df92392044c550aa6ec2}"
+PAYLOAD_SHA="${FRC_PAYLOAD_SHA:-360ffe80f6baf853fdc5acb4bc949a14b84838c3827cbeb56832da56bfcc7332}"
 CONFIG_SHA="${FRC_CONFIG_SHA:-16f6d97fffb6b9934f82bcb03570af8657464d9899c22deb89c9cb61555ef9c3}"
-TX_CLOSE="${FRC_TX_CLOSE:-2026-08-30T11:35:05Z}"
+TX_CLOSE="${FRC_TX_CLOSE:-2026-09-11T06:20:01Z}"
 SETTINGS="${FRC_SETTINGS:-$HOME/.claude/settings.json}"
 KNOWN_MP="${FRC_KNOWN_MP:-$HOME/.claude/plugins/known_marketplaces.json}"
 INSTALLED="${FRC_INSTALLED:-$HOME/.claude/plugins/installed_plugins.json}"
