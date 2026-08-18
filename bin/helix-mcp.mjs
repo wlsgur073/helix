@@ -25199,6 +25199,10 @@ async function handleCodexStatus(deps) {
       "        quota is spent. Raise dualVerify.timeoutMs."
     );
   }
+  const legs = Object.entries(dv.egressPolicy);
+  const changed = legs.filter(([k, v]) => v !== DEFAULT_CONFIG.dualVerify.egressPolicy[k]).map(([k]) => k);
+  lines.push(`- egress legs:    ${legs.map(([k, v]) => `${k}=${v}`).join(" ")}`);
+  if (changed.length > 0) lines.push(`  changed from default: ${changed.join(", ")}`);
   lines.push(`- content log:    ${contentLog}`);
   return ok(lines.join("\n"));
 }

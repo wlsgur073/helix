@@ -187,3 +187,36 @@ describe('handleCodexStatus reports a config it could not read', () => {
     expect(out).not.toMatch(/could not be read/i);
   });
 });
+
+// The egress legs decide whether a payload reaches Codex at all, and codex_status — the one free
+// pre-flight surface — never showed them. That gap outlived a real defect: a written
+// `secretEntropyExempt: "block"` was silently dropped by the config parser, and because the effective
+// legs appeared on no surface, the only way an operator could have noticed was to read stderr. The
+// parser is fixed; this is the observability half, so a dropped or mistyped leg is visible where the
+// operator already looks.
+describe('handleCodexStatus shows the effective egress legs', () => {
+  const LEGS = ['memoryEcho', 'piiHigh', 'piiBulk', 'secretHeuristic', 'secretEntropy', 'secretEntropyExempt'] as const;
+
+  it('every leg and its effective value appears, on the shipped defaults', async () => {
+    const out = text(await handleCodexStatus(deps(LIVE)));
+    for (const leg of LEGS) {
+      const shipped = DEFAULT_CONFIG.dualVerify.egressPolicy[leg];
+      expect(out, `${leg} is not shown`).toContain(`${leg}=${shipped}`);
+    }
+  });
+
+  it('a leg that differs from the shipped default is called out, not just printed', async () => {
+    // Printing the value alone asks the operator to remember six defaults. The question they actually
+    // have is "did my edit take effect", so the answer has to be on the line.
+    const closed = cfg();
+    closed.dualVerify.egressPolicy = { ...closed.dualVerify.egressPolicy, secretEntropyExempt: 'block' };
+    const out = text(await handleCodexStatus(deps(LIVE, { config: closed })));
+
+    expect(out).toContain('secretEntropyExempt=block');
+    expect(out, 'nothing marks the leg as changed from its default').toMatch(/changed from default[^\n]*secretEntropyExempt/i);
+  });
+
+  it('no change marker appears when every leg is at its default', async () => {
+    expect(text(await handleCodexStatus(deps(LIVE)))).not.toMatch(/changed from default/i);
+  });
+});

@@ -1,7 +1,7 @@
 import type { MemoryStore, CommitInput } from '../memory/store.js';
 import type { ProjectDisposition } from '../memory/ownership.js';
 import type { HelixConfig } from '../config.js';
-import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS } from '../config.js';
+import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS, DEFAULT_CONFIG } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type EchoSource } from '../verify/dual-verify.js';
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, asOfWitnessNotes } from '../memory/content-frame.js';
@@ -490,6 +490,20 @@ export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResu
       '        quota is spent. Raise dualVerify.timeoutMs.',
     );
   }
+  // The egress legs decide whether a payload reaches Codex at all, and this free pre-flight is the
+  // only surface an operator reads before spending a call — so until now an edit that never took
+  // effect was discoverable on stderr alone. That is not hypothetical: a written
+  // `secretEntropyExempt: "block"` used to be dropped by the config parser, and nothing on any
+  // durable surface said so. Printing the values alone would ask the reader to remember six
+  // defaults, so the legs they actually changed are named. A leg that was dropped answers their real
+  // question — "did my edit take effect" — by its ABSENCE from that list.
+  const legs = Object.entries(dv.egressPolicy);
+  const changed = legs
+    .filter(([k, v]) => v !== DEFAULT_CONFIG.dualVerify.egressPolicy[k as keyof HelixConfig['dualVerify']['egressPolicy']])
+    .map(([k]) => k);
+  lines.push(`- egress legs:    ${legs.map(([k, v]) => `${k}=${v}`).join(' ')}`);
+  if (changed.length > 0) lines.push(`  changed from default: ${changed.join(', ')}`);
+
   lines.push(`- content log:    ${contentLog}`);
   return ok(lines.join('\n'));
 }
