@@ -418,3 +418,48 @@ describe('a config that exists but cannot be read is not the same as no config',
     expect(loadConfig({ globalPath: join(dir, 'absent.json'), warn: () => {} }).unreadable ?? []).toEqual([]);
   });
 });
+
+// The egressPolicy tests above drive 'allow' and invalid values, never a written 'block'. That gap is
+// not cosmetic: the merge line assigned ONLY 'allow', so a valid 'block' matched neither arm and was
+// never written. For the five legs whose default is already 'block' the omission is invisible — the
+// assertion passes on the default, not on the file. For the ONE leg that defaults to 'allow' it was
+// total: `secretEntropyExempt: "block"` did nothing, silently, and SECURITY.md instructs exactly that
+// edit as the way to close the entropy exemption. The mechanism was covered (test/risk/trifecta.test.ts
+// hands classifyEgress a hand-built policy object); the path from a user's config.json to it was not.
+describe('every egressPolicy leg round-trips from the file, including the one that defaults open', () => {
+  const LEGS = ['memoryEcho', 'piiHigh', 'piiBulk', 'secretHeuristic', 'secretEntropy', 'secretEntropyExempt'] as const;
+
+  it('a config that writes block for every leg produces block for every leg', () => {
+    const dir = tmpDir();
+    const p = join(dir, 'c.json');
+    writeFileSync(p, JSON.stringify({ dualVerify: { egressPolicy: Object.fromEntries(LEGS.map((l) => [l, 'block'])) } }));
+
+    const ep = loadConfig({ globalPath: p, warn: () => {} }).dualVerify.egressPolicy;
+
+    // Asserted as a whole object, not leg by leg: a per-leg assertion on a leg whose DEFAULT is the
+    // expected value passes without the file ever being read, which is how this stayed hidden.
+    expect(ep).toEqual(Object.fromEntries(LEGS.map((l) => [l, 'block'])));
+  });
+
+  it('a config that writes allow for every leg produces allow for every leg', () => {
+    const dir = tmpDir();
+    const p = join(dir, 'c.json');
+    writeFileSync(p, JSON.stringify({ dualVerify: { egressPolicy: Object.fromEntries(LEGS.map((l) => [l, 'allow'])) } }));
+    expect(loadConfig({ globalPath: p, warn: () => {} }).dualVerify.egressPolicy)
+      .toEqual(Object.fromEntries(LEGS.map((l) => [l, 'allow'])));
+  });
+
+  it('the invalid-value warning names the value actually kept, for a leg that defaults open', () => {
+    // The message used to say `-> block` unconditionally. On secretEntropyExempt the effective value
+    // stays `allow`, so an operator who mistyped and then read their own stderr was told the
+    // fail-closed thing had happened when it had not.
+    const dir = tmpDir(); const warn = vi.fn();
+    const p = join(dir, 'c.json');
+    writeFileSync(p, JSON.stringify({ dualVerify: { egressPolicy: { secretEntropyExempt: 'blokc' } } }));
+
+    const ep = loadConfig({ globalPath: p, warn }).dualVerify.egressPolicy;
+    expect(ep.secretEntropyExempt).toBe('allow');                       // unchanged, as before
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('allow')); // and the message says so
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('-> block'));
+  });
+});

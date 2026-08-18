@@ -227,8 +227,18 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
           // key is untrusted here (unvalidated Object.entries key) -> q(); val below is untrusted too,
           // but that branch's key has already passed EGRESS_LEGS, so it stays bare.
           if (!EGRESS_LEGS.includes(key as EgressLeg)) { warn(`helix: ignoring unknown dualVerify.egressPolicy key ${q(key)}`); continue; }
-          if (val === 'allow') merged.dualVerify.egressPolicy[key as EgressLeg] = 'allow';
-          else if (val !== 'block') warn(`helix: invalid dualVerify.egressPolicy.${key} ${q(val)} -> block`);
+          // BOTH valid values are assigned. Assigning only 'allow' was invisible for the five legs
+          // whose default is already 'block' — the omission and the default agreed — and total for
+          // secretEntropyExempt, the one leg that defaults OPEN: `secretEntropyExempt: "block"` did
+          // nothing at all, silently, while SECURITY.md instructs exactly that edit as the way to
+          // close the entropy exemption. The mechanism was covered (trifecta's tests hand
+          // classifyEgress a hand-built policy); the path from a user's config.json to it was not.
+          if (val === 'allow' || val === 'block') merged.dualVerify.egressPolicy[key as EgressLeg] = val;
+          // The message names the value actually RETAINED, not a fixed 'block'. It is not always the
+          // default: loadConfig merges [global, project], so a project file's typo keeps whatever the
+          // global file legitimately set. Telling an operator "-> block" while leaving 'allow' in
+          // force is worse than silence — it reports the fail-closed outcome that did not happen.
+          else warn(`helix: invalid dualVerify.egressPolicy.${key} ${q(val)} -> keeping ${merged.dualVerify.egressPolicy[key as EgressLeg]}`);
         }
       }
       if (dv.memoryEgress !== undefined) {
