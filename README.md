@@ -96,9 +96,11 @@ ledger later presents the rollback witness with a file it has never seen, which 
 you re-bless the scope with the [re-baseline ceremony](./SECURITY.md).
 
 If you used `HELIX_LEDGER` before v0.1.0, an older build wrote the trust store beside the ledger
-instead. The server now refuses to start on that layout rather than silently minting a new key (which
-would drop every `Corroborated`/`Verified` grade you have) — it prints both directories and the two
-ways to resolve it.
+instead. On that layout the server measures what starting would actually cost: it refuses to start
+only when a grade this ledger currently carries would be lost, and prints both directories and the
+two ways to resolve it. When nothing elevated is in play it starts and prints a note naming the
+leftover files instead — refusing on the layout alone would let one planted, shape-valid file stop
+every session on an install with nothing at risk.
 
 ### Automatic compaction (opt-in, off by default)
 

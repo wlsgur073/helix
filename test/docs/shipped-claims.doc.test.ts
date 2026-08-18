@@ -12,7 +12,7 @@
 // rewording stays cheap and deleting the claim does not.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, statSync, chmodSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, readdirSync, statSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
@@ -23,6 +23,7 @@ import { buildServer } from '../../src/server/helix-server.js';
 import { classifyEgress, type EgressInput } from '../../src/risk/trifecta.js';
 import { dualVerify } from '../../src/verify/dual-verify.js';
 import { hardenHomePermissions } from '../../src/memory/home-permissions.js';
+import { assessGradeLoss, strayTrustFiles } from '../../src/memory/trust-store-layout.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
 import { appendAudit } from '../../src/audit.js';
 
@@ -335,5 +336,90 @@ describe('SECURITY.md states the mode the audit trail is actually created with (
     const bullet = auditBullet(doc('SECURITY.md'));
     expect(bullet, 'the bullet still tells the reader a pre-existing trail keeps its mode').not.toMatch(/keeps whatever mode/i);
     expect(bullet, 'the bullet does not mention that the next start repairs the mode').toMatch(/start/i);
+  });
+});
+
+// The split-trust-store refusal. Both documents state it UNCONDITIONALLY — "The server refuses to
+// start if it finds trust-store files beside a relocated ledger" — but src/server/index.ts gates it on
+// assessGradeLoss(...).loses, and its comment block says why in detail: two earlier unconditional
+// proxies were themselves a startup denial of service, where one shape-valid planted witness.json
+// killed every session at exit 78 on an install with nothing at risk. So the CODE is the fixed
+// version and the prose is pre-fix. Driven 2026-08-18 on exactly the pre-pin layout the README
+// sentence is about — genuine key + witness beside a relocated ledger, fresh HELIX_HOME — the server
+// starts, and mints its own second key, whenever the ledger carries no elevated grade.
+//
+// Following this file's rule, the two outcomes are RECOVERED by executing the shipped gate rather
+// than asserted from the prose, and only then is each document required to describe both.
+describe('the documents describe the split-trust-store refusal as the code actually gates it', () => {
+  /** The pre-pin layout, built by the shipped store: trust files beside the ledger, a fresh HOME. */
+  function prePinLayout(elevate: boolean): { home: string; ledger: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'helix-stray-doc-'));
+    const oldHome = join(dir, 'oldhome');
+    const repo = join(dir, 'repo');
+    mkdirSync(oldHome, { recursive: true });
+    mkdirSync(repo, { recursive: true });
+    const ledger = join(repo, 'memory.jsonl');
+
+    const store = new MemoryStore(ledger, { home: oldHome, sessionId: 's1' });
+    const r = store.commit({ content: 'A fact for the stray-trust-store guard.', source: 'user' });
+    if (elevate) store.confirm(r.id);                       // the only thing that puts a grade in play
+
+    // What an older build produced: the trust store sits next to the ledger, HELIX_HOME is fresh.
+    for (const f of readdirSync(oldHome)) if (f !== 'memory.jsonl') cpSync(join(oldHome, f), join(repo, f));
+    const home = join(dir, 'newhome');
+    mkdirSync(home, { recursive: true });
+    return { home, ledger };
+  }
+
+  /** The sentence in `text` that carries the refusal claim, whitespace-collapsed so a reflow is free. */
+  const refusalSentence = (text: string): string =>
+    (/[^.]*refuses to start[^.]*\./.exec(text.replace(/\s+/g, ' '))?.[0] ?? '').trim();
+
+  it('the gate is per measured grade loss, not per layout — both outcomes recovered by execution', () => {
+    const lossless = prePinLayout(false);
+    const losing = prePinLayout(true);
+
+    // Non-vacuity: the layout must actually BE the one the documents describe in both runs, or the
+    // assertions below would pass on a state where no stray file was ever found.
+    expect(strayTrustFiles(lossless.home, lossless.ledger).length,
+      'the lossless fixture no longer reproduces the pre-pin layout').toBeGreaterThan(0);
+    expect(strayTrustFiles(losing.home, losing.ledger).length,
+      'the elevated fixture no longer reproduces the pre-pin layout').toBeGreaterThan(0);
+
+    // The same layout, two answers. This is the whole point: the layout does not decide.
+    expect(assessGradeLoss(lossless.home, lossless.ledger).loses,
+      'a ledger with nothing elevated now refuses — the unconditional prose would be accurate again').toBe(false);
+    expect(assessGradeLoss(losing.home, losing.ledger).loses,
+      'a ledger that stands to lose a grade no longer refuses').toBe(true);
+  });
+
+  it('each document states the condition, not just the refusal', () => {
+    for (const name of ['README.md', 'SECURITY.md']) {
+      const sentence = refusalSentence(doc(name));
+      expect(sentence, `${name} no longer has a refusal sentence to bind`).not.toBe('');
+      // "only" is the quantifier the shipped gate needs and the pre-fix prose lacked: without it the
+      // sentence reads as a property of the LAYOUT, which is the reading that is false.
+      expect(sentence, `${name} states the refusal unconditionally`).toMatch(/only/i);
+      expect(sentence, `${name} does not say what the refusal is conditioned ON`).toMatch(/grade/i);
+    }
+  });
+
+  it('each document also says what happens in the case that does NOT refuse', () => {
+    // The half a reader needs most: they will meet the note, not the refusal, on any install whose
+    // ledger never got a grade. A document that mentions only the refusal leaves that unexplained.
+    //
+    // SCOPED to the paragraph that carries the refusal, deliberately. An earlier draft asserted
+    // /note/i against the whole README, which already passed on an unrelated sentence elsewhere in
+    // the file — a guard satisfied by a line that has nothing to do with the claim, which is the
+    // defect this whole file exists to repair.
+    for (const name of ['README.md', 'SECURITY.md']) {
+      // Collapse BEFORE searching, not after: prose wraps, so the phrase being looked for is split
+      // across a newline in the file as often as not. Matching the raw paragraph made this report
+      // "no refusal paragraph to bind" against a document that plainly had one.
+      const para = doc(name).split(/\n\s*\n/).map((p) => p.replace(/\s+/g, ' '))
+        .find((p) => p.includes('refuses to start')) ?? '';
+      expect(para, `${name} no longer has a refusal paragraph to bind`).not.toBe('');
+      expect(para, `${name}'s refusal paragraph never says what the other outcome is`).toMatch(/note/i);
+    }
   });
 });
