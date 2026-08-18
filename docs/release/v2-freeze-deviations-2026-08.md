@@ -622,13 +622,15 @@ producer for any §9-chain artifact that lacks one — and one such gap is LIVE.
 snapshot has no producer script (the run-sheet's C1 says "BY HAND. There is no producer script"), so
 writing a snapshot builder today resets this window under this very reading.
 
-**A second instance of the same class, NOT YET ADJUDICATED.** `docs/issues/2026-08-12-home-pin-check.sh`
+**A second instance of the same class — ADJUDICATED the same day as `R-2026-08-18b` below, NOT left
+for the close.** `docs/issues/2026-08-12-home-pin-check.sh`
 was rewritten to v3 inside this window (its banner records that every expected value was replaced
 after the 2026-08-14 re-freeze; mtime 2026-08-17T14:05:10Z), and it is a hand-written second
 implementation of freeze-pin verification. It has never been put as an §8 question. The same rule
 must be applied to it and the answer recorded, or this ledger's reset history is incomplete. It does
 not move the anchor under a reset reading — `10:58:05Z` is later. Recorded here, against the ruler's
-interest, in the same breath as the narrowing.
+interest, in the same breath as the narrowing, and disposed of in `R-2026-08-18b` — also NOT a
+reset, on the `D-2026-08-09` precedent rather than on argument.
 
 **Barred reasoning.** No part of this disposition leans on the VALUE of the eligible count. The
 grounds are the scope of a noun across the document's uses, §8's express permission and closed
@@ -639,3 +641,56 @@ the information sought was information §8 permits obtaining at any time by an o
 whatever it turned out to be. One passage in the supporting analysis did lean on the value (it
 argued the agreement is weak because 0 is a boundary value); it is discarded, and its conclusion is
 accepted only on the independent ground that the frozen run came second.
+
+### DISPOSITION R-2026-08-18b — the home-machine pin script's in-window rewrite, NOT A RESET
+
+**Raised against the ruler's own interest.** The disposition of `R-2026-08-18` named this as a
+second, unadjudicated instance of the same class. It is adjudicated here rather than left for the
+close, and by the same party, with the same conflict: the v3 re-anchoring was mine.
+
+**What it is.** `docs/issues/2026-08-12-home-pin-check.sh` — machine-local, gitignored, never
+tracked, 18,768 bytes, banner v3.2 dated 2026-08-17, sha256 `0b5b11b5f59586985f0ec5952b974c213e5c94dcb692645fe0fa2681d8c50ef2`.
+It is the operator's read-only verification of the SECOND machine's deployment: the one surface the
+close report says it "cannot re-derive from the measuring box" (§2.3). It was created 2026-08-12 —
+inside the FIRST window — and rewritten to v3 inside this one, because the re-freeze replaced every
+expected value it carries.
+
+**Read-only, measured rather than asserted.** The file contains no write, no `tee`, no `mkdir`,
+`rm`, `cp` or `mv`, and no `git reset`/`pull`/`checkout`/`clean`/`fetch`. Every redirection in it
+is `>/dev/null`. It reports to stdout and changes nothing.
+
+**Ruled NOT A RESET, on precedent rather than on argument.** `scripts/freeze-runtime-check.sh` was
+**created 2026-08-09, inside the first window** (commit `2fdc1ca`), is a verification program
+written from scratch during a measurement window, and its output — the heal log — is cited FOUR
+times by the §9a close report. This ledger's own `D-2026-08-09` entry disposed of it: "**No-reset
+determination.** A measurement-window reset is NOT required". That first window then ran four more
+days and was reset for the adjudication producer, **not** for the guard.
+
+The home-machine script is the same class and a weaker case for reset on every axis: it is
+read-only where the guard mutates a clone; it is untracked where the guard is committed; and it runs
+on a machine that executes no step of the chain. Applying the `R-2026-08-18` test directly — does it
+decide a rank, or issue an artifact of the §9 chain? — it decides no rank, and what it issues is an
+operator observation report, which stands to the §9a report exactly as the heal log does. That
+relationship was already ruled outside the clause.
+
+**Conduct findings, and they differ from the Python's — the two must not be lumped.**
+
+1. **This one is auditable, and that is the material difference.** `R-2026-08-18`'s heaviest conduct
+   finding was that nothing persisted, so no outside reader could check the act. Here the artifact
+   persists, carries a version banner, a recorded sha256 and a companion document, and can be
+   re-read by anyone the file is transferred to. By this project's own standard that is the right
+   shape, not the wrong one.
+2. **The v3 edit was not only a re-anchoring, and the record should not imply it was.** Beyond
+   replacing the candidate, window bounds, runtime pin hashes and the pin path list, it **removed a
+   decision branch** — the comparison of the pin ∩ changed set against a "known acceptable" set.
+   The reason is that the second window's known set is empty, so a branch comparing against an empty
+   expectation can only manufacture reassurance; the two remaining outcomes are "none" and "new
+   finding". That reasoning is the ruler's own and a reader should check it rather than accept it.
+3. **`R-2026-08-18`'s conduct finding 1 does NOT transfer.** There, a permitted frozen path existed
+   and was not taken first. Here there is none: no frozen tool verifies a second machine's
+   deployment, which is precisely why the report calls that surface non-re-derivable.
+
+**Standing scope.** This covers a read-only observation script, outside the repository, whose output
+the §9a report cites as verification evidence. It does not license writing a producer for any §9
+chain artifact — the close-bounded snapshot still has none, and writing one today would reset this
+window under the reading applied here.

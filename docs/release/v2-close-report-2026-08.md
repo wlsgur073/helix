@@ -754,11 +754,20 @@ verbatim, and ruled NOT a reset: splitting `npm run typecheck` into its own CI j
 comment-only edit to an unpinned `src/verify/` file. The entry carries its own standing scope, which
 is narrower than the ruling might suggest; read it there rather than generalising from this line.
 
-**`Disclosure R-2026-08-18`** — an in-window computation of the §5 eligible-probe count, first by
-reimplementing two frozen rules in ephemeral Python and then by running the frozen program itself in
-its holdout form. The entry sets out both readings of §8 and requests a disposition; it does not
-assert one, and an independent peer review reached the opposite conclusion from the analysis that
-raised it.
+**`Disclosure R-2026-08-18`, and its disposition** — an in-window computation of the §5
+eligible-probe count, first by reimplementing two frozen rules in ephemeral Python and then by
+running the frozen program itself in its holdout form. Both readings of §8 are set out in the entry,
+an independent peer review reached the RESET conclusion, and the disposition recorded on 2026-08-18
+is **NOT A RESET** — on the ground that the 2026-08-13 ruling settled the clause's modality and not
+its scope, and that what was built issues no artifact of the §9 chain. The entry names the conflict
+of interest first, keeps the losing case unrewritten, answers the dissent argument by argument, and
+carries five conduct findings the disposition does NOT clear.
+
+**`Disposition R-2026-08-18b`** — the home-machine pin-verification script, rewritten in-window
+because the re-freeze replaced every expected value it carries. Also **NOT A RESET**, on precedent
+rather than argument: `scripts/freeze-runtime-check.sh` was itself written inside the first window,
+its output is cited four times by this report, and `D-2026-08-09` ruled that no reset was required.
+Raised by the ruler against the ruler's own interest rather than left for the close.
 
 **The number that disclosure records is HISTORY, not this report's result, and the distinction is
 load-bearing.** §5's realized-accrual marker and §7's Hit@1 marker are close-day fills, produced by
