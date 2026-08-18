@@ -148,7 +148,13 @@ off unless you turn it on:
   (`dropped_rows`/`reclaimed_bytes` are honestly `0`), `true` for an after-the-rename throw, where
   `dropped_rows`/`reclaimed_bytes` report what the rewrite actually wrote, not a zeroed default.
 - `auto` (bool, default `false`) — the master switch.
-- `dirtyRatio` — `(0, 1]`, default `0.5`. Fire when reclaimable rows / total rows reaches this.
+- `dirtyRatio` — `(0, 1]`, default `0.5`. Fire when the **net** reclaimable row count over total rows
+  reaches this. Net, because a rewrite mints markers of its own: the epoch fence it re-plants is not
+  counted (it is dropped and immediately re-added, so counting it would re-fire the trigger every
+  session on the fence alone), and on a ledger that has never been compacted the horizon marker it
+  mints has no counterpart in the input. So exactly one dead row nets to zero and no ratio in the
+  legal range fires on it — truthfully, since that rewrite reclaims nothing and the file net-grows.
+  Use `minDirtyBytes` if you want that case compacted anyway.
 - `minDirtyBytes` — integer ≥ 1, default `1048576` (1 MiB). Alternative trigger: fire when the exact
   reclaimable byte count reaches this, whatever the ratio.
 - `minRows` — integer ≥ 0, default `200`. Never compact a ledger with fewer physical rows.
@@ -163,8 +169,9 @@ config typo).
 
 **Observability.** When metrics are enabled (`metrics.enabled`, the default), every attempt appends a
 content-free `compaction` record to `~/.helix/metrics.jsonl`, failed attempts included (`"ok": false`).
-Its `reclaimed_bytes` can legitimately be **negative** when a compaction drops little but adds a
-content-free audit tombstone, so the file net-grew. Its `"landed"` boolean (see above) says whether the
+Its `dropped_rows` and `reclaimed_bytes` can both legitimately be **negative** when a compaction drops
+little but adds a content-free audit tombstone, so the file net-grew — a one-dead-row ledger that
+reaches the gate through `minDirtyBytes` reports `dropped_rows: -1`. Its `"landed"` boolean (see above) says whether the
 rewrite reached disk on this attempt, so `dropped_rows`/`reclaimed_bytes` can be trusted on a failed
 row instead of read as an unconditional zero. If you set `metrics.enabled: false`, the metrics sink
 is a no-op, so you lose the operational detail — how much a compaction reclaimed, and whether it failed.

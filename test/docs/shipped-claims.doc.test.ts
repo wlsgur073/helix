@@ -24,6 +24,8 @@ import { classifyEgress, type EgressInput } from '../../src/risk/trifecta.js';
 import { dualVerify } from '../../src/verify/dual-verify.js';
 import { hardenHomePermissions } from '../../src/memory/home-permissions.js';
 import { assessGradeLoss, strayTrustFiles } from '../../src/memory/trust-store-layout.js';
+import { parseLedger } from '../../src/memory/ledger.js';
+import { noopMetricsSink, type CompactionInput } from '../../src/metrics.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
 import { appendAudit } from '../../src/audit.js';
 
@@ -421,5 +423,74 @@ describe('the documents describe the split-trust-store refusal as the code actua
       expect(para, `${name} no longer has a refusal paragraph to bind`).not.toBe('');
       expect(para, `${name}'s refusal paragraph never says what the other outcome is`).toMatch(/note/i);
     }
+  });
+});
+
+// Compaction is the one destructive subsystem a user opts into, and two of README's statements about
+// it do not survive being driven. Both are the same shape as the other doc findings this file now
+// carries: the CODE is right and the prose rounds it off.
+//
+//   1. "Fire when reclaimable rows / total rows reaches this" reads as a count of dead rows. The
+//      estimate is NET of the markers the rewrite itself mints — store.ts nets out the epoch fence
+//      deliberately (counting it would make a witnessed compaction re-fire forever on the fence
+//      alone), and the horizon marker lands in `kept` without a counterpart in the input on a
+//      never-compacted ledger. So exactly one dead row nets to zero, and no ratio in the legal range
+//      can fire it. That is truthful — the rewrite really would reclaim nothing; measured, the file
+//      NET-GREW from 6 rows to 7 — but it is not what the sentence describes.
+//   2. `CompactionStats.droppedRows` is documented "Always >= 0 in practice", and README extends its
+//      negativity note only to `reclaimed_bytes`. Driven at minDirtyBytes:1 with one dead row, the
+//      shipped code emits droppedRows: -1.
+describe('the documents describe compaction as the shipped gate and stats actually behave', () => {
+  const FUTURE = '2100-01-01T00:00:00.000Z';   // any real mtime is "old", so quiescence is deterministic
+  const BASE = { auto: true, dirtyRatio: 0.01, minRows: 0, graceMs: 0, maxBytes: 52_428_800 };
+
+  /** Commit `facts`, soft-erase `dead` of them, then recall — the trigger. */
+  function drive(minDirtyBytes: number, facts: number, dead: number) {
+    const home = mkdtempSync(join(tmpdir(), 'helix-doc-compact-'));
+    const ledger = join(home, 'memory.jsonl');
+    const emitted: CompactionInput[] = [];
+    const store = new MemoryStore(ledger, {
+      home, sessionId: 't', now: () => FUTURE,
+      compaction: { ...BASE, minDirtyBytes },
+      metricsSink: { ...noopMetricsSink, emitCompaction: (c) => { emitted.push(c); } },
+    });
+    const ids: string[] = [];
+    for (let i = 0; i < facts; i++) ids.push(store.commit({ content: `fact ${i} for the compaction doc guard`, source: 'user' }).id);
+    for (let i = 0; i < dead; i++) store.erase(ids[i]!);
+    const rowsBefore = parseLedger(ledger).length;
+    store.recall('fact compaction doc guard');
+    return { emitted, rowsBefore, rowsAfter: parseLedger(ledger).length };
+  }
+
+  it('the ratio gate cannot fire on exactly one dead row — recovered by execution', () => {
+    const CLOSED = 999_999_999;   // shuts the absolute-bytes branch so only the ratio can decide
+
+    expect(drive(CLOSED, 5, 1).emitted,
+      'one dead row now reaches the ratio gate — README\'s plain reading became accurate again').toHaveLength(0);
+    // Non-vacuity: the fixture must be capable of firing at all, or the assertion above proves nothing.
+    expect(drive(CLOSED, 5, 2).emitted,
+      'two dead rows no longer fire either — the fixture stopped exercising the gate').toHaveLength(1);
+  });
+
+  it('droppedRows is legitimately negative, and the ledger can net-grow', () => {
+    const r = drive(1, 5, 1);     // absolute branch open, so the same one-dead-row ledger DOES compact
+    expect(r.emitted, 'the absolute-bytes branch no longer fires on this fixture').toHaveLength(1);
+    expect(r.emitted[0]!.droppedRows, 'droppedRows is no longer negative here').toBeLessThan(0);
+    expect(r.rowsAfter, 'the rewrite no longer net-grows the ledger').toBeGreaterThan(r.rowsBefore);
+  });
+
+  it('README says what the ratio is measured against, not just the plain quotient', () => {
+    const bullet = (/^- `dirtyRatio`.*(?:\n {2,}.*)*/m.exec(doc('README.md'))?.[0] ?? '').replace(/\s+/g, ' ');
+    expect(bullet, 'README no longer has a dirtyRatio bullet to bind').not.toBe('');
+    expect(bullet, 'the bullet still reads as a plain count of dead rows').toMatch(/net|marker/i);
+  });
+
+  it('both the shipped contract and README admit droppedRows can be negative', () => {
+    // Recovered from the source, this file's rule: the comment is the contract a caller reads.
+    expect(readFileSync(join(ROOT, 'src', 'memory', 'ledger.ts'), 'utf8'),
+      'the droppedRows contract still promises it is always >= 0').not.toContain('Always >= 0 in practice');
+    const obs = doc('README.md').replace(/\s+/g, ' ');
+    expect(obs, 'README extends the negativity note to reclaimed_bytes only')
+      .toMatch(/`dropped_rows`[^.]*negative|negative[^.]*`dropped_rows`/i);
   });
 });

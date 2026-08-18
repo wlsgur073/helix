@@ -536,9 +536,14 @@ export function serializedBytes(records: MemoryRecord[]): number {
 /** What a compaction ACTUALLY did, measured entirely inside its own lock. Never a projection: a
  *  caller may emit these as past-tense metrics. */
 export interface CompactionStats {
-  /** Physical rows removed: rows read at lock entry minus rows written. Always >= 0 in practice
-   *  (planCompaction keeps a subset of the live projection plus fixed-width markers), and never
-   *  attributable to another writer — see the lock argument on compactLedger. */
+  /** Physical rows removed: rows read at lock entry minus rows written. LEGITIMATELY NEGATIVE, for
+   *  the same reason `reclaimedBytes` is: planCompaction keeps a subset of the live projection PLUS
+   *  the markers this rewrite mints, so a compaction that drops one row and mints a horizon marker
+   *  writes exactly as many rows as it read, and one that drops none while minting writes more.
+   *  Measured: a one-dead-row ledger reaching the gate through `minDirtyBytes` reports `-1`. Like
+   *  `reclaimedBytes` it is NOT clamped — a clamp would report "removed nothing" for a compaction
+   *  that grew the ledger, hiding the case an operator most wants to see. Never attributable to
+   *  another writer — see the lock argument on compactLedger. */
   droppedRows: number;
   /** On-disk bytes reclaimed: file size at lock entry minus file size after the rename.
    *  LEGITIMATELY NEGATIVE when a compaction drops little or nothing but mints a content-free
