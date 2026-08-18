@@ -12,7 +12,7 @@
 // rewording stays cheap and deleting the claim does not.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, statSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
@@ -22,6 +22,7 @@ import { MemoryStore } from '../../src/memory/store.js';
 import { buildServer } from '../../src/server/helix-server.js';
 import { classifyEgress, type EgressInput } from '../../src/risk/trifecta.js';
 import { dualVerify } from '../../src/verify/dual-verify.js';
+import { hardenHomePermissions } from '../../src/memory/home-permissions.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
 import { appendAudit } from '../../src/audit.js';
 
@@ -296,11 +297,43 @@ describe('SECURITY.md states the mode the audit trail is actually created with (
     expect(bullet).toContain(`created \`${declared}\``);
   });
 
-  it('the document limits the guarantee to creation, which is all open(2) gives it', () => {
+  it('the document limits the appender\'s guarantee to creation, which is all open(2) gives it', () => {
     // Irreducibly prose: a mode passed to openSync applies when the call CREATES the file and never
-    // afterwards, so a pre-existing audit.jsonl keeps whatever mode it already had. Stating the
-    // guarantee without that limit would repeat the finding with the sign flipped — a document
-    // promising more than the code delivers, instead of less.
+    // afterwards. Stating the guarantee without that limit would repeat the finding with the sign
+    // flipped — a document promising more than the appender delivers, instead of less.
+    //
+    // This is a PHRASE match, and the case below exists because a phrase match is not enough: it is
+    // satisfied by a sentence that goes on to draw a false conclusion from the true premise.
     expect(auditBullet(doc('SECURITY.md'))).toMatch(/at creation/i);
+  });
+
+  it('a pre-existing over-broad trail IS repaired at startup, and the document says so', () => {
+    // Why this case exists. The bullet used to continue "...so a trail that already exists keeps
+    // whatever mode it has", which is false of the shipped system: hardenHomePermissions runs
+    // unconditionally at startup, audit.jsonl is in its OWNED_FILES, and a 0644 trail comes back
+    // 0600 with the server saying so on stderr. Observed on a real ~/.helix across a restart, then
+    // reproduced in a temp home. The clause survived review because the only guard on it was the
+    // phrase match above — while test/memory/home-permissions.test.ts had been asserting the
+    // OPPOSITE behavior all along. Two suites, contradictory readings of one file, both green.
+    //
+    // So this case does not ask what the sentence says about repair; it DRIVES the repair first and
+    // then requires the document to describe what was just observed. A doc claim about runtime
+    // behavior needs a test that runs the behavior — a guard that only reads prose can only ever
+    // confirm that the prose is still the prose.
+    const home = mkdtempSync(join(tmpdir(), 'helix-d5b-harden-'));
+    const trail = join(home, 'audit.jsonl');
+    writeFileSync(trail, '{"kind":"adopt","ts":"2026-06-09T00:00:00.000Z","scope":"/x"}\n');
+    chmodSync(trail, 0o644);
+
+    const warnings: string[] = [];
+    hardenHomePermissions(home, { warn: (m) => warnings.push(m) });
+
+    expect(`0o${(statSync(trail).mode & 0o777).toString(8)}`,
+      'the startup pass no longer repairs a pre-existing audit trail — the document below is now the accurate one, so fix this test, not the prose').toBe('0o600');
+    expect(warnings.join('\n'), 'the repair happened silently; the document promises it is announced').toContain(trail);
+
+    const bullet = auditBullet(doc('SECURITY.md'));
+    expect(bullet, 'the bullet still tells the reader a pre-existing trail keeps its mode').not.toMatch(/keeps whatever mode/i);
+    expect(bullet, 'the bullet does not mention that the next start repairs the mode').toMatch(/start/i);
   });
 });
