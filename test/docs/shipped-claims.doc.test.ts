@@ -28,6 +28,69 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const doc = (name: string): string => readFileSync(join(ROOT, name), 'utf8');
 
 describe('shipped docs state what the code actually does', () => {
+  // ---- D2.c, D3.c, D6.c, F5.DOC -------------------------------------------------------------
+  // Four more doc legs from the same rounds, each an INDEPENDENT writer from the case that already
+  // covers its finding: D6 was asserted against SECURITY.md only, so the README sentences carrying
+  // the same caps could be deleted with the suite green; D2 and D3 had no doc assertion at all; F5's
+  // documentation half was never pinned anywhere. They follow this file's rule — recover the value
+  // from the code first, and pin prose only where there is no value to recover.
+
+  it('README quotes the same egress scan caps SECURITY.md does, recovered from the code (D6.c)', () => {
+    const allow = { memoryEcho: 'allow', piiHigh: 'allow', piiBulk: 'allow', secretHeuristic: 'allow', secretEntropy: 'allow', secretEntropyExempt: 'allow' } as EgressInput['policy'];
+    const huge = 'z'.repeat(20_000_000);
+    const formVerdict = classifyEgress({ texts: [huge], outbound: huge, ledger: null, policy: allow });
+    const formCap = Number(/\((\d+) chars\)/.exec(formVerdict.reason)![1]);
+    const ledgerVerdict = classifyEgress({ texts: ['x'], outbound: 'x', ledger: [{ id: 'a', content: 'y'.repeat(20_000_000) }] as never, policy: allow });
+    const ledgerCap = Number(/\((\d+) chars\)/.exec(ledgerVerdict.reason)![1]);
+
+    // README writes them with thousands separators; the numbers still come from execution, so raising
+    // either constant fails this until the prose is updated too.
+    const readme = doc('README.md');
+    expect(readme).toContain(`over ${formCap.toLocaleString('en-US')} characters`);
+    expect(readme).toContain(`over ${ledgerCap.toLocaleString('en-US')} characters`);
+    expect(readme).toContain('refused unscanned rather than sent');
+  });
+
+  it('both documents name the entropy exemption and the default the code actually ships (D2.c)', () => {
+    const shipped = DEFAULT_CONFIG.dualVerify.egressPolicy.secretEntropyExempt;
+    expect(shipped).toBe('allow');   // non-vacuity: if this flipped, the sentences below would be wrong
+
+    const readme = doc('README.md');
+    expect(readme).toContain('with one documented exemption on the egress side');
+    expect(readme).toContain('secretEntropyExempt');
+
+    const sec = doc('SECURITY.md');
+    expect(sec).toContain('One documented exception to "blocked by default"');
+    expect(sec).toContain(`\`secretEntropyExempt\` (default \`${shipped}\`)`);
+  });
+
+  it('both documents warn against allow-listing adopt, the tool the server actually registers (D3.c)', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-docs-d3c-'));
+    const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1' });
+    const server = buildServer(store);
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'doc-guard-d3c', version: '0' });
+    await Promise.all([client.connect(ct), server.connect(st)]);
+    const { tools } = await client.listTools();
+
+    // Recovered, not assumed: the warning is only owed while the tool is on the surface at all.
+    const adopt = tools.find((t) => t.name === 'helix_memory_adopt');
+    expect(adopt, 'helix_memory_adopt is no longer registered — the docs below would be stale').toBeDefined();
+    expect(adopt!.description).toContain('do not allow-list this tool');
+
+    expect(doc('README.md')).toContain('adopting a project ledger is a trust decision only you can make');
+    expect(doc('README.md')).toContain('the only other tool that moves what Helix trusts');
+    expect(doc('SECURITY.md')).toContain('do **not** allow-list `helix_memory_adopt`');
+  }, 30_000);
+
+  it('both documents disclose that the guard is not a sandbox around the CLI (F5.DOC)', () => {
+    // Irreducibly prose: a negative promise about what a separate program can still reach has no
+    // value to read out of the code, so this pins the shortest load-bearing phrase in each document
+    // rather than the paragraph. Deleting the disclosure fails; rewording around it stays cheap.
+    expect(doc('README.md')).toContain('What the CLI itself can still reach');
+    expect(doc('SECURITY.md')).toContain('it is not a sandbox around the');
+  });
+
   // ---- D6 ----------------------------------------------------------------------------------
   // The egress scan caps were implemented and documented nowhere. Both constants are module-private
   // in src/risk/trifecta.ts, so a test cannot import them — but the enforcement interpolates each one
