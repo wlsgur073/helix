@@ -9,7 +9,7 @@ import { scanLegacyElevated, classifyLegacyOffenders } from '../memory/legacy-sc
 import { hardenHomePermissions } from '../memory/home-permissions.js';
 import { subkeyForScope } from '../memory/verified-read.js';
 import { aliasesGlobalLedger } from '../memory/scope-target.js';
-import { strayTrustFiles, assessGradeLoss } from '../memory/trust-store-layout.js';
+import { strayTrustFiles, collidingTrustFiles, assessGradeLoss } from '../memory/trust-store-layout.js';
 import { verifyVerify } from '../memory/ledger-mac.js';
 import { buildServer } from './helix-server.js';
 import { installSelfTermination } from './lifecycle.js';
@@ -78,6 +78,15 @@ const metrics = createMetricsSink(join(home, 'metrics.jsonl'), config.metrics.en
 const stray = strayTrustFiles(home, globalLedger);
 if (stray.length > 0) {
   const ledgerDir = dirname(globalLedger);
+  // What the "move them into HELIX_HOME" advice below would destroy. Computed once, for both
+  // branches, because both give that advice and both used to give it unqualified.
+  const collide = collidingTrustFiles(home, stray);
+  const wouldOverwrite =
+    `     HELIX_HOME ALREADY HAS ${collide.join(', ')} - moving the stray copies\n` +
+    `     over ${collide.length === 1 ? 'it' : 'them'} REPLACES this install's own trust store, and every elevated grade\n` +
+    `     on HELIX_HOME's own ledger is lost with it - the same loss this check exists to\n` +
+    `     prevent, in the other direction. Move HELIX_HOME's copies aside first and decide\n` +
+    `     which store you are keeping; deleting the stray copies instead is unaffected.\n`;
   const loss = assessGradeLoss(home, globalLedger);
   if (!loss.loses) {
     process.stderr.write(                                                             // ASCII only
@@ -90,7 +99,8 @@ if (stray.length > 0) {
       `They are most likely an inert leftover, from before the trust store's location was pinned to\n` +
       `HELIX_HOME or from a repo-writing adversary. If they still hold state you need, move\n` +
       `${stray.join(', ')} into HELIX_HOME by hand; otherwise it is safe to delete them from the\n` +
-      `ledger directory - this note will keep appearing until they are gone.\n`,
+      `ledger directory - this note will keep appearing until they are gone.\n` +
+      (collide.length > 0 ? wouldOverwrite : ''),
     );
   } else {
     const causes: string[] = [];
@@ -128,8 +138,14 @@ if (stray.length > 0) {
       `  HELIX_HOME              : ${home}\n` +
       `${causes.join('')}` +
       `Two ways out, both deliberate:\n` +
-      `  1. Move ${stray.join(', ')} from the ledger directory into HELIX_HOME, keeping the ledger where it\n` +
-      `     is - the only remedy proven lossless (docs/issues/repros/f1-manual-remedy.ts).\n` +
+      `  1. Move ${stray.join(', ')} from the ledger directory into HELIX_HOME, keeping the ledger\n` +
+      `     where it is.\n` +
+      // The claim used to be flat: "the only remedy proven lossless". It was proven for the case the
+      // repro actually built - a home with no file of those names - and is FALSE for the collision,
+      // which is the common case here. The claim is now scoped to the case it holds in.
+      (collide.length > 0
+        ? wouldOverwrite
+        : `     Lossless here: HELIX_HOME has no file of those names to overwrite.\n`) +
       `  2. Discard the old trust state (delete those files) and accept the loss deliberately with the\n` +
       `     re-baseline ceremony: node bin/helix-rebaseline.mjs --scope global\n`,
     );

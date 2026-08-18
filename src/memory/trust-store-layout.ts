@@ -85,6 +85,26 @@ function looksLikeOurs(name: string, path: string): boolean {
  * a trailing separator, since `dirname()` normalises one side and the environment variable does not
  * — refusing to start for a user whose configuration was correct all along.
  */
+/** Which of `stray` the "move them into HELIX_HOME" remedy would OVERWRITE - i.e. which of those
+ *  names already exist under `home`.
+ *
+ *  Separate from `strayTrustFiles` because the two questions have opposite polarity: that one asks
+ *  what is in the wrong place, this asks what is already in the RIGHT one and would be destroyed by
+ *  putting the wrong copy on top of it. Both stray-store messages instruct a move and neither said
+ *  anything about the collision - which is the normal state whenever either message is reached at
+ *  all, because reaching it means this install has its own trust store somewhere. Following the
+ *  instruction with a collision present replaces HOME's key and witness, and every elevated grade on
+ *  HOME's own ledger is lost: the same loss the refusal exists to prevent, in the other direction.
+ *
+ *  `lstat`, not `existsSync`: a symlink standing at that name is equally something a move replaces,
+ *  and a BROKEN one must still count - `existsSync` follows and would answer false for it.
+ */
+export function collidingTrustFiles(home: string, stray: readonly string[]): string[] {
+  return stray.filter((name) => {
+    try { lstatSync(join(home, name)); return true; } catch { return false; }
+  });
+}
+
 export function strayTrustFiles(home: string, globalLedger: string): string[] {
   const ledgerDir = dirname(globalLedger);
   if (canonicalRoot(ledgerDir) === canonicalRoot(home)) return [];

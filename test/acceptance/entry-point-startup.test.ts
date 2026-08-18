@@ -101,4 +101,65 @@ describe('top-level entry points, measured through a bundle built from source', 
       for (const d of [home1, proj, home2, quiet]) rmSync(d, { recursive: true, force: true });
     }
   }, 90_000);
+
+  // Both stray-store messages tell the operator to MOVE the stray files into HELIX_HOME. Neither
+  // said anything about the files of those names HELIX_HOME already has — and that is the normal
+  // state whenever either message is reached, because reaching it at all means this install has its
+  // own trust store somewhere else. Driven end to end before this guard: a record committed and
+  // confirmed under HELIX_HOME read back `Verified`; following the printed remedy as a literal `mv`
+  // replaced HOME's key and witness; the next session printed the forged/legacy warning and the same
+  // record read back `Fresh`. The instruction destroyed the grade it exists to protect. The cited
+  // proof only ever moved into an EMPTY home, so "lossless" was established for the no-collision
+  // case alone.
+  async function strayStoreStderr(opts: { elevated: boolean; homeHasItsOwn: boolean }): Promise<string> {
+    const home = mkdtempSync(join(tmpdir(), 'helix-remedy-home-'));
+    const elsewhere = mkdtempSync(join(tmpdir(), 'helix-remedy-ledger-'));
+    const cwd = mkdtempSync(join(tmpdir(), 'helix-remedy-cwd-'));
+    // A trust store beside the ledger, shaped so the detector recognises it as ours.
+    writeFileSync(join(elsewhere, 'ledger-mac-master.key'), randomBytes(32));
+    writeFileSync(join(elsewhere, 'witness.json'), JSON.stringify({ v: 1, scopes: {} }));
+    writeFileSync(join(elsewhere, 'memory.jsonl'), opts.elevated
+      ? JSON.stringify({
+        id: 'rec-elevated-1', tx: '2026-01-01T00:00:00.000Z', validFrom: '2026-01-01T00:00:00.000Z',
+        validTo: null, type: 'assert', state: 'Verified', content: 'an elevated row',
+        provenance: { source: 'user', sessionId: 's' }, supersedes: null, blastRadius: null,
+        reverifyTrigger: null, classification: 'normal',
+      }) + '\n'
+      : '');
+    if (opts.homeHasItsOwn) {                       // the collision: same names, different bytes
+      writeFileSync(join(home, 'ledger-mac-master.key'), randomBytes(32));
+      writeFileSync(join(home, 'witness.json'), JSON.stringify({ v: 1, scopes: {} }));
+    }
+    try {
+      return await serverStderr({ HELIX_HOME: home, HELIX_LEDGER: join(elsewhere, 'memory.jsonl') }, cwd);
+    } finally {
+      for (const d of [home, elsewhere, cwd]) rmSync(d, { recursive: true, force: true });
+    }
+  }
+
+  it('the refusal warns that moving would overwrite HELIX_HOME\'s own trust store', async () => {
+    const err = await strayStoreStderr({ elevated: true, homeHasItsOwn: true });
+
+    expect(err, 'the refusal branch was not reached').toContain('REFUSING TO START');
+    expect(err, 'the remedy does not name the files it would overwrite').toMatch(/already has[^\n]*ledger-mac-master\.key/i);
+    expect(err, 'the remedy still calls itself lossless with a collision present')
+      .not.toMatch(/the only remedy proven lossless/);
+  }, 90_000);
+
+  it('the note branch carries the same warning, because it gives the same instruction', async () => {
+    const err = await strayStoreStderr({ elevated: false, homeHasItsOwn: true });
+
+    expect(err, 'the note branch was not reached').toContain('helix: NOTE');
+    expect(err, 'the note tells the operator to move over their own store without saying so')
+      .toMatch(/already has[^\n]*ledger-mac-master\.key/i);
+  }, 90_000);
+
+  it('with no collision the remedy keeps its unqualified form', async () => {
+    // Non-vacuity: the warning must be driven by the collision, not printed unconditionally — and
+    // the no-collision case is the one the cited proof actually establishes.
+    const err = await strayStoreStderr({ elevated: true, homeHasItsOwn: false });
+
+    expect(err).toContain('REFUSING TO START');
+    expect(err, 'a collision was reported where HELIX_HOME holds nothing').not.toMatch(/already has/i);
+  }, 90_000);
 });
