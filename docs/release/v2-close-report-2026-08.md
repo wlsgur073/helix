@@ -249,9 +249,10 @@ this report**. Each is summarized here in the substance that binds the report; t
 including the reflog extracts and the file-history verdicts, is
 `v2-freeze-deviations-2026-08.md` in this directory.
 
-Deviations occurring inside the SECOND window are §4.7, and there is already one: the clone-HEAD
-drift D-2026-08-10 predicted as a standing exposure arrived on 2026-08-15. Further instances are
-appended there.
+Second-window entries are §4.7 and §4.8, and the ledger now carries THREE classes of entry —
+`Deviation`, `Ruling` and `Disclosure`. All three are §9a content. Do not list only the ones headed
+`Deviation`: §4.7's marker asks for *every* entry appended after 2026-08-14, and two of them are not
+deviations.
 
 ### 4.0 The first window's reset — D-2026-08-13-in-window-tooling
 
@@ -733,6 +734,32 @@ subagent's shell start during an unrelated verification pass, under the auto-hea
 passes. Both conditions held.
 
 - Final second-window deviation list and heal count: <<FILL AT CLOSE: every entry appended to `v2-freeze-deviations-2026-08.md` after 2026-08-14, and the total line count of the heal log | the deviation ledger and `~/.cache/freeze-guard-heals.log`, read at the close. Prevention is not available (§4.2), so more instances are expected; a window with none would itself be worth remarking on >>
+
+### 4.8 Second-window rulings and disclosures — entries that are not deviations
+
+Two ledger entries inside this window record decisions and acts rather than incidents. Both are
+required §9a content and neither is a deviation.
+
+**`Ruling R-2026-08-16`** — two in-window edit classes put to the owner with the Reset clause quoted
+verbatim, and ruled NOT a reset: splitting `npm run typecheck` into its own CI job, and a
+comment-only edit to an unpinned `src/verify/` file. The entry carries its own standing scope, which
+is narrower than the ruling might suggest; read it there rather than generalising from this line.
+
+**`Disclosure R-2026-08-18`** — an in-window computation of the §5 eligible-probe count, first by
+reimplementing two frozen rules in ephemeral Python and then by running the frozen program itself in
+its holdout form. The entry sets out both readings of §8 and requests a disposition; it does not
+assert one, and an independent peer review reached the opposite conclusion from the analysis that
+raised it.
+
+**The number that disclosure records is HISTORY, not this report's result, and the distinction is
+load-bearing.** §5's realized-accrual marker and §7's Hit@1 marker are close-day fills, produced by
+the close chain from the close-bounded snapshot. They must be filled from that run and from nothing
+else. An in-window reading of the same quantity is disclosed because §8's Reset clause and the
+independence bullet in `pilot-amendment-1.md` both bear on the act of taking it — not because it
+substitutes for the measurement. If those two ever disagree at the close, that disagreement is
+itself a finding, and it is the close-day value that governs.
+
+- Owner disposition on `R-2026-08-18`: <<FILL AT CLOSE: the ruling, its date, and whether it changed the window's identities | owner decision. If it is ruled a reset, this report is not published for THIS window and the entry's recorded anchor instant is what the new window is cut from >>
 
 ---
 
