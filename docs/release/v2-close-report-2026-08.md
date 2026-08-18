@@ -661,12 +661,21 @@ with their measured costs, and the step-by-step remediation executed on 2026-08-
 window ended and was not published; this report is the second window's, and §4.0 carries the reset
 as the head of the deviation history rather than as a footnote to it.
 
-**And the question does not recur in THIS window.** §8 reaches tooling built after the freeze it
-governs. This window's freeze is `3bd63d0` and its candidate `94dd136` already contains both the
-producer and its test — `git ls-tree -r --name-only 94dd136 -- scripts/close test/close` returns
-exactly `scripts/close/adjudication-skeleton.ts` and `test/close/adjudication-skeleton.test.ts` —
-and the producer is pinned as the 26th `payload.tools` entry, with its blob row in §2.1. So the
-close-day chain runs no program that post-dates this freeze, and no second §8 ruling is owed.
+**The question does not recur for THE PRODUCER in this window — but a second §8 ruling WAS owed,
+and this sentence used to deny it.** §8 reaches tooling built after the freeze it governs. This
+window's freeze is `3bd63d0` and its candidate `94dd136` already contains both the producer and its
+test — `git ls-tree -r --name-only 94dd136 -- scripts/close test/close` returns exactly
+`scripts/close/adjudication-skeleton.ts` and `test/close/adjudication-skeleton.test.ts` — and the
+producer is pinned as the 26th `payload.tools` entry, with its blob row in §2.1. So the close-day
+chain runs no program that post-dates this freeze.
+
+**Corrected 2026-08-18.** This paragraph previously ended "and no second §8 ruling is owed". One
+was: on 2026-08-18 an in-window recomputation of two frozen rules raised the same clause, and it is
+disposed of as NOT A RESET in `Disclosure R-2026-08-18` of the deviation ledger, together with the
+conduct findings the disposition does not clear and a second, still-unadjudicated instance. The
+error was one of scope, and the paragraph's own next sentence already warned about it: the evidence
+here is producer-scoped and was never a survey of everything authored during the window. §4.8 lists
+the entry.
 **Scope of that claim, stated so it is not read wider than it is measured:** the evidence above is
 producer-scoped. It establishes that the one program §9b identified as missing predates the freeze;
 it is not a survey of everything authored during the window. The general assurance rests on the
