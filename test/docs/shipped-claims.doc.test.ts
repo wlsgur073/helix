@@ -12,7 +12,7 @@
 // rewording stays cheap and deleting the claim does not.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
@@ -23,6 +23,7 @@ import { buildServer } from '../../src/server/helix-server.js';
 import { classifyEgress, type EgressInput } from '../../src/risk/trifecta.js';
 import { dualVerify } from '../../src/verify/dual-verify.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
+import { appendAudit } from '../../src/audit.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const doc = (name: string): string => readFileSync(join(ROOT, name), 'utf8');
@@ -255,5 +256,51 @@ describe('SECURITY.md states the lock-liveness limitation the code actually has'
     expect(sec).toMatch(/\/proc/);
     expect(sec).toMatch(/alive-unknown/);
     expect(sec).toMatch(/age is deliberately not used/i);
+  });
+});
+
+// D5.b — the at-rest section listed `~/.helix/audit.jsonl` as content-free and said nothing about its
+// mode, directly above a `codex-log.jsonl` bullet that states `0o600`. The round read that adjacency
+// as a guarantee the audit trail did not have, and it was right to: nothing in the document claimed
+// one. The code has since been fixed — appendAudit opens with an explicit mode — so the adjacency
+// reading became accidentally true, which is worse than false. A reader still cannot tell whether the
+// mode is promised or inferred, and nothing fails if the appender drops it.
+//
+// The assertion is scoped to the audit bullet ON PURPOSE. `toContain('is created `0o600`')` against
+// the whole document passes today on the codex-log sentence alone — a doc guard satisfied by an
+// unrelated line is the same defect this file was written to repair, and it would be a particularly
+// poor way to close a finding whose subject IS reading one bullet as covering its neighbour.
+describe('SECURITY.md states the mode the audit trail is actually created with (D5.b)', () => {
+  // The bullet line plus its indented continuation lines, whitespace-collapsed. Two deliberate
+  // choices: an earlier draft ended the match at `$`, which under /m matches every line end and so
+  // silently returned only the first line — a scoped guard that quietly stops being scoped is worse
+  // than an unscoped one. And collapsing whitespace binds the assertions to the SENTENCE rather than
+  // to where the paragraph happens to wrap, so reflowing the document stays free.
+  const auditBullet = (sec: string): string =>
+    (/^- `~\/\.helix\/audit\.jsonl`.*(?:\n {2,}.*)*/m.exec(sec)?.[0] ?? '').replace(/\s+/g, ' ');
+
+  it('the mode is recovered from the appender, observed on disk, and stated in the document', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'helix-d5b-')), '.helix', 'audit.jsonl');
+    appendAudit(path, { kind: 'adopt', ts: '2026-06-09T00:00:00.000Z', scope: '/x' });
+
+    // Recovered by SEARCHING THE SHIPPED SOURCE, never hardcoded: change the literal in src/audit.ts
+    // and this test starts demanding the new number from SECURITY.md instead of silently agreeing.
+    const declared = /openSync\(path, 'a', (0o\d+)\)/.exec(readFileSync(join(ROOT, 'src', 'audit.ts'), 'utf8'))?.[1];
+    expect(declared, 'src/audit.ts no longer opens the audit trail with an explicit mode').toBeDefined();
+
+    // The promise is kept on this filesystem — the recovered literal is what the file actually gets.
+    expect(`0o${(statSync(path).mode & 0o777).toString(8)}`).toBe(declared);
+
+    const bullet = auditBullet(doc('SECURITY.md'));
+    expect(bullet, 'the at-rest section no longer has an audit.jsonl bullet to bind').not.toBe('');
+    expect(bullet).toContain(`created \`${declared}\``);
+  });
+
+  it('the document limits the guarantee to creation, which is all open(2) gives it', () => {
+    // Irreducibly prose: a mode passed to openSync applies when the call CREATES the file and never
+    // afterwards, so a pre-existing audit.jsonl keeps whatever mode it already had. Stating the
+    // guarantee without that limit would repeat the finding with the sign flipped — a document
+    // promising more than the code delivers, instead of less.
+    expect(auditBullet(doc('SECURITY.md'))).toMatch(/at creation/i);
   });
 });

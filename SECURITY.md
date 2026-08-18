@@ -353,7 +353,9 @@ not acceptable, run it under an OS-level sandbox or leave the feature off.
 
 ## Handling of sensitive data at rest
 
-- `~/.helix/audit.jsonl` is content-free (enums / IDs / labels only).
+- `~/.helix/audit.jsonl` is content-free (enums / IDs / labels only) and is created
+  `0o600`. The mode is applied at creation and never afterwards, so a trail that already
+  exists keeps whatever mode it has.
 - `~/.helix/codex-log.jsonl` exists only if you opt in (`dualVerify.logContent: true`);
   it stores the exact prompt/response, is created `0o600`, and is capped. A
   firewall-refused payload is never written there.
