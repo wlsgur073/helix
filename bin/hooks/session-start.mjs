@@ -451,8 +451,10 @@ function atomicWriteRegistry(home, reg) {
   atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
 }
 function readOwner(projectRoot) {
+  const path = ownerFile(projectRoot);
   try {
-    return readFileSync3(ownerFile(projectRoot), "utf8").trim();
+    if (!lstatSync3(path).isFile()) return null;
+    return readFileSync3(path, "utf8").trim();
   } catch {
     return null;
   }

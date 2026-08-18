@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, lstatSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, lstatSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { isOwned, stampOwnership, projectLedgerPath, scopeNonce, globalScopeNonce } from '../../src/memory/ownership.js';
+import { projectDispositionOf } from '../../src/memory/ownership.js';
 
 function dirs() {
   const home = mkdtempSync(join(tmpdir(), 'helix-home-'));
@@ -163,6 +164,44 @@ describe('adoption is symlink-safe (F5/F7)', () => {
     expect(readFileSync(victim, 'utf8')).toBe('ORIGINAL-SECRET'); // untouched
     expect(lstatSync(join(proj, '.helix', '.owner')).isSymbolicLink()).toBe(false); // replaced by a real file
     expect(isOwned(proj, home)).toBe(true); // adoption still succeeded
+  });
+
+  it('a symlinked .owner is not followed on the READ side either — the stamp must live in the repo', () => {
+    // The case above covers the WRITE direction: adoption replaces the link rather than writing
+    // through it. Nothing covered the read. readOwner was a bare readFileSync, which resolves a
+    // final-component symlink, so the ownership DECISION could be satisfied by bytes stored anywhere
+    // else on disk — and a project judged owned that way is read, injected into session context and
+    // written to, with the unadopted-present disclosure suppressed.
+    //
+    // Not a clone-forge: the target's bytes must still equal the home-side stamp, which a foreign
+    // checkout cannot read. This is the read-side half of a defense the write path already has
+    // (assertNotSymlink), and the same rule trust-store-layout.ts states outright — lstat, never a
+    // bare read, "so a symlink standing in for the file ... is rejected outright rather than followed".
+    const { home, proj } = dirs();
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    mkdirSync(home, { recursive: true });
+    writeFileSync(projectLedgerPath(proj), '{"id":"x","content":"project fact"}\n');
+
+    stampOwnership(proj, home);                       // adopt legitimately, so the registry entry is real
+    const ownerPath = join(proj, '.helix', '.owner');
+    const stamp = readFileSync(ownerPath, 'utf8');
+
+    // Control first: the same bytes in a REAL file are owned, so a later failure is about the link.
+    expect(isOwned(proj, home)).toBe(true);
+
+    // Now move the stamp out of the repo and leave a link where the file was.
+    const outside = join(home, 'stamp-outside-the-repo.txt');
+    writeFileSync(outside, stamp);
+    unlinkSync(ownerPath);
+    symlinkSync(outside, ownerPath);
+
+    expect(isOwned(proj, home),
+      'the ownership decision was satisfied by bytes stored outside the repo').toBe(false);
+
+    // The consequence the read surfaces actually carry: a project that is not owned but has a ledger
+    // file must be disclosed as unadopted, not served.
+    expect(projectDispositionOf({ root: proj, ledger: projectLedgerPath(proj), home }))
+      .toBe('unadopted-present');
   });
 
   it('refuses to write .owner through a symlinked .helix parent directory (H2)', () => {

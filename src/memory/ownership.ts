@@ -134,9 +134,26 @@ function atomicWriteOwner(projectRoot: string, stamp: string): void {
   atomicWriteFile(ownerFile(projectRoot), stamp, 0o600);
 }
 
+/** The repo-side half of the ownership pair. lstat FIRST, never a bare read: `readFileSync` resolves
+ *  a final-component symlink, so a `.owner -> anywhere` link let the ownership DECISION be satisfied
+ *  by bytes living outside the repo — and a project judged owned that way is read, injected into
+ *  session context and written to, with the unadopted-present disclosure suppressed.
+ *
+ *  This is the READ-side counterpart of a defense the write path already had: `assertNotSymlink`
+ *  refuses to write THROUGH a symlinked `.owner`, and `stampOwnership` replaces the link with a real
+ *  file, but nothing stopped `isOwned` from following one. `trust-store-layout.ts`'s `looksLikeOurs`
+ *  states the same rule for the same reason — lstat throughout, so a symlink standing in for the
+ *  file is rejected outright rather than followed.
+ *
+ *  Not a clone-forge on its own: the target's bytes must still equal the home-side registry stamp,
+ *  which a foreign checkout cannot read. Defense in depth, applied where the project already applies
+ *  it everywhere else. */
 function readOwner(projectRoot: string): string | null {
-  try { return readFileSync(ownerFile(projectRoot), 'utf8').trim(); }
-  catch { return null; }
+  const path = ownerFile(projectRoot);
+  try {
+    if (!lstatSync(path).isFile()) return null;   // symlink, directory, socket -> not our stamp
+    return readFileSync(path, 'utf8').trim();
+  } catch { return null; }                        // absent or unreadable -> not owned
 }
 
 /** Owned iff the home registry has an entry for this absolute path whose stamp equals the

@@ -123,8 +123,10 @@ function readRegistry(home) {
   return r.kind === "ok" ? r.reg : {};
 }
 function readOwner(projectRoot) {
+  const path = ownerFile(projectRoot);
   try {
-    return readFileSync2(ownerFile(projectRoot), "utf8").trim();
+    if (!lstatSync2(path).isFile()) return null;
+    return readFileSync2(path, "utf8").trim();
   } catch {
     return null;
   }

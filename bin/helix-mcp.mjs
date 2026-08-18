@@ -14285,8 +14285,10 @@ function atomicWriteOwner(projectRoot2, stamp) {
   atomicWriteFile(ownerFile(projectRoot2), stamp, 384);
 }
 function readOwner(projectRoot2) {
+  const path = ownerFile(projectRoot2);
   try {
-    return readFileSync4(ownerFile(projectRoot2), "utf8").trim();
+    if (!lstatSync3(path).isFile()) return null;
+    return readFileSync4(path, "utf8").trim();
   } catch {
     return null;
   }
