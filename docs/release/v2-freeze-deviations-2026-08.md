@@ -366,3 +366,70 @@ particular they do NOT license: editing any of the 28 pinned paths; rebuilding `
 re-measuring a metric that a §9a-mandatory report section is then rewritten around — that last one
 lands on the clause's first limb and was refused on 2026-08-16 for exactly that reason (see the
 close report §4.5).
+
+## Deviation D-2026-08-18-in-window-product-rebuild — RULING PENDING
+
+**Status: the ruling is the owner's and has not been taken.** This entry records the facts, the rule
+they land on, and the readings, in the shape D-2026-08-13 established. Nothing here asserts a reset;
+nothing here asserts the window continues.
+
+**What happened.** On 2026-08-18, inside the second window, a dogfooding session drove the shipped
+bundle to verify claims the documents make, found defects, and fixed them under TDD. Six of the ten
+commits edited `src/` and rebuilt `bin/`; `npm run build` ran eight times. At session start `bin/`
+was byte-identical to the candidate — `git diff 94dd136 a59e3ad -- bin/` is empty — and it is not
+now: `git diff a59e3ad HEAD -- bin/` reports four bundles changed, 92 insertions, 25 deletions. The
+rebuild was not incidental to the fixes: `test/plugin/packaging.test.ts` rebuilds from `src/` and
+byte-compares against the committed bundles, so any `src/` edit turns it red until `bin/` follows.
+
+**Detected** the same day, by reading `test/acceptance/trust-store-home.e2e.test.ts` while extending
+it. The constraint lives in that file's own comment ("the window forbids rebuilding `bin/`") and in
+the standing-scope paragraph of this ledger. No document outside the test tree states it, and it was
+not checked before the first commit. That is the process failure this entry is primarily about.
+
+**Byte continuity: BROKEN in the repo tree.** Every prior entry in this ledger could record unbroken
+runtime bytes. This one cannot. What bounds it instead is reach:
+
+- Nothing was pushed. 20 local commits sit ahead of `origin/feat/helix-v1`, which is still `5c6e1c7`.
+- The marketplace clone — a pinned runtime load path — is still `5c6e1c7` carrying the candidate
+  bundle (`md5 c18253ee…`), unchanged by any of this.
+- The measuring host is not this machine. The receipt's `runtime.loadPaths` are rooted in a
+  different account's home directory; that account does not exist on this box, and the local
+  `~/.helix` holds no ledger at all. The only route from this box to the pinned load paths is
+  `git push`, and it was not taken.
+- This box's own plugin cache WAS hand-replaced with each rebuilt bundle (five `rsync` runs), so the
+  local runtime is off-candidate. That path is not among the receipt's pinned load paths.
+
+**Consequence already realised regardless of the ruling.** The three `itUnlessFrozenBundle` cases in
+`test/acceptance/trust-store-home.e2e.test.ts` were skipped throughout, as designed. Every "N tests
+passed" figure reported during the session excluded them, and none of those reports said so.
+
+**Three readings, for the owner.** (1) The Reset paragraph's FIRST limb is reached directly: "any
+intervening **system**, config, rule, or metric change resets the window", and the system under
+measurement is exactly what was edited and rebuilt — a stronger fit than the tooling clause that
+triggered D-2026-08-13, where the artifact was method tooling rather than the product. (2) The
+tooling clause is NOT reached — `src/` and `bin/` are the measured product, not the method's tooling
+— and this ledger's standing-scope paragraph says only that the two prior rulings do not *license* a
+rebuild, which is not itself a ruling that one resets. A fresh ruling is required either way. (3)
+Reach bounds it: no pinned load path moved, nothing was pushed, and the measuring host cannot see
+this tree, so the window continues with this entry as the record and the local rebuild treated as
+off-instrument work.
+
+**Measured cost if the window resets, as of this entry.** The second window opened
+2026-08-14T06:20:01Z; 4.1 days have elapsed against a measured accrual of about 0.87 rows per day,
+so roughly 3.5 of the required `k = 20` rows fall below a new cutoff and leave the probe population
+permanently. The close instant moves from 2026-09-11T06:20:01Z to 28 days after the new cutoff.
+Mechanically a reset is indistinguishable from a re-freeze — new candidate commit, re-issued
+receipt, new freeze commit — for the reasons D-2026-08-13 records.
+
+**Owner decisions already taken 2026-08-18**, which do not settle the reading above: the ten commits
+are kept on `feat/helix-v1` rather than moved to a branch; this box's plugin cache stays on the
+rebuilt bundle rather than being restored to the candidate, because it is not a pinned load path and
+restoring it would reopen the defects the session closed; and no push is made while the window is
+open.
+
+**What the session produced, for the reset-and-deviation history.** Ten commits: six defect fixes
+(an adopt argument that named nothing being accepted; a config file discarded whole in silence; a
+written `egressPolicy` `block` never applied; a project store relocatable behind a symlinked `.owner`
+and then behind a symlinked `.helix`; the effective egress legs shown nowhere) and four documentation
+corrections where the shipped prose asserted the opposite of shipped behaviour. Each carries a test
+that drives the behaviour rather than reading the prose.
