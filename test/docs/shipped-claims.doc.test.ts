@@ -494,3 +494,39 @@ describe('the documents describe compaction as the shipped gate and stats actual
       .toMatch(/`dropped_rows`[^.]*negative|negative[^.]*`dropped_rows`/i);
   });
 });
+
+// The proof-of-read guard on superseding a Verified fact is a security control that appears in NO
+// shipped document: `supersedesDigest` occurs nowhere in README.md or SECURITY.md. Its entire
+// rationale — including the residual its own author insisted on stating rather than hiding — lives in
+// a comment in src/memory/store.ts. A user cannot act on a control they cannot read about, and the
+// residual is the half that decides whether they should rely on it.
+describe('SECURITY.md documents the proof-of-read guard on superseding a verified fact', () => {
+  it('the guard is real, and the read path dispenses the token — both recovered by driving them', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-doc-supersede-'));
+    const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 't' });
+    const target = store.commit({ content: 'A fact the user vouched for.', source: 'user' });
+    store.confirm(target.id);
+
+    // Blind: a caller that never read the target cannot displace it, even claiming source=user —
+    // which is the cheap credential the tier below this one was protected by.
+    expect(() => store.commit({ content: 'A blind replacement.', source: 'user', supersedes: target.id }))
+      .toThrow(/supersedesDigest/);
+
+    // And the cost the guard actually imposes on an honest caller is exactly one extra read.
+    const digest = store.inspect().find((r) => r.record.id === target.id)?.contentDigest;
+    expect(digest, 'the read path no longer dispenses contentDigest — the remedy the error names is gone').toBeDefined();
+    expect(() => store.commit({
+      content: 'An informed replacement.', source: 'user', supersedes: target.id, supersedesDigest: digest,
+    })).not.toThrow();
+  });
+
+  it('SECURITY.md states the guard, what it is not, and the residual', () => {
+    const sec = doc('SECURITY.md');
+    expect(sec, 'the guard is still absent from the security document').toContain('supersedesDigest');
+    expect(sec, 'the document does not say what the guard proves').toMatch(/proof of read/i);
+    // The two honesty clauses the code comment insists on, so the prose cannot promise more than the
+    // code delivers — the failure mode every other finding in this file has taken.
+    expect(sec, 'the document does not say this is not an authorization check').toMatch(/not an authorization/i);
+    expect(sec, 'the document does not disclose the guess-the-content residual').toMatch(/guess/i);
+  });
+});

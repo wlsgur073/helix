@@ -195,6 +195,20 @@ still confirm which ledger it physically lives in (read the ledger JSONL directl
   can still be superseded or evicted by a later Fresh non-authoritative commit; the replacement is
   honestly `Fresh` — no grade is forged — so this is a within-model crowd-out property, not a
   trust-forgery.
+- **Superseding a `Verified` fact requires proof of read.** The guard above it is credentialed by a
+  model-supplied enum, so any caller willing to declare `source=user` walked straight past the
+  highest tier. What is enforceable instead is that the caller actually retrieved the target: a
+  supersede of a `Verified` record must echo that record's `contentDigest` back as
+  `supersedesDigest`, and `recall` / `inspect` are what hand the token out — so the whole cost to an
+  honest caller is one extra read, and a caller acting blind (the prompt-injected case this exists
+  for) cannot pay it. It applies only to `Verified` targets, which is exactly where `state` is
+  MAC-covered, so it sits on the authenticated boundary and does not tax ordinary `Fresh` updates.
+  **It is proof of read, not an authorization check** — no field a commit carries is authenticated.
+  Residual, stated rather than hidden: an adversary who can guess the target's content byte-exactly
+  computes the digest without ever reading it, with short predictable facts the weak case — far
+  narrower than declaring an enum value, but not nothing. Superseding a `Verified` record costs the
+  grade either way: the signed `verify` binds `(id, contentDigest)`, so replacement content replays
+  as `Fresh`.
 - **`provenance.source` is caller-declared, and is not a trust boundary.** The ledger MAC does not
   cover it, the verified projection passes it through unclamped, and the tool schema lets the calling
   model choose it — the server has no way to tell what you said from what a document you pasted said.
