@@ -5,6 +5,9 @@ import {
 } from '../../src/risk/trifecta.js';
 import type { EgressPolicy, EgressLeg } from '../../src/config.js';
 import { normalizeUntrusted } from '../../src/memory/content-frame.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve, join } from 'node:path';
 
 const item = (id: string, content: string): LedgerItem => ({ id, content });
 
@@ -798,5 +801,60 @@ describe('E-CITE: the citation exemption at the egress gate', () => {
   });
   it('BLOCK: a word-labelled numeric value is not a citation and stays in the net', () => {
     expect(gate(['code backup.recovery.identifier:593821 issued']).decision).toBe('blocked');
+  });
+});
+
+// `blockedLegs` is computed on every verdict and its docstring makes two claims about itself. Both
+// were measured 2026-08-18 and both were wrong: it names consumers ("for audit + the D1 disclosure
+// line") that do not exist anywhere in the tree, and its emptiness rule ("Empty on
+// scan_limit/named/clean") holds for two of the three cases it lists.
+//
+// A field nothing reads is cheap to leave alone; a field nothing reads whose comment says two
+// subsystems depend on it is not, because the next reader budgets around a coupling that is not
+// there. So the docstring is bound here to what execution and the source actually show, in both
+// directions — if a consumer is added later, the first case fails and asks for the comment back.
+describe('blockedLegs is described by its own docstring', () => {
+  const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const src = (p: string): string => readFileSync(join(ROOT, 'src', p), 'utf8');
+  /** The `blockedLegs` doc comment plus its declaration, whitespace-collapsed. */
+  const docstring = (): string =>
+    (/\/\*\*(?:(?!\*\/)[\s\S])*?\*\/\s*blockedLegs:/.exec(src('risk/trifecta.ts'))?.[0] ?? '').replace(/\s+/g, ' ');
+
+  it('names no consumer, because the shipped tree has none', () => {
+    // Recovered, not assumed. `trifecta.ts` itself declares and builds the field, so it is excluded;
+    // any OTHER file mentioning it is a real consumer and this case should then be rewritten rather
+    // than deleted — the docstring would be entitled to name it again.
+    const others = ['audit.ts', 'verify/dual-verify.ts', 'server/handlers.ts', 'server/helix-server.ts', 'metrics.ts']
+      .filter((f) => src(f).includes('blockedLegs'));
+    expect(others, 'a consumer exists now — say so in the docstring instead of removing the claim').toEqual([]);
+
+    expect(docstring(), 'the docstring no longer has a blockedLegs comment to bind').not.toBe('');
+    // Require the TRUE statement rather than forbidding a phrase. The first cut banned "for audit"
+    // and "disclosure line" outright, and then failed on the corrected comment — which mentions both
+    // in the course of saying neither exists. A substring ban cannot tell a claim from its retraction.
+    expect(docstring(), 'the docstring does not state that nothing reads this field')
+      .toMatch(/nothing in the shipped tree reads this/i);
+    // And the original positive construction specifically, so a revert is caught rather than merely
+    // leaving the sentence above to be deleted alongside it.
+    expect(docstring(), 'the docstring claims consumers again').not.toMatch(/— for audit \+ the D1 disclosure line/);
+  });
+
+  it('its emptiness rule matches what the classifier returns, on every case the rule lists', () => {
+    const policy = { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' } as EgressPolicy;
+    const MEM = 'The production database host is db-prod-7.internal and the rotation window is Sunday 02:00 UTC.';
+    const run = (texts: string[], ledger: unknown = null) =>
+      classifyEgress({ texts, outbound: texts.join('\n'), ledger, policy } as never);
+
+    expect(run(['The build uses esbuild.']).blockedLegs, 'clean').toEqual([]);
+    expect(run(['z'.repeat(20_000_000)]).blockedLegs, 'scan_limit').toEqual([]);
+
+    // The case the rule gets wrong. `named` is deny-dominant and decides regardless, but a gated leg
+    // that blocked is still listed — so `named` does not belong in a list of empty cases.
+    const named = run([`AKIAQQQQWWWWEEEERRRR and: ${MEM}`], [{ id: 'm_1', content: MEM }]);
+    expect(named.decidedBy, 'the fixture stopped reaching the named path').toBe('named');
+    expect(named.blockedLegs, 'named now returns empty — the original rule became true again').toEqual(['memoryEcho']);
+
+    expect(docstring(), 'the docstring still lists `named` among the empty cases')
+      .not.toMatch(/scan_limit\/named\/clean/);
   });
 });

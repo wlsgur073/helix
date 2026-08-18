@@ -109,8 +109,22 @@ export interface EgressVerdict {
    *  instead of re-deriving a decider from `legs` — `legs` reports every DETECTED leg (audit), which
    *  after the blocked-dominant fold is no longer the leg that decided. */
   decidedBy?: EgressLeg | 'named' | 'scan_limit';
-  /** Gated legs whose policy BLOCKED, canonical order — for audit + the D1 disclosure line. A leg here
-   *  is a POLICY KEY (piiHigh), never a coarse leg. Empty on scan_limit/named/clean. */
+  /** Gated legs whose policy BLOCKED, canonical order. A leg here is a POLICY KEY (piiHigh), never a
+   *  coarse leg. Empty on scan_limit and on a clean pass. NOT necessarily empty on `named`: that
+   *  check is deny-dominant and decides regardless of what else blocked, so a named credential
+   *  alongside an echoed memory yields `decidedBy: 'named'` with `blockedLegs: ['memoryEcho']`.
+   *
+   *  NOTHING IN THE SHIPPED TREE READS THIS. An earlier version of this comment named two consumers
+   *  — the audit row and the D1 disclosure line — and neither exists: `DualVerifyAudit` has no such
+   *  field, and no file outside this one mentions the name. Stated plainly because the cost of the
+   *  old wording was not the dead field but the coupling a reader would budget for.
+   *
+   *  Kept rather than deleted because it is the only place the FULL set of blocking keys survives:
+   *  `decidedBy` keeps one, and the audit row coarsens even that to `secret`/`pii`/`memory_echo`, so
+   *  an operator asking "which egressPolicy keys must I relax to send this" has no other source.
+   *  Wiring it to a durable surface is a separate change. Both halves of this comment are bound in
+   *  both directions by test/risk/trifecta.test.ts — add a consumer and the guard asks for the claim
+   *  back. */
   blockedLegs: EgressLeg[];
   /** Gated legs a policy RELEASED (allow), canonical order. Meaningful even on a `blocked` decision:
    *  the blocked-dominant fold can release some legs while another blocks. Disjoint from blockedLegs. */
