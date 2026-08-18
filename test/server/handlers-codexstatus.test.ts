@@ -168,3 +168,22 @@ describe('handleCodexStatus: effective model / effort / timeout disclosure', () 
     expect(text(unknown)).not.toContain('note:');
   });
 });
+
+describe('handleCodexStatus reports a config it could not read', () => {
+  it('an unreadable config is named, not rendered as a deliberate "disabled"', async () => {
+    // The load-bearing half of the config fix. A warning on stderr changes nothing the operator sees:
+    // this free tool is the surface they read to answer "what is dual-verify actually doing". Without
+    // this line, a config that failed to parse renders byte-for-byte like one that turned dual-verify
+    // off on purpose, and the operator's only way to notice is to remember what they wrote.
+    const broken: HelixConfig = { ...structuredClone(DEFAULT_CONFIG), unreadable: ['/tmp/helix-home/config.json'] };
+    const out = text(await handleCodexStatus(deps(LIVE, { config: broken })));
+
+    expect(out).toContain('/tmp/helix-home/config.json');
+    expect(out).toMatch(/could not be read/i);
+  });
+
+  it('a config that read cleanly adds no such line', async () => {
+    const out = text(await handleCodexStatus(deps(LIVE, { config: enabledCfg() })));
+    expect(out).not.toMatch(/could not be read/i);
+  });
+});

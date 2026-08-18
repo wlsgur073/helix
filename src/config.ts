@@ -88,6 +88,13 @@ export interface HelixConfig {
   };
   /** Local-only, content-free latency/size records (spec 2026-07-05). Read once at startup. */
   metrics: { enabled: boolean };
+  /** Paths that EXIST but could not be parsed or read, so nothing they set is in this object.
+   *  ABSENT (not `[]`) when every named path either loaded or simply was not there — an absent
+   *  config is the ordinary case, not a fault, and DEFAULT_CONFIG must stay deep-equal to a
+   *  no-config load. Carried on the config rather than only warned to stderr because stderr is a
+   *  debug channel nobody watches: the surfaces an operator actually reads need to be able to tell
+   *  a discarded file from a deliberate setting. */
+  unreadable?: readonly string[];
 }
 
 export const DEFAULT_CONFIG: HelixConfig = {
@@ -129,9 +136,26 @@ export interface LoadConfigOptions {
   warn?: (msg: string) => void; // one-time diagnostics sink (default stderr; injectable for tests)
 }
 
-function readJson(path: string): Record<string, unknown> | null {
-  try { return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>; }
-  catch { return null; } // missing or malformed -> ignore
+/** Parse one config layer. Returns null for BOTH "not there" and "there but unusable" — the caller
+ *  merges null over the defaults either way — but reports only the second, through `onUnusable`.
+ *
+ *  The split is the whole point. ENOENT is the ordinary no-config case and must not become a
+ *  diagnostic on every start. Anything else — a syntax error, EISDIR, EACCES — means the operator
+ *  has a file they believe is in effect and it is not, and every setting in it has just reverted.
+ *  Before this split both took the same silent path, so a single trailing comma reverted the whole
+ *  file and was indistinguishable from having written no file at all. */
+function readJson(path: string, onUnusable: (reason: string) => void): Record<string, unknown> | null {
+  let text: string;
+  try { text = readFileSync(path, 'utf8'); }
+  catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') onUnusable((e as Error).message);
+    return null;
+  }
+  try { return JSON.parse(text) as Record<string, unknown>; }
+  // CONTRACT: `reason` is UNTRUSTED. A JSON.parse message quotes a span of the file, so a hostile or
+  // merely multi-line config could forge log lines through it — every caller must put it through q()
+  // (or an equivalent escape) before it reaches a diagnostic, exactly like any other config value.
+  catch (e) { onUnusable((e as Error).message); return null; }
 }
 
 /** Merge defaults <- global <- project (project wins), where a project layer exists ONLY if the
@@ -153,8 +177,12 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
   const merged: HelixConfig = structuredClone(DEFAULT_CONFIG);
   const seen = new Set<string>();
   const warn = (msg: string): void => { if (!seen.has(msg)) { seen.add(msg); (opts.warn ?? ((m) => process.stderr.write(m + '\n')))(msg); } };
+  const unreadable: string[] = [];
   for (const path of opts.projectPath ? [globalPath, opts.projectPath] : [globalPath]) {
-    const raw = readJson(path);
+    const raw = readJson(path, (reason) => {
+      unreadable.push(path);
+      warn(`helix: ${path} exists but could not be read (${q(reason)}) -> every setting in it is ignored; using defaults`);
+    });
     const dv = raw?.dualVerify as (Partial<HelixConfig['dualVerify']> & Record<string, unknown>) | undefined;
     if (dv) {
       if (typeof dv.enabled === 'boolean') merged.dualVerify.enabled = dv.enabled;
@@ -213,6 +241,9 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
       merged.metrics.enabled = m.enabled;
     }
   }
+  // Set ONLY when non-empty: a clean load must stay deep-equal to DEFAULT_CONFIG, which several
+  // callers and tests compare against directly.
+  if (unreadable.length > 0) merged.unreadable = unreadable;
   return merged;
 }
 
@@ -220,7 +251,10 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
  *  checkout's project config from a hook would let an untrusted repo toggle user-level behavior —
  *  spec §6). Never throws; missing/malformed/absent key => true (the default). */
 export function metricsEnabledFromGlobalConfig(home: string): boolean {
-  const raw = readJson(join(home, 'config.json'));
+  // Deliberately silent: this runs in a HOOK, where stderr is the user's terminal and the process
+  // has no diagnostic channel of its own. The MCP server's loadConfig reports the same file on the
+  // same start, so the operator is told once, from the surface that can also show it.
+  const raw = readJson(join(home, 'config.json'), () => {});
   const m = raw?.metrics as Record<string, unknown> | undefined;
   return m && typeof m === 'object' && typeof m.enabled === 'boolean' ? m.enabled : true;
 }
@@ -246,5 +280,5 @@ function mergeCompaction(raw: unknown): CompactionConfig {
 /** Compaction config, GLOBAL only. Compaction is destructive (it can close the soft-erase undo
  *  window), so a foreign checkout's project config must never enable or tune it. Never throws. */
 export function compactionConfigFromGlobal(home: string): CompactionConfig {
-  return mergeCompaction(readJson(join(home, 'config.json'))?.compaction);
+  return mergeCompaction(readJson(join(home, 'config.json'), () => {})?.compaction);  // silent: see metricsEnabledFromGlobalConfig
 }

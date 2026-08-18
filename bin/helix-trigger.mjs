@@ -149,15 +149,24 @@ function aliasesGlobalLedger(projectLedger, globalLedger) {
 // src/config.ts
 import { readFileSync as readFileSync3 } from "node:fs";
 import { join as join3 } from "node:path";
-function readJson(path) {
+function readJson(path, onUnusable) {
+  let text;
   try {
-    return JSON.parse(readFileSync3(path, "utf8"));
-  } catch {
+    text = readFileSync3(path, "utf8");
+  } catch (e) {
+    if (e.code !== "ENOENT") onUnusable(e.message);
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    onUnusable(e.message);
     return null;
   }
 }
 function metricsEnabledFromGlobalConfig(home) {
-  const raw = readJson(join3(home, "config.json"));
+  const raw = readJson(join3(home, "config.json"), () => {
+  });
   const m = raw?.metrics;
   return m && typeof m === "object" && typeof m.enabled === "boolean" ? m.enabled : true;
 }

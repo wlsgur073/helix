@@ -368,3 +368,53 @@ describe('loadConfig does not discover a project config from the working directo
     expect(loadConfig({ projectPath: p, globalPath: join(dir, 'absent-global.json') }).dualVerify.enabled).toBe(true);
   });
 });
+
+// A config file that EXISTS but cannot be read is not the same event as no config file, and until now
+// both took the same silent path: readJson's `catch { return null }` merged null over the defaults, so
+// a parse failure never reached a warn site. Measured against the shipped bundle: a config differing
+// from a valid one by ONE trailing comma reverted dualVerify.enabled true->false, stakesFloor
+// low->high and metrics.enabled false->true, and was byte-for-byte indistinguishable from having no
+// config at all on stdout, on stderr, and in helix_codex_status.
+//
+// The revert is not itself the defect — merging over defaults is the right failure mode. Losing the
+// operator's whole file in silence is. README documents that an invalid mode/stakesFloor/model/effort
+// VALUE "is ignored with a warning on stderr, not silently", which trains the reader to take silence
+// as acceptance; the whole-file discard is the case where the most is lost and the least is said.
+describe('a config that exists but cannot be read is not the same as no config', () => {
+  it('a parse failure warns, names the path, and still falls back to defaults', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    const p = join(dir, 'config.json');
+    // The commonest JSON typo there is; every other byte is a deliberate, valid setting.
+    writeFileSync(p, '{ "dualVerify": { "enabled": true, "stakesFloor": "low", }, "metrics": { "enabled": false } }');
+
+    const cfg = loadConfig({ globalPath: p, warn });
+
+    expect(cfg.dualVerify.enabled).toBe(false);        // the fallback stays — only the silence goes
+    expect(cfg.metrics.enabled).toBe(true);            // and note this direction is fail-OPEN
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(p));
+  });
+
+  it('an absent config stays silent, because that is the ordinary case and not a fault', () => {
+    const warn = vi.fn();
+    loadConfig({ globalPath: join(tmpDir(), 'nope.json'), warn });
+    expect(warn).not.toHaveBeenCalled();               // ENOENT must NOT become noise on every start
+  });
+
+  it('a path that is a directory warns like a parse failure — it is equally not a config', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    const asDir = join(dir, 'config.json');
+    mkdirSync(asDir);
+    loadConfig({ globalPath: asDir, warn });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(asDir));
+  });
+
+  it('the unreadable path rides on the returned config, so a reader can surface it', () => {
+    // stderr is a debug channel nobody watches. Carrying the fact on the config is what lets the
+    // surface an operator actually reads (helix_codex_status) tell "unreadable" from "disabled".
+    const dir = tmpDir();
+    const p = join(dir, 'config.json');
+    writeFileSync(p, '{ "dualVerify": { "enabled": true, } }');
+    expect(loadConfig({ globalPath: p, warn: () => {} }).unreadable).toEqual([p]);
+    expect(loadConfig({ globalPath: join(dir, 'absent.json'), warn: () => {} }).unreadable ?? []).toEqual([]);
+  });
+});

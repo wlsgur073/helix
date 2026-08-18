@@ -1265,15 +1265,24 @@ function createMetricsSink(path, enabled, deps = {}) {
 // src/config.ts
 import { readFileSync as readFileSync8 } from "node:fs";
 import { join as join7 } from "node:path";
-function readJson(path) {
+function readJson(path, onUnusable) {
+  let text;
   try {
-    return JSON.parse(readFileSync8(path, "utf8"));
-  } catch {
+    text = readFileSync8(path, "utf8");
+  } catch (e) {
+    if (e.code !== "ENOENT") onUnusable(e.message);
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    onUnusable(e.message);
     return null;
   }
 }
 function metricsEnabledFromGlobalConfig(home) {
-  const raw = readJson(join7(home, "config.json"));
+  const raw = readJson(join7(home, "config.json"), () => {
+  });
   const m = raw?.metrics;
   return m && typeof m === "object" && typeof m.enabled === "boolean" ? m.enabled : true;
 }

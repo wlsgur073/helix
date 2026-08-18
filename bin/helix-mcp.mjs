@@ -24462,10 +24462,18 @@ var DEFAULT_CONFIG = {
   // Local metrics sensor ON by default ("local logs always, export opt-in"); content-free records.
   metrics: { enabled: true }
 };
-function readJson(path) {
+function readJson(path, onUnusable) {
+  let text;
   try {
-    return JSON.parse(readFileSync10(path, "utf8"));
-  } catch {
+    text = readFileSync10(path, "utf8");
+  } catch (e) {
+    if (e.code !== "ENOENT") onUnusable(e.message);
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    onUnusable(e.message);
     return null;
   }
 }
@@ -24479,8 +24487,12 @@ function loadConfig(opts = {}) {
       (opts.warn ?? ((m) => process.stderr.write(m + "\n")))(msg);
     }
   };
+  const unreadable = [];
   for (const path of opts.projectPath ? [globalPath, opts.projectPath] : [globalPath]) {
-    const raw = readJson(path);
+    const raw = readJson(path, (reason) => {
+      unreadable.push(path);
+      warn(`helix: ${path} exists but could not be read (${q(reason)}) -> every setting in it is ignored; using defaults`);
+    });
     const dv = raw?.dualVerify;
     if (dv) {
       if (typeof dv.enabled === "boolean") merged.dualVerify.enabled = dv.enabled;
@@ -24526,6 +24538,7 @@ function loadConfig(opts = {}) {
       merged.metrics.enabled = m.enabled;
     }
   }
+  if (unreadable.length > 0) merged.unreadable = unreadable;
   return merged;
 }
 function mergeCompaction(raw) {
@@ -24541,7 +24554,8 @@ function mergeCompaction(raw) {
   return c;
 }
 function compactionConfigFromGlobal(home2) {
-  return mergeCompaction(readJson(join8(home2, "config.json"))?.compaction);
+  return mergeCompaction(readJson(join8(home2, "config.json"), () => {
+  })?.compaction);
 }
 
 // src/verify/agreement-map.ts
@@ -25156,6 +25170,14 @@ async function handleCodexStatus(deps) {
   const effort = dv.effort !== null ? `${dv.effort} (helix override)` : "inherited from codex config";
   const lines = [
     "Helix <-> Codex",
+    // FIRST, above every value it invalidates. A config that failed to parse renders byte-for-byte
+    // like one that deliberately turned dual-verify off, and this free tool is the surface an
+    // operator reads to answer "what is dual-verify actually doing" — so without this line their
+    // only way to notice a discarded file is to remember what they wrote in it. loadConfig also
+    // warns on stderr, but stderr is a debug channel nobody watches; this is the observable one.
+    ...(deps.config.unreadable ?? []).map(
+      (p) => `! ${p} could not be read \u2014 everything it sets is ignored; the values below are DEFAULTS`
+    ),
     `- codex CLI:      ${cli}`,
     `- connection:     ${connection}`,
     `- auth mode:      ${auth}`,

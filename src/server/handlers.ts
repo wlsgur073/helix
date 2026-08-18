@@ -460,6 +460,14 @@ export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResu
 
   const lines = [
     'Helix <-> Codex',
+    // FIRST, above every value it invalidates. A config that failed to parse renders byte-for-byte
+    // like one that deliberately turned dual-verify off, and this free tool is the surface an
+    // operator reads to answer "what is dual-verify actually doing" — so without this line their
+    // only way to notice a discarded file is to remember what they wrote in it. loadConfig also
+    // warns on stderr, but stderr is a debug channel nobody watches; this is the observable one.
+    ...(deps.config.unreadable ?? []).map(
+      (p) => `! ${p} could not be read — everything it sets is ignored; the values below are DEFAULTS`,
+    ),
     `- codex CLI:      ${cli}`,
     `- connection:     ${connection}`,
     `- auth mode:      ${auth}`,
