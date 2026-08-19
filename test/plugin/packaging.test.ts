@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { staleBundles } from '../helpers/bundle-freshness.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -63,15 +62,10 @@ describe('committed bundles are fresh', () => {
   // This catches the real failure mode: a dev edits src, runs green tests, and commits
   // without rebuilding — shipping a stale bundle. (esbuild is deterministic for a fixed
   // version + input, so identical src reproduces identical bytes.)
+  // 재빌드와 비교 자체는 `test/helpers/bundle-freshness.ts`가 담당한다. 같은 사실을
+  // `test/docs/shipped-claims.doc.test.ts`도 필요로 하기 때문이다 — 그 파일의 핀들은 `src/`를
+  // 실행해 값을 얻으므로, 그것이 배포 번들에 대한 증거가 되는 근거가 바로 이 비교이다.
   it('rebuilding from src reproduces bin/ byte-for-byte (else: run npm run build)', () => {
-    const out = mkdtempSync(join(tmpdir(), 'helix-freshbuild-'));
-    execFileSync(process.execPath, [join(root, 'build.mjs')], {
-      cwd: root, env: { ...process.env, HELIX_BUILD_OUT: out }, stdio: 'ignore',
-    });
-    for (const rel of ['helix-mcp.mjs', 'helix-trigger.mjs', 'helix-rebaseline.mjs', 'hooks/session-start.mjs', 'hooks/session-end.mjs']) {
-      const committed = readFileSync(join(root, 'bin', rel));
-      const rebuilt = readFileSync(join(out, rel));
-      expect(rebuilt.equals(committed), `bin/${rel} is stale — run npm run build and commit bin/`).toBe(true);
-    }
+    expect(staleBundles(), 'bin/ is stale — run npm run build and commit bin/').toEqual([]);
   }, 30_000);
 });

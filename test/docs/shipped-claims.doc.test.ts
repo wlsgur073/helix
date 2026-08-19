@@ -28,9 +28,24 @@ import { parseLedger } from '../../src/memory/ledger.js';
 import { noopMetricsSink, type CompactionInput } from '../../src/metrics.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
 import { appendAudit } from '../../src/audit.js';
+import { staleBundles } from '../helpers/bundle-freshness.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const doc = (name: string): string => readFileSync(join(ROOT, name), 'utf8');
+
+// 이 파일의 나머지 사례는 `src/`를 실행해 값을 회수한다. 그것이 사용자가 실행하는 배포 번들에
+// 대한 증거가 되는 근거는 오직 `bin/`이 `src/`의 재빌드와 바이트 동일하다는 사슬이다. 사슬이
+// 끊어지면 아래 사례들은 사용자가 실행하지 않는 코드에 대한 진술이 되므로, 그 사슬을 여기서
+// 직접 측정한다. `test/plugin/packaging.test.ts`가 같은 헬퍼로 같은 사실을 확인하지만, 그 파일이
+// 사라져도 이 파일이 스스로 자신의 전제를 증명해야 한다.
+describe('the evidence chain that lets this file measure src/ and still speak for the bundle', () => {
+  it('the shipped bundle is a byte-identical rebuild of the source these pins execute', () => {
+    expect(
+      staleBundles(),
+      'bin/ is stale — every pin in this file is currently a claim about code users do not run',
+    ).toEqual([]);
+  }, 30_000);
+});
 
 describe('shipped docs state what the code actually does', () => {
   // ---- D2.c, D3.c, D6.c, F5.DOC -------------------------------------------------------------
