@@ -11,6 +11,9 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
+// 옵트인이 없으면 아래 블록은 스킵된다. 스킵이 유일한 신호이므로,
+// `expect(enabled).toBe(false)`만 하는 짝 블록은 두지 않는다 — 기본 환경에서 실패할 수 없는
+// 단언이 통과 건수에 집계되면 부재가 가려진다.
 const enabled = process.env.HELIX_REAL_CODEX === '1';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BUNDLE = join(root, 'bin', 'helix-mcp.mjs');
@@ -73,10 +76,4 @@ describe.runIf(enabled)('real codex dual-verify through the bundle tool (metered
     expect(audit.enabled).toBe(true);
     expect(audit.spawned).toBe(true);
   }, 180_000);
-});
-
-describe.runIf(!enabled)('real codex dual-verify (skipped)', () => {
-  it('is skipped without HELIX_REAL_CODEX=1 (no quota spent in normal runs)', () => {
-    expect(enabled).toBe(false);
-  });
 });

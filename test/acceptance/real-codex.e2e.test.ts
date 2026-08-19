@@ -4,6 +4,9 @@
 import { describe, it, expect } from 'vitest';
 import { createCodexRunner, resolveCodexInvocation, checkCodexAvailable } from '../../src/verify/codex.js';
 
+// 옵트인이 없으면 아래 블록은 스킵된다. 스킵이 유일한 신호이므로,
+// `expect(enabled).toBe(false)`만 하는 짝 블록은 두지 않는다 — 기본 환경에서 실패할 수 없는
+// 단언이 통과 건수에 집계되면 부재가 가려진다.
 const enabled = process.env.HELIX_REAL_CODEX === '1';
 
 describe.runIf(enabled)('real codex exec (metered, opt-in)', () => {
@@ -18,10 +21,4 @@ describe.runIf(enabled)('real codex exec (metered, opt-in)', () => {
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.answer).toMatch(/pong/i);
   }, 180_000);
-});
-
-describe.runIf(!enabled)('real codex exec (skipped)', () => {
-  it('is skipped without HELIX_REAL_CODEX=1 (no quota spent in normal runs)', () => {
-    expect(enabled).toBe(false);
-  });
 });
