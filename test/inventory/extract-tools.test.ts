@@ -1,6 +1,8 @@
 // 도구 표면 추출기의 계약. 개수를 하드코딩하지 않는다 — 하드코딩된 목록이 배포 트리의
 // "Seven MCP tools" 오류를 만든 방식이며, 개수 고정은 Task 4의 스냅샷이 담당한다.
 import { describe, it, expect } from 'vitest';
+import { readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fromBundle, fromSource, compareSurfaces, extractTools } from '../../scripts/inventory/extract-tools.js';
 
 describe('tool surface extraction', () => {
@@ -16,6 +18,13 @@ describe('tool surface extraction', () => {
     expect(commit, 'helix_memory_commit is no longer registered').toBeDefined();
     expect(commit!.description.length).toBeGreaterThan(0);
     expect(commit!.inputSchema).toBeDefined();
+  }, 60_000);
+
+  it('removes the temporary home it created, so a run outside vitest does not accumulate them', async () => {
+    const before = readdirSync(tmpdir()).filter((e) => e.startsWith('helix-inv-')).length;
+    await extractTools();
+    const after = readdirSync(tmpdir()).filter((e) => e.startsWith('helix-inv-')).length;
+    expect(after, 'extractTools left its temporary HELIX_HOME behind').toBe(before);
   }, 60_000);
 
   // 음성 대조: 비교기가 실제로 불일치를 거부하는지. 이것이 없으면 위 두 사례는
