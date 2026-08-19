@@ -46,17 +46,33 @@ const text = (r: unknown): string =>
   ((r as { content: Array<{ type: string; text?: string }> }).content ?? [])
     .map((c) => c.text ?? '').join('');
 
+// The acceptance list stays HARDCODED here on purpose. Deriving it from the inventory snapshot
+// would make this test agree with the snapshot whenever the snapshot is wrong — the circularity
+// that a hardcoded list exists to break. What the snapshot buys is a SECOND independent
+// derivation; the case below requires the two to agree.
+const ACCEPTANCE_TOOLS = [
+  'helix_codex_status', 'helix_dual_verify', 'helix_memory_adopt', 'helix_memory_commit',
+  'helix_memory_confirm', 'helix_memory_erase', 'helix_memory_inspect', 'helix_memory_recall',
+  'helix_memory_recheck',
+];
+
 describe('helix bundle e2e (hermetic)', () => {
   it('exposes the nine helix tools', async () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-acc-'));
     const client = await connect(home);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual([
-      'helix_codex_status', 'helix_dual_verify', 'helix_memory_adopt', 'helix_memory_commit',
-      'helix_memory_confirm', 'helix_memory_erase', 'helix_memory_inspect', 'helix_memory_recall',
-      'helix_memory_recheck',
-    ]);
+    expect(tools.map((t) => t.name).sort()).toEqual(ACCEPTANCE_TOOLS);
   }, 30_000);
+
+  // The design requires the surface inventory to supply this list. Until it does, the two
+  // hardcodings must at least be held equal — otherwise one can be corrected and the other left
+  // stale, which is exactly how the shipped tree came to claim seven tools.
+  it('agrees with the committed surface inventory on the tool set', () => {
+    const snapshot = JSON.parse(
+      readFileSync(join(root, 'data', 'inventory', 'surface.json'), 'utf8'),
+    ) as { tools: Array<{ name: string }> };
+    expect(snapshot.tools.map((t) => t.name).sort()).toEqual(ACCEPTANCE_TOOLS);
+  });
 
   it('memory survives a server restart (commit, kill, respawn, recall)', async () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-acc-'));
