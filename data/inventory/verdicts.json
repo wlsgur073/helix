@@ -383,10 +383,10 @@
     "rowId": "r039",
     "surfaceItem": "cross-cutting",
     "claimId": "CHANGELOG.md#5399fa9e4fd3",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: a config outside the global home cannot enable compaction while the same content in the global home can",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": false
   },
   {
@@ -603,10 +603,10 @@
     "rowId": "r061",
     "surfaceItem": "cross-cutting",
     "claimId": "SECURITY.md#4b70331445b5",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: the shipped series is recovered from the plugin manifest and required to be marked supported; the table must still mark something unsupported",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": false
   },
   {
@@ -643,10 +643,10 @@
     "rowId": "r065",
     "surfaceItem": "cross-cutting",
     "claimId": "SECURITY.md#ed14167461da",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: a compaction that drops a forged verify mints a content-free unsigned marker at the constant id; one that drops nothing mints none",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": true
   },
   {
@@ -683,10 +683,10 @@
     "rowId": "r069",
     "surfaceItem": "cross-cutting",
     "claimId": "docs/release/recovery-playbook.md#3f634b1c30db",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: a cross-scope supersede raises the quoted refusal while a same-scope one does not",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": false
   },
   {
@@ -723,10 +723,10 @@
     "rowId": "r073",
     "surfaceItem": "cross-cutting",
     "claimId": "docs/release/recovery-playbook.md#9cae2460fad9",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: after erase and re-commit the text returns while the id changes and the grade drops to Fresh from a real Verified",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": false
   },
   {

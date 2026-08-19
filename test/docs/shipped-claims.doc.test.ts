@@ -24,9 +24,9 @@ import { classifyEgress, type EgressInput } from '../../src/risk/trifecta.js';
 import { dualVerify } from '../../src/verify/dual-verify.js';
 import { hardenHomePermissions } from '../../src/memory/home-permissions.js';
 import { assessGradeLoss, strayTrustFiles } from '../../src/memory/trust-store-layout.js';
-import { parseLedger, isIntegrityMarker, isHorizonMarker } from '../../src/memory/ledger.js';
+import { parseLedger, isIntegrityMarker, isHorizonMarker, compactLedger } from '../../src/memory/ledger.js';
 import { noopMetricsSink, type CompactionInput } from '../../src/metrics.js';
-import { DEFAULT_CONFIG } from '../../src/config.js';
+import { DEFAULT_CONFIG, compactionConfigFromGlobal } from '../../src/config.js';
 import { appendAudit } from '../../src/audit.js';
 import { staleBundles } from '../helpers/bundle-freshness.js';
 
@@ -800,4 +800,146 @@ describe('SECURITY.md states the marker forgeability the predicates actually hav
     expect(sec, 'SECURITY.md no longer names the two prefixes an adversary can use')
       .toMatch(/integrity_[^a-z]/);
   });
+});
+
+// SECURITY.md의 지원 버전 표가 실제로 배포되는 버전을 지원한다고 적는지. 표의 숫자를 읽어
+// 확인하지 않고, 배포 매니페스트에서 버전을 회수한 뒤 그 계열이 표에 있는지 본다.
+describe('SECURITY.md supports the version the plugin actually ships', () => {
+  it('the shipped version line is marked supported, recovered from the manifest', () => {
+    const shipped = (JSON.parse(doc('.claude-plugin/plugin.json')) as { version: string }).version;
+    expect(shipped, 'the manifest version is not x.y.z').toMatch(/^\d+\.\d+\.\d+$/);
+    const parts = shipped.split('.');
+    const series = `${parts[0]}.${parts[1]}.x`;
+
+    const rows = doc('SECURITY.md').split('\n').map((l) => l.trim()).filter((l) => l.startsWith('|'));
+    const mine = rows.find((l) => l.startsWith(`| ${series}`));
+    if (mine === undefined) throw new Error(`SECURITY.md has no support row for the shipped series ${series}`);
+    expect(mine, `SECURITY.md does not mark ${series} supported`).toContain('✅');
+
+    // 비공허성: 표가 모든 줄을 지원으로 표시하지는 않아야 한다.
+    expect(rows.some((l) => l.includes('❌')), 'the support table marks nothing unsupported').toBe(true);
+  });
+});
+
+// compaction 설정이 전역 config에서만 읽힌다는 주장. 파괴적 동작이므로 clone한 저장소가 그것을
+// 켜거나 조율할 수 없어야 한다. 접근자를 두 위치에 대해 구동하여 회수한다.
+describe('the compaction setting is read from the global config only, as the changelog states', () => {
+  it('a project-side config cannot enable it while the global one can', () => {
+    const globalHome = mkdtempSync(join(tmpdir(), 'helix-doc-cmpglobal-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'helix-doc-cmpproject-'));
+    const enabled = JSON.stringify({ compaction: { auto: true, minRows: 1 } });
+
+    // 프로젝트 쪽에만 두었을 때: 켜지지 않아야 한다.
+    writeFileSync(join(projectDir, 'config.json'), enabled);
+    expect(compactionConfigFromGlobal(globalHome).auto,
+      'a config outside the global home enabled compaction').toBe(false);
+
+    // 비공허성: 같은 내용을 전역에 두면 켜져야 한다. 그러지 않으면 위 단언은 언제나 false를
+    // 반환하는 구현에서도 통과한다.
+    writeFileSync(join(globalHome, 'config.json'), enabled);
+    expect(compactionConfigFromGlobal(globalHome).auto,
+      'the global config could not enable compaction either — the case above proves nothing').toBe(true);
+
+    expect(doc('CHANGELOG.md'), 'the changelog no longer states the global-only rule')
+      .toContain('global `~/.helix/config.json` only');
+  });
+});
+
+// 복구 playbook이 교차 scope supersede의 거부를 문구까지 인용한다. 그 문구를 문서에서 베끼지
+// 않고 실제 거부에서 회수한 뒤, 문서가 같은 문구를 담는지 본다.
+describe('the playbook quotes the cross-scope refusal the store actually raises', () => {
+  it('a supersede whose target lives in the other ledger is refused, recovered by execution', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-doc-scope-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-doc-scoperoot-'));
+    mkdirSync(join(root, '.helix'));
+    const store = new MemoryStore(join(home, 'memory.jsonl'), {
+      home, sessionId: 't', project: { root, ledger: join(root, '.helix', 'memory.jsonl') },
+    });
+
+    const inGlobal = store.commit({ content: 'a fact in the global ledger', source: 'user', scope: 'global' });
+    const inProject = store.commit({ content: 'a fact in the project ledger', source: 'user', scope: 'project' });
+
+    // 비공허성: 같은 ledger 안에서의 supersede 는 거부되지 않아야 한다. 그러지 않으면 아래
+    // 단언은 모든 supersede 를 거부하는 구현에서도 통과한다.
+    const digest = store.inspect().find((r) => r.record.id === inGlobal.id)?.contentDigest;
+    expect(digest, 'the read path no longer dispenses contentDigest').toBeDefined();
+    expect(() => store.commit({ content: 'a same-scope replacement', source: 'user', scope: 'global',
+      supersedes: inGlobal.id, supersedesDigest: digest })).not.toThrow();
+
+    let raised = '';
+    try {
+      store.commit({ content: 'a cross-scope replacement', source: 'user', scope: 'global', supersedes: inProject.id });
+    } catch (e) { raised = String((e as Error).message); }
+
+    expect(raised, 'a cross-scope supersede was not refused — the playbook line would be stale')
+      .toContain('cannot supersede across scopes');
+    expect(doc('docs/release/recovery-playbook.md'), 'the playbook no longer quotes the refusal the store raises')
+      .toContain(raised);
+  }, 30_000);
+});
+
+// 복구 playbook의 "무엇이 돌아오는가" 표. 재커밋은 텍스트만 되살리고 id·등급·서명·구간은
+// 되살리지 않는다고 적는다. 세 줄을 구동으로 회수한다.
+describe('the playbook table matches what a re-commit actually restores', () => {
+  it('the text returns while the id and the grade do not, recovered by execution', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-doc-recommit-'));
+    const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 't' });
+    const TEXT = 'staging runs Postgres 16 on port 5433';
+    const original = store.commit({ content: TEXT, source: 'user' });
+    store.confirm(original.id);
+
+    // 비공허성: 원본이 실제로 상승 등급을 가졌어야 "등급은 돌아오지 않는다"가 의미를 갖는다.
+    const before = store.inspect().find((r) => r.record.id === original.id)?.record.state;
+    expect(before, 'the original never reached an elevated grade — the claim below would be untestable')
+      .toBe('Verified');
+
+    store.erase(original.id);
+    const recommitted = store.commit({ content: TEXT, source: 'user' });
+    const now = store.inspect().find((r) => r.record.id === recommitted.id)?.record;
+
+    expect(now?.content, 'the text did not come back').toBe(TEXT);                    // 표: The text — Yes
+    expect(recommitted.id, 'the re-commit reused the old id').not.toBe(original.id);  // 표: Item id — No
+    expect(now?.state, 'the re-committed item kept the old grade').toBe('Fresh');     // 표: Trust grade — No
+
+    const play = doc('docs/release/recovery-playbook.md');
+    expect(play, 'the table no longer says the id does not come back').toContain('**No — a new `m_<uuid>`.**');
+    expect(play, 'the table no longer says the grade does not come back').toContain('**No — the new item is `Fresh`**');
+  }, 30_000);
+});
+
+// SECURITY.md가 compaction이 발행하는 표식의 성질을 서술한다: 내용이 없고, 서명되지 않으며,
+// 종류마다 하나의 상수 id로 합쳐진다. 그 셋을 compaction을 실제로 구동하여 회수한다.
+describe('SECURITY.md describes the marker a compaction actually mints', () => {
+  it('the minted integrity marker is content-free, unsigned, and carries the constant id', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'helix-doc-marker-'));
+    const path = join(dir, 'm.jsonl');
+    const row = (o: Record<string, unknown>): string => JSON.stringify({
+      id: 'm', tx: '2026-01-01T00:00:00.000Z', validFrom: '2026-01-01T00:00:00.000Z', validTo: null,
+      type: 'assert', state: 'Fresh', content: '', provenance: { source: 'user', sessionId: 's' },
+      supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal', ...o,
+    }) + '\n';
+    writeFileSync(path, row({ id: 'm_1', content: 'the deploy target is staging' })
+                      + row({ id: 'v_forged', type: 'verify', state: 'Verified', supersedes: 'm_1' }));
+
+    // 비공허성: 표식은 위조 verify가 실제로 버려질 때에만 발행되어야 한다. 아무것도 버리지
+    // 않는 compaction이 표식을 남기면 아래 단언은 무엇을 확인하는지 알 수 없다.
+    const kept = mkdtempSync(join(tmpdir(), 'helix-doc-nomarker-'));
+    const keptPath = join(kept, 'm.jsonl');
+    writeFileSync(keptPath, row({ id: 'm_1', content: 'the deploy target is staging' }));
+    compactLedger(keptPath, { erasedIds: new Set(), keepValidVerify: () => true, provesKey: () => true });
+    expect(parseLedger(keptPath).some(isIntegrityMarker),
+      'a compaction that dropped no forged verify still minted an integrity marker').toBe(false);
+
+    compactLedger(path, { erasedIds: new Set(), keepValidVerify: () => false, provesKey: () => true });
+    const marker = parseLedger(path).find(isIntegrityMarker);
+    if (marker === undefined) throw new Error('the compaction minted no integrity marker after dropping a forged verify');
+
+    expect(marker.id, 'the marker id is not the constant SECURITY.md names').toBe('integrity_marker');
+    expect(marker.content, 'the marker carries content').toBe('');
+    expect((marker as { mac?: string }).mac, 'the marker is signed — SECURITY.md calls it unsigned').toBeFalsy();
+
+    const sec = doc('SECURITY.md');
+    expect(sec, 'SECURITY.md no longer calls the minted marker unsigned').toContain('**unsigned**');
+    expect(sec, 'SECURITY.md no longer names the constant ids').toContain('integrity_marker');
+  }, 30_000);
 });
