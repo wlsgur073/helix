@@ -570,7 +570,8 @@ ruled is one remediated incident, not a class permission.
 `txClose 2026-09-11T06:20:01.000Z`, carrying the §5 sample state as measured (0 eligible against a
 floor of 2 at the 2026-08-18 measurement); declining the reset declines the restart vehicle for
 that starvation. The separate Disclosure R-2026-08-18 below (in-window computation of the
-eligible-probe count) is NOT covered by this ruling and keeps its own requested disposition.
+eligible-probe count) is NOT covered by this ruling; its own disposition — NOT A RESET, ruled
+2026-08-18 — is recorded below, together with R-2026-08-18b.
 
 ## Disclosure R-2026-08-18 — in-window computation of the eligible-probe count
 
