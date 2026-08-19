@@ -12,7 +12,7 @@
 // rewording stays cheap and deleting the claim does not.
 import { describe, it, expect } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, readdirSync, statSync, chmodSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, readdirSync, statSync, chmodSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
@@ -1019,5 +1019,47 @@ describe('README opening states the surfaces and defaults the build actually has
       .toContain('**optional cross-validation**');
     expect(readme, 'README no longer says memory persists across sessions')
       .toContain('across sessions');
+  });
+});
+
+// SECURITY.md가 서명된 위트니스 때문에 master key가 첫 verify가 아니라 첫 메모리 쓰기에
+// 물질화된다고 적는다. 빈 홈에 commit 하나만 하여 회수한다.
+describe('SECURITY.md states when the master signing key actually comes into existence', () => {
+  it('one commit with no verify already materializes the key', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-doc-keybirth-'));
+    const key = join(home, 'ledger-mac-master.key');
+
+    // 비공허성: 쓰기 전에는 없어야 한다. 그러지 않으면 아래 단언은 언제나 참이다.
+    expect(readdirSync(home), 'the home was not empty before the first write').toEqual([]);
+
+    new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 't' })
+      .commit({ content: 'the very first write', source: 'user' });
+
+    expect(existsSync(key), 'the key did not appear on the first memory write').toBe(true);
+    expect(doc('SECURITY.md'), 'SECURITY.md no longer states when the key materializes')
+      .toContain('on the *first* memory write rather than the first `verify`');
+  });
+});
+
+// SECURITY.md가 marker-erase 라우팅을 서술하면서 구현 함수와 커밋된 probe를 경로로 인용한다.
+// 인용은 낡을 수 있으므로 세 이름이 모두 실재하는지 확인한다.
+describe('SECURITY.md cites marker-erase routing that still exists', () => {
+  it('the named resolver, family helper and committed probe are all present', () => {
+    const sec = doc('SECURITY.md');
+    const store = readFileSync(join(ROOT, 'src/memory/store.ts'), 'utf8');
+
+    for (const fn of ['resolveEraseTarget', 'markerFamilyOf']) {
+      expect(sec, `SECURITY.md no longer names ${fn}`).toContain(fn);
+      // 두 이름은 MemoryStore 의 메서드이다. 선언 자리를 찾는다.
+      expect(store, `SECURITY.md names ${fn} but src/memory/store.ts does not declare it`)
+        .toMatch(new RegExp(`(private\\s+)?${fn}\\s*\\(`));
+    }
+
+    // 문서가 경로로 인용한 probe. 파일이 사라지거나 이름이 바뀌면 인용이 매달린다.
+    const cited = 'test/memory/provenance-audit/marker-erase-routing.test.ts';
+    expect(sec, 'SECURITY.md no longer cites the marker-erase probe').toContain(cited);
+    expect(existsSync(join(ROOT, cited)), `SECURITY.md cites ${cited} but it does not exist`).toBe(true);
+    expect(readFileSync(join(ROOT, cited), 'utf8'), 'the cited probe no longer exercises a project-scope marker erase')
+      .toMatch(/permanent/);
   });
 });

@@ -613,20 +613,20 @@
     "rowId": "r062",
     "surfaceItem": "cross-cutting",
     "claimId": "SECURITY.md#9b3b9b89a3b7",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: the resolver and family helper the document names are declared in store.ts, and the probe it cites by path exists and exercises a permanent erase",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": true
   },
   {
     "rowId": "r063",
     "surfaceItem": "cross-cutting",
     "claimId": "SECURITY.md#a6ed3c08e582",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: an empty home plus one commit and no verify already materializes ledger-mac-master.key",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": true
   },
   {
