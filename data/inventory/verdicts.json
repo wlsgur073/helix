@@ -573,10 +573,10 @@
     "rowId": "r058",
     "surfaceItem": "cross-cutting",
     "claimId": "README.md#e09520bebf34",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "certification run-sheet, manual evidence: all five shipped bundles show the same contract on node v20.20.2 as on v24.18.0 (and on v22.22.0)",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": false
   },
   {
