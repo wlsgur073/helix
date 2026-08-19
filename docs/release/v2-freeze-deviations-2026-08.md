@@ -444,7 +444,8 @@ close report §4.5).
 
 ## Deviation D-2026-08-18-in-window-product-rebuild — RULING PENDING
 
-**Status: the ruling is the owner's and has not been taken.** This entry records the facts, the rule
+**Status: RULED 2026-08-19 — NOT A RESET (Ruling R-2026-08-19 below).** As first written this line
+read: the ruling is the owner's and has not been taken. This entry records the facts, the rule
 they land on, and the readings, in the shape D-2026-08-13 established. Nothing here asserts a reset;
 nothing here asserts the window continues.
 
@@ -532,6 +533,44 @@ WITHOUT rebuilding `bin/`, and packaging-red is the expected state, not a defect
 ledger is on the branch both clones pull, so the instruction travels with the bytes it protects.
 This addendum takes no position on the §8 reading; it restores the load-path premise the window's
 continuation arguments assume.
+
+## Ruling R-2026-08-19 — the in-window product rebuild is ruled NOT a reset
+
+Recorded in the shape R-2026-08-16 established, because this ledger is the §9a report's source for
+reset history.
+
+**The clause was put to the owner verbatim** on 2026-08-19 — both limbs of §8 Reset, the three
+readings of the entry above (with reading (3) already falsified by the push and Instance 4), the
+measured cost of each outcome, and one fact the entry as first written did not carry: of the 81
+commits in `94dd136..19b4746`, THREE edited pinned paths — `src/memory/ownership.ts` (`08bc3da`,
+`c3456ec`, `7c22bfc`) and `src/memory/store.ts` (`7c22bfc`). The owner ruled with all of that in
+front of them.
+
+**Ruled NOT A RESET, on reading (2)'s grounds:**
+
+- *The tooling limb is not reached.* `src/` and `bin/` are the measured PRODUCT, not the method's
+  tooling; fixing product defects resolved no unspecified METHOD detail, which is the harm that
+  limb exists to prevent.
+- *The first limb is not reached on the surface the window measures.* Every pinned measurement of
+  the close chain runs from a clean checkout of the CANDIDATE commit
+  (`v2-close-procedure-2026-08.md`, "The rule"), and the runtime load paths were restored to the
+  candidate bytes the same day the drift reached them (Instance 4 heal; branch `bin/` returned at
+  `506e2fc`). Branch-tip edits — including the three pinned-path edits, whose pins bind the
+  CANDIDATE's hashes, not the branch's — change nothing the window measures.
+  `scripts/freeze-guard.ts:17-19` records the same doctrine: undeployed repo work during the window
+  is legitimate; the close chain runs from the candidate commit, not from this tree.
+
+**What this ruling does NOT do.** It licenses nothing: no further in-window rebuild of `bin/`, no
+further pinned-path edits, no redeploy. The standing instruction of Instance 4's addendum — `bin/`
+on this branch stays at the candidate bytes until `txClose` — remains in force, and a recurrence
+lands back on the clause with this ruling as precedent to DISTINGUISH, not to extend: what was
+ruled is one remediated incident, not a class permission.
+
+**Consequence accepted with the ruling.** The window runs to its scheduled close,
+`txClose 2026-09-11T06:20:01.000Z`, carrying the §5 sample state as measured (0 eligible against a
+floor of 2 at the 2026-08-18 measurement); declining the reset declines the restart vehicle for
+that starvation. The separate Disclosure R-2026-08-18 below (in-window computation of the
+eligible-probe count) is NOT covered by this ruling and keeps its own requested disposition.
 
 ## Disclosure R-2026-08-18 — in-window computation of the eligible-probe count
 
