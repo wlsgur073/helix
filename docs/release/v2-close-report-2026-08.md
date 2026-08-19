@@ -42,6 +42,13 @@ Governing texts: `v2-preregistration-2026-07.md` (the preregistration this repor
 `v2-close-procedure-2026-08.md` (the tree the close chain runs from),
 `v2-freeze-deviations-2026-08.md` (the deviation ledger).
 
+**Terminology.** Throughout this report, "v2" names the second iteration of the pilot
+verification protocol — the re-run that `gate-decision-2026-07-22.md` adopted as its path (b)
+"protocol-v2 policy" and that `v2-preregistration-2026-07.md` preregistered. It is **not a
+product version**: the product under verification carries `0.1.0` in both identity files, and the
+first public release proceeds as **v0.1.0** (v0.2.0 was stood down 2026-07-22; the owner
+reaffirmed v0.1.0-first on 2026-08-19).
+
 ---
 
 ## 1. The claim this report supports, and what it does not
