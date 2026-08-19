@@ -943,3 +943,81 @@ describe('SECURITY.md describes the marker a compaction actually mints', () => {
     expect(sec, 'SECURITY.md no longer names the constant ids').toContain('integrity_marker');
   }, 30_000);
 });
+
+// README가 자동 compaction은 파괴적이므로 켜기 전까지 꺼져 있다고 적는다. 그 기본값을
+// 접근자를 실행하여 회수한다.
+describe('README states the compaction default the accessor actually returns', () => {
+  it('auto compaction is off in an untouched home, recovered by execution', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'helix-doc-cmpdefault-'));
+    const shipped = compactionConfigFromGlobal(empty);
+    expect(shipped.auto, 'auto compaction is on by default — README says it is off').toBe(false);
+
+    // 비공허성: 접근자가 무엇을 주든 false를 반환하는 것이 아님을 같은 실행에서 확인한다.
+    writeFileSync(join(empty, 'config.json'), JSON.stringify({ compaction: { auto: true } }));
+    expect(compactionConfigFromGlobal(empty).auto,
+      'the accessor answers false whatever the config says — the case above proves nothing').toBe(true);
+
+    expect(doc('README.md'), 'README no longer says compaction is off unless you turn it on')
+      .toContain('it is **destructive**, so it is\noff unless you turn it on');
+  });
+});
+
+// 복구 playbook이 undo 창은 compaction이 ledger를 물리적으로 다시 쓸 때에만 닫힌다고 적는다.
+// soft erase 후 asOf가 내용을 돌려주고, compaction 뒤에는 돌려주지 않는 것으로 회수한다.
+describe('the playbook states the only thing that closes the undo window', () => {
+  it('an erased fact stays retrievable until a compaction rewrites the ledger', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-doc-window-'));
+    const path = join(home, 'm.jsonl');
+    const store = new MemoryStore(path, { home, sessionId: 't' });
+    const TEXT = 'a fact that will be erased and then physically dropped';
+    const rec = store.commit({ content: TEXT, source: 'user' });
+    store.erase(rec.id);
+
+    // 삭제 직후: live view에는 없지만 파일에는 남아 있다 — 그것이 undo 창이다.
+    expect(store.inspect().some((r) => r.record.id === rec.id), 'the erased fact is still live').toBe(false);
+    expect(readFileSync(path, 'utf8'), 'the erased text left the file before any compaction').toContain(TEXT);
+
+    compactLedger(path, { erasedIds: new Set([rec.id]), keepValidVerify: () => true, provesKey: () => true });
+
+    expect(readFileSync(path, 'utf8'), 'a compaction did not physically drop the erased text').not.toContain(TEXT);
+    expect(doc('docs/release/recovery-playbook.md'), 'the playbook no longer names compaction as what closes the window')
+      .toContain('The window closes only when a **compaction** physically rewrites the ledger');
+  }, 30_000);
+});
+
+// README의 첫 두 문단이 제품을 소개하면서 검증 가능한 것을 함께 주장한다. 소개문이라는 이유로
+// 검사 밖에 두지 않는다 — 신규 사용자가 가장 먼저 읽는 자리이다.
+describe('README opening states the surfaces and defaults the build actually has', () => {
+  it('the engine is exposed as MCP tools and session hooks, recovered from the shipped artifacts', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-doc-opening-'));
+    const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 't' });
+    const server = buildServer(store);
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'doc-guard-opening', version: '0' });
+    await Promise.all([client.connect(ct), server.connect(st)]);
+    const { tools } = await client.listTools();
+    await client.close();
+
+    const hooks = JSON.parse(doc('hooks/hooks.json')) as { hooks: Record<string, unknown[]> };
+    const events = Object.keys(hooks.hooks).sort();
+
+    expect(tools.length, 'no MCP tool is registered — the opening sentence would be wrong').toBeGreaterThan(0);
+    expect(events, 'the two session hooks the opening names are not both declared')
+      .toEqual(['SessionEnd', 'SessionStart']);
+
+    const readme = doc('README.md');
+    expect(readme, 'README no longer says the engine is exposed as MCP tools and session hooks')
+      .toContain('exposed as MCP tools and session hooks');
+  }, 30_000);
+
+  it('the cross-validation the opening calls optional is off until configured', () => {
+    // "optional" 은 기본값에 대한 주장이다. 접근자가 아니라 배포되는 기본 설정에서 회수한다.
+    expect(DEFAULT_CONFIG.dualVerify.enabled, 'dual-verify ships enabled — README calls it optional').toBe(false);
+
+    const readme = doc('README.md');
+    expect(readme, 'README no longer calls the Codex cross-validation optional')
+      .toContain('**optional cross-validation**');
+    expect(readme, 'README no longer says memory persists across sessions')
+      .toContain('across sessions');
+  });
+});

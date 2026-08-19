@@ -403,10 +403,10 @@
     "rowId": "r041",
     "surfaceItem": "cross-cutting",
     "claimId": "README.md#01fbf6da7011",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: tools are registered and both session hooks are declared, recovered from the registry and hooks.json",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": false
   },
   {
@@ -433,10 +433,10 @@
     "rowId": "r044",
     "surfaceItem": "cross-cutting",
     "claimId": "README.md#2e1f9ba5834f",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: DEFAULT_CONFIG ships dual-verify disabled; B2 observed memory carried across two sessions",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": false
   },
   {
@@ -453,10 +453,10 @@
     "rowId": "r046",
     "surfaceItem": "cross-cutting",
     "claimId": "README.md#54778b5b55b8",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: compactionConfigFromGlobal returns auto=false on an untouched home, and true when the global config says so",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": false
   },
   {
@@ -673,10 +673,10 @@
     "rowId": "r068",
     "surfaceItem": "cross-cutting",
     "claimId": "docs/release/recovery-playbook.md#2dacbae5af3a",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: the erased text stays in the file after a soft erase and is gone after a compaction",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": false
   },
   {
