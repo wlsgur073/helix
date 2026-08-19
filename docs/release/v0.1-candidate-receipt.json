@@ -1,0 +1,31 @@
+{
+  "payload": {
+    "artifactKind": "v0.1-release-candidate",
+    "candidateCommit": "01483ce9192028177c594a1a977d47a154535af6",
+    "treeShaAtCut": "b48f07dac95b69a38c5f338962d6be0d410e8741",
+    "cutAt": "2026-08-19T06:48:00.000Z",
+    "bundles": {
+      "bin/helix-mcp.mjs": "e04a01640b67d1d813352a84ae47c5000d4f34e13c81922e843be73a20740d83",
+      "bin/helix-rebaseline.mjs": "510073f3d98af708d836c77d8a52560cac7eea6c2ed58aaf5b9f0895ae98a71c",
+      "bin/helix-trigger.mjs": "2ae99bb4fea132b4543a1c4d283577d98d1dbe274721483927b30c9d194083bb",
+      "bin/hooks/session-end.mjs": "bbb5b5aa52f18942d0d937c9395705f0fe6dcbee68e7befa3f8b1c7eec1de35f",
+      "bin/hooks/session-start.mjs": "0806e945e05de8dc8026fe51ee088160a6be2aed59700d941cfc54479d22ac35"
+    },
+    "manifest": {
+      ".claude-plugin/plugin.json": "5fccae10f7f420c733257a79ac8cebce3878073f32cceae4ff49e5acc39223ce",
+      ".claude-plugin/marketplace.json": "b36c52c1c0dc46cf9906eaf2924c10a1bfe152b8b837718081a7caf181987765",
+      "hooks/hooks.json": "d135a67aa58b10fc805b46a959272099e01e5ed701c511d99319e4641b63bf02"
+    },
+    "claimSet": {
+      "data/inventory/surface.json": "b1f5069fb41f9e432381b2695c44cff1c798a3fc3660d43eba4efc9638b84286",
+      "data/inventory/claims.json": "c3776a6dde0de52a12db941314a2ab2fa44289e6e369f674544b20ca39b5e76d"
+    },
+    "gateAtCut": {
+      "typecheck": "exit 0",
+      "suite": "184 files passed, 2 skipped (186); 2348 tests passed, 2 skipped (2350)",
+      "skippedAre": "the two metered Codex opt-in files, which need HELIX_REAL_CODEX=1",
+      "rebuildMovesBin": false
+    }
+  },
+  "payloadSha256": "2ce045286cc4687fb025cc435b3ebe1dffc9b579c03caf24c4d63c95b92d04f9"
+}
