@@ -28,6 +28,22 @@ describe('verdict ledger validation', () => {
       .toContain('r1: FAILED requires a repairTarget');
   });
 
+  // 후보 혼합 검사는 관측이 있는 행끼리만 비교해야 한다. `candidate`의 정의가 "이 관측이
+  // 결속된 후보"이므로 `UNEVIDENCED` 행의 `null`은 다른 후보가 아니라 관측의 부재이다.
+  // 정직한 원장은 인증이 끝나기 전까지 항상 그런 행을 가지므로, null을 후보로 세면 매번
+  // 거짓 문제를 보고한다.
+  it('does not read an absent observation as a second candidate', () => {
+    expect(validateLedger([
+      row(),
+      row({ rowId: 'r2', verdict: 'UNEVIDENCED', evidence: null, candidate: null }),
+    ])).toEqual([]);
+  });
+
+  it('still rejects rows bound to two different candidates', () => {
+    expect(validateLedger([row(), row({ rowId: 'r2', candidate: 'cafebabe' })]))
+      .toContain('ledger: rows are bound to more than one candidate (cafebabe, deadbeef)');
+  });
+
   it('rejects an UNDOCUMENTED row that names a claim', () => {
     expect(validateLedger([row({ verdict: 'UNDOCUMENTED' })]))
       .toContain('r1: UNDOCUMENTED must not name a claim');

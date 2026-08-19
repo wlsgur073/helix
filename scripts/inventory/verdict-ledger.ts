@@ -35,10 +35,13 @@ export function validateLedger(rows: VerdictRow[]): string[] {
   // 판정표에 섞이는 상황을 원천적으로 배제한다고 적고, 7-1은 바뀐 번들 바이트를 가로지르는
   // 이월을 금지한다. 행마다 `candidate !== null`만 보면 Rₙ의 행과 Rₙ₊₁의 행이 섞인 원장이
   // 게이트를 통과하며, 그 판별이 릴리스 당일의 추가 판단으로 미뤄진다.
-  const candidates = [...new Set(rows.map((r) => r.candidate))];
+  // 관측이 있는 행끼리만 비교한다. `candidate`는 "이 관측이 결속된 후보"이므로 `UNEVIDENCED`
+  // 행의 `null`은 다른 후보가 아니라 관측의 부재이다. null을 후보로 세면 인증이 끝나기 전의
+  // 모든 정직한 원장이 거짓 문제를 보고한다 — 그런 원장은 언제나 미증거 행을 갖기 때문이다.
+  // 관측이 있으면서 후보가 비어 있는 행은 위의 per-row MET 검사가 이미 잡는다.
+  const candidates = [...new Set(rows.map((r) => r.candidate).filter((c): c is string => c !== null))];
   if (candidates.length > 1) {
-    const named = candidates.map((c) => c ?? 'null').sort();
-    problems.push(`ledger: rows are bound to more than one candidate (${named.join(', ')})`);
+    problems.push(`ledger: rows are bound to more than one candidate (${[...candidates].sort().join(', ')})`);
   }
   return problems;
 }
