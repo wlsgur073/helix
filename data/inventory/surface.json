@@ -1,0 +1,379 @@
+{
+  "tools": [
+    {
+      "name": "helix_codex_status",
+      "description": "Show whether Helix is connected to Codex (CLI/version, login, auth mode), the dual-verify config, and the content-log state. Free — no metered Codex call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "helix_dual_verify",
+      "description": "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "helixAnswer": {
+            "type": "string"
+          },
+          "stakes": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ]
+          }
+        },
+        "required": [
+          "question",
+          "helixAnswer"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "helix_memory_adopt",
+      "description": "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean; a root that is not the active scope is refused and adopts nothing. This moves a trust boundary — everything in that ledger becomes recallable — so the user, not Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectRoot"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "helix_memory_commit",
+      "description": "Store a fact in Helix memory (secret-scanned; provenance recorded). Pass supersedes=<id> to update (replace) an existing item instead of adding a duplicate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "user",
+              "user-relayed",
+              "agent-inference",
+              "agent-test-verified"
+            ],
+            "description": "Provenance (required). 'user' = a fact the user stated as their own knowledge/preference/instruction. 'user-relayed' = content the user pasted/forwarded from a third party (web page, email, README, tool output) — use this whenever the user is relaying, not authoring. 'agent-inference' = a conclusion you derived this session, not yet confirmed against reality. 'agent-test-verified' = a conclusion you derived AND mechanically verified this session (e.g. by running tests); still non-authoritative — it does not elevate trust."
+          },
+          "blastRadius": {
+            "type": "string",
+            "enum": [
+              "read-only",
+              "local-reversible",
+              "hard-to-reverse",
+              "external"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "personal"
+            ]
+          },
+          "supersedes": {
+            "type": "string"
+          },
+          "supersedesDigest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Required only when superseding a VERIFIED fact: the `supersedesDigest=` value shown for that row by helix_memory_inspect. Echoing it proves you retrieved the record you are replacing; a supersede issued without having read the target is refused."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "global"
+            ]
+          }
+        },
+        "required": [
+          "content",
+          "source"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "helix_memory_confirm",
+      "description": "Promote a memory item to the Verified state because THE USER explicitly vouched for it this turn. Requires explicit user approval; never self-confirm — call ONLY when the user directly confirmed the fact, never to confirm your own inference or a relayed claim. Only items committed with source=user are eligible (re-commit a relayed/inferred fact as source=user first). The user, not Helix, is the authority — do not allow-list this tool.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "helix_memory_erase",
+      "description": "Erase a memory item by id. Soft: the item is removed from the live view (recall/inspect) and the erase is recorded in the audit log, so an erroneous or poisoned erase can be detected and undone. This tool itself never physically destroys content. By default (compaction off) the erased content stays recoverable on disk indefinitely; but if the user has enabled compaction.auto, that recoverability is time-bounded — an ordinary helix_memory_recall can then compact the ledger and physically destroy it once the grace window (graceMs) has passed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "helix_memory_inspect",
+      "description": "List current memory items (id, trust state, content). Pass history=true to also list closed items with their [tx, txTo) declared interval, OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "history": {
+            "type": "boolean"
+          },
+          "asOf": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "helix_memory_recall",
+      "description": "Recall relevant memory as a DATA-only block; flags items needing re-verification.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "maxItems": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "maxChars": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Per-item character cap for rendered content (truncated with …). Use when the caller can only read a bounded result."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "helix_memory_recheck",
+      "description": "Run a content-bound mechanical reality-check on a memory item. A pass yields the Corroborated trust state (machine-checked, NOT human-verified — it can NEVER reach Verified). The check is file-contains and BOTH path and pattern MUST appear in the item content, or the call is rejected (prevents laundering an unrelated passing check into trust). Use for objective, checkable facts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "check": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "file-contains"
+              },
+              "path": {
+                "type": "string"
+              },
+              "pattern": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "path",
+              "pattern"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "check"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ],
+  "configLeaves": [
+    {
+      "path": "compaction.auto",
+      "defaultValue": false
+    },
+    {
+      "path": "compaction.dirtyRatio",
+      "defaultValue": 0.5
+    },
+    {
+      "path": "compaction.graceMs",
+      "defaultValue": 86400000
+    },
+    {
+      "path": "compaction.maxBytes",
+      "defaultValue": 52428800
+    },
+    {
+      "path": "compaction.minDirtyBytes",
+      "defaultValue": 1048576
+    },
+    {
+      "path": "compaction.minRows",
+      "defaultValue": 200
+    },
+    {
+      "path": "dualVerify.effort",
+      "defaultValue": null
+    },
+    {
+      "path": "dualVerify.egressPolicy.memoryEcho",
+      "defaultValue": "block"
+    },
+    {
+      "path": "dualVerify.egressPolicy.piiBulk",
+      "defaultValue": "block"
+    },
+    {
+      "path": "dualVerify.egressPolicy.piiHigh",
+      "defaultValue": "block"
+    },
+    {
+      "path": "dualVerify.egressPolicy.secretEntropy",
+      "defaultValue": "block"
+    },
+    {
+      "path": "dualVerify.egressPolicy.secretEntropyExempt",
+      "defaultValue": "allow"
+    },
+    {
+      "path": "dualVerify.egressPolicy.secretHeuristic",
+      "defaultValue": "block"
+    },
+    {
+      "path": "dualVerify.enabled",
+      "defaultValue": false
+    },
+    {
+      "path": "dualVerify.logContent",
+      "defaultValue": false
+    },
+    {
+      "path": "dualVerify.mode",
+      "defaultValue": "compare"
+    },
+    {
+      "path": "dualVerify.model",
+      "defaultValue": null
+    },
+    {
+      "path": "dualVerify.stakesFloor",
+      "defaultValue": "high"
+    },
+    {
+      "path": "dualVerify.timeoutMs",
+      "defaultValue": 1500000
+    },
+    {
+      "path": "metrics.enabled",
+      "defaultValue": true
+    }
+  ],
+  "envVars": [
+    {
+      "name": "HELIX_HOME",
+      "readIn": [
+        "bin/helix-mcp.mjs",
+        "bin/hooks/session-end.mjs",
+        "bin/hooks/session-start.mjs"
+      ]
+    },
+    {
+      "name": "HELIX_LEDGER",
+      "readIn": [
+        "bin/helix-mcp.mjs",
+        "bin/hooks/session-start.mjs"
+      ]
+    },
+    {
+      "name": "HELIX_SESSION",
+      "readIn": [
+        "bin/helix-mcp.mjs"
+      ]
+    },
+    {
+      "name": "HELIX_SESSIONS",
+      "readIn": [
+        "bin/hooks/session-end.mjs"
+      ]
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "readIn": [
+        "bin/helix-mcp.mjs"
+      ]
+    }
+  ],
+  "hooks": [
+    {
+      "event": "SessionEnd",
+      "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/hooks/session-end.mjs\"",
+      "timeout": 10,
+      "bundle": "bin/hooks/session-end.mjs"
+    },
+    {
+      "event": "SessionStart",
+      "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/hooks/session-start.mjs\"",
+      "timeout": 10,
+      "bundle": "bin/hooks/session-start.mjs"
+    }
+  ],
+  "clis": [
+    {
+      "bundle": "bin/helix-rebaseline.mjs",
+      "usage": "usage: helix-rebaseline --scope global | --scope <absoluteProjectRoot>",
+      "noArgsExitCode": 2
+    },
+    {
+      "bundle": "bin/helix-trigger.mjs",
+      "usage": "usage: trigger-cli --root <path> --run <id> [--service-result <s>] [--exit-code <s>] [--exit-status <s>]",
+      "noArgsExitCode": 2
+    }
+  ]
+}
