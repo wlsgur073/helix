@@ -10,6 +10,10 @@ describe('hook extraction', () => {
     const hooks = extractHooks();
     expect(hooks.map((h) => h.event).sort()).toEqual(['SessionEnd', 'SessionStart']);
     for (const h of hooks) {
+      // 빈 문자열을 먼저 배제한다. `join(ROOT, '')`는 `ROOT` 자신으로 정규화되고 저장소
+      // 루트는 항상 존재하므로, 이 단언이 없으면 정규식이 실패해 `bundle`이 비어도 아래
+      // 두 검사가 모두 통과한다. Task 4의 스냅샷은 이 값을 그대로 고정한다.
+      expect(h.bundle.length, `${h.event} resolved to an empty bundle path`).toBeGreaterThan(0);
       // 스냅샷에 들어가는 값은 저장소 기준 상대 경로이다. 절대 경로는 기계마다 달라져
       // Task 4의 표류 테스트를 이 기계 밖에서 무의미하게 만든다.
       expect(h.bundle.startsWith('/'), `${h.event} carries an absolute path: ${h.bundle}`).toBe(false);
