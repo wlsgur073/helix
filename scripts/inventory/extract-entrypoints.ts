@@ -27,7 +27,9 @@ export function extractHooks(): HookFacet[] {
           command: entry.command,
           timeout: entry.timeout ?? null,
           // 저장소 기준 상대 경로. 스냅샷이 기계 의존적이 되지 않도록 절대 경로를 쓰지 않는다.
-          bundle: m ? m[1] : '',
+          // `m?.[1] ?? ''`인 이유는 `noUncheckedIndexedAccess`가 캡처 그룹을
+          // `string | undefined`로 만들기 때문이다. `m ? m[1] : ''`는 그 좁히기를 하지 못한다.
+          bundle: m?.[1] ?? '',
         });
       }
     }

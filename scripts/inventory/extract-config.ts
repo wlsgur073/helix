@@ -59,7 +59,10 @@ export function extractEnvVars(): EnvVar[] {
   for (const file of shippedFiles(BIN)) {
     const text = readFileSync(file, 'utf8');
     for (const m of text.matchAll(re)) {
+      // `noUncheckedIndexedAccess`가 켜져 있어 캡처 그룹은 `string | undefined`이다.
+      // 이 정규식에서 그룹 1은 매치 시 항상 참여하지만, 타입이 그것을 알지 못한다.
       const name = m[1];
+      if (name === undefined) continue;
       if (!found.has(name)) found.set(name, new Set());
       found.get(name)!.add(relative(ROOT, file));
     }
