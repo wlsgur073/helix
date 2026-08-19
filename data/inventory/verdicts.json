@@ -593,10 +593,10 @@
     "rowId": "r060",
     "surfaceItem": "cross-cutting",
     "claimId": "SECURITY.md#3889290ed21f",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: a hand-appended elevated assert clamps to Fresh while a tool-minted grade survives in the same run",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": true
   },
   {
@@ -633,10 +633,10 @@
     "rowId": "r064",
     "surfaceItem": "cross-cutting",
     "claimId": "SECURITY.md#bce27476ac03",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: isIntegrityMarker/isHorizonMarker accept any prefixed marker-shaped row with no MAC; a different prefix is rejected",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": true
   },
   {
@@ -713,10 +713,10 @@
     "rowId": "r072",
     "surfaceItem": "cross-cutting",
     "claimId": "docs/release/recovery-playbook.md#90c85d93d1e3",
-    "verdict": "UNEVIDENCED",
+    "verdict": "MET",
     "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
+    "evidence": "shipped-claims: history+asOf refused while each alone is served, recovered by execution; negative control on handlers.ts:263",
+    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": false
   },
   {

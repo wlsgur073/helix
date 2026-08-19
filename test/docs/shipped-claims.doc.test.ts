@@ -24,7 +24,7 @@ import { classifyEgress, type EgressInput } from '../../src/risk/trifecta.js';
 import { dualVerify } from '../../src/verify/dual-verify.js';
 import { hardenHomePermissions } from '../../src/memory/home-permissions.js';
 import { assessGradeLoss, strayTrustFiles } from '../../src/memory/trust-store-layout.js';
-import { parseLedger } from '../../src/memory/ledger.js';
+import { parseLedger, isIntegrityMarker, isHorizonMarker } from '../../src/memory/ledger.js';
 import { noopMetricsSink, type CompactionInput } from '../../src/metrics.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
 import { appendAudit } from '../../src/audit.js';
@@ -697,5 +697,107 @@ describe('README names every environment variable the shipped bundles read', () 
 
     expect(doc('README.md'), 'README does not name OPENAI_API_KEY among what reaches the Codex child')
       .toContain('OPENAI_API_KEY');
+  });
+});
+
+// 복구 playbook이 서술하는 상호 배타를 도구가 실제로 강제하는지. 문서의 문구를 베끼지 않고
+// 거부를 구동으로 회수한다. 각각 단독으로는 거부되지 않는 것까지 확인해야 한다 — 모든 호출을
+// 거부하는 도구에서도 통과하는 단언이 되면 안 되기 때문이다.
+describe('the recovery playbook states the exclusion the inspect tool actually enforces', () => {
+  it('history+asOf is refused while each alone is served, recovered by execution', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-doc-excl-'));
+    const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 't' });
+    store.commit({ content: 'a fact for the exclusion probe', source: 'user' });
+    const server = buildServer(store);
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'doc-guard-excl', version: '0' });
+    await Promise.all([client.connect(ct), server.connect(st)]);
+    const say = async (args: Record<string, unknown>): Promise<string> => {
+      const r = await client.callTool({ name: 'helix_memory_inspect', arguments: args });
+      return ((r as { content?: Array<{ text?: string }> }).content ?? []).map((c) => c.text ?? '').join('');
+    };
+    const TS = '2026-01-01T00:00:00.000Z';
+
+    const both = await say({ history: true, asOf: TS });
+    const onlyHistory = await say({ history: true });
+    const onlyAsOf = await say({ asOf: TS });
+    await client.close();
+
+    // 비공허성: 각각 단독은 거부되지 않아야 한다. 그러지 않으면 아래 단언은 무엇이든 거부하는
+    // 구현에서도 통과한다.
+    expect(onlyHistory, 'history alone is refused — the refusal is not about the combination')
+      .not.toMatch(/mutually exclusive/i);
+    expect(onlyAsOf, 'asOf alone is refused — the refusal is not about the combination')
+      .not.toMatch(/mutually exclusive/i);
+
+    expect(both, 'inspect no longer refuses history+asOf — the playbook line would be stale')
+      .toMatch(/mutually exclusive/i);
+
+    expect(
+      doc('docs/release/recovery-playbook.md'),
+      'the playbook no longer states the exclusion the tool enforces',
+    ).toContain('`history` and `asOf` are mutually exclusive');
+  }, 30_000);
+});
+
+// SECURITY.md가 파일 표면에서의 위조 불가를 주장한다. 그 주장을 구동으로 회수한다: 원시 JSON을
+// ledger에 덧붙여 상승 등급을 주장해도 `Fresh`로 clamp되고, MAC 없는 verify는 무시된다.
+// 비공허성은 같은 실행에서 정직하게 승급된 사실이 `Verified`로 남는 것으로 확보한다 — 모든
+// 항목을 `Fresh`로 만드는 구현에서도 통과하는 단언이 되면 안 되기 때문이다.
+describe('SECURITY.md states the forgery resistance the ledger actually has', () => {
+  it('a hand-appended elevated assert is clamped while a tool-minted grade survives', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-doc-forge-'));
+    const ledger = join(home, 'm.jsonl');
+    const store = new MemoryStore(ledger, { home, sessionId: 't' });
+    const honest = store.commit({ content: 'a fact the user vouched for', source: 'user' });
+    store.confirm(honest.id);
+
+    const now = new Date().toISOString();
+    writeFileSync(ledger, readFileSync(ledger, 'utf8')
+      + JSON.stringify({ id: 'm_forged-assert', tx: now, validFrom: now, validTo: null, type: 'assert',
+          state: 'Verified', content: 'a forged top-grade fact',
+          provenance: { source: 'user', sessionId: 'cli' },
+          supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal' }) + '\n'
+      + JSON.stringify({ id: 'm_forged-verify', tx: now, type: 'verify', target: 'm_forged-assert',
+          resultState: 'Verified', source: 'user' }) + '\n');
+
+    const reread = new MemoryStore(ledger, { home, sessionId: 't2' }).inspect();
+    const state = (id: string): string | undefined => reread.find((r) => r.record.id === id)?.record.state;
+
+    // 비공허성: 도구가 부여한 등급은 살아남아야 한다.
+    expect(state(honest.id), 'the tool-minted grade did not survive — this case would pass on any all-Fresh build')
+      .toBe('Verified');
+    // 본론: 손으로 덧붙인 상승 주장은 clamp된다.
+    expect(state('m_forged-assert'), 'a hand-appended elevated assert kept its claimed grade').toBe('Fresh');
+
+    const sec = doc('SECURITY.md');
+    expect(sec, 'SECURITY.md no longer states that a forged verify record is ignored').toContain('is **ignored**');
+    expect(sec, 'SECURITY.md no longer states that a forged elevated assert is clamped').toContain('clamped to `Fresh`');
+  }, 30_000);
+});
+
+// SECURITY.md가 표식의 존재는 위조 가능하다고 공시한다. 그 공시가 사실인지 확인한다 — 잔여
+// 위험 서술이 실제와 어긋나면 잘못된 안심을 준다. 술어를 직접 구동하여 회수한다.
+describe('SECURITY.md states the marker forgeability the predicates actually have', () => {
+  it('any marker-shaped row with the prefix is taken as canonical, with no MAC consulted', () => {
+    // MAC 없는 verify 모양. 공시가 말하는 바로 그 형태이다.
+    const forged = (id: string): never =>
+      ({ id, type: 'verify', supersedes: null, target: null } as unknown as never);
+
+    expect(isIntegrityMarker(forged('integrity_anything_an_adversary_picks')),
+      'an appended integrity_-prefixed row is no longer taken as the marker — the disclosure would be stale').toBe(true);
+    expect(isHorizonMarker(forged('horizon_anything_an_adversary_picks')),
+      'an appended horizon_-prefixed row is no longer taken as the marker').toBe(true);
+
+    // 비공허성: 접두사가 다르면 거짓이어야 한다. 그러지 않으면 위 두 단언은 항상 참을 반환하는
+    // 술어에서도 통과한다.
+    expect(isIntegrityMarker(forged('m_ordinary_row')), 'the predicate answers true for any id').toBe(false);
+    expect(isHorizonMarker(forged('m_ordinary_row')), 'the predicate answers true for any id').toBe(false);
+
+    const sec = doc('SECURITY.md');
+    expect(sec, 'SECURITY.md no longer discloses that the marker presence is forgeable')
+      .toContain('presence is forgeable');
+    expect(sec, 'SECURITY.md no longer names the two prefixes an adversary can use')
+      .toMatch(/integrity_[^a-z]/);
   });
 });
