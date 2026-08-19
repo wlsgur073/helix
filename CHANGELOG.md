@@ -17,7 +17,7 @@ All notable changes to Helix are documented here. This project follows
   datamarking + a per-call 128-bit nonce frame.
 - Optional Codex dual-verify (off by default) with a deterministic egress guard
   (secret / PII / memory-echo), plus `helix_codex_status` and an opt-in content log.
-- Seven MCP tools and SessionStart/SessionEnd hooks, installable as a Claude Code
+- Nine MCP tools and SessionStart/SessionEnd hooks, installable as a Claude Code
   plugin with self-contained committed bundles (no `npm install` to use).
 - Codex 5.6 reasoning efforts. `dualVerify.effort` now accepts `max` and `ultra`. Per-model support
   varies and Helix does not arbitrate it — `codex debug models` is the authority.

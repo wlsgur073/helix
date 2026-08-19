@@ -545,3 +545,36 @@ describe('SECURITY.md documents the proof-of-read guard on superseding a verifie
     expect(sec, 'the document does not disclose the guess-the-content residual').toMatch(/guess/i);
   });
 });
+
+// 배포된 CHANGELOG가 런타임이 실제로 등록하는 도구 수를 적는지. 이 저장소는 그 수를 사람이
+// 눈으로 세어 적었고 실제와 어긋난 채로 배포되었다. 그래서 이 사례는 문서의 숫자를 읽어
+// 확인하지 않고, 등록부를 구동하여 얻은 수로부터 문서가 무엇을 적어야 하는지를 도출한다.
+describe('the shipped changelog states the tool count the runtime actually registers', () => {
+  it('the spelled-out number in CHANGELOG matches the registry, recovered by execution', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-doc-count-'));
+    const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 't' });
+    const server = buildServer(store);
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'doc-guard-count', version: '0' });
+    await Promise.all([client.connect(ct), server.connect(st)]);
+    const { tools } = await client.listTools();
+    await client.close();
+
+    const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+    const word = words[tools.length];
+    // 등록 도구가 이 표를 넘어서면 문서가 무엇을 적어야 하는지 도출할 수 없다. 조용히
+    // 지나가면 그 순간부터 이 사례는 아무것도 확인하지 않으므로 여기서 멈춘다.
+    if (word === undefined) throw new Error(`no spelled-out word for ${tools.length} registered tools`);
+
+    const changelog = doc('CHANGELOG.md');
+    expect(changelog, `CHANGELOG does not say "${word} MCP tools" — the registry has ${tools.length}`)
+      .toMatch(new RegExp(`${word} MCP tools`, 'i'));
+
+    // 다른 수를 동시에 주장하지 않는지. 한쪽만 정정되어 두 수가 공존하는 경우를 막는다.
+    for (const [i, other] of words.entries()) {
+      if (i === tools.length) continue;
+      expect(changelog, `CHANGELOG still claims "${other} MCP tools"`)
+        .not.toMatch(new RegExp(`${other} MCP tools`, 'i'));
+    }
+  }, 30_000);
+});
