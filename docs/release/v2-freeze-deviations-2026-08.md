@@ -509,6 +509,30 @@ and then behind a symlinked `.helix`; the effective egress legs shown nowhere) a
 corrections where the shipped prose asserted the opposite of shipped behaviour. Each carries a test
 that drives the behaviour rather than reading the prose.
 
+**Addendum 2026-08-19 — the reach bounds above are falsified; the branch's `bin/` returned to the
+candidate bytes.** All three containment bounds this entry relied on have since failed, in order:
+the commits WERE pushed (origin reached `19b4746` by 2026-08-19 17:33 KST), the marketplace clone —
+a pinned runtime load path — pulled them at 20:55:31 KST (Instance 4 of D-2026-08-15, four of nine
+pin-list files off-pin, first byte-discontinuous drift of either window), and so the "only route"
+this entry said was not taken was taken. The 2026-08-18 owner decision recorded above ("no push is
+made while the window is open") and the observed push therefore diverge; this addendum records the
+fact and asserts nothing about intent. Reading (3) as written is no longer available — the ruling
+between readings (1) and (2) remains the owner's and has become more urgent, not less.
+
+Operational remediation, owner-approved in-session 2026-08-19: the four divergent bundles
+(`bin/helix-mcp.mjs`, `bin/helix-rebaseline.mjs`, `bin/helix-trigger.mjs`,
+`bin/hooks/session-start.mjs`) were returned to the candidate bytes on this branch — precedent
+`b4997cd`, the first window's identical operation — and all nine pin-list files re-verified OK.
+Measured consequence, disclosed rather than implied: `test/plugin/packaging.test.ts` reports
+**1 failed / 6 passed** (the rebuild-and-byte-compare case; the six manifest checks stay green).
+That is the first window's by-design state, and R-2026-08-16(a) split typecheck into its own CI job
+precisely so this red silences nothing. **Standing instruction until `txClose`
+(2026-09-11T06:20:01Z): `bin/` on this branch stays at the candidate bytes — `src/` work rides
+WITHOUT rebuilding `bin/`, and packaging-red is the expected state, not a defect to fix.** This
+ledger is on the branch both clones pull, so the instruction travels with the bytes it protects.
+This addendum takes no position on the §8 reading; it restores the load-path premise the window's
+continuation arguments assume.
+
 ## Disclosure R-2026-08-18 — in-window computation of the eligible-probe count
 
 **Disposition REQUESTED, not asserted.** This entry exists so the act is on the record whichever

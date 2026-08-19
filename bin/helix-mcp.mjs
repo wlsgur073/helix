@@ -14174,10 +14174,7 @@ import { dirname as dirname6, join as join6 } from "node:path";
 // src/memory/ownership.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync3, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
-import { join as join5, resolve, dirname as dirname5, isAbsolute } from "node:path";
-function isReviewableRoot(projectRoot2) {
-  return isAbsolute(projectRoot2);
-}
+import { join as join5, resolve, dirname as dirname5 } from "node:path";
 function canonicalRoot(projectRoot2) {
   try {
     return canonical(projectRoot2);
@@ -14285,13 +14282,8 @@ function atomicWriteOwner(projectRoot2, stamp) {
   atomicWriteFile(ownerFile(projectRoot2), stamp, 384);
 }
 function readOwner(projectRoot2) {
-  const path = ownerFile(projectRoot2);
   try {
-    if (lstatSync3(dirname5(path)).isSymbolicLink()) return null;
-    const st = lstatSync3(path);
-    if (!st.isFile()) return null;
-    if (st.nlink > 1) return null;
-    return readFileSync4(path, "utf8").trim();
+    return readFileSync4(ownerFile(projectRoot2), "utf8").trim();
   } catch {
     return null;
   }
@@ -16056,8 +16048,6 @@ var MemoryStore = class {
    *  store directly must clear the same gate. Returns the canonical scope for the audit row. */
   adopt(expectedRoot) {
     const p = this.opts.project;
-    if (!isReviewableRoot(expectedRoot))
-      throw new Error("adopt: projectRoot must be an absolute path \u2014 a relative or empty root resolves to wherever the server is running, so the approval prompt has no target to show");
     if (!p) throw new Error("adopt: no project scope is active");
     const active = canonicalRoot(p.root);
     if (canonicalRoot(expectedRoot) !== active)
@@ -16264,16 +16254,6 @@ function looksLikeOurs(name, path) {
   } catch {
     return false;
   }
-}
-function collidingTrustFiles(home2, stray2) {
-  return stray2.filter((name) => {
-    try {
-      lstatSync4(join7(home2, name));
-      return true;
-    } catch {
-      return false;
-    }
-  });
 }
 function strayTrustFiles(home2, globalLedger2) {
   const ledgerDir = dirname10(globalLedger2);
@@ -24477,18 +24457,10 @@ var DEFAULT_CONFIG = {
   // Local metrics sensor ON by default ("local logs always, export opt-in"); content-free records.
   metrics: { enabled: true }
 };
-function readJson(path, onUnusable) {
-  let text;
+function readJson(path) {
   try {
-    text = readFileSync10(path, "utf8");
-  } catch (e) {
-    if (e.code !== "ENOENT") onUnusable(e.message);
-    return null;
-  }
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    onUnusable(e.message);
+    return JSON.parse(readFileSync10(path, "utf8"));
+  } catch {
     return null;
   }
 }
@@ -24502,12 +24474,8 @@ function loadConfig(opts = {}) {
       (opts.warn ?? ((m) => process.stderr.write(m + "\n")))(msg);
     }
   };
-  const unreadable = [];
   for (const path of opts.projectPath ? [globalPath, opts.projectPath] : [globalPath]) {
-    const raw = readJson(path, (reason) => {
-      unreadable.push(path);
-      warn(`helix: ${path} exists but could not be read (${q(reason)}) -> every setting in it is ignored; using defaults`);
-    });
+    const raw = readJson(path);
     const dv = raw?.dualVerify;
     if (dv) {
       if (typeof dv.enabled === "boolean") merged.dualVerify.enabled = dv.enabled;
@@ -24539,8 +24507,8 @@ function loadConfig(opts = {}) {
             warn(`helix: ignoring unknown dualVerify.egressPolicy key ${q(key)}`);
             continue;
           }
-          if (val === "allow" || val === "block") merged.dualVerify.egressPolicy[key] = val;
-          else warn(`helix: invalid dualVerify.egressPolicy.${key} ${q(val)} -> keeping ${merged.dualVerify.egressPolicy[key]}`);
+          if (val === "allow") merged.dualVerify.egressPolicy[key] = "allow";
+          else if (val !== "block") warn(`helix: invalid dualVerify.egressPolicy.${key} ${q(val)} -> block`);
         }
       }
       if (dv.memoryEgress !== void 0) {
@@ -24553,7 +24521,6 @@ function loadConfig(opts = {}) {
       merged.metrics.enabled = m.enabled;
     }
   }
-  if (unreadable.length > 0) merged.unreadable = unreadable;
   return merged;
 }
 function mergeCompaction(raw) {
@@ -24569,8 +24536,7 @@ function mergeCompaction(raw) {
   return c;
 }
 function compactionConfigFromGlobal(home2) {
-  return mergeCompaction(readJson(join8(home2, "config.json"), () => {
-  })?.compaction);
+  return mergeCompaction(readJson(join8(home2, "config.json"))?.compaction);
 }
 
 // src/verify/agreement-map.ts
@@ -25185,14 +25151,6 @@ async function handleCodexStatus(deps) {
   const effort = dv.effort !== null ? `${dv.effort} (helix override)` : "inherited from codex config";
   const lines = [
     "Helix <-> Codex",
-    // FIRST, above every value it invalidates. A config that failed to parse renders byte-for-byte
-    // like one that deliberately turned dual-verify off, and this free tool is the surface an
-    // operator reads to answer "what is dual-verify actually doing" — so without this line their
-    // only way to notice a discarded file is to remember what they wrote in it. loadConfig also
-    // warns on stderr, but stderr is a debug channel nobody watches; this is the observable one.
-    ...(deps.config.unreadable ?? []).map(
-      (p) => `! ${p} could not be read \u2014 everything it sets is ignored; the values below are DEFAULTS`
-    ),
     `- codex CLI:      ${cli}`,
     `- connection:     ${connection}`,
     `- auth mode:      ${auth}`,
@@ -25212,10 +25170,6 @@ async function handleCodexStatus(deps) {
       "        quota is spent. Raise dualVerify.timeoutMs."
     );
   }
-  const legs = Object.entries(dv.egressPolicy);
-  const changed = legs.filter(([k, v]) => v !== DEFAULT_CONFIG.dualVerify.egressPolicy[k]).map(([k]) => k);
-  lines.push(`- egress legs:    ${legs.map(([k, v]) => `${k}=${v}`).join(" ")}`);
-  if (changed.length > 0) lines.push(`  changed from default: ${changed.join(", ")}`);
   lines.push(`- content log:    ${contentLog}`);
   return ok(lines.join("\n"));
 }
@@ -25803,9 +25757,6 @@ function createMetricsSink(path, enabled, deps = {}) {
 var ID_SCHEMA = external_exports.string().refine(isValidId, {
   message: `id must be 1-${MAX_ID_CHARS} printable, non-control characters`
 });
-var PROJECT_ROOT_SCHEMA = external_exports.string().refine(isReviewableRoot, {
-  message: "projectRoot must be an absolute path, so the approval prompt can show which ledger is being trusted"
-});
 function buildServer(store2, dualDeps, metrics2) {
   const m = metrics2 ?? noopMetricsSink;
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
@@ -25905,7 +25856,7 @@ function buildServer(store2, dualDeps, metrics2) {
   server2.registerTool("helix_memory_adopt", {
     title: "Adopt project memory",
     description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean; a root that is not the active scope is refused and adopts nothing. This moves a trust boundary \u2014 everything in that ledger becomes recallable \u2014 so the user, not Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.",
-    inputSchema: { projectRoot: PROJECT_ROOT_SCHEMA }
+    inputSchema: { projectRoot: external_exports.string() }
   }, async (args) => m.runOp("helix_memory_adopt", () => handleAdopt(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   return Object.assign(server2, {
     // Bounded by construction: resolves once every tracked call has settled OR budgetMs elapses,
@@ -25974,13 +25925,6 @@ var metrics = createMetricsSink(join12(home, "metrics.jsonl"), config2.metrics.e
 var stray = strayTrustFiles(home, globalLedger);
 if (stray.length > 0) {
   const ledgerDir = dirname14(globalLedger);
-  const collide = collidingTrustFiles(home, stray);
-  const wouldOverwrite = `     HELIX_HOME ALREADY HAS ${collide.join(", ")} - moving the stray copies
-     over ${collide.length === 1 ? "it" : "them"} REPLACES this install's own trust store, and every elevated grade
-     on HELIX_HOME's own ledger is lost with it - the same loss this check exists to
-     prevent, in the other direction. Move HELIX_HOME's copies aside first and decide
-     which store you are keeping; deleting the stray copies instead is unaffected.
-`;
   const loss = assessGradeLoss(home, globalLedger);
   if (!loss.loses) {
     process.stderr.write(
@@ -25995,7 +25939,7 @@ They are most likely an inert leftover, from before the trust store's location w
 HELIX_HOME or from a repo-writing adversary. If they still hold state you need, move
 ${stray.join(", ")} into HELIX_HOME by hand; otherwise it is safe to delete them from the
 ledger directory - this note will keep appearing until they are gone.
-` + (collide.length > 0 ? wouldOverwrite : "")
+`
     );
   } else {
     const causes = [];
@@ -26035,13 +25979,9 @@ ledger directory - this note will keep appearing until they are gone.
   ledger directory        : ${ledgerDir}
   HELIX_HOME              : ${home}
 ${causes.join("")}Two ways out, both deliberate:
-  1. Move ${stray.join(", ")} from the ledger directory into HELIX_HOME, keeping the ledger
-     where it is.
-` + // The claim used to be flat: "the only remedy proven lossless". It was proven for the case the
-      // repro actually built - a home with no file of those names - and is FALSE for the collision,
-      // which is the common case here. The claim is now scoped to the case it holds in.
-      (collide.length > 0 ? wouldOverwrite : `     Lossless here: HELIX_HOME has no file of those names to overwrite.
-`) + `  2. Discard the old trust state (delete those files) and accept the loss deliberately with the
+  1. Move ${stray.join(", ")} from the ledger directory into HELIX_HOME, keeping the ledger where it
+     is - the only remedy proven lossless (docs/issues/repros/f1-manual-remedy.ts).
+  2. Discard the old trust state (delete those files) and accept the loss deliberately with the
      re-baseline ceremony: node bin/helix-rebaseline.mjs --scope global
 `
     );

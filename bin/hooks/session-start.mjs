@@ -23,7 +23,7 @@ import { dirname as dirname6, join as join6 } from "node:path";
 // src/memory/ownership.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3, renameSync, unlinkSync as unlinkSync2, lstatSync as lstatSync3, openSync, writeSync, fsyncSync, closeSync } from "node:fs";
-import { join as join3, resolve, dirname as dirname3, isAbsolute } from "node:path";
+import { join as join3, resolve, dirname as dirname3 } from "node:path";
 
 // src/memory/lock.ts
 import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync as realpathSync2, rmSync, readdirSync } from "node:fs";
@@ -451,13 +451,8 @@ function atomicWriteRegistry(home, reg) {
   atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
 }
 function readOwner(projectRoot) {
-  const path = ownerFile(projectRoot);
   try {
-    if (lstatSync3(dirname3(path)).isSymbolicLink()) return null;
-    const st = lstatSync3(path);
-    if (!st.isFile()) return null;
-    if (st.nlink > 1) return null;
-    return readFileSync3(path, "utf8").trim();
+    return readFileSync3(ownerFile(projectRoot), "utf8").trim();
   } catch {
     return null;
   }
@@ -1270,24 +1265,15 @@ function createMetricsSink(path, enabled, deps = {}) {
 // src/config.ts
 import { readFileSync as readFileSync8 } from "node:fs";
 import { join as join7 } from "node:path";
-function readJson(path, onUnusable) {
-  let text;
+function readJson(path) {
   try {
-    text = readFileSync8(path, "utf8");
-  } catch (e) {
-    if (e.code !== "ENOENT") onUnusable(e.message);
-    return null;
-  }
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    onUnusable(e.message);
+    return JSON.parse(readFileSync8(path, "utf8"));
+  } catch {
     return null;
   }
 }
 function metricsEnabledFromGlobalConfig(home) {
-  const raw = readJson(join7(home, "config.json"), () => {
-  });
+  const raw = readJson(join7(home, "config.json"));
   const m = raw?.metrics;
   return m && typeof m === "object" && typeof m.enabled === "boolean" ? m.enabled : true;
 }
