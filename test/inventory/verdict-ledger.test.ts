@@ -54,4 +54,11 @@ describe('release gate', () => {
     // 행이 없는 원장이 통과하면 인벤토리 미완성이 통과로 집계된다.
     expect(gatePasses([])).toBe(false);
   });
+
+  // `gatePasses`의 `validateLedger` 연동 분기를 고립시키는 유일한 사례이다. 이 행은
+  // verdict가 `MET`이므로 `.every(r => r.verdict === 'MET')`만 보는 구현에서는 통과한다.
+  // 이 사례가 없으면 그 분기를 통째로 삭제해도 나머지 테스트가 전부 초록색으로 남는다.
+  it('blocks a row whose verdict is MET but whose schema is incomplete', () => {
+    expect(gatePasses([row({ evidence: null })])).toBe(false);
+  });
 });
