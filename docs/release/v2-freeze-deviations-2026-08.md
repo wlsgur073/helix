@@ -356,6 +356,49 @@ the heal fired because an interactive session ran `freeze-runtime-check.sh` by h
 investigating, so it measures session activity, not detection latency. The three in-window
 intervals — 14 h 17 m, 1 h 22 m, 34 m 45 s — are a record of when a shell happened to open.
 
+### Instance 4 — 2026-08-19, and the byte-continuity bound finally broke on one load path
+
+**Statement.** The clone fast-forwarded off the candidate again on 2026-08-19 11:55:31Z
+(20:55:31 KST): `pull origin HEAD: Fast-forward`, HEAD `94dd136 -> 19b4746`. Flags and environment
+unchanged and still not consulted (`autoUpdate` `false` in both files, `DISABLE_AUTOUPDATER=1`).
+One corroboration detail differs from instances 1-3: `known_marketplaces.json`'s `helix.lastUpdated`
+reads `2026-08-19T12:38:29.301Z` — NOT the pull second. It coincides instead, to within 4 seconds,
+with a session resume that spawned the live cache-path server at 21:38:25 KST (`ps lstart`), so the
+lastUpdated stamp recorded a later no-op check, not the pull. Recorded as observed rather than
+forced into the earlier pattern.
+
+**Byte continuity BROKE — the first time on either window, and it was measured.** `19b4746` carries
+the second clone's in-window `bin/` rebuild (deviation `D-2026-08-18-in-window-product-rebuild`,
+RULING PENDING below): seven commits touch `bin/` in `94dd136..19b4746` (`8ca8a2f`, `08bc3da`,
+`535de65`, `c3456ec`, `e5a3f3d`, `9f0ca5a`, `7c22bfc`). FOUR of the nine files in
+`v2-freeze-runtime-pins-2026-08.txt` failed the pin list on the marketplace load path —
+`bin/helix-mcp.mjs` (`e04a0164…`, 936,649 B vs the candidate's `075fc39e…`, 933,389 B),
+`bin/helix-rebaseline.mjs`, `bin/helix-trigger.mjs`, `bin/hooks/session-start.mjs`; only
+`bin/hooks/session-end.mjs` still matched. The guard banner named three of the four:
+`freeze-runtime-check.sh:94` pipes the failure list through `head -3`, a display truncation that
+under-reported this incident by one file and will hide any fourth-and-later failure in future ones.
+Fixing it in-window would change the live guard (the script runs from the working tree), so the fix
+is queued for post-close instead and the full four-file measurement is recorded here.
+
+**Exposure, measured not assumed.** The install cache — the other pinned load path — stayed
+candidate-identical throughout (all five bundle files byte-verified). The only `helix-mcp` process
+alive during the interval binds the cache path (started 21:38:25 KST), and the daily dogfood run
+(09:00 KST) predates the pull, so no measured run executed against the drifted bytes. What cannot
+be claimed: that no short-lived process bound the marketplace bundle inside the interval. **The
+close report may therefore no longer say byte continuity held at both load paths for the whole
+window** — the marketplace path carried non-candidate bytes for 1 h 32 m 27 s.
+
+**Auto-heal correctly declined; first MANUAL remediation of the window.** The healer requires
+exactly one failure and it must be the HEAD-drift line (`freeze-runtime-check.sh:116-117`); this
+incident presented two (HEAD drift + bytes off-pin), so the conservative gate held — by design,
+since resetting over unexplained byte drift is precisely what it exists to refuse. Guard exit 1;
+left standing, the 08-20 09:00 KST `ExecStartPre` would have blocked the run and cost a §5 accrual
+day. The owner approved manual remediation in-session; `reset --hard` to the candidate at
+2026-08-19 13:27:58Z (22:27:58 KST), all nine pin-list files re-verified, guard exit 0. Off-pin
+interval 1 h 32 m 27 s — with the same caveat as instances 2-3: detection happened because a
+documentation sweep re-ran the guard by hand, so the number measures session activity, not the
+control's latency.
+
 ## Ruling R-2026-08-16 — two in-window edit classes ruled NOT a reset
 
 Recorded here because this ledger is the §9a report's source for reset history, and "this was
