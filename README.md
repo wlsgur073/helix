@@ -83,6 +83,23 @@ at startup saying it is being ignored.)
   the literal `inherited from codex config` with no value, and the `max`/`ultra` advisory note fires only
   when `effort` is a Helix override, never on the inherited path.
 
+- `egressPolicy` — the per-leg map the egress guard consults, one key per class of content it can
+  refuse to send. Every leg takes `"block"` or `"allow"`; anything else is read as `"block"`. Named
+  provider credentials are refused regardless of this map and have no leg.
+
+  | Leg | Default | What it governs |
+  |---|---|---|
+  | `memoryEcho` | `block` | a verbatim copy of a stored memory item |
+  | `piiHigh` | `block` | high-severity personal data |
+  | `piiBulk` | `block` | personal data in bulk |
+  | `secretHeuristic` | `block` | a token matching a known credential shape |
+  | `secretEntropy` | `block` | a high-entropy token with no known shape |
+  | `secretEntropyExempt` | `allow` | the entropy subclass described below — pure-hex cores and low-entropy chains |
+
+  `secretEntropyExempt` is the one leg that ships open, so a git SHA in your prose does not block the
+  call. Set it to `"block"` to close the exemption. The write path redacts those bytes regardless of
+  this setting.
+
 A `mode`, `stakesFloor`, `model` or `effort` value that is present but invalid is ignored with a warning
 on stderr, not silently.
 
@@ -212,7 +229,7 @@ Helix keeps two ledgers that it always reads together:
 
 Helix's memory lives in plain files under your control. Back them up like any other data — here is what to expect on restore.
 
-- **What to back up.** `~/.helix/` holds the global ledger (`memory.jsonl`), the signing key (`ledger-mac-master.key`), the rollback-witness state (`witness.json`) and its diagnostic log (`witness-log.jsonl`), config (`config.json`), and the project-ownership registry (`projects.json`). Each project's own `<project-root>/.helix/` is a second, independent unit. Back up both while no Claude Code session is running against them — an external backup tool isn't covered by Helix's own file lock, so copying mid-rewrite can catch an inconsistent instant. If you set `HELIX_LEDGER`, the global ledger is **not** inside `~/.helix/` — back up that file separately; everything else in the list stays under `HELIX_HOME` regardless.
+- **What to back up.** Back up the whole `~/.helix/` directory rather than a file list — that is the unit, and the list below is what it contains rather than a subset to pick from. It holds the global ledger (`memory.jsonl`), the signing key (`ledger-mac-master.key`), the rollback-witness state (`witness.json`) and its diagnostic log (`witness-log.jsonl`), config (`config.json`), the project-ownership registry (`projects.json`), the erase/verify audit trail (`audit.jsonl`), the session records (`sessions.jsonl`), and — when the corresponding feature is on — the local metrics (`metrics.jsonl`), the dual-verify content log (`codex-log.jsonl`), and the scale-trigger records (`trigger.jsonl`). Copying only the first six loses the audit trail that makes an erroneous erase both detectable and recoverable. Each project's own `<project-root>/.helix/` is a second, independent unit. Back up both while no Claude Code session is running against them — an external backup tool isn't covered by Helix's own file lock, so copying mid-rewrite can catch an inconsistent instant. If you set `HELIX_LEDGER`, the global ledger is **not** inside `~/.helix/` — back up that file separately; everything else in the list stays under `HELIX_HOME` regardless.
 - **Restoring.** Copy the directories back into place. **An intentionally restored older ledger will trip the rollback witness by design**: the witness lives in `~/.helix/` independently of whichever ledger bytes are on disk, so a restored file that no longer matches the head it last saw gets that scope's elevated grades clamped to `Fresh` plus a disclosure note. This is not a failure to route around — the legitimate way to adopt an old backup on purpose is the operator re-baseline ceremony: `node bin/helix-rebaseline.mjs --scope global` (or `--scope <absoluteProjectRoot>` for a project), an interactive, TTY-only command that is never run automatically. See [SECURITY.md's rollback witness section](./SECURITY.md#rollback-witness-cross-boundary-ledger-rollback) for the full mechanics.
 - **Key loss.** Without `ledger-mac-master.key`, no signed `verify` record can validate, so any grade a `verify` record conferred — `Corroborated`, `Verified`, or `Suspect` — reverts to `Fresh` until a new key signs fresh verifications; for `Suspect` that reversion is a trust *increase*, not fail-low: the item's displayed state quietly reads `Fresh` again and the session hint loses its Suspect-specific wording, though such items (always non-authoritative) remain flagged for confirmation on source grounds. A new key is minted automatically on the next write; re-elevate a fact with `helix_memory_confirm`, or re-run `helix_memory_recheck` to restore a lapsed `Suspect` label. Losing the key never loses content — only a verify-conferred grade is affected.
 - **Corruption.** A torn tail line (e.g. power loss mid-append) is repaired by the next writer, which prefixes a separator so its own record lands cleanly while the torn fragment is isolated as its own skipped line. A more structurally damaged line elsewhere in the ledger is simply excluded from the live view rather than guessed at or fabricated. Restore from backup for anything worse than a torn tail, and never hand-edit a ledger file while a session is running — Helix's own file lock coordinates only its own processes, not an external editor.
@@ -247,7 +264,7 @@ Helix is local-first. Installing it lets Claude Code run code on your machine �
 
 - **MCP server** (`node bin/helix-mcp.mjs`, launched by Claude Code): reads and writes memory under `~/.helix/` (and an owned `<project>/.helix/` ledger when present). It makes **no network calls** except the optional dual-verify path below.
 - **Re-baseline ceremony** (`node bin/helix-rebaseline.mjs --scope global`, or `--scope <absoluteProjectRoot>` for a project; run by you): an interactive, TTY-only maintenance command that re-blesses a ledger scope after the rollback witness flags it as regressed (see [SECURITY.md](./SECURITY.md)). It is never launched automatically and is not exposed as an MCP tool.
-- **Scale-trigger snapshot** (`node bin/helix-trigger.mjs`; run by you or your own scheduler, never launched by the plugin or by Claude Code): appends one content-free evaluation of the indexed-storage migration trigger (ledger row / byte / latency legs) to `~/.helix/trigger.jsonl` — the measurement behind the Scale note in [Requirements](#requirements).
+- **Scale-trigger snapshot** (`node bin/helix-trigger.mjs --root <path> --run <id>`; run by you or your own scheduler, never launched by the plugin or by Claude Code): appends one content-free evaluation of the indexed-storage migration trigger (ledger row / byte / latency legs) to `~/.helix/trigger.jsonl` — the measurement behind the Scale note in [Requirements](#requirements). Both arguments are required: `--root` is the project root the evaluation is about, `--run` is an id you choose to label the record. Invoked without them the command prints its usage and exits 2.
 - **Session hooks:** SessionStart reads your trusted memory and injects it into the session as quarantined DATA (never as instructions); SessionEnd appends a session record. Neither sends anything off-machine.
 - **No telemetry.** Helix never phones home.
 - **Metrics (local only):** Helix appends content-free latency/size records (tool op durations,

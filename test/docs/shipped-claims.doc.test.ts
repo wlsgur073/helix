@@ -11,7 +11,7 @@
 // of code), the shortest load-bearing phrase is pinned rather than the whole sentence, so that
 // rewording stays cheap and deleting the claim does not.
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, readdirSync, statSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -577,4 +577,86 @@ describe('the shipped changelog states the tool count the runtime actually regis
         .not.toMatch(new RegExp(`${other} MCP tools`, 'i'));
     }
   }, 30_000);
+});
+
+// README가 인쇄하는 모든 배포 CLI 호출이 실제로 실행되는지. 이 저장소는 인자가 필요한 CLI를
+// 인자 없이 보여준 채로 배포하였다. 그래서 이 사례는 문서의 명령을 읽어 판단하지 않고, CLI를
+// 실행하여 그것이 요구하는 인자를 회수한 뒤 문서가 그것을 담고 있는지 확인한다.
+describe('every shipped CLI invocation README prints can actually run', () => {
+  it('the trigger invocation carries the arguments the CLI requires, recovered by executing it', () => {
+    // 자식에게 최소 환경을 준다. 개발자가 export한 `HELIX_*`가 닿지 않게 하고, node 진단
+    // 출력이 usage 문자열에 섞이지 않게 한다.
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([k, v]) => v !== undefined && !k.startsWith('HELIX_') && k !== 'NODE_OPTIONS' && k !== 'NODE_DEBUG',
+      ),
+    ) as NodeJS.ProcessEnv;
+    const bare = spawnSync(process.execPath, [join(ROOT, 'bin', 'helix-trigger.mjs')], { encoding: 'utf8', env, timeout: 10_000 });
+    expect(bare.status, 'the trigger CLI no longer refuses a bare invocation').toBe(2);
+
+    // usage가 요구하는 플래그를 실행 출력에서 회수한다. 문서에서 베끼지 않는다.
+    // `[...]`로 감싸인 구간은 선택 인자이므로 먼저 제거한다. 그러지 않으면 선택 인자까지
+    // 필수로 회수되어, README가 그것들까지 인쇄해야 통과하게 된다 — 잘못된 문서를 요구하는
+    // 테스트가 된다.
+    const usage = `${bare.stdout}${bare.stderr}`.replace(/\[[^\]]*\]/g, '');
+    const required = [...usage.matchAll(/--([a-z-]+) </g)]
+      .map((m) => m[1])
+      .filter((f): f is string => f !== undefined);
+    expect(required.length, 'the usage line names no required flag — the recovery is broken').toBeGreaterThan(0);
+
+    const line = doc('README.md').split('\n').find((l) => l.includes('bin/helix-trigger.mjs'));
+    expect(line, 'README no longer mentions the trigger CLI').toBeDefined();
+    for (const flag of required) {
+      expect(line!, `README's trigger invocation omits the required --${flag}`).toContain(`--${flag}`);
+    }
+  }, 30_000);
+});
+
+// README가 설정 가능하다고 말하는 egress leg의 이름과 기본값을 실제로 적는지. 문서는 leg를
+// 동작으로 서술하고 "per-leg overridable"이라고 적으면서 키 이름은 하나만 주었다 — 나머지를
+// 닫으려는 사용자는 키 이름을 알 수 없었다. 이 사례는 이름과 기본값을 모두 코드에서 회수한다.
+describe('README documents every egress leg the config actually accepts', () => {
+  it('names each leg and its shipped default, recovered from DEFAULT_CONFIG', () => {
+    const legs = Object.entries(DEFAULT_CONFIG.dualVerify.egressPolicy);
+    expect(legs.length, 'no egress leg was recovered — the config shape changed').toBeGreaterThan(1);
+
+    const readme = doc('README.md');
+    expect(readme, 'README never names the `egressPolicy` key itself').toContain('`egressPolicy`');
+
+    for (const [leg, shipped] of legs) {
+      // 표의 행이어야 한다. 산문에서 이름만 스쳐도 통과하면, 사용자가 값을 알 수 없는 상태가
+      // 그대로 남는다.
+      // 표가 불릿 안에 중첩되어 앞에 공백이 붙으므로 다듬어서 본다. 들여쓰기는 마크다운
+      // 중첩의 산물이지 의미가 아니다.
+      const row = readme.split('\n').map((l) => l.trim()).find((l) => l.startsWith('| `' + leg + '`'));
+      if (row === undefined) throw new Error(`README has no table row for the egress leg \`${leg}\``);
+      expect(row, `README's row for \`${leg}\` does not state its shipped default \`${shipped}\``)
+        .toContain('`' + shipped + '`');
+    }
+  });
+});
+
+// README의 백업 절이 감사 기록 파일을 이름으로 적는지. 그 절은 원래 여섯 파일만 열거하여
+// `audit.jsonl`을 빠뜨렸는데, README는 다른 곳에서 삭제가 감사 가능하게 남는다고 약속하고
+// 복구 절차가 그 기록에 의존한다. 파일 이름을 산문에서 베끼지 않고 감사 기록을 실제로 남겨서
+// 회수한다.
+describe('README names the audit trail its erasure promise depends on', () => {
+  it('the file the audit appender actually creates is named in the backup section', () => {
+    // 이름은 서버가 그것을 조립하는 자리에서 회수한다. 문서에서 베끼지 않는다.
+    const wiring = readFileSync(join(ROOT, 'src/server/helix-server.ts'), 'utf8');
+    const derived = /auditPath:\s*join\(home,\s*'([^']+)'\)/.exec(wiring)?.[1];
+    if (derived === undefined) {
+      throw new Error('the audit filename is no longer derived as join(home, ...) in helix-server.ts');
+    }
+
+    // 회수한 이름이 실재하는지 구동으로 확인한다. 소스의 문자열만 보면 그 이름으로 파일이
+    // 실제로 생기는지는 알 수 없다.
+    const home = mkdtempSync(join(tmpdir(), 'helix-doc-audit-'));
+    appendAudit(join(home, derived), { kind: 'erase', ts: '2026-01-01T00:00:00.000Z', id: 'm_1', soft: true });
+    expect(readdirSync(home), `the appender did not create ${derived}`).toContain(derived);
+
+    const backupParagraph = doc('README.md').split('\n').find((l) => l.includes('**What to back up.**'));
+    if (backupParagraph === undefined) throw new Error('README has no "What to back up" paragraph');
+    expect(backupParagraph, `the backup section does not name \`${derived}\``).toContain('`' + derived + '`');
+  });
 });
