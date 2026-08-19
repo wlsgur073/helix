@@ -1997,9 +1997,13 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   `cutoff < tx ≤ close` demonstration; the prepared-artifact hash with its pre-run timestamp and
   the ordering evidence; the full reset-and-deviation history (including G5's heal count, the
   **first window's RESET over the in-window producer**, and the **dissolution** of both the
-  pinned-src disclosure (G8, report §4.4) and — as a statement the report must ACQUIRE, since no
-  section carries it today — the fact that no post-freeze method tooling was built inside the
-  SECOND window (A4)); evidence the declared
+  pinned-src disclosure (G8, report §4.4); and — **corrected 2026-08-18, because the statement this
+  line used to ask for is no longer available** — the DISPOSITION of `R-2026-08-18` rather than a
+  blanket "no post-freeze method tooling was built inside the SECOND window". Something was: an
+  in-window recomputation of two frozen rules, ruled NOT A RESET on 2026-08-18 on the ground that
+  it issues no §9-chain artifact. Acquire the disposition, its conduct findings, and the
+  second unadjudicated instance the entry names (the home-machine pin script's in-window v3
+  rewrite) — a blanket denial would now be false (A4)); evidence the declared
   consequence was actually applied; the D5 disclosures in full, not by reference; and the
   §1 claim + coverage statement **verbatim alongside every reported number**.
   Also confirm the report carries **Block A's outcomes**: the home-machine pin report or the

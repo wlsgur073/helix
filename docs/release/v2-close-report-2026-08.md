@@ -249,9 +249,10 @@ this report**. Each is summarized here in the substance that binds the report; t
 including the reflog extracts and the file-history verdicts, is
 `v2-freeze-deviations-2026-08.md` in this directory.
 
-Deviations occurring inside the SECOND window are §4.7, and there is already one: the clone-HEAD
-drift D-2026-08-10 predicted as a standing exposure arrived on 2026-08-15. Further instances are
-appended there.
+Second-window entries are §4.7 and §4.8, and the ledger now carries THREE classes of entry —
+`Deviation`, `Ruling` and `Disclosure`. All three are §9a content. Do not list only the ones headed
+`Deviation`: §4.7's marker asks for *every* entry appended after 2026-08-14, and two of them are not
+deviations.
 
 ### 4.0 The first window's reset — D-2026-08-13-in-window-tooling
 
@@ -660,12 +661,21 @@ with their measured costs, and the step-by-step remediation executed on 2026-08-
 window ended and was not published; this report is the second window's, and §4.0 carries the reset
 as the head of the deviation history rather than as a footnote to it.
 
-**And the question does not recur in THIS window.** §8 reaches tooling built after the freeze it
-governs. This window's freeze is `3bd63d0` and its candidate `94dd136` already contains both the
-producer and its test — `git ls-tree -r --name-only 94dd136 -- scripts/close test/close` returns
-exactly `scripts/close/adjudication-skeleton.ts` and `test/close/adjudication-skeleton.test.ts` —
-and the producer is pinned as the 26th `payload.tools` entry, with its blob row in §2.1. So the
-close-day chain runs no program that post-dates this freeze, and no second §8 ruling is owed.
+**The question does not recur for THE PRODUCER in this window — but a second §8 ruling WAS owed,
+and this sentence used to deny it.** §8 reaches tooling built after the freeze it governs. This
+window's freeze is `3bd63d0` and its candidate `94dd136` already contains both the producer and its
+test — `git ls-tree -r --name-only 94dd136 -- scripts/close test/close` returns exactly
+`scripts/close/adjudication-skeleton.ts` and `test/close/adjudication-skeleton.test.ts` — and the
+producer is pinned as the 26th `payload.tools` entry, with its blob row in §2.1. So the close-day
+chain runs no program that post-dates this freeze.
+
+**Corrected 2026-08-18.** This paragraph previously ended "and no second §8 ruling is owed". One
+was: on 2026-08-18 an in-window recomputation of two frozen rules raised the same clause, and it is
+disposed of as NOT A RESET in `Disclosure R-2026-08-18` of the deviation ledger, together with the
+conduct findings the disposition does not clear and a second, still-unadjudicated instance. The
+error was one of scope, and the paragraph's own next sentence already warned about it: the evidence
+here is producer-scoped and was never a survey of everything authored during the window. §4.8 lists
+the entry.
 **Scope of that claim, stated so it is not read wider than it is measured:** the evidence above is
 producer-scoped. It establishes that the one program §9b identified as missing predates the freeze;
 it is not a survey of everything authored during the window. The general assurance rests on the
@@ -733,6 +743,41 @@ subagent's shell start during an unrelated verification pass, under the auto-hea
 passes. Both conditions held.
 
 - Final second-window deviation list and heal count: <<FILL AT CLOSE: every entry appended to `v2-freeze-deviations-2026-08.md` after 2026-08-14, and the total line count of the heal log | the deviation ledger and `~/.cache/freeze-guard-heals.log`, read at the close. Prevention is not available (§4.2), so more instances are expected; a window with none would itself be worth remarking on >>
+
+### 4.8 Second-window rulings and disclosures — entries that are not deviations
+
+Two ledger entries inside this window record decisions and acts rather than incidents. Both are
+required §9a content and neither is a deviation.
+
+**`Ruling R-2026-08-16`** — two in-window edit classes put to the owner with the Reset clause quoted
+verbatim, and ruled NOT a reset: splitting `npm run typecheck` into its own CI job, and a
+comment-only edit to an unpinned `src/verify/` file. The entry carries its own standing scope, which
+is narrower than the ruling might suggest; read it there rather than generalising from this line.
+
+**`Disclosure R-2026-08-18`, and its disposition** — an in-window computation of the §5
+eligible-probe count, first by reimplementing two frozen rules in ephemeral Python and then by
+running the frozen program itself in its holdout form. Both readings of §8 are set out in the entry,
+an independent peer review reached the RESET conclusion, and the disposition recorded on 2026-08-18
+is **NOT A RESET** — on the ground that the 2026-08-13 ruling settled the clause's modality and not
+its scope, and that what was built issues no artifact of the §9 chain. The entry names the conflict
+of interest first, keeps the losing case unrewritten, answers the dissent argument by argument, and
+carries five conduct findings the disposition does NOT clear.
+
+**`Disposition R-2026-08-18b`** — the home-machine pin-verification script, rewritten in-window
+because the re-freeze replaced every expected value it carries. Also **NOT A RESET**, on precedent
+rather than argument: `scripts/freeze-runtime-check.sh` was itself written inside the first window,
+its output is cited four times by this report, and `D-2026-08-09` ruled that no reset was required.
+Raised by the ruler against the ruler's own interest rather than left for the close.
+
+**The number that disclosure records is HISTORY, not this report's result, and the distinction is
+load-bearing.** §5's realized-accrual marker and §7's Hit@1 marker are close-day fills, produced by
+the close chain from the close-bounded snapshot. They must be filled from that run and from nothing
+else. An in-window reading of the same quantity is disclosed because §8's Reset clause and the
+independence bullet in `pilot-amendment-1.md` both bear on the act of taking it — not because it
+substitutes for the measurement. If those two ever disagree at the close, that disagreement is
+itself a finding, and it is the close-day value that governs.
+
+- Owner disposition on `R-2026-08-18`: <<FILL AT CLOSE: the ruling, its date, and whether it changed the window's identities | owner decision. If it is ruled a reset, this report is not published for THIS window and the entry's recorded anchor instant is what the new window is cut from >>
 
 ---
 

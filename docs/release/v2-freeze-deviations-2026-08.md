@@ -228,9 +228,11 @@ exposure D-2026-08-10 predicted, arriving on schedule.** That entry closed with 
 startup may move the clone again", having falsified both preventive controls. It did.
 
 > **This entry carries MORE THAN ONE instance.** Its closing paragraph says each further instance
-> is appended here, and one was, on 2026-08-17 — see *Instance 2* at the end. Read the whole entry
-> before quoting a count from its opening; the close report's §4.7 marker asks for the list, not
-> for this heading.
+> is appended here, and two have been — *Instance 2* (2026-08-17) and *Instance 3* (2026-08-18) —
+> so the statement below describes the FIRST instance only. Read the whole entry before quoting a
+> count from its opening; the close report's §4.7 marker asks for the list, not for this heading.
+> Count the `### Instance` headings rather than trusting this line, which has already been stale
+> once.
 
 **Statement.** The marketplace clone fast-forwarded off the candidate on 2026-08-15 20:26:24 KST
 (11:26:24Z): `pull origin HEAD: Fast-forward`, HEAD `94dd136 -> 3bd63d0`. Corroborated
@@ -323,6 +325,36 @@ unrelated verification pass, under the auto-heal mode the owner approved 2026-08
 gated to the case where clone-HEAD drift is the sole violation and every byte check passes. Both
 conditions held. It is recorded here as what it was — the standing mechanism working — rather than
 as remediation anyone chose.
+
+### Instance 3 — 2026-08-18, and the drift target stopped being our own commit
+
+**Statement.** The clone fast-forwarded off the candidate again on 2026-08-18 10:24:57Z
+(19:24:57 KST): `pull origin HEAD: Fast-forward`, HEAD `94dd136 -> 5c6e1c7`. Corroborated
+independently of the reflog by `known_marketplaces.json`'s `helix.lastUpdated`, which reads
+`2026-08-18T10:24:57.399Z` — the same second. Flags and environment unchanged and still not
+consulted, exactly as instances 1 and 2.
+
+**Byte continuity.** Unbroken, and MEASURED rather than assumed:
+`git diff 94dd136 5c6e1c7 -- bin/ .claude-plugin/ hooks/ data/` is empty, and all nine runtime
+surfaces verified byte-identical against the pin list under BOTH load paths before the heal. Same
+wording bound as before: **control/provenance deviation with continuous runtime bytes**.
+
+**What is new, and it widens the class rather than repeating it.** `5c6e1c7` is a MERGE COMMIT
+PUSHED BY THE SECOND CLONE (authored 2026-08-18 09:43:18 KST on the other machine). Instances 1 and
+2 drifted to commits this machine had itself pushed minutes or hours earlier, so their byte
+continuity could be reasoned about from what we had just written. This one drifted to a commit this
+machine had not yet fetched — at the moment of the pull, the development tree here was nine commits
+behind it. **So the marketplace clone can carry bytes onto a measured load path that no one on this
+box has seen**, and the continuity check stops being a formality: it is the only thing standing
+between another machine's push and the runtime under measurement. It held here — the nine commits
+touch `scripts/mutation-sweep.sh` and three test files and nothing else — but that is a fact about
+what the other clone happened to be doing, not a property of the control.
+
+**Healed** 2026-08-18 10:59:42Z, the sixth heal overall and the third of this window; off-pin
+interval 34 m 45 s. Per the note under instance 2, that number is not evidence the guard improved:
+the heal fired because an interactive session ran `freeze-runtime-check.sh` by hand while
+investigating, so it measures session activity, not detection latency. The three in-window
+intervals — 14 h 17 m, 1 h 22 m, 34 m 45 s — are a record of when a shell happened to open.
 
 ## Ruling R-2026-08-16 — two in-window edit classes ruled NOT a reset
 
@@ -433,3 +465,299 @@ written `egressPolicy` `block` never applied; a project store relocatable behind
 and then behind a symlinked `.helix`; the effective egress legs shown nowhere) and four documentation
 corrections where the shipped prose asserted the opposite of shipped behaviour. Each carries a test
 that drives the behaviour rather than reading the prose.
+
+## Disclosure R-2026-08-18 — in-window computation of the eligible-probe count
+
+**Disposition REQUESTED, not asserted.** This entry exists so the act is on the record whichever
+way it is ruled, and so the instant a reset reading would need is fixed before it evaporates.
+
+**What happened.** On 2026-08-18, six analysis passes computed the §5 eligible-probe count for this
+window by REIMPLEMENTING two frozen rules — `topicTerms` (`scripts/pilot/derive.ts`) and
+`unambiguous` (`scripts/pilot/generate-manifest.ts:161-165`) — in ephemeral Python over
+`~/dev/helix-dogfood/tinytask/.helix/memory.jsonl` and `~/.helix/memory.jsonl`. All six ran inside
+one orchestration, between **2026-08-18T10:51:48Z and 2026-08-18T10:58:05Z**; the last of them is
+therefore no later than `10:58:05Z`. No file was written into the repository, no program under
+`scripts/pilot/` was executed by them, and nothing derived from a rank, hit or ordering was read.
+
+**The same number, then taken by the authorised path.** At **2026-08-18T11:05:39Z** — after the
+last reimplementation — the FROZEN program was run in its holdout form,
+`generate-manifest --after <cutoff> --close <close> <snapshotDir> <out>`, against copies of the two
+ledgers staged in a scratch directory, with `--out` outside every close-chain path. It printed:
+
+```
+probes: 2 (ledger 2, oracle 0); unambiguous: 0
+```
+
+so the reimplementations produced no information the permitted path withholds.
+
+**The grounding for that run, corrected.** An earlier form of this entry rested it on §8's "the
+prepare phase … may be run at any time". That is imprecise: §9's ordering lists "manifest /
+candidate universe / classifier" and "prepare" as SEPARATE steps, so the phrase does not literally
+name `generate-manifest`. The run is still permitted, on the stronger and more direct ground —
+§8's positive permission ("Permitted: nothing derived from ranks") together with its closed
+forbidden list, none of whose three members occurred.
+
+**One question a reviewer raised and the record can settle.** Whether that run was the forbidden
+act — §8 forbids "running the pilot runner over window records" — turns on which program the
+"pilot runner" is. It is `scripts/pilot/run-pilot.ts`, whose header reads *"Pilot runner (protocol
+§execution, preregistration §9 item 5) … probes MemoryStore.recall at the manifest K"*. That
+program was NOT run. `generate-manifest.ts` is a different pinned tool and touches no recall.
+
+**The two readings, each with its best support.**
+
+*Not a reset.* §8's own usage of "the method's tooling" is visible in §9b, which names what it
+meant: the runner's payload/receipts split, and the freeze receipt, ordering receipt and release
+record, which "have no producer yet" — and says they must land before the freeze "since building
+them afterwards would resolve method choices". **Corrected 2026-08-18:** an earlier form of this
+sentence said every instance was a producer that DID NOT EXIST, and that is false for the first of
+the two bullets — the runner already existed ("It currently writes `{ k, results }`") and §9b
+requires modifying it. The surviving common property is narrower and is the one that matters: every
+instance ISSUES AN ARTIFACT OF THE §9 CHAIN. A disposable recomputation of an already-frozen rule
+issues no such artifact and resolves no choice. §8 additionally states that "Counting qualifying exposures during the window
+needs no special procedure", and the forbidden list is closed and was not touched.
+
+*A reset.* §8 says "Building **any** of the method's tooling after the freeze **does** reset it",
+without qualification. The Python implemented the actual eligibility metric and the actual
+topic-term rule, so it was the method's tooling on the plain reading; persistence, artifact
+production and execution in the close chain are not conditions the sentence states. The
+2026-08-13 ruling read that main clause as unconditional — the act of building triggers it whether
+or not the program is ever run — and the argument from the trailing clause ("because implementing
+an unspecified detail…") is the reading that ruling already rejected. Under this reading each
+separate reimplementation restarts the clock, and the anchor is the last one, `10:58:05Z` above.
+
+**Recorded because it is uncomfortable, not despite it:** an independent peer review of this
+question reached the *reset* conclusion, while the analysis that raised the disclosure reached the
+opposite. Both are set out above rather than one being presented as settled.
+
+**No operational change was made on the strength of the count.** The count is holdout content, and
+`pilot-amendment-1.md` forbids any product or remediation decision informed by the holdout's
+contents. The workload driver, its systemd units and the frozen rules are all untouched; the
+driver's sha256 is unchanged from before either window.
+
+### Why-log — the peer reconciliation behind this entry
+
+Recorded because the disagreements and how they resolved are the part no code or changelog keeps.
+The consultation was symmetric: one neutral question, an answer published before the call so the two
+were provably independent, then reconciliation against local evidence rather than by authorship.
+
+**Process note first, because it cost a call.** The initial question addressed files by
+repository-relative path. The external reasoner runs confined in an empty scratch directory with no
+project root, so those paths resolved to nothing and it declined to rule — *"the referenced files
+were not found… please remount the workspace"* — rather than guessing. That refusal is a correct
+response to bad addressing and is the only reason the addressing defect became visible. The question
+was re-sent with the governing text quoted verbatim and the predicate's source inlined.
+
+**Divergence 1 — the disposition itself. NOT RESOLVED, and it should not be.** The reviewer ruled
+RESET, on §8's unqualified "any" plus the 2026-08-13 unconditional reading. The analysis that raised
+the disclosure ruled NOT a reset, on §9b's own usage of "the method's tooling" and §8's express
+permission to count. Both readings are set out above with their evidence. This is a ruling, not a
+factual dispute, and no further exchange settles it — the owner does.
+
+**Divergence 2 — my argument, withdrawn.** The original no-reset case leaned on the trailing clause
+("because implementing an unspecified detail resolves a method choice") as a LIMITER on the main
+clause. The reviewer identified that as the reading the 2026-08-13 ruling had already rejected, and
+that is correct. The argument in this entry is therefore different: it rests on §9b's enumeration of
+what the document itself calls the method's tooling, all of which issue artifacts of the §9 chain.
+(An earlier form said "did not exist"; that is false for the runner bullet — see the correction in
+the disclosure above.)
+
+**Divergence 3 — "more rows cannot help". RESOLVED AGAINST ME.** The analysis claimed added rows
+could not raise eligibility, since each new row is also a new competitor. The reviewer pointed out
+that a new row is ALSO a candidate probe in its own right, so a topically distinct one can be
+eligible even though it cannot rescue an existing probe. Checked against the predicate, which is
+evaluated per probe: correct. Nine consecutive ineligible rows are evidence, not proof, and §5
+forbids turning such evidence into an accrual forecast in terms. The claim is withdrawn; the count
+is still to be evaluated at the close, from the close-day chain.
+
+**Divergence 4 — an open question the record could close.** The reviewer could not tell from the
+text whether the holdout-form run was the forbidden act, since §8 forbids "running the pilot runner
+over window records". Resolved locally: the pilot runner is `scripts/pilot/run-pilot.ts`, whose
+header reads *"Pilot runner … probes MemoryStore.recall at the manifest K"*, and it was not run.
+
+**Divergence 5 — why the workload driver may not be touched. CONVERGED BY DIFFERENT ROUTES.** The
+analysis reached it through the independence bullet (acting on holdout contents); the reviewer added
+that §8's first limb reaches it too, since "system" is not limited to what the receipt happens to
+map and the script functionally controls exposure accrual. The exemption question is moot: the
+action is barred on either route, and both agree it is barred.
+
+**Contributed by the reviewer and adopted:** under the reset reading each separate reimplementation
+restarts the clock, so the anchor is the LAST one — which is why this entry fixes that instant
+(`2026-08-18T10:58:05Z`) rather than leaving it to be reconstructed later.
+
+**Converged, independently, on the point that decides conduct:** permission to inspect is not
+permission to act. §8 allows the count; `pilot-amendment-1.md` forbids a remediation decision
+informed by holdout contents. Every candidate intervention — repairing the driver, changing its
+schedule or prompt, lowering the floor, hand-minting rows, or resetting because the number is
+unwelcome — fails on that, independently of how the disposition above is ruled.
+
+### DISPOSITION of R-2026-08-18 — NOT A RESET, ruled 2026-08-18
+
+**The ruling.** The six passes reimplemented two frozen RULES but built none of THE METHOD'S
+TOOLING, which in this document's own uses of the term denotes the programs that execute or issue
+evidence for the measured chain. The act produced no input to any chain step and changed nothing on
+the measured surface. The window stands; the close remains `2026-09-11T06:20:01.000Z`.
+
+**Who ruled, and the conflict, stated first because it is the reason to read the rest sceptically.**
+The party recording this disposition is the party that directed the work which performed the
+reimplementation. No clause of the frozen method names a determiner, creates recusal, or provides
+external adjudication — searched for, and there is none. Single-party operation is a PRE-REGISTERED
+standing condition of this pilot rather than a new defect: `pilot-protocol.md:38-43` already caps
+the exercise as "development evidence, not independent efficacy evidence… the same author and
+development process". The integrity claim therefore rests on procedure and record, not on an
+independent adjudicator — which is why everything below is written to be checked rather than
+believed.
+
+**The reasoning, and it turns on a distinction the 2026-08-13 ruling left open.** That ruling
+settled the sentence's MODALITY — "building alone triggers the reset whether or not the program is
+ever run". It did not settle its SCOPE: what the definite description "the method's tooling"
+denotes. The ruling itself shows the axis it closed, by naming the three arguments it rejected —
+the placement argument, the cannot-move-the-gate argument, and the chain-runs-without-it argument
+(close report §4.6). **All three concede the program IS the method's tooling and argue it is
+harmless.** This disposition denies class membership instead, which is the axis left open.
+
+The document answers the scope question itself. Every use of "tooling" in the preregistration
+denotes a program of the pinned measured or reporting chain, and the frozen surface carries its own
+gloss in a PINNED file — `pin-hashes.ts:145` "Every program the measured method runs", and `:162`
+"the boundary is 'decides a rank or issues the evidence'". Against that boundary the two acts
+separate, and the separator is not persistence:
+
+- `adjudication-skeleton.ts` wrote `--adjudication`, an input `score-gate.ts` REQUIRES and refuses
+  without. It was destined for the chain and now IS the chain, pinned as the 26th tool.
+- The Python produced a console number. No chain step takes it as input and none could. That would
+  remain true if the files were still on disk.
+
+**The cost of the wider reading, measured rather than asserted.** Read "the method's tooling" as any
+implementation of any frozen rule, however brief, and it reaches `test/pilot/derive.test.ts:7`,
+where a human executed the frozen rule by hand and wrote the expected list into an assertion. That
+collides head-on with the pinned file's own statement that a program which neither decides a rank
+nor issues evidence is "ordinary in-window test work" which criminalising "would protect nothing"
+(`pin-hashes.ts:176-179`). A reading that makes a pinned file's stated position unlawful is not the
+plain reading; it is a wider one.
+
+**The first limb disposed of separately, mechanically.** All 26 `payload.tools` blob ids and both
+`payload.methodDocs` sha256 values were recomputed against the receipt: 0 mismatches. The config
+hash equals `payload.config.sha256`. No metric changed, and no §9a-mandatory section was rewritten
+around a number — which is the exact condition under which the first limb WAS applied on 2026-08-16.
+
+**The dissent, answered rather than noted.** An independent reviewer ruled RESET on §8's unqualified
+"any" plus the 2026-08-13 precedent. That is rejected on the modality/scope distinction above: "any"
+quantifies over the method's tooling, and the question is what falls inside that noun. Its two
+supporting facts are UPHELD, as findings of conduct, and appear below.
+
+**Conduct findings, which the disposition does NOT clear.** The rule is cleared; the conduct is not,
+and the entry must not let the first do the work of the second.
+
+1. **The permitted path existed throughout and was not taken first.** `generate-manifest --after
+   <tx> --close <tx>` is the documented holdout form and produced the same count seven minutes
+   later. Building a second implementation was never necessary to exercise what §8 grants. The
+   ORDER was wrong: the auditable instrument should have run first.
+2. **This is the class this codebase flags as hazardous, done without the lock the codebase
+   requires.** Where a frozen rule is restated here the restatement is declared and its equivalence
+   pinned by a named test — `liveRows` (`generate-manifest.ts:70-75`) and `gitHashObject`
+   (`pin-hashes.ts:130-143`, "A blob id that only this program can reproduce would pin nothing an
+   outside reader could check"). Neither was done. And the port necessarily transcribed pinned
+   bytes: `pilot-protocol.md:127` specifies only "a fixed stopword list"; the 41 terms exist solely
+   in `derive.ts`.
+3. **It left an act no outside reader can audit.** Nothing persisted, so nothing can be checked.
+   By this project's own standard, non-persistence is WORSE for the record than persistence — the
+   2026-08-13 program at least left a blob that is now pinned. This disposition deliberately does
+   not rest on the throwaway property, because a reader cannot verify it.
+4. **The permitted run minted a manifest-shaped artifact out of chain order.** It carries this
+   window's bounds and is dated 2026-08-18. It lives in a session scratch directory outside the
+   repository and outside every close-chain path; its sha256 is
+   `d749286e8574776d803f1f58d5a53bd45627b5dc24a59131a73d8aa3ee8f4666`. Recorded so it can never be
+   confused at the close with the chain's manifest — §9 names exactly this shape in its threat
+   model.
+5. **Stated in the plainest available words:** the rule was read narrowly on one axis and the
+   window kept, by the party that would benefit.
+
+**What a stranger can check without trusting the ruler**, kept separate from the characterisation:
+the bounds `10:51:48Z`–`10:58:05Z`; that no file entered the repository (`4747b9b` touches two
+`docs/release/*.md` and nothing else, tree clean); that the forbidden act is `run-pilot.ts` and it
+did not run; the 11:05:39Z invocation and the sha256 above; and the 28-pin plus config verification
+with its 0-mismatch result. **Not reader-checkable, and said so:** the passes' internals and the
+non-persistence claim are attested, not auditable.
+
+**The anchor was fixed BEFORE the ruling, and that is the record's strongest feature.**
+`2026-08-18T10:58:05Z` was committed at `4747b9b` and pushed while the disposition was still open,
+so the reset reading's own restart point cannot have been chosen to suit the outcome.
+
+**Standing scope.** This covers an ad-hoc recomputation of an already-frozen rule that produces no
+input to any chain step. It does NOT license: editing any of the 28 pinned paths; rebuilding
+`bin/`; re-measuring a metric a §9a-mandatory section is then rewritten around; or **authoring a
+producer for any §9-chain artifact that lacks one — and one such gap is LIVE.** The close-bounded
+snapshot has no producer script (the run-sheet's C1 says "BY HAND. There is no producer script"), so
+writing a snapshot builder today resets this window under this very reading.
+
+**A second instance of the same class — ADJUDICATED the same day as `R-2026-08-18b` below, NOT left
+for the close.** `docs/issues/2026-08-12-home-pin-check.sh`
+was rewritten to v3 inside this window (its banner records that every expected value was replaced
+after the 2026-08-14 re-freeze; mtime 2026-08-17T14:05:10Z), and it is a hand-written second
+implementation of freeze-pin verification. It has never been put as an §8 question. The same rule
+must be applied to it and the answer recorded, or this ledger's reset history is incomplete. It does
+not move the anchor under a reset reading — `10:58:05Z` is later. Recorded here, against the ruler's
+interest, in the same breath as the narrowing, and disposed of in `R-2026-08-18b` — also NOT a
+reset, on the `D-2026-08-09` precedent rather than on argument.
+
+**Barred reasoning.** No part of this disposition leans on the VALUE of the eligible count. The
+grounds are the scope of a noun across the document's uses, §8's express permission and closed
+forbidden list, and a 0-mismatch measured-surface check — each identical whether the count is 0, 2
+or 20. The available argument "the two runs agreed, so no information was withheld" was DECLINED,
+because it is retrospective and contingent on holdout content; the prospective form is used instead:
+the information sought was information §8 permits obtaining at any time by an outcome-blind path,
+whatever it turned out to be. One passage in the supporting analysis did lean on the value (it
+argued the agreement is weak because 0 is a boundary value); it is discarded, and its conclusion is
+accepted only on the independent ground that the frozen run came second.
+
+### DISPOSITION R-2026-08-18b — the home-machine pin script's in-window rewrite, NOT A RESET
+
+**Raised against the ruler's own interest.** The disposition of `R-2026-08-18` named this as a
+second, unadjudicated instance of the same class. It is adjudicated here rather than left for the
+close, and by the same party, with the same conflict: the v3 re-anchoring was mine.
+
+**What it is.** `docs/issues/2026-08-12-home-pin-check.sh` — machine-local, gitignored, never
+tracked, 18,768 bytes, banner v3.2 dated 2026-08-17, sha256 `0b5b11b5f59586985f0ec5952b974c213e5c94dcb692645fe0fa2681d8c50ef2`.
+It is the operator's read-only verification of the SECOND machine's deployment: the one surface the
+close report says it "cannot re-derive from the measuring box" (§2.3). It was created 2026-08-12 —
+inside the FIRST window — and rewritten to v3 inside this one, because the re-freeze replaced every
+expected value it carries.
+
+**Read-only, measured rather than asserted.** The file contains no write, no `tee`, no `mkdir`,
+`rm`, `cp` or `mv`, and no `git reset`/`pull`/`checkout`/`clean`/`fetch`. Every redirection in it
+is `>/dev/null`. It reports to stdout and changes nothing.
+
+**Ruled NOT A RESET, on precedent rather than on argument.** `scripts/freeze-runtime-check.sh` was
+**created 2026-08-09, inside the first window** (commit `2fdc1ca`), is a verification program
+written from scratch during a measurement window, and its output — the heal log — is cited FOUR
+times by the §9a close report. This ledger's own `D-2026-08-09` entry disposed of it: "**No-reset
+determination.** A measurement-window reset is NOT required". That first window then ran four more
+days and was reset for the adjudication producer, **not** for the guard.
+
+The home-machine script is the same class and a weaker case for reset on every axis: it is
+read-only where the guard mutates a clone; it is untracked where the guard is committed; and it runs
+on a machine that executes no step of the chain. Applying the `R-2026-08-18` test directly — does it
+decide a rank, or issue an artifact of the §9 chain? — it decides no rank, and what it issues is an
+operator observation report, which stands to the §9a report exactly as the heal log does. That
+relationship was already ruled outside the clause.
+
+**Conduct findings, and they differ from the Python's — the two must not be lumped.**
+
+1. **This one is auditable, and that is the material difference.** `R-2026-08-18`'s heaviest conduct
+   finding was that nothing persisted, so no outside reader could check the act. Here the artifact
+   persists, carries a version banner, a recorded sha256 and a companion document, and can be
+   re-read by anyone the file is transferred to. By this project's own standard that is the right
+   shape, not the wrong one.
+2. **The v3 edit was not only a re-anchoring, and the record should not imply it was.** Beyond
+   replacing the candidate, window bounds, runtime pin hashes and the pin path list, it **removed a
+   decision branch** — the comparison of the pin ∩ changed set against a "known acceptable" set.
+   The reason is that the second window's known set is empty, so a branch comparing against an empty
+   expectation can only manufacture reassurance; the two remaining outcomes are "none" and "new
+   finding". That reasoning is the ruler's own and a reader should check it rather than accept it.
+3. **`R-2026-08-18`'s conduct finding 1 does NOT transfer.** There, a permitted frozen path existed
+   and was not taken first. Here there is none: no frozen tool verifies a second machine's
+   deployment, which is precisely why the report calls that surface non-re-derivable.
+
+**Standing scope.** This covers a read-only observation script, outside the repository, whose output
+the §9a report cites as verification evidence. It does not license writing a producer for any §9
+chain artifact — the close-bounded snapshot still has none, and writing one today would reset this
+window under the reading applied here.
