@@ -7,6 +7,16 @@ import { fileURLToPath } from 'node:url';
 export type Classification = 'claim' | 'procedure' | 'non-normative';
 export interface DocBlock { id: string; file: string; line: number; text: string }
 
+const PERMITTED: ReadonlySet<string> = new Set<string>(['claim', 'procedure', 'non-normative']);
+
+/**
+ * 허용되지 않은 분류 값을 가진 블록 ID를 반환한다. 오기가 있으면 그 블록은 세 부류
+ * 어디에도 속하지 않아 이후 청구 행 생성에서 조용히 탈락하므로, 키의 존재만으로는 부족하다.
+ */
+export function invalidClassifications(ledger: Record<string, string>): string[] {
+  return Object.entries(ledger).filter(([, v]) => !PERMITTED.has(v)).map(([k]) => k).sort();
+}
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const CLAIMS_PATH = join(ROOT, 'data', 'inventory', 'claims.json');
 

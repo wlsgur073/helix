@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { parseBlocks, unclassified, DOC_CORPUS, CLAIMS_PATH } from '../../scripts/inventory/classify-docs.js';
+import { parseBlocks, unclassified, invalidClassifications, DOC_CORPUS, CLAIMS_PATH } from '../../scripts/inventory/classify-docs.js';
 
 describe('document block parsing', () => {
   it('splits every corpus document into non-empty blocks', () => {
@@ -40,5 +40,20 @@ describe('classification ledger', () => {
     const blocks = parseBlocks('README.md');
     const partial = Object.fromEntries(blocks.slice(1).map((b) => [b.id, 'non-normative' as const]));
     expect(unclassified(blocks, partial).map((b) => b.id)).toEqual([blocks[0]?.id]);
+  });
+
+  it('every classification in the committed ledger is one of the three permitted values', () => {
+    const ledger = JSON.parse(readFileSync(CLAIMS_PATH, 'utf8')) as Record<string, string>;
+    expect(
+      invalidClassifications(ledger),
+      'the ledger carries a classification outside the permitted three',
+    ).toEqual([]);
+  });
+
+  // 음성 대조: 오기가 실제로 검출되는지. 이것이 없으면 위 사례는 검사기가 항상 빈 배열을
+  // 반환하는 경우에도 초록색이다.
+  it('reports a classification value that is not permitted', () => {
+    expect(invalidClassifications({ 'a#1': 'claim', 'b#2': 'clam', 'c#3': 'non-normative' }))
+      .toEqual(['b#2']);
   });
 });
