@@ -660,3 +660,42 @@ describe('README names the audit trail its erasure promise depends on', () => {
     expect(backupParagraph, `the backup section does not name \`${derived}\``).toContain('`' + derived + '`');
   });
 });
+
+// 배포 번들이 읽는 환경변수가 전부 README에 이름으로 나오는지. 사용자가 설정할 수 있고 동작을
+// 바꾸는데 문서에 없으면, 그 변수는 존재하지 않는 것처럼 보이면서 실제로는 작동한다. 이름을
+// 문서에서 베끼지 않고 배포된 번들에서 회수한다.
+describe('README names every environment variable the shipped bundles read', () => {
+  it('each HELIX_ variable recovered from bin/ appears in README', () => {
+    const bundles = ['bin/helix-mcp.mjs', 'bin/helix-trigger.mjs', 'bin/helix-rebaseline.mjs', 'bin/hooks/session-start.mjs', 'bin/hooks/session-end.mjs'];
+    const found = new Set<string>();
+    for (const b of bundles) {
+      for (const m of readFileSync(join(ROOT, b), 'utf8').matchAll(/process\.env\.(HELIX_[A-Z0-9_]*)/g)) {
+        const name = m[1];
+        if (name !== undefined) found.add(name);
+      }
+    }
+    expect(found.size, 'no HELIX_ variable was recovered — the scan is broken').toBeGreaterThan(1);
+
+    const readme = doc('README.md');
+    for (const name of [...found].sort()) {
+      // 단어 경계로 본다. `HELIX_SESSION`은 `HELIX_SESSIONS`의 접두사이므로, 부분 문자열
+      // 검사로는 후자만 문서화해도 전자가 통과한다.
+      expect(readme, `${name} is read by a shipped bundle but appears nowhere in README`)
+        .toMatch(new RegExp(name + '\\b'));
+    }
+  });
+
+  it('README discloses that the user API key is forwarded to the Codex child', () => {
+    // Helix의 손잡이가 아니라 Codex의 변수이지만, dual-verify가 그것을 자식에게 전달한다.
+    // 무엇이 기계 밖으로 나가는지 서술하는 절이 그 사실을 적어야 한다. 허용 목록에 실제로
+    // 들어 있는지를 소스에서 회수한다.
+    const codex = readFileSync(join(ROOT, 'src/verify/codex.ts'), 'utf8');
+    const allowlist = /CHILD_ENV_ALLOWLIST[^=]*=\s*\[([\s\S]*?)\]/.exec(codex)?.[1];
+    if (allowlist === undefined) throw new Error('CHILD_ENV_ALLOWLIST is no longer an array literal in codex.ts');
+    expect(allowlist, 'the API key is no longer forwarded — this disclosure would be stale')
+      .toContain('OPENAI_API_KEY');
+
+    expect(doc('README.md'), 'README does not name OPENAI_API_KEY among what reaches the Codex child')
+      .toContain('OPENAI_API_KEY');
+  });
+});

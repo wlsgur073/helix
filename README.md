@@ -112,6 +112,14 @@ file too — it is no longer inside `HELIX_HOME` — and repointing `HELIX_LEDGE
 ledger later presents the rollback witness with a file it has never seen, which reads as tamper until
 you re-bless the scope with the [re-baseline ceremony](./SECURITY.md).
 
+Two further variables the shipped code reads. Neither is something you normally set, but both take
+effect if you do, so they are listed rather than left silent.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `HELIX_SESSION` | `cli` | The session id stamped on each memory row's provenance and on the SessionEnd record. A label only — it moves no data and confers no trust. |
+| `HELIX_SESSIONS` | `<HELIX_HOME>/sessions.jsonl` | Where the SessionEnd hook appends its records. Like `HELIX_LEDGER`, it takes precedence over `HELIX_HOME`, so setting it puts that file outside the directory the backup and removal steps below name. |
+
 If you used `HELIX_LEDGER` before v0.1.0, an older build wrote the trust store beside the ledger
 instead. On that layout the server measures what starting would actually cost: it refuses to start
 only when a grade this ledger currently carries would be lost, and prints both directories and the
@@ -288,6 +296,14 @@ Helix is local-first. Installing it lets Claude Code run code on your machine �
   connection, which Helix never sees. The egress guard governs the payload Helix builds; it is not a
   sandbox around the CLI. If that residue matters for your data, run Codex under an OS-level sandbox
   or leave dual-verify off.
+- **What that constructed environment contains.** It is an allowlist, not an empty set — the CLI
+  cannot authenticate or reach the network without some of your variables, so those are forwarded
+  deliberately: `PATH`, `HOME`, `CODEX_HOME` and the `XDG_*` paths (this is how a `codex login`
+  session is found), the API-key variables **`OPENAI_API_KEY`, `CODEX_API_KEY` and
+  `OPENAI_BASE_URL`** (the other supported auth route), the proxy and CA variables, `TMPDIR`, the
+  locale, and a Windows platform block. Everything else in the server's environment is dropped.
+  `helix_codex_status` also reads whether `OPENAI_API_KEY` is set — its presence, never its value —
+  as a secondary signal when `codex login`'s own output does not say which route is in use.
 - **Blocked before sending:** an egress guard refuses the call if the payload contains a named provider credential (override-proof), a heuristic- or entropy-detected secret (blocked by default, per-leg overridable), high-severity or bulk PII, or a verbatim copy of a stored memory. One entropy subclass is **released** by default — a token whose stripped core is pure hex (git SHA, digest) or a chain of individually low-entropy segments, with no credential keyword in the same statement. Close it with the `secretEntropyExempt` leg; the write path redacts those bytes regardless. See [SECURITY.md](./SECURITY.md) for why the exemption exists.
 - **Refused rather than scanned:** the guard fails closed on size. A payload over 200,000 characters, or an aggregate ledger over 8,000,000 characters, is refused unscanned rather than sent — so a large enough call or a large enough ledger makes dual-verify unavailable, which is the intended failure direction.
 - **Logging:** off by default. The exact prompt/response are written to `~/.helix/codex-log.jsonl` (`0o600`) only if you set `dualVerify.logContent: true`; the audit log stays content-free regardless.
