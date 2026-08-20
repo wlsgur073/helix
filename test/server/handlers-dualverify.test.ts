@@ -131,6 +131,26 @@ describe('handleDualVerify', () => {
     expect(t).not.toContain('no divergences');
   });
 
+  it('a figure-clamped indeterminate never claims the aligner found no pairs (H1)', async () => {
+    // The second route to 'indeterminate' (agreement-map.ts PASS 3): the claims DID pair and the
+    // figure clamp withheld them. Every fixed sentence this branch prints is a statement about the
+    // comparison, so each one has to be true on THIS route too — before withheldPairs existed the
+    // renderer said "could not match claims" and "no claim pairs found by aligner" about a
+    // comparison that matched a claim pair and then declined to rule on it.
+    const d = deps({ runner: async () => ({ ok: true, answer: 'The retry limit is 30.' }) });
+    const res = await handleDualVerify({ question: 'q', helixAnswer: 'The retry limit is 3.' }, d);
+    const t = text(res);
+    expect(t).toContain('verdict: indeterminate (mode: compare)');
+    expect(t).toContain('\u2014 claims matched, but the figures inside them differ; read both answers');
+    expect(t).toContain('no agreements \u2014 the aligner withheld every claim pair it found');
+    expect(t).toContain('withheld claim pairs:');
+    expect(t).toContain('figures differ');
+    // The three statements that are true only on the zero-pair route must be absent here.
+    expect(t).not.toContain('no claim pairs found by aligner');
+    expect(t).not.toContain('could not match claims');
+    expect(t).not.toContain('unmatched claims:');
+  });
+
   it('a fully-discordant negated pair renders diverge with divergences, never the zero-pair aligner text', async () => {
     const d = deps({ runner: async () => ({ ok: true, answer: 'The migration is not safe to apply.' }) });
     const res = await handleDualVerify({ question: 'q', helixAnswer: 'The migration is safe to apply.' }, d);

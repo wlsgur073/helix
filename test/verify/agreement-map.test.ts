@@ -28,7 +28,13 @@ describe('agreement map', () => {
     );
     expect(map.verdict).toBe('diverge');
     expect(JSON.stringify(map)).toContain('IGNORE ALL PREVIOUS INSTRUCTIONS');
-    expect(Object.keys(map)).toEqual(['verdict', 'agreements', 'divergences']);
+    // FLIPPED 2026-08-20 (H1): `withheldPairs` joins the shape. The pin's PURPOSE is unchanged and is
+    // why it is updated rather than relaxed — it asserts an exact key list so that no future change
+    // can quietly return extra untrusted content to the caller. `withheldPairs` is a COUNT derived
+    // from the comparison, carrying no bytes from either answer, which is exactly what makes adding
+    // it compatible with the thing this test guards.
+    expect(Object.keys(map)).toEqual(['verdict', 'agreements', 'divergences', 'withheldPairs']);
+    expect(map.withheldPairs).toBe(0);
   });
 
   it('2026-07-26 specimen: same conclusion as prose paragraph vs bulleted list is indeterminate (zero pairs), every sentence preserved', () => {
@@ -513,6 +519,16 @@ describe('agreement map', () => {
     expect(m.divergences.length).toBeGreaterThan(0);
   });
 
+  it('a bare figure substitution can no longer render agree (H1)', () => {
+    const m = buildAgreementMap('The retry limit is 3.', 'The retry limit is 30.');
+    expect(m.verdict).toBe('indeterminate');
+    expect(m.divergences.join(' ')).toContain('3');   // the differing figures are NAMED
+  });
+  it('agreements that quote the SAME figures still agree', () => {
+    const m = buildAgreementMap('The retry limit is 3.', 'Yes — the retry limit is 3.');
+    expect(m.verdict).toBe('agree');
+  });
+
   it('keeps file paths, file:line cites and version numbers as single claims (H3: a period splits only before whitespace or end)', () => {
     const map = buildAgreementMap(
       'The fix belongs in src/verify/codex.ts:12 next to version 0.144.1.',
@@ -551,21 +567,39 @@ describe('agreement map', () => {
     expect(m.divergences).toHaveLength(0);
   });
 
-  it('open hole 4, caller-visible face: the contradicted claim is emitted INSIDE agreements while an unrelated sentence drives the verdict to diverge', () => {
-    // The lone-pair statement of the content-carried limit — "renders agree with an empty divergence
-    // list" — is the SINGLE-SENTENCE case, and stating it without that qualifier is false. Add one
-    // ordinary unpaired sentence and the verdict flips to 'diverge' for a reason that has nothing to
-    // do with the contradiction, which is then printed under `agreements:` by handlers.ts. The reader
-    // is steered AWAY from the real conflict by a tool that appears to have found a conflict, which is
-    // arguably worse than silent agreement: false confidence with a wrong pointer attached.
-    // Measured 2026-08-16; pinned so a future reader sees it was measured, not missed.
-    const m = buildAgreementMap(
+  // FLIPPED 2026-08-20 (H1), FIGURE HALF ONLY. The original fixture used a figure substitution, which
+  // the figure clamp now reaches: the contradicted claim leaves `agreements` and a note naming both
+  // figure sets takes its place, so the "wrong pointer" this pinned no longer exists for that class.
+  // The SHAPE it pinned is still open for every class the clamp cannot see, so the same assertion is
+  // re-made below over a polar-adjective contradiction — deleting it with the figure fixture would
+  // have dropped live coverage of an open hole, which is why both halves are kept.
+  it('the caller-visible face of a content-carried contradiction: closed for figures (H1), still open for classes the clamp cannot see', () => {
+    // Closed half. The verdict is still 'diverge' — driven by the genuinely unpaired sentence — but
+    // the contradicted claim is no longer offered to the reader as an agreement, and the figure note
+    // travels beside the real divergence instead of the claim being silently absorbed.
+    const figures = buildAgreementMap(
       'The retry limit is 3. The cache directory is purged on startup.',
       'The retry limit is 30.',
     );
-    expect(m.verdict).toBe('diverge');
-    expect(m.agreements).toEqual(['The retry limit is 3']);
-    expect(m.divergences).toEqual(['The cache directory is purged on startup']);
+    expect(figures.verdict).toBe('diverge');
+    expect(figures.agreements).toEqual([]);
+    expect(figures.divergences).toEqual([
+      'The cache directory is purged on startup',
+      'figures differ — "The retry limit is 3" cites 3; "The retry limit is 30" cites 30',
+    ]);
+    // Open half, measured 2026-08-16 and re-measured 2026-08-20: "safe" vs "dangerous" carries no
+    // negation morphology and no figure, so nothing in this module can see it. The verdict flips to
+    // 'diverge' for a reason that has nothing to do with the contradiction, which is then printed
+    // under `agreements:` by handlers.ts. The reader is steered AWAY from the real conflict by a tool
+    // that appears to have found a conflict — false confidence with a wrong pointer attached.
+    // Pinned so a future reader sees it was measured, not missed; not asserting desired behavior.
+    const adjectives = buildAgreementMap(
+      'The migration is safe to apply. The cache directory is purged on startup.',
+      'The migration is dangerous to apply.',
+    );
+    expect(adjectives.verdict).toBe('diverge');
+    expect(adjectives.agreements).toEqual(['The migration is safe to apply']);
+    expect(adjectives.divergences).toEqual(['The cache directory is purged on startup']);
   });
 
   it('open hole 2: a role swap with an IDENTICAL token set renders agree — there is no lexical difference to find', () => {
@@ -583,16 +617,63 @@ describe('agreement map', () => {
     expect(m.divergences).toHaveLength(0);
   });
 
-  it('open hole 2: a bare figure substitution renders agree — the suite could not see this class until now', () => {
-    // Kept separate from the role swap because it has the opposite property: here there IS a lexical
-    // difference to find ("3" vs "30"), so unlike the swap this class is at least reachable by a rule.
-    // That matters for a specific pending decision — splitting out token-visible differences inside a
-    // high-overlap pair. Before this case the file's 48 tests contained no instance of agreement across
-    // differing figures, so such a rule could be added, break real agreements that legitimately quote
-    // different numbers, and leave the suite entirely green. A change nothing can measure is not a
-    // change worth making; this is the case that makes the trade measurable. Measured 2026-08-16.
+  // FLIPPED 2026-08-20 (H1). This was hole 2's figure-substitution limit pin, asserting 'agree'. The
+  // pending decision its comment named — whether to split out token-visible differences inside a
+  // high-overlap pair — is now DECIDED: the figure clamp is that split, scoped to figures and units.
+  // The pin's own reasoning is why the decision could be taken at all. It was added on 2026-08-16
+  // precisely so the trade would be measurable, and the cost it warned about (breaking agreements
+  // that legitimately quote different numbers) is now bounded rather than hypothetical: the clamp
+  // never fires on a pair that quotes the SAME figures (asserted above), and when it does fire it
+  // withholds rather than accuses — 'indeterminate', not 'diverge'.
+  it('a bare figure substitution is withheld, not agreed: the clamp names both figure sets (H1)', () => {
     const m = buildAgreementMap('The retry limit is 3.', 'The retry limit is 30.');
-    expect(m.verdict).toBe('agree');
-    expect(m.divergences).toHaveLength(0);
+    expect(m.verdict).toBe('indeterminate');
+    expect(m.agreements).toEqual([]);
+    // The full note, not just a substring: a caller shown 'indeterminate' has to be able to read WHICH
+    // figures differ, and an assertion on the verdict alone cannot tell a named clamp from a silent one.
+    expect(m.divergences).toEqual([
+      'figures differ — "The retry limit is 3" cites 3; "The retry limit is 30" cites 30',
+    ]);
+    // The role-swapped direction the review also measured. Same clamp, sides exchanged.
+    const swapped = buildAgreementMap('The retry limit is 30.', 'The retry limit is 3.');
+    expect(swapped.verdict).toBe('indeterminate');
+    expect(swapped.divergences).toEqual([
+      'figures differ — "The retry limit is 30" cites 30; "The retry limit is 3" cites 3',
+    ]);
+  });
+
+  it('a UNIT substitution over the same number is withheld too — the unit travels with the figure (H1)', () => {
+    // The other row the limits header names under content-carried contradiction. "25" is identical on
+    // both sides, so a bare-number rule would miss this entirely; FIGURE_RE carries up to 8 following
+    // letters so "25 minutes" and "25 seconds" compare unequal.
+    const m = buildAgreementMap('The timeout is 25 minutes.', 'The timeout is 25 seconds.');
+    expect(m.verdict).toBe('indeterminate');
+    expect(m.divergences).toEqual([
+      'figures differ — "The timeout is 25 minutes" cites 25 minutes; "The timeout is 25 seconds" cites 25 seconds',
+    ]);
+  });
+
+  it('the clamp does not fire on a pair that quotes the same figures in a different ORDER or FORM', () => {
+    // Two ways the clamp could over-fire and turn a real agreement into an abstention, both pinned so
+    // the "never on the same figures" claim is measured rather than asserted: figures quoted in the
+    // other order (multiset equality is order-independent), and a sentence-final figure whose trailing
+    // punctuation the normalizer strips.
+    const reordered = buildAgreementMap(
+      'The limits are 3 retries and 25 minutes.',
+      'The limits are 25 minutes and 3 retries.',
+    );
+    expect(reordered.verdict).toBe('agree');
+    const punctuated = buildAgreementMap('The retry limit is 3.', 'The retry limit is 3, always.');
+    expect(punctuated.verdict).toBe('agree');
+  });
+
+  it('a figure on ONE side only is withheld, and the empty side is stated as "no figure"', () => {
+    // A missing figure is a difference in the multiset, so the clamp fires. The note has to say so
+    // rather than print an empty gap that reads like a rendering bug.
+    const m = buildAgreementMap('The retry limit is 3.', 'The retry limit is documented.');
+    expect(m.verdict).toBe('indeterminate');
+    expect(m.divergences).toEqual([
+      'figures differ — "The retry limit is 3" cites 3; "The retry limit is documented" cites no figure',
+    ]);
   });
 });

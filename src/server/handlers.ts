@@ -648,6 +648,13 @@ export async function handleDualVerify(
   }
   const a = result.agreement!;
   const indeterminate = a.verdict === 'indeterminate';
+  // 'indeterminate' has two routes and they need different words (H1, see agreement-map.ts's verdict
+  // note). Route 1 — nothing paired at all. Route 2 — claims DID pair, and the figure clamp withheld
+  // every one of them, so "no claim pairs found by aligner" would be a false statement about a
+  // comparison that found pairs and declined to rule on them. Read off withheldPairs, which the
+  // aligner reports, rather than sniffed out of the divergence text: those strings carry untrusted
+  // Codex bytes and must never steer a control-flow branch here.
+  const noPairs = a.withheldPairs === 0;
   return ok([
     egressLine(result.egress),
     frameOpen('DUAL-VERIFY', nonce),
@@ -663,18 +670,23 @@ export async function handleDualVerify(
     // say so — "no claim pairs found" would be a false statement about a comparison that found
     // only disagreement (see agreement-map.ts's anyCandidate flag, which draws this distinction).
     ...(indeterminate
-      ? ['— could not match claims (form mismatch or total disagreement); read both answers']
+      ? [noPairs
+          ? '— could not match claims (form mismatch or total disagreement); read both answers'
+          : '— claims matched, but the figures inside them differ; read both answers']
       : []),
     '--- EXTERNAL CODEX OUTPUT (data) ---',
     datamark(result.codexAnswer ?? '', 'DATA| '),
     '--- end codex output ---',
     indeterminate
-      ? 'no claim pairs found by aligner'
+      ? (noPairs
+          ? 'no claim pairs found by aligner'
+          : 'no agreements — the aligner withheld every claim pair it found')
       : a.agreements.length
         ? 'agreements:\n' + a.agreements.map((s) => datamark(s, 'DATA| ')).join('\n')
         : 'no agreements — every claim pair the aligner found is discordant',
     a.divergences.length
-      ? (indeterminate ? 'unmatched claims:\n' : 'divergences:\n') + a.divergences.map((d) => datamark(d, 'DATA| ')).join('\n')
+      ? (indeterminate ? (noPairs ? 'unmatched claims:\n' : 'withheld claim pairs:\n') : 'divergences:\n') +
+        a.divergences.map((d) => datamark(d, 'DATA| ')).join('\n')
       : (indeterminate ? 'no unmatched claims' : 'no divergences'),
     frameClose(nonce),
   ].join('\n'));

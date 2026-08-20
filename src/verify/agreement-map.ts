@@ -2,6 +2,14 @@ export interface AgreementMap {
   verdict: 'agree' | 'diverge' | 'indeterminate';
   agreements: string[];
   divergences: string[];
+  /** How many assigned pairs the figure clamp declined to rule on (H1, see PASS 3). Zero on every
+   *  pre-H1 shape. It exists because 'indeterminate' now has two routes that a caller CANNOT tell
+   *  apart from the other three fields — with a single withheld pair, `agreements` is empty and
+   *  `divergences` holds one entry, exactly like a one-sentence zero-pair comparison — and a caller
+   *  that explains the verdict has to say something different in each case or state a falsehood.
+   *  A count, not a flag re-derived from the note text: `divergences` carries untrusted answer bytes,
+   *  so any string test over it is a rule an adversary can aim at. */
+  withheldPairs: number;
 }
 
 /** Split an answer into trimmed claim-sentences, preserving original casing for display.
@@ -129,6 +137,43 @@ const UN_FORM_RE = new RegExp(String.raw`\bun-|\b(?:${UNPREFIXED_NEGATIONS.join(
  *  word characters, which never holds. `+` is kept because it says what is meant. */
 const COLLAPSE_GAP = String.raw`[\s*_~\u0060]+`;
 
+/** FIGURE TOKENS of a sentence, scanned on the RAW text (H1, 2026-08-20). Two reasons it cannot run
+ *  on tokenSet: tokenSet has by then shredded "codex.ts:12" and "0.144.1" into separate tokens, and
+ *  it is a SET, so "3" appearing twice on one side and once on the other would compare equal.
+ *  Shape: digits, then further digit runs joined by the separators that hold a figure together
+ *  (`,` `.` `:` — thousands, decimals, times and file:line cites), then an optional single space and
+ *  up to 8 letters or a `%` so the UNIT travels with the number ("25 minutes" vs "25 seconds" is a
+ *  substitution this must see). The bound is 8 because it is a unit-catcher, not a phrase-catcher —
+ *  it deliberately grabs the following word whether or not that word is a unit ("12 next" out of
+ *  "codex.ts:12 next to"), which costs nothing because both sides are normalized the same way and
+ *  only compared with each other.
+ *  A separator counts ONLY between digits. The looser `[\d,.:]*` this started as swallowed ordinary
+ *  sentence punctuation and the word after it, so "the retry limit is 3, always" yielded "3, always"
+ *  and did not match a plain "3" — the clamp fired on a pair that quotes the SAME figure, which is
+ *  exactly the false-'diverge' cost the limits header warned this rule could carry. Found by the
+ *  boundary test below, not reasoned about; that test is the guard on this bound.
+ *  Normalization is then only case plus whitespace shape ("30 Minutes" / "30\tminutes"): with the
+ *  separator tightened, a match can no longer END in punctuation, so nothing needs stripping. */
+const FIGURE_RE = /\d+(?:[.,:]\d+)*\s?[\p{L}%]{0,8}/gu;
+
+function figuresOf(s: string): string[] {
+  return (s.match(FIGURE_RE) ?? []).map((f) => f.toLowerCase().replace(/\s/g, ' '));
+}
+
+/** Render a figure list for the divergence note; an empty list is stated, never left blank. */
+function cites(figures: string[]): string {
+  return figures.length === 0 ? 'no figure' : figures.join(', ');
+}
+
+/** MULTISET equality, not set equality: an answer that says "3" twice does not agree with one that
+ *  says it once, and sorting is what makes order irrelevant without making count irrelevant too. */
+function sameFigures(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const x = [...a].sort();
+  const y = [...b].sort();
+  return x.every((v, k) => v === y[k]);
+}
+
 /** Genuinely-cancelling ADJACENT pair: a negator followed by an un- form with nothing but
  *  whitespace/inline markup between them ("not un-safe", "not unsafe", "not **unsafe**", "never
  *  un-X"). Only this shape reads as a cancelled double negation; markers that are merely CO-PRESENT
@@ -254,16 +299,24 @@ function negationPolarity(s: string): number {
  *           conflict and is pointed at the wrong sentence. That is hole (4) seen from the caller's
  *           side, and it is arguably worse than silent agreement; see the pinned multi-claim
  *           absorption test.
- *           Splitting out the token-VISIBLE corner (differing digits or identifiers inside a
- *           high-overlap pair) was considered 2026-08-16 and DEFERRED as unmeasurable rather than
- *           unsound: it reaches the figure and unit rows above but not the role swap, and it turns
- *           legitimate agreements that quote different numbers into false-'diverge'. The suite
- *           contained no case of agreement across differing figures, so it could not see that cost
- *           at all — every test stayed green either way. One was added the same day for exactly
- *           this reason, which is what makes the trade measurable next time. Note also that such a
- *           rule must run on the RAW sentence, as NEGATOR_RE already does: tokenSet has by then
- *           shredded "agreement-map.ts:130" into five tokens. See the "true antonym pair" and role
- *           swap tests for pinned examples.
+ *           THE FIGURE AND UNIT ROWS ARE NOW CLAMPED (H1, 2026-08-20); the rest of the list is not.
+ *           Splitting out the token-VISIBLE corner was considered 2026-08-16 and DEFERRED then as
+ *           unmeasurable rather than unsound — the suite held no case of agreement across differing
+ *           figures, so the rule's cost (turning legitimate agreements that quote different numbers
+ *           into false verdicts) could not be seen at all and every test stayed green either way.
+ *           One was added the same day for exactly that reason, and it is what made the decision
+ *           takeable. What shipped is narrower than the corner as stated: FIGURES AND UNITS ONLY,
+ *           not identifiers, and it WITHHOLDS rather than accuses — a pair whose figures differ
+ *           leaves `agreements`, contributes a note naming both figure sets, and clamps the verdict
+ *           to 'indeterminate' rather than 'diverge' (see PASS 3). That is what bounds the cost the
+ *           deferral was worried about: an agreement quoting different numbers now reads as an
+ *           abstention with both numbers printed, not as a manufactured conflict. The rule runs on
+ *           the RAW sentence, as NEGATOR_RE already does — by tokenSet, "agreement-map.ts:130" is
+ *           five tokens and a repeated figure has collapsed to one set member.
+ *           STILL OPEN, none of them token-visible in this way: polar adjectives ("safe" /
+ *           "dangerous"), quantifier and modality shifts ("every" / "some", "must" / "may"),
+ *           direction reversals ("before" / "after", "increases" / "decreases"), and the role swap.
+ *           See the "true antonym pair", role swap and caller-visible-face tests for pinned examples.
  *       (3) UN-BIT ATTACHMENT (re-derived 2026-08-12 after the two-bit change): bit 1 records that an
  *           un- form is PRESENT, not what it attaches to. The pair this hole used to be stated as —
  *           a separated cancellation "cannot be unsafe" agreeing with the genuine negation "cannot be
@@ -297,11 +350,20 @@ function negationPolarity(s: string): number {
  *           so on a set of near-equal candidates it can take a locally-best pair that forces a worse
  *           one later. That residue points at false-'diverge' (a mis-assigned pair reads as a
  *           divergence), the declared-safe direction here. See the pinned cross-pairing tests.
- * No lexical candidates ANYWHERE (jaccard is symmetric, so zero one way implies zero the other)
- * yields 'indeterminate': no comparability was established and no semantic relationship is
- * asserted (empty inputs included; they must not read as vacuous agreement). This is distinct from
- * having candidates that are all polarity-discordant — that IS comparability, and a genuine
- * finding, so it reads 'diverge', not 'indeterminate'.
+ * 'indeterminate' has TWO routes, and they mean the same thing at different depths — the module has
+ * established no relationship it is willing to report:
+ *   - No lexical candidates ANYWHERE (jaccard is symmetric, so zero one way implies zero the other):
+ *     no comparability at all (empty inputs included; they must not read as vacuous agreement).
+ *   - Every pair that survived polarity had its figures WITHHELD by the clamp (H1): comparability
+ *     was established, the relationship was not.
+ * Both are distinct from having candidates that are all polarity-discordant — that IS comparability
+ * AND a genuine finding, so it reads 'diverge'. A comparison carrying both a real divergence and a
+ * withheld pair reads 'diverge' too: the real finding outranks the abstention, and the withheld
+ * pair's note travels in `divergences` beside it either way.
+ * NOTE FOR CALLERS that branch on 'indeterminate' to explain themselves: the two routes are NOT
+ * distinguishable from the returned shape when the withheld pair is the only pair, so text reading
+ * "no claim pairs were found" is false on the second route. See server/handlers.ts, which words its
+ * abstention line to cover both.
  */
 export function buildAgreementMap(helixAnswer: string, codexAnswer: string): AgreementMap {
   const helix = sentences(helixAnswer);
@@ -351,32 +413,68 @@ export function buildAgreementMap(helixAnswer: string, codexAnswer: string): Agr
     partnerOfCodex[c.j] = c.i;
   }
 
-  // PASS 3 — CLASSIFY each assigned pair. An assigned pair agrees only when both sides share a
-  // negation polarity; an unassigned claim has no counterpart at all and is a one-sided divergence.
-  const helixAgrees = helix.map((_, i) => {
+  // PASS 3 — CLASSIFY each assigned pair. Three outcomes per claim, not two:
+  //   'divergent'      — unassigned (no counterpart at all), or assigned at opposite polarity.
+  //   'agreed'         — assigned, same polarity, and the two claims quote the same figures.
+  //   'figures-differ' — assigned and same polarity, but the figures inside them do NOT match (H1).
+  // The third is the FIGURE CLAMP. A figure substitution ("the retry limit is 3" / "is 30", "25
+  // minutes" / "25 seconds") moves neither polarity bit, so before this the pair counted as a plain
+  // agreement — the review's own repro. Note what the clamp does NOT claim: it cannot tell a
+  // contradiction from two claims that legitimately quote different numbers ("reduced from 10 to 3"
+  // beside "the limit is 3"), so it reports neither agreement nor conflict. It withholds the pair —
+  // the claims leave `agreements`, a note NAMING both figure sets enters `divergences`, and the
+  // verdict is clamped away from 'agree'. Deliberately NOT recorded as an ordinary divergence: doing
+  // so would drive the verdict to 'diverge' and assert a conflict this module has no evidence for,
+  // which is the same over-claiming, in the other direction, that H1 is about.
+  type ClaimStatus = 'agreed' | 'divergent' | 'figures-differ';
+  const helixStatus = new Array<ClaimStatus>(helix.length).fill('divergent');
+  const codexStatus = new Array<ClaimStatus>(codex.length).fill('divergent');
+  const figureNotes: string[] = [];
+  for (let i = 0; i < helix.length; i++) {
     const j = partnerOfHelix[i]!;
-    return j >= 0 && helixPolarity[i]! === codexPolarity[j]!;
-  });
-  const codexAgrees = codex.map((_, j) => {
-    const i = partnerOfCodex[j]!;
-    return i >= 0 && codexPolarity[j]! === helixPolarity[i]!;
-  });
+    if (j < 0) continue;
+    if (helixPolarity[i]! !== codexPolarity[j]!) continue;
+    const helixFigures = figuresOf(helix[i]!);
+    const codexFigures = figuresOf(codex[j]!);
+    if (sameFigures(helixFigures, codexFigures)) {
+      helixStatus[i] = 'agreed';
+      codexStatus[j] = 'agreed';
+      continue;
+    }
+    helixStatus[i] = 'figures-differ';
+    codexStatus[j] = 'figures-differ';
+    // Both claims and both figure sets go in the note: the figures are what differ, but the caller
+    // needs the sentences to judge whether the difference is a conflict. A side that quotes no
+    // figure at all reads "cites no figure" rather than an empty gap.
+    figureNotes.push(
+      `figures differ \u2014 "${helix[i]}" cites ${cites(helixFigures)}; "${codex[j]}" cites ${cites(codexFigures)}`,
+    );
+  }
 
-  const agreements = helix.filter((_, i) => helixAgrees[i]);
-  const divergences = [
-    ...helix.filter((_, i) => !helixAgrees[i]),
-    ...codex.filter((_, j) => !codexAgrees[j]),
+  const agreements = helix.filter((_, i) => helixStatus[i] === 'agreed');
+  // Withheld pairs are NOT here — that is what keeps them out of the 'diverge' branch below.
+  const trueDivergences = [
+    ...helix.filter((_, i) => helixStatus[i] === 'divergent'),
+    ...codex.filter((_, j) => codexStatus[j] === 'divergent'),
   ];
+  const divergences = [...trueDivergences, ...figureNotes];
 
   // Zero candidates is a failure to COMPARE, not a finding of disagreement (2026-07-26 dogfood
   // specimen: a prose paragraph vs a bulleted list reaching the same conclusion paired nothing
   // and rendered 'diverge'). With no anchor the heuristic has no evidence for agree OR diverge.
   // Candidates that exist but are all polarity-discordant DO have evidence — hence branching on
   // anyCandidate, not on agreements.length as the pre-polarity version did.
+  // A withheld figure pair is the SECOND route to 'indeterminate' and it is deliberate: comparability
+  // was established (the claims paired) but the relationship was not (see the clamp above). It ranks
+  // BELOW a true divergence — a comparison carrying both a real divergence and a withheld pair reads
+  // 'diverge', because the real finding is the one the caller must act on, and the note travels with
+  // it in `divergences` either way.
   const verdict: AgreementMap['verdict'] = !anyCandidate
     ? 'indeterminate'
-    : divergences.length === 0
-      ? 'agree'
-      : 'diverge';
-  return { verdict, agreements, divergences };
+    : trueDivergences.length > 0
+      ? 'diverge'
+      : figureNotes.length > 0
+        ? 'indeterminate'
+        : 'agree';
+  return { verdict, agreements, divergences, withheldPairs: figureNotes.length };
 }
