@@ -169,6 +169,29 @@ describe('Task 7 — read-side witness enforcement', () => {
       } finally { rmSync(home, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
     });
 
+    it('recall: GLOBAL excluded, project still scored against its OWN tokens (N2-BM25-DUP.d)', () => {
+      // Head-removal is the untested direction: recallInput pushes global FIRST, so excluding global
+      // shifts every position. If the artifacts are not rebuilt, the served project row is paired
+      // with the global row's tokens and no longer matches the query that names it.
+      const home = newHome();
+      const root = mkdtempSync(join(tmpdir(), 'helix-dupd-proj-'));
+      mkdirSync(join(root, '.helix'), { recursive: true });
+      const projLedger = join(root, '.helix', 'memory.jsonl');
+      let n = 0;
+      const store = new MemoryStore(join(home, 'memory.jsonl'), {
+        home, sessionId: 't', now: () => FIXED, genId: () => `m_${++n}`,
+        project: { ledger: projLedger, root },
+      });
+      try {
+        store.commit({ content: 'unrelated filler nothing here', scope: 'global', source: 'user' });
+        const pj = store.commit({ content: 'projectword sentinel keepme', scope: 'project', source: 'user' });
+        plantInterrupted(home, scopeKeyOf(home), join(home, 'memory.jsonl'), '2026-07-18T00:05:00.000Z'); // the global key, exactly as this file's global cases (:265, :305) plant it
+        const res = store.recall('projectword');
+        expect(res.witnessNotes).toContain(WITNESS_TRANSITION_NOTE);
+        expect(res.items.find((i) => i.record.id === pj.id), 'the project row must be scored with its own tokens, not the excluded global row\'s').toBeDefined();
+      } finally { rmSync(home, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+    });
+
     it('currentView / historyView / asOfView all exclude the interrupted project scope, global survives', () => {
       const { store, home, root, globalId, projectId } = twoScopeInterruptProject();
       try {
