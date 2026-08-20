@@ -184,12 +184,15 @@ function negationPolarity(s: string): number {
 
 /**
  * Compare Helix's answer with Codex's. Both are DATA: this only inspects and reports, it never
- * interprets either side as instructions. Pairing and classification are separate passes
- * (pair-then-classify): a claim on one side is a lexical CANDIDATE for a claim on the other side
- * when their content-token overlap clears SENTENCE_SIM; among its candidates, a claim AGREES only
- * with ones sharing its negation polarity — a lexical candidate at opposite polarity (e.g. "is safe"
- * vs "is not safe") is a divergence, not an agreement, even though the words otherwise overlap
- * heavily. Original casing is preserved in the lists so the user sees exactly what each side said.
+ * interprets either side as instructions. Scoring, assignment and classification are three separate
+ * passes: a claim on one side is a lexical CANDIDATE for a claim on the other side when their
+ * content-token overlap clears SENTENCE_SIM; candidates are then ASSIGNED ONE-TO-ONE, greedily over
+ * the similarity ranking, so each claim has at most one counterpart; and an assigned pair AGREES
+ * only when both sides share a negation polarity — an assigned pair at opposite polarity (e.g. "is
+ * safe" vs "is not safe") is a divergence, not an agreement, even though the words otherwise overlap
+ * heavily. Assignment is what stops a claim from borrowing agreement off a counterpart that belongs
+ * to some other claim (H1, see hole (4) below). Original casing is preserved in the lists so the
+ * user sees exactly what each side said.
  * v1 used a richer claim extractor's place-holder (verbatim-sentence overlap); this is still a
  * heuristic, and a coarse one, wrong in BOTH directions — both are load-bearing for the caller to
  * know about, not just the quieter one:
@@ -279,17 +282,21 @@ function negationPolarity(s: string): number {
  *           under the whitespace-only rule that predates the gap class. That is a complement-attachment
  *           hole of the same family as this one, not a character-class problem, and narrowing the class
  *           cannot close it. See the pinned un-bit residue test and the round-2 residual test.
- *       (4) CROSS-PAIRING (measured 2026-08-12, PRE-EXISTING and structural — the polarity work did
- *           not introduce or change it): polarity is judged per SENTENCE, but agreement is an OR over
- *           every lexical candidate, so a claim counts as agreed if ANY same-polarity candidate exists
- *           — not necessarily the one it actually corresponds to. In a multi-claim answer whose claims
- *           are parallel and differ by one noun, each claim can pair with the WRONG sentence on the
- *           other side: "The lock is safe. The sweep is not safe." vs "The lock is not safe. The sweep
- *           is safe." contradicts on BOTH claims yet renders 'agree' with an EMPTY divergence list,
- *           because claim 1 finds its match in the other side's claim 2 and vice versa. Fixing this is
- *           a pairing-strategy change (best-match assignment rather than any-match), which is its own
- *           design with its own measurement — recorded here rather than half-done. See the pinned
- *           cross-pairing test.
+ *       (4) CROSS-PAIRING — CLOSED 2026-08-20 by the one-to-one assignment pass (H1); kept here with
+ *           its history because the closure is what the two passes above now depend on. Measured
+ *           2026-08-12 and PRE-EXISTING then (the polarity work neither introduced nor changed it):
+ *           polarity was judged per SENTENCE while agreement was an OR over every lexical candidate,
+ *           so a claim counted as agreed if ANY same-polarity candidate existed — not necessarily the
+ *           one it actually corresponded to. In a multi-claim answer whose claims are parallel and
+ *           differ by one noun, each claim paired with the WRONG sentence on the other side: "The
+ *           lock is safe. The sweep is not safe." vs "The lock is not safe. The sweep is safe."
+ *           contradicts on BOTH claims yet rendered 'agree' with an EMPTY divergence list, because
+ *           claim 1 found its match in the other side's claim 2 and vice versa. Assignment consumes
+ *           each claim at most once, so both pairs now stand on their true counterparts and both are
+ *           polarity-discordant. WHAT IS NOT CLOSED: assignment is GREEDY, not an optimal matching,
+ *           so on a set of near-equal candidates it can take a locally-best pair that forces a worse
+ *           one later. That residue points at false-'diverge' (a mis-assigned pair reads as a
+ *           divergence), the declared-safe direction here. See the pinned cross-pairing tests.
  * No lexical candidates ANYWHERE (jaccard is symmetric, so zero one way implies zero the other)
  * yields 'indeterminate': no comparability was established and no semantic relationship is
  * asserted (empty inputs included; they must not read as vacuous agreement). This is distinct from
@@ -304,35 +311,56 @@ export function buildAgreementMap(helixAnswer: string, codexAnswer: string): Agr
   const helixPolarity = helix.map(negationPolarity);
   const codexPolarity = codex.map(negationPolarity);
 
+  // PASS 1 — SCORE. Every (helix claim, codex claim) whose content-token overlap clears the bar is
+  // a lexical CANDIDATE. `>=` is a PINNED boundary, not an incidental choice: a jaccard sitting
+  // exactly on SENTENCE_SIM is a candidate, and `>` drops such a comparison all the way to
+  // 'indeterminate' without any other visible symptom (see the exactly-0.5 test).
+  const candidates: { i: number; j: number; sim: number }[] = [];
+  for (let i = 0; i < helix.length; i++) {
+    for (let j = 0; j < codex.length; j++) {
+      const sim = jaccard(helixTok[i]!, codexTok[j]!);
+      if (sim >= SENTENCE_SIM) candidates.push({ i, j, sim });
+    }
+  }
   // anyCandidate tracks whether the aligner found ANY lexical pairing, independent of polarity —
   // this is what 'indeterminate' actually means (no anchor at all). agreements.length alone can no
   // longer stand in for that: a fully polarity-discordant comparison now leaves agreements empty
   // while still having found (and rejected) every candidate, which is a 'diverge', not an abstention.
-  let anyCandidate = false;
-  const agreesWithPool = (
-    tok: Set<string>,
-    polarity: number,
-    // A mutation sweep (2026-08-12, TARGETS=this file) reported `>` -> `>=` on the next line as its one
-    // SURVIVOR. It is EQUIVALENT, proved rather than assumed: the sweep rewrites the FIRST `>` on the
-    // line, which is the generic's closing bracket, so `Set<string>[]` becomes `Set<string>=[]` — still
-    // valid TypeScript, but as a DEFAULT PARAMETER VALUE, compiling to `poolTok = []`. Both call sites
-    // below pass poolTok explicitly, so the default is never taken and no observable behaviour changes.
-    // No test can kill it; it is not a coverage gap and is not re-reported.
-    poolTok: Set<string>[],
-    poolPolarity: number[],
-  ): boolean => {
-    let agree = false;
-    for (let j = 0; j < poolTok.length; j++) {
-      if (jaccard(tok, poolTok[j]!) >= SENTENCE_SIM) {
-        anyCandidate = true;
-        if (polarity === poolPolarity[j]) agree = true;
-      }
-    }
-    return agree;
-  };
+  // Read off the candidate list rather than off the ASSIGNMENT below, and the two are equivalent
+  // anyway: the top-ranked candidate always assigns, since nothing is taken when it is considered.
+  const anyCandidate = candidates.length > 0;
 
-  const helixAgrees = helix.map((_, i) => agreesWithPool(helixTok[i]!, helixPolarity[i]!, codexTok, codexPolarity));
-  const codexAgrees = codex.map((_, j) => agreesWithPool(codexTok[j]!, codexPolarity[j]!, helixTok, helixPolarity));
+  // PASS 2 — ASSIGN, one-to-one (H1, 2026-08-20). Until this pass existed, agreement was an OR over
+  // every candidate, so a claim counted as agreed if ANY same-polarity candidate existed anywhere on
+  // the other side — not necessarily the claim it actually corresponds to. Two parallel claims that
+  // differ by one noun could therefore each pair with the OTHER one's counterpart and cancel out:
+  // 'The lock is safe. The sweep is not safe.' vs 'The lock is not safe. The sweep is safe.'
+  // contradicts on both claims and rendered 'agree' with an EMPTY divergence list. Greedy over the
+  // similarity ranking with each claim consumed at most once is what closes it; the tie-break is
+  // input order (i, then j) so that equal-scoring candidates resolve identically on every run.
+  // This is an ASSIGNMENT heuristic, not an optimal matching — greedy can pick a locally-best pair
+  // that forces a worse global one. That direction is the safe one here (a mis-assigned pair reads
+  // as a divergence, not as agreement), and an optimal matching would need a different algorithm
+  // than a defensible verdict heuristic warrants.
+  candidates.sort((a, b) => b.sim - a.sim || a.i - b.i || a.j - b.j);
+  const partnerOfHelix = new Array<number>(helix.length).fill(-1);
+  const partnerOfCodex = new Array<number>(codex.length).fill(-1);
+  for (const c of candidates) {
+    if (partnerOfHelix[c.i] !== -1 || partnerOfCodex[c.j] !== -1) continue;
+    partnerOfHelix[c.i] = c.j;
+    partnerOfCodex[c.j] = c.i;
+  }
+
+  // PASS 3 — CLASSIFY each assigned pair. An assigned pair agrees only when both sides share a
+  // negation polarity; an unassigned claim has no counterpart at all and is a one-sided divergence.
+  const helixAgrees = helix.map((_, i) => {
+    const j = partnerOfHelix[i]!;
+    return j >= 0 && helixPolarity[i]! === codexPolarity[j]!;
+  });
+  const codexAgrees = codex.map((_, j) => {
+    const i = partnerOfCodex[j]!;
+    return i >= 0 && codexPolarity[j]! === helixPolarity[i]!;
+  });
 
   const agreements = helix.filter((_, i) => helixAgrees[i]);
   const divergences = [

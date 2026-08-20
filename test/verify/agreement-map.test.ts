@@ -477,24 +477,40 @@ describe('agreement map', () => {
     expect(m.verdict).toBe('agree');
   });
 
-  it('I3: parallel claims can pair with the WRONG sentence on the other side, so mutual contradiction reads agree (open hole 4)', () => {
-    // PRE-EXISTING and structural: the polarity work neither introduced nor changed this. Polarity is
-    // judged per sentence, but agreement is an OR over every lexical candidate — a claim counts as
-    // agreed if ANY same-polarity candidate exists, not necessarily its true counterpart. Here every
-    // claim is contradicted, yet claim 1 finds its same-polarity match in the other side's claim 2
-    // (jaccard("the lock is safe", "the sweep is safe") = 3/5 = 0.6, both unnegated) and claim 2
-    // likewise. The divergence list comes out EMPTY, which is the dangerous part: the caller sees
-    // consensus with nothing to read. Fixing it means changing the pairing strategy from any-match to
-    // best-match assignment — its own design change with its own measurement, deliberately NOT done
-    // here. Pinned so a future reader sees this was measured, not missed; it is not asserting desired
-    // behavior.
+  // FLIPPED 2026-08-20 (H1). This was I3's limit pin for open hole 4: it asserted 'agree' with an
+  // EMPTY divergence list on a pair that contradicts on BOTH claims, because agreement was an OR over
+  // every lexical candidate — claim 1 found its same-polarity match in the other side's claim 2
+  // (jaccard("the lock is safe", "the sweep is safe") = 3/5 = 0.6, both unnegated) and claim 2
+  // likewise. The old expectation depended entirely on that double assignment, so the one-to-one
+  // assignment pass is what changes the answer: it is now a CORRECTNESS pin, and the fixture is kept
+  // BYTE-IDENTICAL to the limit pin it replaces so the two readings are directly comparable. The
+  // assignment it produces is asserted, not just the verdict — 'diverge' alone would also be
+  // satisfied by an aligner that paired nothing at all.
+  it('I3 closed: parallel claims are assigned one-to-one, so mutual contradiction no longer reads agree (H1)', () => {
     const m = buildAgreementMap(
       'The lock is safe. The sweep is not safe.',
       'The lock is not safe. The sweep is safe.',
     );
-    expect(m.verdict).toBe('agree');
-    expect(m.divergences).toHaveLength(0);
-    expect(m.agreements).toEqual(['The lock is safe', 'The sweep is not safe']);
+    expect(m.verdict).toBe('diverge');
+    expect(m.agreements).toHaveLength(0);
+    // lock<->lock and sweep<->sweep both score 0.8 and both assign; each pair is polarity-discordant,
+    // so all four claims surface. The caller now has every contradicted claim in front of them.
+    expect(m.divergences).toEqual([
+      'The lock is safe',
+      'The sweep is not safe',
+      'The lock is not safe',
+      'The sweep is safe',
+    ]);
+  });
+
+  it('cross-pairing cannot manufacture agreement: sentences are assigned one-to-one (H1)', () => {
+    const m = buildAgreementMap(
+      'The lock is safe. The sweep is not safe.',
+      'The lock is not safe. The sweep is safe.',
+    );
+    // Best-match assignment pairs lock↔lock and sweep↔sweep; both pairs then differ in polarity.
+    expect(m.verdict).not.toBe('agree');
+    expect(m.divergences.length).toBeGreaterThan(0);
   });
 
   it('keeps file paths, file:line cites and version numbers as single claims (H3: a period splits only before whitespace or end)', () => {
