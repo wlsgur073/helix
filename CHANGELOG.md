@@ -1,9 +1,9 @@
 # Changelog
 
-All notable changes to Helix are documented here. This project follows
+This file records what shipped in each release of Helix. It follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0]
 
 ### Added
 - Trust-indexed, verifiable cross-session memory: an append-only JSONL ledger with a
@@ -190,244 +190,21 @@ All notable changes to Helix are documented here. This project follows
   requires a typed confirmation, and holds the ledger lock from that display through the commit.
   It is deliberately not an MCP tool: no agent-suppliable parameter can invoke it, and nothing
   invokes it automatically.
-
-### Changed
-- `dualVerify.timeoutMs` is now clamped to a 1-hour maximum. A valid integer ≥ 1s is accepted
-  and capped at 1h; previously a value above Node's `setTimeout` 32-bit ceiling fell back to the
-  default. The Codex runner also hard-clamps the timeout at its boundary, so no run can exceed 1h.
-- Codex dual-verify scratch directories are now created under a single `<temp>/helix/` folder
-  instead of `helix-codex-*` scattered across the temp root, so scratch left behind by a cleanup
-  race collects in one easily-purged place.
-- Secret detection gains a `heuristic` confidence tier: the broad keyword-assignment matcher
-  (`pass:`/`secret:`/`api_key:` + value) is no longer override-proof at the dual-verify egress
-  guard — it still redacts on the write path, but its egress block is now policy-overridable.
-- Secret detection: the `entropy` catch-all no longer **egress-blocks** a pure-hex literal (git SHA,
-  content digest, hex keyId) at the dual-verify guard — it still redacts on the write path, but a bare
-  hex token in security-design prose no longer wedges `helix_dual_verify`. A credential keyword in the
-  same statement (e.g. `secret <hex>`) keeps the block, and rich-alphabet (base62/64) tokens are
-  unaffected. Release the residual via `dualVerify.egressPolicy.secretEntropy: 'allow'` as before.
-- **Breaking config replacement:** `dualVerify.memoryEgress` (single `block`/`allow`) is replaced
-  by `dualVerify.egressPolicy`, a per-leg map (`memoryEcho` / `piiHigh` / `piiBulk` /
-  `secretHeuristic` / `secretEntropy`), each defaulting to `block`. Provider-format secrets stay
-  override-proof. A leftover `memoryEgress` key is ignored with a startup warning.
-- **Breaking audit schema change:** `audit.jsonl`'s `blockedLeg` field is replaced by `decidedLeg` +
-  `releasedLegs` — the old key conflated "the leg that decided the call" with "the leg that would
-  otherwise have blocked it," so a policy-released block was indistinguishable from a leg that never
-  fired. Anyone parsing `audit.jsonl` directly is affected. Existing rows are **not** rewritten (the
-  audit log is append-only history) — they keep the legacy `blockedLeg` key; only new rows carry
-  `decidedLeg`/`releasedLegs`.
-
-### Removed
-- `dualVerify.effort: 'minimal'`. The CLI still parses it, but no model in `codex debug models`
-  advertises it, so the API rejects it after the metered call is already spent.
-
-### Fixed
-- **An elevated `verify` is refused while a scope's rollback alarm stands.** A `mismatch` verdict
-  clamped what reads *displayed* but never what the write path *minted*, and a signed verify records
-  nothing about the verdict it was minted under — so one signed during an alarm was indistinguishable
-  from an honest one afterwards. Two things made that decisive rather than untidy: `--asOf` is
-  deliberately not clamped, so it served the new grade immediately, and the re-baseline ceremony
-  adopts the current bytes wholesale, so the operator's own documented recovery promoted it
-  everywhere. The refusal happens before anything is appended, so the ledger and the witness are both
-  left untouched and the alarm survives. Deliberately narrow: ordinary commits, soft erases and
-  reality-check **demotions** still land under the same verdict — a scope under suspicion must stay
-  able to record that something failed. It keys on the record rather than the caller's operation
-  label, because `signVerify` does not itself assert the record type.
-- **The `--asOf` view no longer claims a clamp it does not perform.** That surface preserves
-  historical grades on purpose, but it rendered the live path's note verbatim — "elevated grades are
-  clamped to Fresh" — while serving `Verified`. It now carries its own wording. The live surfaces are
-  unchanged, where that sentence is still true. Known limit: a *library* caller reading
-  `asOfView().witnessNotes` still receives the generic wording; only the tool surface is corrected.
-- **A fact id is now owned by the first ledger row that claims it**, so a row appended with an
-  existing id is inert. A signed `verify` binds only `(id, contentDigest)`, so a duplicate row with
-  the same id and content satisfied it as well as the row it was signed for — and rode the grade up
-  carrying the appending writer's `provenance`, `classification` and validity bounds, none of which
-  any MAC covers. Ownership is decided by file position, not `tx` or `gen`: a non-`verify` row
-  carries no MAC at all, so those fields are attacker-chosen, while getting in front of the genuine
-  row requires rewriting the witnessed prefix, which the rollback witness reports as `mismatch`.
-  Ownership is resolved over the whole ledger *before* the `--asOf` window is applied — a duplicate
-  dated into the past would otherwise be the only claimant of its id inside that window, and a v1
-  `verify` supplies the matching signature for free because `macInputV1` never bound `tx`. No effect
-  on any ledger Helix wrote: ids are `randomUUID`-derived and updates mint a new id carrying
-  `supersedes`. A duplicate id is still reported as a history anomaly, and compaction now keeps the
-  genuine row rather than the appended one.
-- **The content digest a `verify` signs is now injective.** It hashed the UTF-8 encoding of the
-  content, and that encoding replaces every lone surrogate with U+FFFD — so unboundedly many
-  distinct contents shared one digest and could be swapped under a signed grade, including
-  well-formed substitutes. Well-formed content hashes exactly as before, so every previously signed
-  `verify` still applies; ill-formed content is bound over a domain-separated UTF-16LE image
-  instead. A pre-existing grade signed over ill-formed content stops applying and its row falls back
-  to `Fresh` — deliberately fail-closed.
-- A witnessed rewrite that fails before its first byte lands no longer strands the scope. Both
-  rewrite paths — the re-baseline ceremony and witnessed compaction — publish a write-ahead witness
-  journal and only then touch the ledger, so a refusal in between (an unwritable ledger file, a
-  failed rename, an orphan-tmp sweep error) used to leave a pending journal over unchanged bytes:
-  `transition-interrupted`, where reads exclude the scope and writes throw, until an operator re-ran
-  a ceremony. The failing writer is the one party that can prove nothing landed — it holds the
-  ledger lock continuously and re-reads the unchanged bytes under it — so it now retracts its own
-  journal (a new witness-store retract operation, keyed on the journal's random nonce and logged to
-  the witness log before the slot clears). Two states deliberately get no retraction. A crashed
-  writer: from disk alone, "bytes match the pre-transition state" cannot distinguish a rewrite that
-  never started from one that landed and was rolled back, so that stays `transition-interrupted` —
-  the conservative verdict — by design. And a rewrite that superseded a still-pending journal: the
-  journal slot holds one transition at a time, so the predecessor's evidence is already gone and
-  clearing the slot would delete an alarm this writer cannot vouch for rather than restore anything.
-  Such a failure leaves the journal pending for a re-drive to supersede, exactly as before.
-- `bench-replay --real` no longer benches one physical file under two labels. Its project-scope
-  gate checked ownership but not the one-file-is-one-participant rule the server, session-start
-  hook, and trigger measurement already apply, so in the default layout a benchmark run from an
-  adopted `$HOME` printed a phantom `project` row measuring the global ledger a second time.
-- `dualVerify.mode`, `stakesFloor`, `model` and `effort` no longer discard an invalid value in
-  silence. Previously an unrecognised `effort` left the field at `null`, which means "omit `-c` and
-  inherit `~/.codex/config.toml`" — so `"effort": "max"` produced whatever Codex was configured with,
-  with no diagnostic. Each key now warns on stderr when present and invalid. An **absent** key stays
-  silent, so a valid global+project config pair emits nothing.
-- `dualVerify.model` is now bounded at 64 characters, as the same predicate guards a value rendered
-  into a tool result.
-- `dualVerify.egressPolicy`'s unknown-key and invalid-value warnings now render the untrusted config
-  data through the same bounded single-line guard as `mode`/`stakesFloor`/`model`/`effort`, instead of
-  interpolating it raw. A crafted value (or key) containing a newline could otherwise forge a second
-  line in the stderr diagnostic; an ordinary key/value renders byte-identically to before.
-- A malformed ledger row — a bare `null` line, or a row with a non-string `tx` — could throw inside
-  `helix_memory_recall` and disable memory until the offending line was found and removed by hand
-  (`tx` is dereferenced by a ranking tie-break, `.localeCompare`, the moment two rows land on an equal
-  score). The parse-boundary guard now also validates `tx`, alongside the already-guarded
-  `id`/`content`/`provenance`/`mac`, and skips a structurally invalid row exactly like an existing
-  torn-line, instead of letting a downstream predicate dereference it.
-- dual-verify compare mode: a zero-pair claim alignment now reports `verdict: indeterminate`
-  (with a fixed guidance line, a `no claim pairs found by aligner` fallback, and an `unmatched
-  claims:` list) instead of mislabeling the comparison failure as `diverge`. Audit rows may now
-  carry `verdict: "indeterminate"`; consumers must treat it as non-coverage — never fold it into
-  divergence.
-
-### Security
-- A claimed provenance can no longer make a fact undemotable. The write-side trust authority
-  (`resolveTransition`) treated a determinate reality-check FAIL as `contested` — no ledger record,
-  no state change — when the target's `provenance.source` was `user`. That field is unauthenticated
-  at every layer: the ledger MAC never covers it (and says so, together with the invariant that no
-  such field may drive a trust decision), the verified projection clamps `state` and spreads the rest
-  through unchanged, and at the MCP boundary the calling model picks the value outright. So an item
-  that merely *claimed* human authorship was permanently immune to mechanical contradiction, with no
-  file write required. The guard now tests `targetState` alone — the same intent in authenticated
-  form, since only `confirm` mints `Verified` and that grade survives projection only through a
-  MAC-verified record. An **unvouched** item, whatever it claims, now demotes to `Suspect` on a
-  determinate FAIL, which is reversible in both directions (a later PASS lifts it to `Corroborated`;
-  `confirm` still lifts it to `Verified` from any state). The human vouch is still protected; the
-  unbacked claim of one is not. The parameter is accepted-and-ignored for now because `store.ts` is
-  freeze-pinned and still passes it; a behavioural regression lock asserts every verdict is identical
-  across every claimed source. This also closes the separately-filed "the boundary lets a caller
-  declare `source: 'user'`" report: no schema can authenticate that field, so the fix is that nothing
-  security-critical may depend on it.
-- The egress guard no longer blocks source citations by accident. A `path/to/file.ts:112` pointer has
-  no `:` in the benign-word-chain separator class, so its final segment disqualified the whole token
-  and the citation landed in the entropy net — while the same shape one character shorter passed, the
-  outcome turning on path length rather than on content. A bounded trailing line reference (`:112`,
-  `:44-45`, `:45:7`) is now stripped before the **unchanged** chain test, so the path in front is
-  judged on its own and the exemption inherits every existing anti-greedy rule. Not done by adding
-  `:` to the separator class, which would have exempted `label:<secret>` pairs. The strip is earned
-  by the prefix's grammar rather than granted to any digit tail: it applies only when the prefix is
-  file-shaped (ending in a dot plus a 1–5 character extension) and each number is at most five
-  digits. Without that condition a colon alone would launder digits past the sibling "no digit run
-  over 4" rule — `backup.recovery.identifier.593821` is caught by it, and an unconditional strip
-  released the same digits the moment the separator became a colon. A secret-shaped path segment, a
-  word-labelled numeric value, a long digit run and an interior colon all stay in the net; a
-  recognized provider credential still blocks through its own override-proof leg; and the write path
-  still redacts these bytes.
-- Everything Helix persists under `HELIX_HOME` is owner-only, and stays that way. Creation sites
-  passed no mode and inherited `0666` masked by the process umask — on a `umask 002` box that is
-  `0664`, **group-writable**, not the `0644` an earlier audit assumed and bounded as a confidentiality
-  problem. The ledger, the audit log, the session log and the lock publish files now pass an explicit
-  `0o600`, and a startup pass (`hardenHomePermissions`) repairs what shipped versions already wrote —
-  creation modes cannot reach files that already exist. **The decisive part is the directory:** POSIX
-  puts unlink permission on the parent, so a `0600` master key inside a `0775` `~/.helix` can still be
-  replaced wholesale; the pass tightens the directory to `0700` too. It warns and fixes rather than
-  failing closed (an over-broad mode is a state shipped versions created, not evidence of tampering),
-  refuses to chmod through a symlink or a non-regular file rather than following it, leaves project
-  `.helix` trees alone — those are boundary-writable by design — and never throws.
-- The write-path secret scan sees confusables. It read raw bytes while the render path NFKC-folds, so
-  a fullwidth-encoded credential was persisted verbatim and came back out live. `findSecrets` now
-  runs a per-token NFKC pass and reports the raw token's span, giving the write path the coverage the
-  egress guard already had. Per-token rather than whole-string because the spans must address the
-  caller's own bytes; token boundaries survive folding because JS `\s` already includes every space
-  character NFKC can produce.
-- The egress policy now decides on the FULL secret classification instead of a lossy projection of
-  it. Two reducers upstream of the policy table were collapsing the detection before any leg could
-  see it, and each produced a way for a payload to be released that the operator's configuration
-  said should block:
-  - **Overlapping spans kept only the highest-CONFIDENCE tier.** `mergeSpans` ranks
-    `named > heuristic > entropy`, which is right for choosing a redaction label and wrong for
-    choosing a policy leg. With `secretHeuristic: allow, secretEntropy: block`, a bare high-entropy
-    token blocked but the SAME token prefixed `password=` merged to heuristic-only and was released —
-    adding a credential marker made the bytes *less* blocked. A span now carries every tier that
-    matched it (`SecretSpan.tiers`); `tier` remains the display/redaction winner. The mirror case
-    (provider + heuristic) was already covered by a test and passed only because `named` happens to
-    outrank `heuristic`.
-  - **The EH-4/C2.2 hex/word-chain release was applied inside the detector.** `scanText` — whose
-    contract is "pure, no policy, no decision" — subtracted exempt spans from the entropy signal, so
-    `egressPolicy.secretEntropy: block` had nothing left to gate and no configuration could close
-    the release. The exemption is now its own leg, **`secretEntropyExempt`**, defaulting to `allow`:
-    the shipped verdict for a git SHA in design prose is byte-for-byte what it was (an audit-only
-    `pass`), but an operator can now set it to `block`. It is an opt-in leg — applicable only when
-    set to `block` — so the default introduces no verdict churn on the false-positive class the
-    exemption exists to serve. `SECURITY.md`'s "blocked by default but per-leg policy-overridable"
-    claim was false for this subclass in both halves; it now names the exception.
-  The audit record's `releasedLegs` type was a hand-copied union of the five leg names and went
-  stale the moment a sixth existed; it is now sourced from `EgressLeg`.
-- The re-baseline ceremony refuses a project scope that names the global ledger. It resolved the
-  ledger from the scope argument and the witness key from the same argument by a second, independent
-  route, and compared neither against the global ledger. In the default layout `HELIX_HOME` is
-  `$HOME/.helix`, so `--scope $HOME` resolved to the global ledger file while keying the witness
-  under the project root: one physical file recorded under two witness identities, with the older
-  one left attesting to a prefix of a file that had since grown — an unwitnessed tail until the next
-  write under that key. The ceremony compounded it by displaying `first-contact` and `epoch: 0 -> 1`
-  beside a non-zero byte count, telling the operator they were blessing virgin ground. The ledger
-  and its witness key are now derived together in one place, and that place is also where the
-  components that already enforced this same rule read it from. Also refused up front: a ledger with
-  more than one hard link. The append layer already rejected those, but only after the ceremony had
-  published its write-ahead witness journal, which left the scope holding a transition the ledger
-  never received. The link count is re-verified after the confirmation pause as well, next to the
-  existing content re-verify: a hard link created while the ceremony waits for the operator changes
-  no byte, so the content check alone cannot see it, and the append's own late refusal would strand
-  the scope the same way. The pre-check stats the path rather than opening it: a directory or FIFO
-  at the ledger path is not misreported as an alias — the downstream layer's own error stays the
-  accurate one — and the check cannot hang on a FIFO, which `open('r')` would block on.
-- The dual-verify subprocess no longer inherits the user's working directory or environment. It was
-  spawned with only `stdio` set, so the external Codex CLI started in the user's project and
-  received every variable the server had — and `-s read-only` sandboxes writes, not reads, while the
-  egress guard inspects the composed prompt and cannot see what the subprocess reads afterwards. It
-  now starts in an empty per-run scratch directory, is told (`--cd`) to treat that directory as its
-  project, and receives a constructed environment holding only what it needs to authenticate and
-  reach the network. README and SECURITY.md previously said the call sends "nothing else (no memory,
-  no files)"; that was a statement about what Helix composes, read as a statement about what the CLI
-  can reach. Both now state the confinement and the residue it does not cover.
-- Dual-verify, egress-policy and content-logging settings are read from the global
-  `~/.helix/config.json` only. A checkout's `.helix/config.json` was previously discovered from the
-  working directory and merged LAST, so opening an untrusted repository let its config re-enable the
-  outbound Codex path, drop every egress leg to `allow`, and turn on verbatim prompt/response logging
-  into the user's home — silently, since a well-formed file produces no warning. Compaction and
-  hook-metrics settings were already global-only for exactly this reason; the rest now match. A
-  caller may still name a project config explicitly (the trigger CLI does); what it can no longer do
-  is discover one. The server prints a note at startup when such a file exists and is being ignored.
-- The trust store no longer follows `HELIX_LEDGER`. The ledger signing key, the ownership
-  registry and the rollback witness are always created under `HELIX_HOME`; previously their
-  location was derived from the ledger's own directory, so repointing `HELIX_LEDGER` at a
-  git-tracked tree wrote the signing key there — where anyone with the repository could mint
-  valid trust grades, and where the rollback witness sat on the untrusted side of the boundary
-  it exists to guard. `HELIX_LEDGER` now moves the data file and nothing else. A server that
-  finds trust-store files beside a relocated ledger refuses to start and names both directories,
-  rather than minting a fresh key and silently dropping every grade the old one conferred.
-- Secret-scan redaction on the memory write path; the dual-verify egress guard
-  hard-blocks credential tokens (override-proof).
-- Provenance firewall: agreement from an external model never promotes to `Verified`.
-- Content-free audit log; the Codex content log is opt-in, `0o600`, and capped.
-- The dual-verify egress firewall now scans the exact normalized bytes it transmits on the
-  memory-echo leg, instead of a differently-normalized copy. Previously, zero-width and confusable
-  padding interleaved into a memory was invisible to the scan but still present on the wire, so it
-  could smuggle an echoed memory past the check.
-- The egress scan now fails **closed** at its size bound instead of open: a payload over 200,000
-  characters, or a dual-verify whose ledger exceeds roughly 8,000,000 content characters, is now
-  **refused** rather than sent to Codex partially scanned. **Availability change:** a call this large
-  previously went through unscanned past the bound; it now errors instead.
-- Codex's stderr on a failed dual-verify run is now rendered inside a nonce-framed, datamarked
-  quarantine block in the host-visible error, instead of interpolated as a plain line — external
-  process output is untrusted content and is now handled like any other.
+- Dual-verify configuration, read from the global `~/.helix/config.json` only — a checkout's
+  `.helix/config.json` can neither enable the outbound path nor loosen it: `enabled` (bool, default
+  `false`), `mode`, `model` (bounded at 64 characters, or `null` to inherit `~/.codex/config.toml`),
+  `effort`, `stakesFloor`, `timeoutMs` (a valid integer ≥ 1 s, clamped to a 1-hour maximum at the
+  config boundary and again in the Codex runner), and `egressPolicy` — a per-leg map over
+  `memoryEcho`, `piiHigh`, `piiBulk`, `secretHeuristic`, `secretEntropy` and `secretEntropyExempt`.
+  Each leg is `block` or `allow`. All default to `block` except `secretEntropyExempt`, which defaults
+  to `allow` and is what releases a hex-shaped or low-entropy-chain token — a git SHA quoted in
+  design prose — past the egress guard while the write path still redacts it. Provider-format
+  credentials are override-proof: no policy value releases them. An invalid value on any of these
+  keys is refused with a bounded single-line stderr warning and the default is kept, so a crafted
+  newline in a key or value cannot forge a second diagnostic line; an absent key is silent.
+- Two environment inputs place Helix's state. `HELIX_HOME` (default `~/.helix`) is where the ledger
+  signing key, the ownership registry, the rollback witness, the audit log and the metrics stream
+  are always created; `HELIX_LEDGER` moves the global ledger data file and nothing else. A server
+  that finds trust-store files beside a relocated ledger refuses to start and names both
+  directories, rather than minting a fresh key and silently dropping every grade the old one
+  conferred.
