@@ -185,9 +185,13 @@ describe('Task 7 — read-side witness enforcement', () => {
       try {
         store.commit({ content: 'unrelated filler nothing here', scope: 'global', source: 'user' });
         const pj = store.commit({ content: 'projectword sentinel keepme', scope: 'project', source: 'user' });
-        plantInterrupted(home, scopeKeyOf(home), join(home, 'memory.jsonl'), '2026-07-18T00:05:00.000Z'); // the global key, exactly as this file's global cases (:265, :305) plant it
+        plantInterrupted(home, scopeKeyOf(home), join(home, 'memory.jsonl'), '2026-07-18T00:05:00.000Z'); // the global key, exactly as this file's other two global-scope plantInterrupted call sites (the cache-bypass case and the empty-records case) plant it
         const res = store.recall('projectword');
         expect(res.witnessNotes).toContain(WITNESS_TRANSITION_NOTE);
+        expect(res.witnessNotes).not.toContain(WITNESS_MISMATCH_NOTE);
+        // Control: without this, a future change that stopped excluding global would leave the
+        // mutated line byte-equivalent and this case silently vacuous while staying green.
+        expect(res.items.some((i) => i.scope === 'global'), 'the interrupted global scope must be excluded, or this case is vacuous').toBe(false);
         expect(res.items.find((i) => i.record.id === pj.id), 'the project row must be scored with its own tokens, not the excluded global row\'s').toBeDefined();
       } finally { rmSync(home, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
     });
