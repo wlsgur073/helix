@@ -26,6 +26,7 @@ import { interruptedAtPredecessor, type WitnessVerdict } from './witness-core.js
 import { ledgerDigest, subkeyFingerprint, keyVectorEqual, type ScopeKeyComponent, type RecallCacheEntry } from './recall-cache.js';
 import type { MetricsSink } from '../metrics.js';
 import { withFileLock } from './lock.js';
+import { MAX_COMMIT_CONTENT_CHARS } from '../limits.js';
 
 export interface MemoryStoreOptions {
   sessionId?: string;
@@ -214,6 +215,14 @@ export class MemoryStore {
   }
 
   commit(input: CommitInput): MemoryRecord {
+    // H3 (2026-08-18 review): the FIRST statement of validation, before the secret scan and before
+    // any append -- an oversized commit must cost O(1), not pay for a scan of content that is about
+    // to be rejected anyway. Schema-enforced too (helix-server.ts), so an MCP caller never reaches
+    // this method with oversized content in the first place; this is the authoritative check for
+    // callers that do not come through MCP (hooks, CLI, tests). See src/limits.ts's header.
+    if (input.content.length > MAX_COMMIT_CONTENT_CHARS) {
+      throw new Error(`helix: content exceeds the ${MAX_COMMIT_CONTENT_CHARS}-char commit cap (got ${input.content.length}); split the fact or store a pointer`);
+    }
     if (input.content.trim() === '') throw new Error('commit: content must be non-empty');
     const source: ProvenanceSource = input.source;
     if (!canCommit({ provenance: { source, sessionId: this.session() } })) {

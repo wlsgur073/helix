@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { MemoryStore } from '../memory/store.js';
 import type { RealityCheck } from '../memory/reality-check.js';
 import { MAX_QUERY_CHARS } from '../memory/retrieval.js';
+import { MAX_COMMIT_CONTENT_CHARS } from '../limits.js';
 import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, MAX_ID_CHARS, isValidId, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus, checkCodexModel } from '../verify/codex.js';
@@ -64,7 +65,14 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     title: 'Commit memory',
     description: 'Store a fact in Helix memory (secret-scanned; provenance recorded). Pass supersedes=<id> to update (replace) an existing item instead of adding a duplicate.',
     inputSchema: {
-      content: z.string(),
+      // H3: the character bound is declared here as well as enforced in the store, so an oversized
+      // commit is refused by schema validation before the handler (and its secret scan) ever runs —
+      // the same bounded-input discipline MAX_QUERY_CHARS gets on recall above. The store keeps the
+      // authoritative check for callers that do not come through MCP (hooks, CLI, tests).
+      content: z
+        .string()
+        .max(MAX_COMMIT_CONTENT_CHARS)
+        .describe(`The fact to store (max ${MAX_COMMIT_CONTENT_CHARS} characters; split the fact or store a pointer if it is longer).`),
       source: z
         .enum(['user', 'user-relayed', 'agent-inference', 'agent-test-verified'])
         .describe(

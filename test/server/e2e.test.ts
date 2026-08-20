@@ -6,8 +6,12 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { MemoryStore } from '../../src/memory/store.js';
 import { buildServer } from '../../src/server/helix-server.js';
+import { MAX_COMMIT_CONTENT_CHARS } from '../../src/limits.js';
+import type { MetricsSink } from '../../src/metrics.js';
 
-async function connectedClient(): Promise<Client> {
+// Optional metrics sink (H3 schema-precedes-handler case below): every other caller omits it and
+// gets the same server as before (buildServer defaults to noopMetricsSink), so this is additive.
+async function connectedClient(metrics?: MetricsSink): Promise<Client> {
   const home = mkdtempSync(join(tmpdir(), 'helix-e2e-'));
   const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1' });
   const server = buildServer(store, {
@@ -19,7 +23,7 @@ async function connectedClient(): Promise<Client> {
     echo: { mode: 'disabled' },
     auditPath: join(mkdtempSync(join(tmpdir(), 'helix-e2e-audit-')), 'audit.jsonl'),
     codexLogPath: join(mkdtempSync(join(tmpdir(), 'helix-e2e-clog-')), 'codex-log.jsonl'),
-  });
+  }, metrics);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   const client = new Client({ name: 'helix-test-client', version: '0.0.0' });
@@ -137,6 +141,26 @@ describe('Helix MCP server (end-to-end via in-memory transport)', () => {
       name: 'helix_memory_commit', arguments: { content: 'x', source: 'made-up-source' },
     });
     expect(res.isError).toBe(true);
+  });
+
+  it('rejects an over-cap commit content at the schema, BEFORE the handler runs (H3)', async () => {
+    // Mirrors N2-QUERY-DOS.c (schema-bound-precedes-handler.test.ts): "the call fails" does not
+    // discriminate schema rejection from the store's own throw, since both fail today. What
+    // discriminates them is WHETHER the handler ran at all -- a counting metrics sink is the
+    // observable, since runOp (and its audit/timing side effects) only wraps an entered handler.
+    const ops: string[] = [];
+    const sink: MetricsSink = {
+      emitReplay: () => {},
+      emitCompaction: () => {},
+      runOp: async (tool, fn) => { ops.push(tool); return await fn(); },
+    };
+    const client = await connectedClient(sink);
+    const res = await client.callTool({
+      name: 'helix_memory_commit',
+      arguments: { content: 'x'.repeat(MAX_COMMIT_CONTENT_CHARS + 1), source: 'user' },
+    });
+    expect(res.isError, 'an over-cap commit was accepted').toBe(true);
+    expect(ops, 'the handler ran, so the bound was enforced inside rather than at the boundary').not.toContain('helix_memory_commit');
   });
 
   it('commit with supersedes replaces the prior item over the protocol (update, not duplicate)', async () => {

@@ -38,7 +38,7 @@ Nine MCP tools:
 
 | Tool | Purpose |
 |------|---------|
-| `helix_memory_commit` | Store a fact (secret-scanned, provenance recorded) |
+| `helix_memory_commit` | Store a fact (secret-scanned, provenance recorded; content capped at 16,384 characters so one oversized fact cannot become a permanent per-read cost — split the fact or store a pointer) |
 | `helix_memory_recall` | Retrieve relevant memory as a quarantined DATA block |
 | `helix_memory_inspect` | List current memory items with their trust state |
 | `helix_memory_recheck` | Re-check a fact against reality (content-bound file check) → `Corroborated` (machine-checked, never `Verified`) |
