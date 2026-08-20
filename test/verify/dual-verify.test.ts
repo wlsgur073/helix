@@ -21,7 +21,7 @@ describe('dualVerify', () => {
     let seenTimeout: number | undefined;
     const cfg = enabled();
     cfg.dualVerify.timeoutMs = 234567;
-    await dualVerify({ question: 'q', helixAnswer: 'a' }, deps({
+    await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' }, deps({
       config: cfg,
       runner: async (_q, opts) => { seenTimeout = opts?.timeoutMs; return { ok: true, answer: 'x' }; },
     }));
@@ -30,7 +30,7 @@ describe('dualVerify', () => {
 
   it('degrades (ran=false) when disabled, without calling the runner', async () => {
     let called = false;
-    const r = await dualVerify({ question: 'q', helixAnswer: 'a' },
+    const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' },
       deps({ runner: async () => { called = true; return { ok: true, answer: 'x' }; } }));
     expect(r.ran).toBe(false);
     expect(r.attempted).toBe(false); // no metered call
@@ -39,7 +39,7 @@ describe('dualVerify', () => {
   });
 
   it('degrades when codex is unavailable — NEVER fabricates an answer', async () => {
-    const r = await dualVerify({ question: 'q', helixAnswer: 'a' },
+    const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' },
       deps({ config: enabled(), checkAvailable: async () => ({ available: false, reason: 'not logged in' }) }));
     expect(r.ran).toBe(false);
     expect(r.codexAnswer).toBeUndefined();
@@ -47,7 +47,7 @@ describe('dualVerify', () => {
   });
 
   it('degrades when the runner fails (no fabrication)', async () => {
-    const r = await dualVerify({ question: 'q', helixAnswer: 'a' },
+    const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' },
       deps({ config: enabled(), runner: async () => ({ ok: false, error: 'timeout' }) }));
     expect(r.ran).toBe(false);
     expect(r.attempted).toBe(true); // codex WAS reached (metered) — the run itself failed
@@ -56,7 +56,7 @@ describe('dualVerify', () => {
   });
 
   it('on success builds an agreement map (compare mode)', async () => {
-    const r = await dualVerify({ question: 'what is 2+2?', helixAnswer: 'the answer is 4' },
+    const r = await dualVerify({ stakes: 'high', question: 'what is 2+2?', helixAnswer: 'the answer is 4' },
       deps({ config: enabled(), runner: async () => ({ ok: true, answer: 'the answer is 4' }) }));
     expect(r.ran).toBe(true);
     expect(r.codexAnswer).toBe('the answer is 4');
@@ -65,14 +65,14 @@ describe('dualVerify', () => {
   });
 
   it('zero-pair answers surface as indeterminate through the pipeline', async () => {
-    const r = await dualVerify({ question: 'q', helixAnswer: 'use postgres' },
+    const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'use postgres' },
       deps({ config: enabled(), runner: async () => ({ ok: true, answer: 'use mysql instead' }) }));
     expect(r.ran).toBe(true);
     expect(r.agreement?.verdict).toBe('indeterminate');
   });
 
   it('flags divergence when an anchored pair leaves differing remainders', async () => {
-    const r = await dualVerify({ question: 'q', helixAnswer: 'Use postgres for the store. Add an index today.' },
+    const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'Use postgres for the store. Add an index today.' },
       deps({ config: enabled(), runner: async () => ({ ok: true, answer: 'Use postgres for the store. Skip the index for now.' }) }));
     expect(r.ran).toBe(true);
     expect(r.agreement?.verdict).toBe('diverge');
@@ -114,15 +114,74 @@ describe('dualVerify', () => {
     expect(meets.ran).toBe(true);
   });
 
-  it('runs when stakes are unspecified (an explicit tool invocation signals intent)', async () => {
-    const r = await dualVerify({ question: 'q', helixAnswer: 'the answer is 4' }, deps({ config: enabled() }));
+  it('an omitted stakes value is treated as the lowest tier, so the floor refuses it with no metered call', async () => {
+    let preflights = 0;
+    let called = false;
+    const r = await dualVerify({ question: 'q', helixAnswer: 'the answer is 4' }, deps({
+      config: enabled(),
+      checkAvailable: async () => { preflights++; return { available: true }; },
+      runner: async () => { called = true; return { ok: true, answer: 'x' }; },
+    }));
+    expect(r.ran).toBe(false);
+    expect(r.attempted).toBe(false);
+    expect(preflights).toBe(0);   // still the free gate, still first
+    expect(called).toBe(false);   // the quota the floor exists to protect is not spent
+  });
+
+  it('the refusal distinguishes an omitted stakes value from a declared-but-too-low one', async () => {
+    const omitted = await dualVerify({ question: 'q', helixAnswer: 'a' }, deps({ config: enabled() }));
+    const declared = await dualVerify({ question: 'q', helixAnswer: 'a', stakes: 'low' }, deps({ config: enabled() }));
+    expect(omitted.reason).not.toBe(declared.reason);
+    expect(omitted.reason).toContain('not declared');
+    expect(declared.reason).toContain("stakes 'low' below");
+    expect(omitted.reason).toContain("lowest accepted: 'high'");   // both still name the way forward (H4)
+  });
+
+  it("a 'low' floor still admits an omitted stakes value — the floor decides, not the omission", async () => {
+    const cfg = enabled();
+    cfg.dualVerify.stakesFloor = 'low';
+    const r = await dualVerify({ question: 'q', helixAnswer: 'the answer is 4' }, deps({ config: cfg }));
     expect(r.ran).toBe(true);
+  });
+
+  it('a refusal names the gates that ran and the one that stopped it (H7)', async () => {
+    const disabled = await dualVerify({ question: 'q', helixAnswer: 'a' }, deps({}));
+    expect(disabled.gates).toEqual({ evaluated: ['enabled'], stoppedAt: 'enabled' });
+
+    const belowFloor = await dualVerify({ question: 'q', helixAnswer: 'a', stakes: 'low' },
+      deps({ config: enabled() }));
+    expect(belowFloor.gates).toEqual({ evaluated: ['enabled', 'stakesFloor'], stoppedAt: 'stakesFloor' });
+
+    const blocked = await dualVerify(
+      { question: 'is this key live?', helixAnswer: 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34', stakes: 'high' },
+      deps({ config: enabled() }));
+    expect(blocked.gates).toEqual({ evaluated: ['enabled', 'stakesFloor', 'egress'], stoppedAt: 'egress' });
+
+    const unavailable = await dualVerify({ question: 'q', helixAnswer: 'a', stakes: 'high' },
+      deps({ config: enabled(), checkAvailable: async () => ({ available: false, reason: 'not logged in' }) }));
+    expect(unavailable.gates)
+      .toEqual({ evaluated: ['enabled', 'stakesFloor', 'egress', 'available'], stoppedAt: 'available' });
+  });
+
+  it('the gate trace records the floor BEFORE the egress leg — the order the guards actually run in', async () => {
+    // The dogfood channel spent three weeks inferring this order from message strings and got it
+    // backwards (merge doc C1). A below-floor call must therefore never report the egress leg as run.
+    const r = await dualVerify({ question: 'q', helixAnswer: 'a', stakes: 'low' }, deps({ config: enabled() }));
+    expect(r.gates?.evaluated).not.toContain('egress');
+    expect(r.gates?.stoppedAt).toBe('stakesFloor');
+  });
+
+  it('a run that reaches the metered call and fails names the runner as the stopping gate', async () => {
+    const r = await dualVerify({ question: 'q', helixAnswer: 'a', stakes: 'high' },
+      deps({ config: enabled(), runner: async () => ({ ok: false, error: 'timeout' }) }));
+    expect(r.attempted).toBe(true);
+    expect(r.gates).toEqual({ evaluated: ['enabled', 'stakesFloor', 'egress', 'available', 'runner'], stoppedAt: 'runner' });
   });
 
   it('refuses fail-closed when the payload contains a secret — never sends it to external Codex', async () => {
     let called = false;
     const r = await dualVerify(
-      { question: 'is this key live?', helixAnswer: 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34' },
+      { stakes: 'high', question: 'is this key live?', helixAnswer: 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34' },
       deps({ config: enabled(), runner: async () => { called = true; return { ok: true, answer: 'x' }; } }));
     expect(r.ran).toBe(false);
     expect(r.attempted).toBe(false);
@@ -132,7 +191,7 @@ describe('dualVerify', () => {
 
   it('passes the configured model + effort to the runner', async () => {
     let seen: { model?: string | null; effort?: string | null; timeoutMs?: number } | undefined;
-    await dualVerify({ question: 'q', helixAnswer: 'a' }, deps({
+    await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' }, deps({
       config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'xhigh', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, metrics: { enabled: true } },
       runner: async (_q, opts) => { seen = opts; return { ok: true, answer: 'x' }; },
     }));
@@ -146,7 +205,7 @@ describe('critique mode', () => {
 
   it('sends a critique prompt carrying the question and the data-framed answer', async () => {
     let prompt = '';
-    await dualVerify({ question: 'which db?', helixAnswer: 'use postgres' },
+    await dualVerify({ stakes: 'high', question: 'which db?', helixAnswer: 'use postgres' },
       deps({ config: critiqueCfg(), runner: async (q) => { prompt = q; return { ok: true, answer: 'fine' }; } }));
     expect(prompt).toContain('which db?');
     expect(prompt).toContain('use postgres');
@@ -154,7 +213,7 @@ describe('critique mode', () => {
   });
 
   it('returns the critique verbatim with no agreement map', async () => {
-    const r = await dualVerify({ question: 'q', helixAnswer: 'a' },
+    const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' },
       deps({ config: critiqueCfg(), runner: async () => ({ ok: true, answer: 'missing index consideration' }) }));
     expect(r.ran).toBe(true);
     expect(r.mode).toBe('critique');
@@ -164,7 +223,7 @@ describe('critique mode', () => {
 
   it('compare mode still sends the bare question (independent answer, not a review)', async () => {
     let prompt = '';
-    await dualVerify({ question: 'which db?', helixAnswer: 'use postgres' },
+    await dualVerify({ stakes: 'high', question: 'which db?', helixAnswer: 'use postgres' },
       deps({ config: enabled(), runner: async (q) => { prompt = q; return { ok: true, answer: 'x' }; } }));
     expect(prompt).toBe('which db?');
   });
@@ -177,7 +236,7 @@ describe('dualVerify egress gate (S1)', () => {
   it('blocks a memory echo before any spawn (policy=block) and surfaces the verdict', async () => {
     let called = false;
     const r = await dualVerify(
-      { question: 'the deploy uses the blue cluster in us-east-1', helixAnswer: 'yes' },
+      { stakes: 'high', question: 'the deploy uses the blue cluster in us-east-1', helixAnswer: 'yes' },
       deps({
         config: enabled(),
         echo: echoEnforce([{ id: 'm_1', content: 'the deploy uses the blue cluster in us-east-1' }]),
@@ -193,7 +252,7 @@ describe('dualVerify egress gate (S1)', () => {
   it('proceeds and carries an allowed_override verdict when policy=allow', async () => {
     const cfg = enabled(); cfg.dualVerify.egressPolicy.memoryEcho = 'allow';
     const r = await dualVerify(
-      { question: 'the deploy uses the blue cluster in us-east-1', helixAnswer: 'the answer is 4' },
+      { stakes: 'high', question: 'the deploy uses the blue cluster in us-east-1', helixAnswer: 'the answer is 4' },
       deps({
         config: cfg,
         echo: echoEnforce([{ id: 'm_1', content: 'the deploy uses the blue cluster in us-east-1' }]),
@@ -207,7 +266,7 @@ describe('dualVerify egress gate (S1)', () => {
     const secret = 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34';
     for (const policy of ['block', 'allow'] as const) {
       const cfg = enabled(); cfg.dualVerify.egressPolicy = { memoryEcho: policy, piiHigh: policy, piiBulk: policy, secretHeuristic: policy, secretEntropy: policy, secretEntropyExempt: 'allow' };
-      const r = await dualVerify({ question: 'is this live?', helixAnswer: secret },
+      const r = await dualVerify({ stakes: 'high', question: 'is this live?', helixAnswer: secret },
         deps({ config: cfg, echo: disabledEcho }));
       expect(r.ran).toBe(false);
       expect(r.egress?.decision).toBe('blocked');
@@ -216,7 +275,7 @@ describe('dualVerify egress gate (S1)', () => {
   });
 
   it('blocks high-severity PII (card) under policy=block', async () => {
-    const r = await dualVerify({ question: 'verify card 4111 1111 1111 1111', helixAnswer: 'ok' },
+    const r = await dualVerify({ stakes: 'high', question: 'verify card 4111 1111 1111 1111', helixAnswer: 'ok' },
       deps({ config: enabled(), echo: disabledEcho }));
     expect(r.ran).toBe(false);
     expect(r.egress?.legs).toEqual(['pii']);
@@ -226,7 +285,7 @@ describe('dualVerify egress gate (S1)', () => {
   it('echo:{mode:disabled} skips the echo leg but still runs secret + PII', async () => {
     // ledger is not consulted; the same echo text now passes (no PII, no secret).
     const r = await dualVerify(
-      { question: 'the deploy uses the blue cluster in us-east-1', helixAnswer: 'the answer is 4' },
+      { stakes: 'high', question: 'the deploy uses the blue cluster in us-east-1', helixAnswer: 'the answer is 4' },
       deps({ config: enabled(), echo: disabledEcho }));
     expect(r.ran).toBe(true);
     expect(r.egress?.decision).toBe('pass');
@@ -234,7 +293,7 @@ describe('dualVerify egress gate (S1)', () => {
   });
 
   it('carries the egress verdict on the success path (audit-only low-sev PII passes)', async () => {
-    const r = await dualVerify({ question: 'ping kim@example.com', helixAnswer: 'the answer is 4' },
+    const r = await dualVerify({ stakes: 'high', question: 'ping kim@example.com', helixAnswer: 'the answer is 4' },
       deps({ config: enabled(), echo: disabledEcho }));
     expect(r.ran).toBe(true);
     expect(r.egress?.decision).toBe('pass');
@@ -242,7 +301,7 @@ describe('dualVerify egress gate (S1)', () => {
   });
 
   it('carries the egress verdict on the run-failure path', async () => {
-    const r = await dualVerify({ question: 'q', helixAnswer: 'a' },
+    const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' },
       deps({ config: enabled(), echo: disabledEcho, runner: async () => ({ ok: false, error: 'timeout' }) }));
     expect(r.ran).toBe(false);
     expect(r.attempted).toBe(true);
@@ -254,7 +313,7 @@ describe('dualVerify: outcome + promptSent (for opt-in content logging)', () => 
   const expectOutcome = (got: CodexOutcome | undefined, want: CodexOutcome) => expect(got).toBe(want);
 
   it('disabled -> outcome skipped, no promptSent', async () => {
-    const r = await dualVerify({ question: 'q', helixAnswer: 'a' }, deps({}));
+    const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' }, deps({}));
     expectOutcome(r.outcome, 'skipped');
     expect(r.promptSent).toBeUndefined();
   });
@@ -267,28 +326,28 @@ describe('dualVerify: outcome + promptSent (for opt-in content logging)', () => 
 
   it('secret in payload -> outcome refused, no promptSent (the secret is never retained)', async () => {
     const r = await dualVerify(
-      { question: 'is this key live?', helixAnswer: 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34' },
+      { stakes: 'high', question: 'is this key live?', helixAnswer: 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34' },
       deps({ config: enabled() }));
     expectOutcome(r.outcome, 'refused');
     expect(r.promptSent).toBeUndefined();
   });
 
   it('codex unavailable -> outcome unavailable, no promptSent', async () => {
-    const r = await dualVerify({ question: 'q', helixAnswer: 'a' },
+    const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' },
       deps({ config: enabled(), checkAvailable: async () => ({ available: false, reason: 'not logged in' }) }));
     expectOutcome(r.outcome, 'unavailable');
     expect(r.promptSent).toBeUndefined();
   });
 
   it('runner failed -> outcome error, no promptSent', async () => {
-    const r = await dualVerify({ question: 'q', helixAnswer: 'a' },
+    const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' },
       deps({ config: enabled(), runner: async () => ({ ok: false, error: 'codex produced no output' }) }));
     expectOutcome(r.outcome, 'error');
     expect(r.promptSent).toBeUndefined();
   });
 
   it('compare success -> outcome sent, promptSent equals the bare question', async () => {
-    const r = await dualVerify({ question: 'which db?', helixAnswer: 'use postgres' },
+    const r = await dualVerify({ stakes: 'high', question: 'which db?', helixAnswer: 'use postgres' },
       deps({ config: enabled(), runner: async () => ({ ok: true, answer: 'use postgres' }) }));
     expectOutcome(r.outcome, 'sent');
     expect(r.promptSent).toBe('which db?');
@@ -297,7 +356,7 @@ describe('dualVerify: outcome + promptSent (for opt-in content logging)', () => 
   it('critique success -> outcome sent, promptSent equals the critique prompt (contains question + answer)', async () => {
     const critiqueCfg: HelixConfig =
       { dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, metrics: { enabled: true } };
-    const r = await dualVerify({ question: 'which db?', helixAnswer: 'use postgres' },
+    const r = await dualVerify({ stakes: 'high', question: 'which db?', helixAnswer: 'use postgres' },
       deps({ config: critiqueCfg, runner: async () => ({ ok: true, answer: 'fine' }) }));
     expectOutcome(r.outcome, 'sent');
     expect(r.promptSent).toContain('which db?');
@@ -340,7 +399,7 @@ describe('G1: what the gate scanned is what the runner is sent', () => {
     const zw = MEMO.split('').join('​');
     let runnerSaw: string | null = null;
     const result = await dualVerify(
-      { question: `please review: ${zw}`, helixAnswer: 'looks fine' },
+      { stakes: 'high', question: `please review: ${zw}`, helixAnswer: 'looks fine' },
       deps({
         config: enabled(),      // every egress leg already 'block' in this helper
         runner: async (prompt: string) => { runnerSaw = prompt; return { ok: true, answer: 'ok' }; },
@@ -363,7 +422,7 @@ describe('G1: what the gate scanned is what the runner is sent', () => {
     const zw = MEMO.split('').join('​');
     let called = false;
     const result = await dualVerify(
-      { question: 'what do you think?', helixAnswer: `echoing back: ${zw}` },
+      { stakes: 'high', question: 'what do you think?', helixAnswer: `echoing back: ${zw}` },
       deps({
         config: enabled(),   // mode: 'compare' -- helixAnswer is not part of the sent prompt
         runner: async () => { called = true; return { ok: true, answer: 'ok' }; },
@@ -388,7 +447,7 @@ describe('G1: what the gate scanned is what the runner is sent', () => {
     const question = 'what does === mean in js?';
     let runnerSaw: string | null = null;
     const result = await dualVerify(
-      { question, helixAnswer: 'strict equality, no type coercion' },
+      { stakes: 'high', question, helixAnswer: 'strict equality, no type coercion' },
       deps({
         config: enabled(),   // mode: 'compare'
         runner: async (prompt: string) => { runnerSaw = prompt; return { ok: true, answer: 'x' }; },

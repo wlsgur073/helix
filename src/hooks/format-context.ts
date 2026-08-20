@@ -1,8 +1,25 @@
-import type { MemoryState, ScopedRecord } from '../types.js';
+import type { MemoryState, ProvenanceSource, ScopedRecord } from '../types.js';
 import { requiresReverifyBeforeUse } from '../memory/state-machine.js';
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS, safeId, UNADOPTED_LEDGER_NOTE } from '../memory/content-frame.js';
 import { classifyEmission } from '../risk/trifecta.js';
 import { isVerifyingSource } from '../memory/firewall.js';
+
+/** H8: ONE literal for every non-verifying source asserted a relay that may not have happened.
+ *  `requiresReverifyBeforeUse` flags four sources, and all four rendered as "relayed source — confirm
+ *  with user": a conclusion an agent derived and mechanically verified alone was presented to the next
+ *  session as relayed content, with no third party to confirm with and no way to tell the cases apart.
+ *  The annotation now names the source. It grants no trust in either direction -- VERIFYING_SOURCES is
+ *  unchanged, so every branch here is still a flag, and `agent-test-verified` still mints no grade.
+ *  An unknown or legacy value falls to the generic branch, matching isVerifyingSource's fail-closed
+ *  set membership: a source this build does not recognise is flagged, never silently trusted. */
+const NON_VERIFYING_FLAG: Partial<Record<ProvenanceSource, string>> = {
+  'user-relayed': '(relayed source — confirm with user) ',
+  'agent-inference': '(agent inference — unconfirmed) ',
+  'agent-test-verified': '(agent test-verified — self-asserted) ',
+  'codex-agree': '(codex agreement — unconfirmed) ',
+};
+const nonVerifyingFlag = (source: ProvenanceSource): string =>
+  NON_VERIFYING_FLAG[source] ?? '(non-authoritative — confirm before use) ';
 
 export interface FormatOptions {
   maxItems?: number;
@@ -94,9 +111,11 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
   const lines = selected.map((s) => {
     const { record: r, scope } = s;
     const reverify = requiresReverifyBeforeUse({ state: r.state, blastRadius: r.blastRadius, source: r.provenance.source });
+    // Suspect outranks the source branch: a stale fact is the more urgent problem, and its wording
+    // already tells the reader to go and look. Source naming applies to the non-Suspect flags (H8).
     const flag = !reverify ? ''
       : r.state === 'Suspect' ? '(re-verify — reality may have changed) '
-      : '(relayed source — confirm with user) ';
+      : nonVerifyingFlag(r.provenance.source);
     return {
       text: datamark(`${flag}${r.content.replace(/\s+/g, ' ').trim()}`, `DATA[${r.state}:${scope}]| `, maxItemChars),
       reserved: reserved.includes(s),
