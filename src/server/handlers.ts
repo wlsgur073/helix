@@ -649,12 +649,21 @@ export async function handleDualVerify(
   const a = result.agreement!;
   const indeterminate = a.verdict === 'indeterminate';
   // 'indeterminate' has two routes and they need different words (H1, see agreement-map.ts's verdict
-  // note). Route 1 — nothing paired at all. Route 2 — claims DID pair, and the figure clamp withheld
-  // every one of them, so "no claim pairs found by aligner" would be a false statement about a
-  // comparison that found pairs and declined to rule on them. Read off withheldPairs, which the
-  // aligner reports, rather than sniffed out of the divergence text: those strings carry untrusted
-  // Codex bytes and must never steer a control-flow branch here.
-  const noPairs = a.withheldPairs === 0;
+  // note). Route 1 — nothing paired at all. Route 2 — claims DID pair and at least one was withheld
+  // by the figure clamp, so "no claim pairs found by aligner" would be a false statement about a
+  // comparison that found pairs and declined to rule on some of them. Read off withheldPairs, which
+  // the aligner reports, rather than sniffed out of the divergence text: those strings carry
+  // untrusted Codex bytes and must never steer a control-flow branch here.
+  // `zeroPair` is deliberately NOT "no pair agreed" and NOT "every pair was withheld" — an earlier
+  // version of this branch conflated withheldPairs > 0 with "every pair was withheld" and printed
+  // that as a sentence. It is false: the clamp withholds PER PAIR, so a comparison can carry an
+  // agreeing pair AND a withheld one and still read 'indeterminate' (agreement-map.ts's verdict
+  // note). That reading also made the agreements block below unreachable on this route, so a real
+  // agreement never reached the caller at all (review 2026-08-20, measured). Every sentence in this
+  // renderer is a statement ABOUT the comparison; each one has to be true on every route that can
+  // reach it, which is why the agreements list is now printed whenever it is non-empty regardless of
+  // verdict, and the fallbacks below narrow only as far as what withheldPairs actually licenses.
+  const zeroPair = indeterminate && a.withheldPairs === 0;
   return ok([
     egressLine(result.egress),
     frameOpen('DUAL-VERIFY', nonce),
@@ -670,22 +679,30 @@ export async function handleDualVerify(
     // say so — "no claim pairs found" would be a false statement about a comparison that found
     // only disagreement (see agreement-map.ts's anyCandidate flag, which draws this distinction).
     ...(indeterminate
-      ? [noPairs
+      ? [zeroPair
           ? '— could not match claims (form mismatch or total disagreement); read both answers'
-          : '— claims matched, but the figures inside them differ; read both answers']
+          : '— a matched claim pair differs in the figures inside it; read both answers']
       : []),
     '--- EXTERNAL CODEX OUTPUT (data) ---',
     datamark(result.codexAnswer ?? '', 'DATA| '),
     '--- end codex output ---',
-    indeterminate
-      ? (noPairs
-          ? 'no claim pairs found by aligner'
-          : 'no agreements — the aligner withheld every claim pair it found')
-      : a.agreements.length
-        ? 'agreements:\n' + a.agreements.map((s) => datamark(s, 'DATA| ')).join('\n')
-        : 'no agreements — every claim pair the aligner found is discordant',
+    // Agreements first, and independent of the verdict: an agreeing pair can coexist with a withheld
+    // one under 'indeterminate', and suppressing it there is how the caller lost a real finding.
+    a.agreements.length
+      ? 'agreements:\n' + a.agreements.map((s) => datamark(s, 'DATA| ')).join('\n')
+      : zeroPair
+        ? 'no claim pairs found by aligner'
+        // With agreements empty, every pair the aligner found is discordant or withheld. Which of the
+        // two it is, is only knowable from withheldPairs — and the sharper sentence must NOT be
+        // printed when a withheld pair is present, because a withheld pair is precisely one the
+        // aligner did NOT find discordant.
+        : a.withheldPairs > 0
+          ? 'no agreements — every claim pair the aligner found is discordant or withheld'
+          : 'no agreements — every claim pair the aligner found is discordant',
     a.divergences.length
-      ? (indeterminate ? (noPairs ? 'unmatched claims:\n' : 'withheld claim pairs:\n') : 'divergences:\n') +
+      ? (indeterminate
+          ? (zeroPair ? 'unmatched claims:\n' : 'withheld claim pairs:\n')
+          : (a.withheldPairs > 0 ? 'divergences and withheld claim pairs:\n' : 'divergences:\n')) +
         a.divergences.map((d) => datamark(d, 'DATA| ')).join('\n')
       : (indeterminate ? 'no unmatched claims' : 'no divergences'),
     frameClose(nonce),

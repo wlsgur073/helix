@@ -4,9 +4,14 @@ export interface AgreementMap {
   divergences: string[];
   /** How many assigned pairs the figure clamp declined to rule on (H1, see PASS 3). Zero on every
    *  pre-H1 shape. It exists because 'indeterminate' now has two routes that a caller CANNOT tell
-   *  apart from the other three fields — with a single withheld pair, `agreements` is empty and
-   *  `divergences` holds one entry, exactly like a one-sentence zero-pair comparison — and a caller
-   *  that explains the verdict has to say something different in each case or state a falsehood.
+   *  apart from the other three fields: a lone withheld pair leaves `agreements` empty and
+   *  `divergences` holding one entry, which is indistinguishable from a one-sentence zero-pair
+   *  comparison — and a caller that explains the verdict has to say something different in each case
+   *  or state a falsehood.
+   *  READ IT AS A COUNT, NOT AS "EVERY PAIR WAS WITHHELD". The clamp withholds PER PAIR, so a
+   *  comparison can carry an agreeing pair AND a withheld one; `withheldPairs > 0` licenses "at least
+   *  one pair was withheld" and nothing stronger. server/handlers.ts read it as the stronger claim,
+   *  printed that as a sentence, and suppressed the surviving agreement (review 2026-08-20, measured).
    *  A count, not a flag re-derived from the note text: `divergences` carries untrusted answer bytes,
    *  so any string test over it is a rule an adversary can aim at. */
   withheldPairs: number;
@@ -155,12 +160,19 @@ const COLLAPSE_GAP = String.raw`[\s*_~\u0060]+`;
  *  and did not match a plain "3" — the clamp fired on a pair that quotes the SAME figure, which is
  *  exactly the false-'diverge' cost the limits header warned this rule could carry. Found by the
  *  boundary test below, not reasoned about; that test is the guard on this bound.
- *  Normalization is then only case plus whitespace shape ("30 Minutes" / "30\tminutes"): with the
- *  separator tightened, a match can no longer END in punctuation, so nothing needs stripping. */
-const FIGURE_RE = /\d+(?:[.,:]\d+)*\s?[\p{L}%]{0,8}/gu;
+ *  The gap before the unit is `\s*`, not `\s?`. `\s?` admits exactly ONE whitespace character, so
+ *  "3  minutes" (two spaces) detached its unit, captured the figure as "3 " with a trailing space,
+ *  and withheld a pair that quotes the same figure AND the same unit — a false verdict whose note
+ *  rendered as `cites 3 `, the very trailing-gap shape cites() exists to prevent (review 2026-08-20,
+ *  measured). Widening cannot reach across a sentence, since sentences() has already split on \n+.
+ *  Normalization is then only case plus whitespace shape ("30 Minutes" / "30\tminutes" / "30  minutes"
+ *  all compare equal): with the separator tightened, a match can no longer END in punctuation, so
+ *  nothing needs stripping, and the run is collapsed to one space so a widened gap cannot itself
+ *  become a difference. */
+const FIGURE_RE = /\d+(?:[.,:]\d+)*\s*[\p{L}%]{0,8}/gu;
 
 function figuresOf(s: string): string[] {
-  return (s.match(FIGURE_RE) ?? []).map((f) => f.toLowerCase().replace(/\s/g, ' '));
+  return (s.match(FIGURE_RE) ?? []).map((f) => f.toLowerCase().replace(/\s+/g, ' ').trim());
 }
 
 /** Render a figure list for the divergence note; an empty list is stated, never left blank. */
@@ -239,8 +251,9 @@ function negationPolarity(s: string): number {
  * only when both sides share a negation polarity — an assigned pair at opposite polarity (e.g. "is
  * safe" vs "is not safe") is a divergence, not an agreement, even though the words otherwise overlap
  * heavily. Assignment is what stops a claim from borrowing agreement off a counterpart that belongs
- * to some other claim (H1, see hole (4) below). Original casing is preserved in the lists so the
- * user sees exactly what each side said.
+ * to some other claim — but only WHEN THE TRUE PAIRING SCORES HIGHER than the cross pairing, which
+ * is not always (H1, see hole (4) below, which is narrowed rather than closed). Original casing is
+ * preserved in the lists so the user sees exactly what each side said.
  * v1 used a richer claim extractor's place-holder (verbatim-sentence overlap); this is still a
  * heuristic, and a coarse one, wrong in BOTH directions — both are load-bearing for the caller to
  * know about, not just the quieter one:
@@ -338,8 +351,29 @@ function negationPolarity(s: string): number {
  *           under the whitespace-only rule that predates the gap class. That is a complement-attachment
  *           hole of the same family as this one, not a character-class problem, and narrowing the class
  *           cannot close it. See the pinned un-bit residue test and the round-2 residual test.
- *       (4) CROSS-PAIRING — CLOSED 2026-08-20 by the one-to-one assignment pass (H1); kept here with
- *           its history because the closure is what the two passes above now depend on. Measured
+ *       (4) CROSS-PAIRING — NARROWED, NOT CLOSED, 2026-08-20 by the one-to-one assignment pass (H1).
+ *           An earlier version of this line said CLOSED. That was wrong and is corrected here by
+ *           measurement (review, 2026-08-20), which matters more than the usual documentation slip:
+ *           this header IS the contract for a module whose whole job is to avoid over-claiming, so a
+ *           hole recorded as closed is worse than one never claimed. THE BOUND: assignment fixes the
+ *           cross pairing when the TRUE pairs outscore the cross pairs. Wherever a cross pairing
+ *           scores at or above the true pairing, greedy takes it and the original false-'agree' with
+ *           an EMPTY divergence list returns unchanged. Two measured shapes, pinned as limit tests
+ *           and NOT the same mechanism:
+ *             - greedy-suboptimal. "The sweep is not safe today. The lock is safe." vs "The lock is
+ *               not safe today. The sweep is safe." The cross pair scores highest individually
+ *               (5/7 = 0.714), so greedy consumes both of its endpoints; a maximum-weight matching
+ *               would have taken the two true pairs (4/6 + 4/6 = 1.333 > 0.714 + 0.6 = 1.314) and
+ *               found both polarity-discordant.
+ *             - similarity TIE. "The sweep is not safe. The lock is safe today." vs "The lock is not
+ *               safe. The sweep is safe today." All four candidates score 4/6; the input-order
+ *               tie-break resolves to the cross pairing. No weight-based matcher helps here at all —
+ *               the weights are equal.
+ *           So the residue points at false-'AGREE', the dangerous direction, NOT at false-'diverge'
+ *           as this file claimed until the review measured it. Upgrading greedy to a maximum-weight
+ *           matching would close the first shape and leave the second untouched; whether that trade
+ *           is worth a matching algorithm inside a verdict heuristic is an OWNER DECISION, recorded
+ *           here as open rather than promised. Measured
  *           2026-08-12 and PRE-EXISTING then (the polarity work neither introduced nor changed it):
  *           polarity was judged per SENTENCE while agreement was an OR over every lexical candidate,
  *           so a claim counted as agreed if ANY same-polarity candidate existed — not necessarily the
@@ -349,16 +383,16 @@ function negationPolarity(s: string): number {
  *           contradicts on BOTH claims yet rendered 'agree' with an EMPTY divergence list, because
  *           claim 1 found its match in the other side's claim 2 and vice versa. Assignment consumes
  *           each claim at most once, so both pairs now stand on their true counterparts and both are
- *           polarity-discordant. WHAT IS NOT CLOSED: assignment is GREEDY, not an optimal matching,
- *           so on a set of near-equal candidates it can take a locally-best pair that forces a worse
- *           one later. That residue points at false-'diverge' (a mis-assigned pair reads as a
- *           divergence), the declared-safe direction here. See the pinned cross-pairing tests.
+ *           polarity-discordant — WHEN the true pairs outscore the cross pairs. See the pinned
+ *           cross-pairing tests: one for the fixed shape, two for the shapes still open.
  * 'indeterminate' has TWO routes, and they mean the same thing at different depths — the module has
  * established no relationship it is willing to report:
  *   - No lexical candidates ANYWHERE (jaccard is symmetric, so zero one way implies zero the other):
  *     no comparability at all (empty inputs included; they must not read as vacuous agreement).
- *   - Every pair that survived polarity had its figures WITHHELD by the clamp (H1): comparability
- *     was established, the relationship was not.
+ *   - At least one pair had its figures WITHHELD by the clamp and no pair diverged (H1):
+ *     comparability was established, the relationship was not. Note the "at least one" — a pair may
+ *     have AGREED alongside the withheld one, so `agreements` can be NON-EMPTY under 'indeterminate'.
+ *     A caller that renders this verdict must not describe it as "no pair agreed".
  * Both are distinct from having candidates that are all polarity-discordant — that IS comparability
  * AND a genuine finding, so it reads 'diverge'. A comparison carrying both a real divergence and a
  * withheld pair reads 'diverge' too: the real finding outranks the abstention, and the withheld
@@ -404,9 +438,12 @@ export function buildAgreementMap(helixAnswer: string, codexAnswer: string): Agr
   // similarity ranking with each claim consumed at most once is what closes it; the tie-break is
   // input order (i, then j) so that equal-scoring candidates resolve identically on every run.
   // This is an ASSIGNMENT heuristic, not an optimal matching — greedy can pick a locally-best pair
-  // that forces a worse global one. That direction is the safe one here (a mis-assigned pair reads
-  // as a divergence, not as agreement), and an optimal matching would need a different algorithm
-  // than a defensible verdict heuristic warrants.
+  // that forces a worse global one. Measured (review 2026-08-20), correcting what this comment said
+  // before: that residue points at false-'AGREE', not at false-'diverge'. When the cross pairing
+  // outscores the true pairing, or merely ties it, greedy takes the cross pair, both sides land on
+  // matching polarity, and the contradiction renders as agreement with an empty divergence list —
+  // the H1 signature itself. A maximum-weight matching would close the outscoring half and cannot
+  // touch the tie half. See hole (4) in the header for the bound and the two pinned limit tests.
   candidates.sort((a, b) => b.sim - a.sim || a.i - b.i || a.j - b.j);
   const partnerOfHelix = new Array<number>(helix.length).fill(-1);
   const partnerOfCodex = new Array<number>(codex.length).fill(-1);

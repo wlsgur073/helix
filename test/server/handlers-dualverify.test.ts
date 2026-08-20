@@ -141,14 +141,54 @@ describe('handleDualVerify', () => {
     const res = await handleDualVerify({ question: 'q', helixAnswer: 'The retry limit is 3.' }, d);
     const t = text(res);
     expect(t).toContain('verdict: indeterminate (mode: compare)');
-    expect(t).toContain('\u2014 claims matched, but the figures inside them differ; read both answers');
-    expect(t).toContain('no agreements \u2014 the aligner withheld every claim pair it found');
+    expect(t).toContain('\u2014 a matched claim pair differs in the figures inside it; read both answers');
+    expect(t).toContain('no agreements \u2014 every claim pair the aligner found is discordant or withheld');
     expect(t).toContain('withheld claim pairs:');
     expect(t).toContain('figures differ');
     // The three statements that are true only on the zero-pair route must be absent here.
     expect(t).not.toContain('no claim pairs found by aligner');
     expect(t).not.toContain('could not match claims');
     expect(t).not.toContain('unmatched claims:');
+  });
+
+  it('an agreement that SURVIVES beside a withheld pair still reaches the caller (H1 fix round 1)', async () => {
+    // withheldPairs is a COUNT, not "every pair was withheld". The clamp withholds per pair, so a
+    // comparison can carry an agreeing pair AND a withheld one and still read 'indeterminate'. The
+    // first version of this branch read withheldPairs > 0 as "every pair", printed that sentence, and
+    // put the agreements block behind an `indeterminate ? … :` that made it UNREACHABLE on this
+    // route — so a real agreement never reached the caller at all. Both halves are asserted: the
+    // sentence must be true, and the surviving agreement must be printed.
+    const d = deps({ runner: async () => ({ ok: true, answer: 'The lock is safe. The retry limit is 30.' }) });
+    const res = await handleDualVerify(
+      { question: 'q', helixAnswer: 'The lock is safe. The retry limit is 3.' }, d);
+    const t = text(res);
+    expect(t).toContain('verdict: indeterminate (mode: compare)');
+    expect(t).toContain('agreements:');
+    expect(t).toContain('The lock is safe');
+    expect(t).toContain('withheld claim pairs:');
+    expect(t).toContain('figures differ');
+    // No sentence claiming the comparison found nothing, or that nothing agreed.
+    expect(t).not.toContain('no agreements');
+    expect(t).not.toContain('no claim pairs found by aligner');
+    expect(t).not.toContain('could not match claims');
+  });
+
+  it('a withheld pair beside a real divergence is never described as discordant (H1 fix round 1)', async () => {
+    // The fourth renderer sentence, on the 'diverge' route rather than the indeterminate one. With
+    // agreements empty the renderer used to say "every claim pair the aligner found is discordant" —
+    // false here, because the one pair it found was WITHHELD, which is precisely a pair it did not
+    // find discordant. This is the state the aligner's own flipped fixture produces.
+    const d = deps({ runner: async () => ({ ok: true, answer: 'The retry limit is 30.' }) });
+    const res = await handleDualVerify(
+      { question: 'q', helixAnswer: 'The retry limit is 3. The cache directory is purged on startup.' }, d);
+    const t = text(res);
+    expect(t).toContain('verdict: diverge (mode: compare)');
+    expect(t).toContain('no agreements \u2014 every claim pair the aligner found is discordant or withheld');
+    expect(t).toContain('divergences and withheld claim pairs:');
+    expect(t).toContain('The cache directory is purged on startup');
+    expect(t).toContain('figures differ');
+    // The unqualified sentence must not appear: it is the false one on this route.
+    expect(t).not.toContain('no agreements \u2014 every claim pair the aligner found is discordant\n');
   });
 
   it('a fully-discordant negated pair renders diverge with divergences, never the zero-pair aligner text', async () => {

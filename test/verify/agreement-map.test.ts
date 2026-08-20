@@ -529,6 +529,56 @@ describe('agreement map', () => {
     expect(m.verdict).toBe('agree');
   });
 
+  // ─── The two cases below BOUND what the H1 assignment pass actually fixed. They were measured in
+  // review on 2026-08-20 against the same build that closed the brief's cross-pairing repro, and the
+  // module header said CROSS-PAIRING CLOSED at the time — which is exactly why they are pinned here
+  // and why the header now says NARROWED. Both assert the CURRENT WRONG answer. They are two
+  // DIFFERENT mechanisms and are kept separate on purpose: the first is greedy-vs-optimal and a
+  // maximum-weight matcher would fix it; the second is a similarity TIE and no weight-based matcher
+  // can help, because the weights are equal. Whether to carry a matching algorithm inside a verdict
+  // heuristic is an owner decision, not something these tests presume.
+
+  it('open hole 4a, GREEDY-SUBOPTIMAL: a cross pair that outscores the true pairs still manufactures agreement', () => {
+    // jaccard("the sweep is not safe today", "the sweep is safe") = 5/7 = 0.714 is the single highest
+    // candidate, so greedy consumes both of its endpoints before either true pair is considered; the
+    // remaining cross pair (3/5 = 0.6) takes what is left. A maximum-weight matching would have taken
+    // the two TRUE pairs instead (4/6 + 4/6 = 1.333 > 0.714 + 0.6 = 1.314) and found both of them
+    // polarity-discordant. Both claims are contradicted and the divergence list is EMPTY — the H1
+    // signature the task set out to remove, surviving inside the shape assignment does not reach.
+    // Not asserting desired behavior.
+    const m = buildAgreementMap(
+      'The sweep is not safe today. The lock is safe.',
+      'The lock is not safe today. The sweep is safe.',
+    );
+    expect(m.verdict).toBe('agree');
+    expect(m.divergences).toHaveLength(0);
+    expect(m.withheldPairs).toBe(0);
+  });
+
+  it('open hole 4b, SIMILARITY TIE: all four candidates score equally and the tie-break lands on the cross pairing', () => {
+    // Distinct from 4a and not fixable the same way. Every candidate here scores 4/6, so there is no
+    // weight for a maximum-weight matching to prefer — the (sim desc, i, j) tie-break in PASS 2 is
+    // what decides, and input order puts the cross pairing first. Any total order over equal weights
+    // picks SOME pairing; nothing in the token sets says which one is the true one. Closing this
+    // needs structure, like the role swap. Not asserting desired behavior.
+    const m = buildAgreementMap(
+      'The sweep is not safe. The lock is safe today.',
+      'The lock is not safe. The sweep is safe today.',
+    );
+    expect(m.verdict).toBe('agree');
+    expect(m.divergences).toHaveLength(0);
+    expect(m.withheldPairs).toBe(0);
+    // The CONTROL that keeps this pair honest: same four claims, but with the token overlap tilted so
+    // the true pairs outscore the cross pairs. That is the half assignment does fix, and it must stay
+    // fixed — without this line the two pins above could be satisfied by an aligner that had simply
+    // reverted to any-match.
+    const fixed = buildAgreementMap(
+      'The lock is safe. The sweep is not safe.',
+      'The lock is not safe. The sweep is safe.',
+    );
+    expect(fixed.verdict).toBe('diverge');
+  });
+
   it('keeps file paths, file:line cites and version numbers as single claims (H3: a period splits only before whitespace or end)', () => {
     const map = buildAgreementMap(
       'The fix belongs in src/verify/codex.ts:12 next to version 0.144.1.',
@@ -653,11 +703,14 @@ describe('agreement map', () => {
     ]);
   });
 
-  it('the clamp does not fire on a pair that quotes the same figures in a different ORDER or FORM', () => {
-    // Two ways the clamp could over-fire and turn a real agreement into an abstention, both pinned so
-    // the "never on the same figures" claim is measured rather than asserted: figures quoted in the
-    // other order (multiset equality is order-independent), and a sentence-final figure whose trailing
-    // punctuation the normalizer strips.
+  it('the clamp does not fire on the same figures in a different ORDER, on sentence punctuation, or on a wider whitespace gap', () => {
+    // Ways the clamp could over-fire and turn a real agreement into an abstention, pinned so the
+    // "never on the same figures" claim is measured rather than asserted.
+    // NOTE THE BOUND, since the earlier title over-claimed it (review 2026-08-20): order-independence
+    // holds for the FIGURE TOKENS, which include the unit tail. Each figure here carries its own unit,
+    // so reordering moves whole tokens. Reordering figures that have NO unit moves a different word
+    // into each tail and the clamp does fire — that is the disclosed unit-tail limit, exhibited in
+    // the limit test below rather than hidden behind this test's name.
     const reordered = buildAgreementMap(
       'The limits are 3 retries and 25 minutes.',
       'The limits are 25 minutes and 3 retries.',
@@ -665,6 +718,15 @@ describe('agreement map', () => {
     expect(reordered.verdict).toBe('agree');
     const punctuated = buildAgreementMap('The retry limit is 3.', 'The retry limit is 3, always.');
     expect(punctuated.verdict).toBe('agree');
+    // A WIDER whitespace gap between figure and unit. `\s?` admitted exactly one whitespace character,
+    // so this withheld a pair quoting the same figure and the same unit, and rendered the note as
+    // `cites 3 ` — a trailing gap that reads as a rendering bug. Measured in review 2026-08-20 and
+    // fixed by widening the gap to `\s*` with the run collapsed on normalization.
+    const wideGap = buildAgreementMap('The timeout is 3 minutes.', 'The timeout is 3  minutes.');
+    expect(wideGap.verdict).toBe('agree');
+    expect(wideGap.divergences).toHaveLength(0);
+    const tabGap = buildAgreementMap('The timeout is 3 minutes.', 'The timeout is 3\tminutes.');
+    expect(tabGap.verdict).toBe('agree');
   });
 
   it('H1 accepted cost, measured: the unit tail grabs the word after a figure, so an ordinary word swap beside a matching number is withheld', () => {
@@ -684,6 +746,15 @@ describe('agreement map', () => {
     // The control: the same shape with the trailing word IDENTICAL still agrees, so the test above is
     // pinning the word tail specifically and not a figure comparison that is simply broken.
     expect(buildAgreementMap('The retry limit is 3 retries.', 'The retry limit is 3 retries.').verdict).toBe('agree');
+    // SECOND EXHIBIT of the same root, measured in review 2026-08-20: figures quoted in a different
+    // ORDER with NO unit after them. Reordering moves a different ordinary word into each figure's
+    // tail ("3 and" / "25 and"), so the multisets differ even though both sides quote 3 and 25. This
+    // is why the order-independence test above is scoped to figures that carry their own units.
+    const reorderedWithoutUnits = buildAgreementMap(
+      'The limit is 3 and the timeout is 25.',
+      'The timeout is 25 and the limit is 3.',
+    );
+    expect(reorderedWithoutUnits.verdict).toBe('indeterminate');
   });
 
   it('a figure on ONE side only is withheld, and the empty side is stated as "no figure"', () => {
