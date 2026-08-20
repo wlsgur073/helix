@@ -193,24 +193,28 @@ describe('buildIndex — duplicate ids (N2-BM25-DUP)', () => {
 // single-term query (matched/not-matched, never partial), so once 'alpha' is present everywhere both
 // are 1 for everyone and the (identical, factory-default) state/provenance keep the trust penalty
 // tied too — only bm25 (frequency- and length-sensitive) still varies, which is exactly the leg
-// under test.
+// under test. dup's own content is tuned to y's 9-token dilution, not z's 2-token one: absent the
+// residue, dup would be scored on that content and rank strictly BELOW z, so the assertions below
+// discriminate rather than merely tying (a same-content dup would pass whether or not the residue
+// existed, since a tie satisfies `toBeLessThan` too).
 describe('rankWithArtifacts — duplicate ids share one BM25 contribution (N2-BM25-DUP.b)', () => {
   it('a later row with an already-claimed id inherits that id\'s bm25, outranking a mid-score id', () => {
     const A = rec('x', 'alpha alpha alpha alpha alpha'); // owns id x: 5/5 tokens are the query term -> highest own bm25
-    const dup = rec('x', 'alpha filler'); // duplicate id, directly after A -> buildIndex drops this row (leg .a)
-    const z = rec('z', 'alpha filler'); // distinct id, content byte-identical to dup -> the mid bm25 dup's OWN content would earn if it were ever scored
-    const y = rec('y', 'alpha filler filler filler filler filler filler filler filler'); // distinct id, 'alpha' diluted into a 9-token doc -> lowest own bm25 (the normalizer's min)
+    const dup = rec('x', 'alpha filler filler filler filler filler filler filler filler'); // duplicate id, directly after A, content diluted to y's 9-token tier (NOT z's) -> buildIndex drops this row (leg .a) and its own content never reaches the index, so its OWN bm25 (were it ever scored) would sit at y's tier, strictly below z's
+    const z = rec('z', 'alpha filler'); // distinct id, 2-token content -> genuinely higher own bm25 than a 9-token dilution (shorter doc, same raw term frequency, so bm25's length normalization favors it)
+    const y = rec('y', 'alpha filler filler filler filler filler filler filler filler'); // distinct id, 'alpha' diluted into a 9-token doc -> lowest own bm25 (the normalizer's min), and dup's content proxy
     const records = [A, dup, z, y];
     const ranked = rankWithArtifacts(records, buildRankArtifacts(records), 'alpha');
     const pos = (r: unknown) => ranked.indexOf(r as never);
     expect(ranked).toContain(dup);
     expect(ranked).toContain(z);
     expect(ranked).toContain(y);
-    // dup's own content is byte-identical to z's, so absent the residue it would earn z's bm25 (a
-    // tie, not a win). Instead it inherits x's map entry via the shared id and gets x's norm (1) —
-    // the residue's claimed effect. Under the residue-precondition mutation (a row whose immediate
-    // predecessor shares its id gets bm forced to 0) that inherited contribution is zeroed and dup
-    // falls back to (at best) z's rank, below it.
+    // dup's own content is y's dilution, not z's, so absent the residue it would be scored on that
+    // content and rank strictly BELOW z — a real discrimination, not a tie. Instead dup shares id x
+    // with A via the id-keyed rawBm map (the residue comment above names it) and inherits A's
+    // bm25norm — the normalizer's max, 1 — which outranks both z and y. Under the residue-precondition
+    // mutation (a row whose immediate predecessor shares its id gets bm forced to 0) that inherited
+    // contribution is zeroed and dup falls back to its own (diluted, y-tier) score, below z.
     expect(pos(dup), 'dup shares id x\'s contribution and must sit above the mid-score id z').toBeLessThan(pos(z));
     expect(pos(dup), 'and above the diluted id y').toBeLessThan(pos(y));
   });
