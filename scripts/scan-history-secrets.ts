@@ -112,17 +112,25 @@ export function scanRepo(repoRoot: string): SecretHitRecord[] {
   return runScan(repoRoot).hits;
 }
 
-const isEntrypoint = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isEntrypoint) {
-  const { hits, scanned, blobCount } = runScan(process.cwd());
-  if (blobCount === 0) {
+/** P4.b: the CLI's verdict mapping, extracted so a unit test can reach what only CI executed —
+ *  the vacuity refusal and the hits→exit-code mapping. The entry block below must stay a thin
+ *  caller: logic added there is logic no test can see. */
+export function scanReport(r: { hits: Array<{ kind: string; sha: string; path: string }>; scanned: number; blobCount: number }): { lines: string[]; errors: string[]; exitCode: number } {
+  if (r.blobCount === 0) {
     // A vacuous scan (no blob enumerated across any ref) must not read as a clean scan —
     // it means the enumeration itself is broken (wrong cwd, no refs, a swallowed git
     // failure), and "0 hits" would otherwise look identical to a real, clean sweep.
-    console.error('FAIL: enumeration found 0 blobs across all refs — refusing to report a clean scan for a scan that never ran.');
-    process.exit(1);
+    return { lines: [], errors: ['FAIL: enumeration found 0 blobs across all refs — refusing to report a clean scan for a scan that never ran.'], exitCode: 1 };
   }
-  for (const h of hits) console.log(`HIT ${h.kind} | blob ${h.sha.slice(0, 10)} | ${h.path}`);
-  console.log(`\nscanned ${scanned} unique blobs across all refs; ${hits.length} named hit(s) after allowlist`);
-  process.exit(hits.length === 0 ? 0 : 1);
+  const lines = r.hits.map((h) => `HIT ${h.kind} | blob ${h.sha.slice(0, 10)} | ${h.path}`);
+  lines.push(`\nscanned ${r.scanned} unique blobs across all refs; ${r.hits.length} named hit(s) after allowlist`);
+  return { lines, errors: [], exitCode: r.hits.length === 0 ? 0 : 1 };
+}
+
+const isEntrypoint = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isEntrypoint) {
+  const report = scanReport(runScan(process.cwd()));
+  for (const e of report.errors) console.error(e);
+  for (const l of report.lines) console.log(l);
+  process.exit(report.exitCode);
 }

@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { enumerateBlobPaths, scanRepo } from '../scripts/scan-history-secrets.js';
+import { enumerateBlobPaths, scanRepo, scanReport } from '../scripts/scan-history-secrets.js';
 
 // deterministic root (repro/test convention: no random suffix in asserted paths)
 const ROOT = join(tmpdir(), 'helix-scan-fixture');
@@ -76,4 +76,17 @@ describe('scan-history-secrets against THIS repository', () => {
     // Mapped to strings so a failure names the offending paths instead of printing object diffs.
     expect(scanRepo(repoRoot).map((h) => `${h.kind} ${h.path}`)).toEqual([]);
   }, 60_000);
+});
+
+describe('scanReport — the CLI verdict mapping (P4.b)', () => {
+  const hit = { kind: 'named', sha: 'a'.repeat(40), path: 'x' };
+  it('a vacuous scan (0 blobs) refuses to report clean: exit 1 with a FAIL line', () => {
+    const r = scanReport({ hits: [], scanned: 0, blobCount: 0 });
+    expect(r.exitCode).toBe(1);
+    expect(r.errors.join('\n')).toContain('refusing to report a clean scan');
+  });
+  it('hits map to exit 1; a real clean scan maps to exit 0', () => {
+    expect(scanReport({ hits: [hit], scanned: 5, blobCount: 5 }).exitCode).toBe(1);
+    expect(scanReport({ hits: [], scanned: 5, blobCount: 5 }).exitCode).toBe(0);
+  });
 });
