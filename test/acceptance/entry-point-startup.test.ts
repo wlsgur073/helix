@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawn } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -162,4 +162,29 @@ describe('top-level entry points, measured through a bundle built from source', 
     expect(err).toContain('REFUSING TO START');
     expect(err, 'a collision was reported where HELIX_HOME holds nothing').not.toMatch(/already has/i);
   }, 90_000);
+
+  it('session-start still runs when spawned through a SYMLINK to the bundle (F4)', () => {
+    // isEntryPoint must answer identity, not spelling: argv[1] here is a symlink path whose
+    // realpath is the bundle. A textual comparison reads them as different files, main() never
+    // runs, and the hook exits 0 having done nothing — the exact defect shape F4 named.
+    const home = mkdtempSync(join(tmpdir(), 'helix-f4-home-'));
+    const elsewhere = mkdtempSync(join(tmpdir(), 'helix-f4-ledger-'));
+    const linkDir = mkdtempSync(join(tmpdir(), 'helix-f4-link-'));
+    const link = join(linkDir, 'session-start-linked.mjs');
+    try {
+      writeFileSync(join(elsewhere, 'ledger-mac-master.key'), randomBytes(32));
+      symlinkSync(sessionStart, link);
+      const env = { ...process.env, HELIX_HOME: home, HELIX_LEDGER: join(elsewhere, 'memory.jsonl') };
+
+      // Control (non-vacuity): spawned by its real path, the hook reports the stray file.
+      const direct = execFileSync(process.execPath, [sessionStart], { input: '{}', encoding: 'utf8', env });
+      expect(direct).toContain('helix: NOTE - trust-store files');
+
+      // The leg: the SAME invocation through a symlink must behave identically.
+      const viaLink = execFileSync(process.execPath, [link], { input: '{}', encoding: 'utf8', env });
+      expect(viaLink, 'spawned via symlink, the hook went silent: isEntryPoint compared spellings, not identities').toContain('helix: NOTE - trust-store files');
+    } finally {
+      for (const d of [home, elsewhere, linkDir]) rmSync(d, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
