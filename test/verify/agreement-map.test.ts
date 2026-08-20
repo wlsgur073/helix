@@ -539,12 +539,20 @@ describe('agreement map', () => {
   // heuristic is an owner decision, not something these tests presume.
 
   it('open hole 4a, GREEDY-SUBOPTIMAL: a cross pair that outscores the true pairs still manufactures agreement', () => {
-    // jaccard("the sweep is not safe today", "the sweep is safe") = 5/7 = 0.714 is the single highest
-    // candidate, so greedy consumes both of its endpoints before either true pair is considered; the
-    // remaining cross pair (3/5 = 0.6) takes what is left. A maximum-weight matching would have taken
-    // the two TRUE pairs instead (4/6 + 4/6 = 1.333 > 0.714 + 0.6 = 1.314) and found both of them
-    // polarity-discordant. Both claims are contradicted and the divergence list is EMPTY — the H1
-    // signature the task set out to remove, surviving inside the shape assignment does not reach.
+    // All four candidate scores, computed rather than eyeballed (an earlier version of this comment
+    // named the wrong pair and so described the opposite mechanism):
+    //   CROSS  "The sweep is not safe today" / "The lock is not safe today"  5/7 = 0.7143  <- highest
+    //   TRUE   "The sweep is not safe today" / "The sweep is safe"           4/6 = 0.6667
+    //   TRUE   "The lock is safe"            / "The lock is not safe today"  4/6 = 0.6667
+    //   CROSS  "The lock is safe"            / "The sweep is safe"           3/5 = 0.6
+    // The two negated sentences share "not" AND "today", which is what lifts that CROSS pair above
+    // both true pairs. Greedy takes it first and consumes both of its endpoints, so neither true pair
+    // can be considered at all, and the remaining cross pair (3/5) takes what is left. Both assigned
+    // pairs then match on polarity — 1 with 1, then 0 with 0 — so both read as agreement. A
+    // maximum-weight matching would have taken the two TRUE pairs instead (0.6667 + 0.6667 = 1.3334 >
+    // 0.7143 + 0.6 = 1.3143) and found both of them polarity-discordant. Both claims are contradicted
+    // and the divergence list is EMPTY — the H1 signature the task set out to remove, surviving
+    // inside the shape assignment does not reach.
     // Not asserting desired behavior.
     const m = buildAgreementMap(
       'The sweep is not safe today. The lock is safe.',
