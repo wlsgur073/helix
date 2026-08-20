@@ -15,11 +15,15 @@
 /** `helix_memory_commit`'s `content` field. */
 export const MAX_COMMIT_CONTENT_CHARS = 16_384;
 
-/** `helix_dual_verify`'s `question` field. Sits under dual-verify's 200,000-char egress cap (see
- *  header) — a per-field cap, not summed with MAX_DV_ANSWER_CHARS. */
+/** `helix_dual_verify`'s `question` field. `classifyEgress` (src/risk/trifecta.ts) joins `question`
+ *  and `helixAnswer` with a newline into one string and compares THAT joined length against its
+ *  200,000-char scan limit — so the pair is bounded JOINTLY, not just per field. This cap and
+ *  MAX_DV_ANSWER_CHARS are chosen so both the individual field and their sum stay under 200,000
+ *  (test/limits.test.ts asserts both). Raising either cap without re-checking the sum can turn every
+ *  dual-verify call into a scan-limit refusal. */
 export const MAX_DV_QUESTION_CHARS = 65_536;
 
-/** `helix_dual_verify`'s `helixAnswer` field. Same reasoning as MAX_DV_QUESTION_CHARS. */
+/** `helix_dual_verify`'s `helixAnswer` field. Same reasoning as MAX_DV_QUESTION_CHARS — see there. */
 export const MAX_DV_ANSWER_CHARS = 65_536;
 
 /** `helix_memory_recheck`'s `check.path` field. */

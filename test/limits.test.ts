@@ -29,15 +29,20 @@ describe('limits', () => {
     }
   });
 
-  // Per-field caps, NOT a sum bound. `helix_dual_verify` takes `question` and `helixAnswer` as two
-  // independent string fields that are never concatenated before dual-verify's downstream egress
-  // cap (200,000 chars -- classifyEgress) runs. `MAX_DV_QUESTION_CHARS + MAX_DV_ANSWER_CHARS <
-  // 200_000` would reject a table where both fields are individually safe but happen to sum past
-  // 200,000, and would pass a table where a single field alone already exceeds what egress lets
-  // through -- neither matches how the two fields are actually read, so each is asserted on its
-  // own against the egress cap.
-  it('MAX_DV_QUESTION_CHARS and MAX_DV_ANSWER_CHARS each sit under the 200,000-char egress cap', () => {
+  // `classifyEgress` (src/risk/trifecta.ts) joins `question` and `helixAnswer` with a newline and
+  // compares the JOINED length against its 200,000-char scan limit -- dual-verify.ts passes both
+  // into classifyEgress's `texts` array on every call, so the pair is bounded JOINTLY, not just per
+  // field. A per-field-only check would let a future edit raise either cap while each stays under
+  // 200,000 individually, yet still push every dual-verify call over the real joint limit and into a
+  // permanent scan_limit refusal -- so the sum is asserted too, alongside the per-field checks, not
+  // instead of them.
+  it('MAX_DV_QUESTION_CHARS and MAX_DV_ANSWER_CHARS each sit under the 200,000-char egress cap, and so does their sum', () => {
     expect(MAX_DV_QUESTION_CHARS).toBeLessThan(200_000);
     expect(MAX_DV_ANSWER_CHARS).toBeLessThan(200_000);
+    // Strict `<` (not `<=`) is deliberate, not just consistency with the two checks above: the real
+    // joined string is `question + '\n' + answer`, one char longer than the bare sum, so a sum that
+    // is merely `<= 200_000` could still push the actual joined length past classifyEgress's limit.
+    // `< 200_000` (i.e. sum <= 199_999) leaves that one char of room, matching the true check.
+    expect(MAX_DV_QUESTION_CHARS + MAX_DV_ANSWER_CHARS).toBeLessThan(200_000);
   });
 });
