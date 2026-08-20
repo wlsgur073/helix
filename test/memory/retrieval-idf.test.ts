@@ -179,3 +179,39 @@ describe('buildIndex — duplicate ids (N2-BM25-DUP)', () => {
     expect(idx.df.get('revenue')).toBe(1);
   });
 });
+
+// N2-BM25-DUP.b. RESIDUE, deliberately left (src/memory/retrieval.ts:381-386): rankWithArtifacts's
+// `rawBm` map is keyed by id and populated by iterating `records` (not the deduped index), so a row
+// whose id an EARLIER row already claimed shares that earlier row's bm25Score instead of ever being
+// scored on its own content — leg .a's first-wins fix above closes the write side (buildIndex) but
+// this read-side lookup never got the same rule. Every colliding-id fixture already in the suite
+// (this file's own N2-BM25-DUP block above, retrieval-split's own-content lock, recall-scope-
+// collision's scope tagging) holds exactly ONE distinct id, so `max === min` and bm25norm degenerates
+// to 0 for every record — nothing can observe which value got inherited. This fixture uses THREE
+// distinct ids so the normalizer stays live, and ties every other score leg by giving all four
+// records the query's one meaningful term ('alpha'): coverage and phrase are presence-only for a
+// single-term query (matched/not-matched, never partial), so once 'alpha' is present everywhere both
+// are 1 for everyone and the (identical, factory-default) state/provenance keep the trust penalty
+// tied too — only bm25 (frequency- and length-sensitive) still varies, which is exactly the leg
+// under test.
+describe('rankWithArtifacts — duplicate ids share one BM25 contribution (N2-BM25-DUP.b)', () => {
+  it('a later row with an already-claimed id inherits that id\'s bm25, outranking a mid-score id', () => {
+    const A = rec('x', 'alpha alpha alpha alpha alpha'); // owns id x: 5/5 tokens are the query term -> highest own bm25
+    const dup = rec('x', 'alpha filler'); // duplicate id, directly after A -> buildIndex drops this row (leg .a)
+    const z = rec('z', 'alpha filler'); // distinct id, content byte-identical to dup -> the mid bm25 dup's OWN content would earn if it were ever scored
+    const y = rec('y', 'alpha filler filler filler filler filler filler filler filler'); // distinct id, 'alpha' diluted into a 9-token doc -> lowest own bm25 (the normalizer's min)
+    const records = [A, dup, z, y];
+    const ranked = rankWithArtifacts(records, buildRankArtifacts(records), 'alpha');
+    const pos = (r: unknown) => ranked.indexOf(r as never);
+    expect(ranked).toContain(dup);
+    expect(ranked).toContain(z);
+    expect(ranked).toContain(y);
+    // dup's own content is byte-identical to z's, so absent the residue it would earn z's bm25 (a
+    // tie, not a win). Instead it inherits x's map entry via the shared id and gets x's norm (1) —
+    // the residue's claimed effect. Under the residue-precondition mutation (a row whose immediate
+    // predecessor shares its id gets bm forced to 0) that inherited contribution is zeroed and dup
+    // falls back to (at best) z's rank, below it.
+    expect(pos(dup), 'dup shares id x\'s contribution and must sit above the mid-score id z').toBeLessThan(pos(z));
+    expect(pos(dup), 'and above the diluted id y').toBeLessThan(pos(y));
+  });
+});
