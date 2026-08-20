@@ -1,5 +1,6 @@
-// 도구 표면의 이중 회수. 사용자가 실행하는 번들과 소스 등록부를 각각 프로토콜로 읽고
-// 일치를 요구한다. 정규식이나 개수 세기를 쓰지 않는다.
+// The tool surface is recovered twice over: once from the bundle the user runs and once from the
+// source registry, each read through the protocol, and the two are required to agree. No regex and
+// no counting.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -28,17 +29,17 @@ function cleanEnv(): Record<string, string> {
 const facet = (t: { name: string; description?: string; inputSchema: unknown }): ToolFacet =>
   ({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema });
 
-// 코드포인트 비교. `localeCompare`는 `--without-intl`/small-icu Node에서 코드포인트 유사
-// 비교로 퇴화하며 `HELIX_HOME` 대 `HELIXA` 같은 쌍에서 순서가 갈린다. 이 스냅샷의 존재
-// 이유가 다른 기계에서의 대조이므로 ICU 빌드에 좌우되는 축을 남기지 않는다.
+// Compared by code point. `localeCompare` degrades to a code-point-like comparison on a
+// `--without-intl` / small-icu Node and orders pairs such as `HELIX_HOME` vs `HELIXA` differently.
+// This snapshot exists to be diffed on another machine, so no axis may depend on the ICU build.
 const byName = (a: ToolFacet, b: ToolFacet): number => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 
 /**
- * 사용자가 실제로 실행하는 바이트에서 회수한다.
+ * Recovered from the bytes the user actually runs.
  *
- * `bundle`은 기본값이 배포되는 번들이며, 인자로 주는 것은 테스트가 합성 변이를 주입하는
- * 통로이다 — 번들의 임시 사본을 변형하여 넘기면, 이 함수가 상수를 반환하는 것이 아니라
- * 넘겨받은 바이트를 실제로 읽는다는 것이 확인된다. `bin/`은 변형하지 않는다.
+ * `bundle` defaults to the shipped bundle; passing it is how a test injects a synthetic mutation.
+ * Handing in a mutated temporary copy confirms that this function really reads the bytes it is
+ * given rather than returning a constant. `bin/` itself is never mutated.
  */
 export async function fromBundle(bundle: string = BUNDLE): Promise<ToolFacet[]> {
   const home = mkdtempSync(join(tmpdir(), 'helix-inv-bundle-'));
@@ -54,16 +55,18 @@ export async function fromBundle(bundle: string = BUNDLE): Promise<ToolFacet[]> 
     return tools.map(facet).sort(byName);
   } finally {
     await client.close();
-    // 디렉터리를 만든 함수가 수명을 소유한다. vitest 안에서는 global-setup의 실행별 루트가
-    // 함께 지우지만, `npm run inventory`는 vitest 밖이라 여기서 지우지 않으면 누적된다.
-    try { rmSync(home, { recursive: true, force: true }); } catch { /* 최선 노력 */ }
+    // The function that made the directory owns its lifetime. Inside vitest the global-setup
+    // per-run root removes it too, but `npm run inventory` runs outside vitest, so without this
+    // removal the directories accumulate.
+    try { rmSync(home, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 }
 
 /**
- * `process.env.HELIX_HOME`을 임시로 바꾸어 `fn`을 실행하고 이전 값으로 복원한다.
- * `process.env.X = undefined`는 문자열 `"undefined"`를 저장하므로, 이전 값이 없었으면
- * 대입이 아니라 삭제로 되돌린다. `test/global-setup.ts`의 `restoreEnv`와 같은 규율이다.
+ * Runs `fn` with `process.env.HELIX_HOME` temporarily changed, then restores the previous value.
+ * `process.env.X = undefined` stores the string `"undefined"`, so when there was no previous value
+ * the restore deletes the key instead of assigning to it — the same discipline as `restoreEnv` in
+ * `test/global-setup.ts`.
  */
 function withHelixHome<T>(home: string, fn: () => T): T {
   const prior = process.env.HELIX_HOME;
@@ -76,15 +79,15 @@ function withHelixHome<T>(home: string, fn: () => T): T {
   }
 }
 
-/** 소스 등록부에서 독립적으로 회수한다. */
+/** Recovered independently, from the source registry. */
 export async function fromSource(): Promise<ToolFacet[]> {
   const home = mkdtempSync(join(tmpdir(), 'helix-inv-src-'));
   const store = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 'inventory' });
-  // `buildServer`는 `dualDeps` 없이 호출되면 `process.env.HELIX_HOME ?? homedir()/.helix`를
-  // 스스로 해소하고 그 경로에 `loadConfig`를 즉시 실행한다. 임시 디렉터리를
-  // `MemoryStore`에만 넘기면 이 팔만 운영자의 실제 전역 설정을 읽어, 이중 회수의 두 팔이
-  // 서로 다른 설정 아래에서 구동된다. 범위는 `buildServer` 호출 한 번으로 좁힌다 —
-  // 도구 등록은 그 시점에 끝나고, `listTools`는 핸들러를 구동하지 않는다.
+  // Called without `dualDeps`, `buildServer` resolves `process.env.HELIX_HOME ?? homedir()/.helix`
+  // on its own and runs `loadConfig` against that path immediately. Handing the temporary directory
+  // to `MemoryStore` alone would leave this arm reading the operator's real global config, so the
+  // two arms of the double recovery would run under different settings. The scope is narrowed to the
+  // single `buildServer` call: tool registration finishes there, and `listTools` drives no handler.
   const server = withHelixHome(home, () => buildServer(store));
   const [ct, st] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'helix-inventory-src', version: '0.0.0' });
@@ -94,13 +97,14 @@ export async function fromSource(): Promise<ToolFacet[]> {
     return tools.map(facet).sort(byName);
   } finally {
     await client.close();
-    // 디렉터리를 만든 함수가 수명을 소유한다. vitest 안에서는 global-setup의 실행별 루트가
-    // 함께 지우지만, `npm run inventory`는 vitest 밖이라 여기서 지우지 않으면 누적된다.
-    try { rmSync(home, { recursive: true, force: true }); } catch { /* 최선 노력 */ }
+    // The function that made the directory owns its lifetime. Inside vitest the global-setup
+    // per-run root removes it too, but `npm run inventory` runs outside vitest, so without this
+    // removal the directories accumulate.
+    try { rmSync(home, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 }
 
-/** 불일치는 실패이며 인벤토리를 만들지 않는다. */
+/** A disagreement is a failure, and no inventory is produced. */
 export function compareSurfaces(bundle: ToolFacet[], source: ToolFacet[]): void {
   const b = JSON.stringify(bundle);
   const s = JSON.stringify(source);

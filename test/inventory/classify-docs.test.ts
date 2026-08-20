@@ -35,7 +35,7 @@ describe('classification ledger', () => {
     ).toEqual([]);
   });
 
-  // 음성 대조: 분류기가 실제로 미분류를 검출하는지.
+  // Negative control: does the classifier actually detect an unclassified block?
   it('reports a block whose classification is absent', () => {
     const blocks = parseBlocks('README.md');
     const partial = Object.fromEntries(blocks.slice(1).map((b) => [b.id, 'non-normative' as const]));
@@ -50,8 +50,8 @@ describe('classification ledger', () => {
     ).toEqual([]);
   });
 
-  // 음성 대조: 오기가 실제로 검출되는지. 이것이 없으면 위 사례는 검사기가 항상 빈 배열을
-  // 반환하는 경우에도 초록색이다.
+  // Negative control: is a typo actually detected? Without this, the case above stays green even
+  // if the checker always returns an empty array.
   it('reports a classification value that is not permitted', () => {
     expect(invalidClassifications({ 'a#1': 'claim', 'b#2': 'clam', 'c#3': 'non-normative' }))
       .toEqual(['b#2']);

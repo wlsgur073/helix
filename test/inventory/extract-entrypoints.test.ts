@@ -10,12 +10,13 @@ describe('hook extraction', () => {
     const hooks = extractHooks();
     expect(hooks.map((h) => h.event).sort()).toEqual(['SessionEnd', 'SessionStart']);
     for (const h of hooks) {
-      // 빈 문자열을 먼저 배제한다. `join(ROOT, '')`는 `ROOT` 자신으로 정규화되고 저장소
-      // 루트는 항상 존재하므로, 이 단언이 없으면 정규식이 실패해 `bundle`이 비어도 아래
-      // 두 검사가 모두 통과한다. Task 4의 스냅샷은 이 값을 그대로 고정한다.
+      // The empty string is excluded first. `join(ROOT, '')` normalises to `ROOT` itself and the
+      // repository root always exists, so without this assertion both checks below pass even when
+      // the regex failed and `bundle` came back empty. The committed inventory snapshot pins this
+      // value verbatim.
       expect(h.bundle.length, `${h.event} resolved to an empty bundle path`).toBeGreaterThan(0);
-      // 스냅샷에 들어가는 값은 저장소 기준 상대 경로이다. 절대 경로는 기계마다 달라져
-      // Task 4의 표류 테스트를 이 기계 밖에서 무의미하게 만든다.
+      // The value that enters the snapshot is repository-relative. An absolute path differs per
+      // machine and would make the drift test meaningless anywhere but here.
       expect(h.bundle.startsWith('/'), `${h.event} carries an absolute path: ${h.bundle}`).toBe(false);
       expect(existsSync(join(ROOT, h.bundle)), `${h.event} resolves to a missing bundle: ${h.bundle}`).toBe(true);
     }
@@ -41,7 +42,7 @@ describe('operator CLI extraction', () => {
   it('the trigger CLI declares required arguments in its usage', () => {
     const trigger = extractClis().find((c) => c.bundle.includes('helix-trigger'));
     expect(trigger, 'the trigger CLI is no longer shipped').toBeDefined();
-    // 문서가 제시하는 인자 없는 호출이 실행되지 않는 근거가 되는 계약.
+    // The contract that establishes why the argument-less invocation the docs show does not run.
     expect(trigger!.usage).toContain('--root');
     expect(trigger!.usage).toContain('--run');
   }, 60_000);

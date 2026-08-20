@@ -1,5 +1,5 @@
-// 커밋된 스냅샷과 실시간 회수가 어긋나면 실패한다. 열 번째 도구, 새 설정 leaf, 새 환경변수,
-// 새 hook, 새 CLI 플래그가 추가되면 이 테스트가 그것을 알린다.
+// Fails when the committed snapshot and a live recovery disagree. A tenth tool, a new config leaf,
+// a new environment variable, a new hook or a new CLI flag is reported here.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { buildSurface, SURFACE_PATH } from '../../scripts/inventory/build-inventory.js';

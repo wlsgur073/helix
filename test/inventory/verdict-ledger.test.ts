@@ -28,10 +28,11 @@ describe('verdict ledger validation', () => {
       .toContain('r1: FAILED requires a repairTarget');
   });
 
-  // 후보 혼합 검사는 관측이 있는 행끼리만 비교해야 한다. `candidate`의 정의가 "이 관측이
-  // 결속된 후보"이므로 `UNEVIDENCED` 행의 `null`은 다른 후보가 아니라 관측의 부재이다.
-  // 정직한 원장은 인증이 끝나기 전까지 항상 그런 행을 가지므로, null을 후보로 세면 매번
-  // 거짓 문제를 보고한다.
+  // The mixed-candidate check must compare only rows that carry an observation. `candidate` means
+  // "the candidate this OBSERVATION is bound to", so the `null` on an `UNEVIDENCED` row is the
+  // absence of an observation, not a second candidate. An honest ledger always holds such rows
+  // until certification finishes, so counting null as a candidate reports a false problem every
+  // time.
   it('does not read an absent observation as a second candidate', () => {
     expect(validateLedger([
       row(),
@@ -49,8 +50,9 @@ describe('verdict ledger validation', () => {
       .toContain('r1: UNDOCUMENTED must not name a claim');
   });
 
-  // 원장은 손으로 채우는 JSON이므로 자리표시자 빈 문자열은 현실적인 입력이다. `=== null`만
-  // 보는 검사는 그것을 증거로 받아들인다. 아래 두 사례는 그 규칙 하나만 발동시킨다.
+  // The ledger is JSON filled in by hand, so a placeholder empty string is a realistic input, and a
+  // check that only tests `=== null` accepts it as evidence. The two cases below trip that one rule
+  // and nothing else.
   it('rejects a MET row whose evidence is an empty string', () => {
     expect(validateLedger([row({ evidence: '' })])).toEqual(['r1: MET requires evidence']);
   });
@@ -59,8 +61,9 @@ describe('verdict ledger validation', () => {
     expect(validateLedger([row({ candidate: '   ' })])).toEqual(['r1: MET requires a candidate binding']);
   });
 
-  // 설계 문서 4는 서로 다른 번들에서 나온 행이 한 판정표에 섞이는 상황을 배제하고, 7-1은
-  // 이월을 금지한다. 행마다 `candidate !== null`만 보면 그 원장이 통과한다.
+  // Rows from two different bundles must never share one verdict table, and no observation may
+  // carry across changed bundle bytes. A per-row `candidate !== null` check would let such a ledger
+  // through.
   it('rejects a ledger whose rows are bound to two different candidates', () => {
     const mixed = [row(), row({ rowId: 'r2', candidate: 'cafebabe' })];
     expect(validateLedger(mixed))
@@ -72,8 +75,8 @@ describe('verdict ledger validation', () => {
   });
 });
 
-// 게이트를 커밋된 테스트로 구동한다. 손으로 붙여 넣는 일회성 명령은 실행 여부 자체가 판단에
-// 맡겨지며, 그러면 원장이 손상되어도 스위트는 초록색이다.
+// The gate is driven by a committed test. A one-off command pasted in by hand leaves whether it ran
+// at all to someone's judgement, and then the suite stays green over a damaged ledger.
 describe('the committed verdict ledger', () => {
   const VERDICTS_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'inventory', 'verdicts.json');
 
@@ -81,7 +84,7 @@ describe('the committed verdict ledger', () => {
     const rows = JSON.parse(readFileSync(VERDICTS_PATH, 'utf8')) as VerdictRow[];
     expect(Array.isArray(rows), 'data/inventory/verdicts.json is not a JSON array').toBe(true);
     expect(validateLedger(rows), 'the committed ledger carries a schema problem').toEqual([]);
-    // 빈 원장에서는 `gatePasses`가 `false`이므로 통과 단언은 아직 걸 수 없다.
+    // `gatePasses` is `false` on an empty ledger, so no passing assertion can be made yet.
   });
 });
 
@@ -105,19 +108,20 @@ describe('release gate', () => {
   });
 
   it('an empty ledger does not pass the gate', () => {
-    // 행이 없는 원장이 통과하면 인벤토리 미완성이 통과로 집계된다.
+    // If a ledger with no rows passed, an unfinished inventory would count as a pass.
     expect(gatePasses([])).toBe(false);
   });
 
-  // `gatePasses`의 `validateLedger` 연동 분기를 고립시키는 유일한 사례이다. 이 행은
-  // verdict가 `MET`이므로 `.every(r => r.verdict === 'MET')`만 보는 구현에서는 통과한다.
-  // 이 사례가 없으면 그 분기를 통째로 삭제해도 나머지 테스트가 전부 초록색으로 남는다.
+  // The only case that isolates the branch where `gatePasses` consults `validateLedger`. This row's
+  // verdict is `MET`, so an implementation that only checks `.every(r => r.verdict === 'MET')` lets
+  // it pass. Without this case the whole branch could be deleted and every other test would stay
+  // green.
   it('blocks a row whose verdict is MET but whose schema is incomplete', () => {
     expect(gatePasses([row({ evidence: null })])).toBe(false);
   });
 
-  // 두 행 모두 `MET`이므로 `.every(r => r.verdict === 'MET')`만 보는 구현에서는 통과한다.
-  // 후보 혼합을 막는 것은 `validateLedger` 연동 분기뿐이다.
+  // Both rows are `MET`, so an implementation checking only `.every(r => r.verdict === 'MET')` lets
+  // them pass. The `validateLedger` branch is the only thing that refuses the mixed candidates.
   it('blocks a ledger whose MET rows are bound to different candidates', () => {
     expect(gatePasses([row(), row({ rowId: 'r2', candidate: 'cafebabe' })])).toBe(false);
   });

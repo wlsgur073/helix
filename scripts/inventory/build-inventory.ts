@@ -1,4 +1,4 @@
-// 세 추출기를 합쳐 스냅샷을 만든다. 인자 없이 실행하면 스냅샷 파일을 갱신한다.
+// Combines the three extractors into one snapshot. Run with no arguments it rewrites the snapshot file.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

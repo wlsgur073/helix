@@ -1,4 +1,5 @@
-// 배포 문서를 블록 단위로 파싱하고 분류 원장과 대조한다. 미분류 블록은 실패이다.
+// Parses the shipped docs into blocks and checks each against the classification ledger.
+// An unclassified block is a failure.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -10,8 +11,9 @@ export interface DocBlock { id: string; file: string; line: number; text: string
 const PERMITTED: ReadonlySet<string> = new Set<string>(['claim', 'procedure', 'non-normative']);
 
 /**
- * 허용되지 않은 분류 값을 가진 블록 ID를 반환한다. 오기가 있으면 그 블록은 세 부류
- * 어디에도 속하지 않아 이후 청구 행 생성에서 조용히 탈락하므로, 키의 존재만으로는 부족하다.
+ * Returns the ids of blocks whose classification value is not one of the permitted three. A typo
+ * puts the block in none of them, so it drops out of claim-row generation in silence — which is why
+ * the key merely being present is not enough.
  */
 export function invalidClassifications(ledger: Record<string, string>): string[] {
   return Object.entries(ledger).filter(([, v]) => !PERMITTED.has(v)).map(([k]) => k).sort();
@@ -27,7 +29,7 @@ export const DOC_CORPUS: readonly string[] = [
   'docs/release/recovery-playbook.md',
 ];
 
-/** 빈 줄로 블록을 나누되, 펜스 코드 블록은 한 덩어리로 유지한다. */
+/** Splits on blank lines, but keeps a fenced code block together as one piece. */
 export function parseBlocks(file: string): DocBlock[] {
   const lines = readFileSync(join(ROOT, file), 'utf8').split('\n');
   const out: DocBlock[] = [];

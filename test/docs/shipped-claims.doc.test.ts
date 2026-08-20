@@ -33,11 +33,12 @@ import { staleBundles } from '../helpers/bundle-freshness.js';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const doc = (name: string): string => readFileSync(join(ROOT, name), 'utf8');
 
-// 이 파일의 나머지 사례는 `src/`를 실행해 값을 회수한다. 그것이 사용자가 실행하는 배포 번들에
-// 대한 증거가 되는 근거는 오직 `bin/`이 `src/`의 재빌드와 바이트 동일하다는 사슬이다. 사슬이
-// 끊어지면 아래 사례들은 사용자가 실행하지 않는 코드에 대한 진술이 되므로, 그 사슬을 여기서
-// 직접 측정한다. `test/plugin/packaging.test.ts`가 같은 헬퍼로 같은 사실을 확인하지만, 그 파일이
-// 사라져도 이 파일이 스스로 자신의 전제를 증명해야 한다.
+// Every other case in this file obtains its values by running `src/`. The only thing that makes
+// those values evidence about the shipped bundle the user runs is the chain that `bin/` is byte
+// identical to a rebuild of `src/`. Break the chain and the cases below become statements about
+// code nobody executes, so the chain is measured here directly. `test/plugin/packaging.test.ts`
+// checks the same fact through the same helper, but this file must prove its own premise even if
+// that file disappears.
 describe('the evidence chain that lets this file measure src/ and still speak for the bundle', () => {
   it('the shipped bundle is a byte-identical rebuild of the source these pins execute', () => {
     expect(
@@ -546,9 +547,10 @@ describe('SECURITY.md documents the proof-of-read guard on superseding a verifie
   });
 });
 
-// 배포된 CHANGELOG가 런타임이 실제로 등록하는 도구 수를 적는지. 이 저장소는 그 수를 사람이
-// 눈으로 세어 적었고 실제와 어긋난 채로 배포되었다. 그래서 이 사례는 문서의 숫자를 읽어
-// 확인하지 않고, 등록부를 구동하여 얻은 수로부터 문서가 무엇을 적어야 하는지를 도출한다.
+// Does the shipped CHANGELOG state the number of tools the runtime actually registers? This
+// repository once counted them by eye and shipped a number that disagreed with reality. So this
+// case does not read the document's figure and check it: it drives the registry, and derives from
+// the resulting count what the document has to say.
 describe('the shipped changelog states the tool count the runtime actually registers', () => {
   it('the spelled-out number in CHANGELOG matches the registry, recovered by execution', async () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-doc-count-'));
@@ -562,15 +564,17 @@ describe('the shipped changelog states the tool count the runtime actually regis
 
     const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
     const word = words[tools.length];
-    // 등록 도구가 이 표를 넘어서면 문서가 무엇을 적어야 하는지 도출할 수 없다. 조용히
-    // 지나가면 그 순간부터 이 사례는 아무것도 확인하지 않으므로 여기서 멈춘다.
+    // If the registered tools outgrow this table there is no way to derive what the document must
+    // say. Passing quietly would mean this case establishes nothing from that moment on, so it
+    // stops here instead.
     if (word === undefined) throw new Error(`no spelled-out word for ${tools.length} registered tools`);
 
     const changelog = doc('CHANGELOG.md');
     expect(changelog, `CHANGELOG does not say "${word} MCP tools" — the registry has ${tools.length}`)
       .toMatch(new RegExp(`${word} MCP tools`, 'i'));
 
-    // 다른 수를 동시에 주장하지 않는지. 한쪽만 정정되어 두 수가 공존하는 경우를 막는다.
+    // And that it does not assert a different number at the same time — one correction landing
+    // alone would leave two counts side by side.
     for (const [i, other] of words.entries()) {
       if (i === tools.length) continue;
       expect(changelog, `CHANGELOG still claims "${other} MCP tools"`)
@@ -579,13 +583,14 @@ describe('the shipped changelog states the tool count the runtime actually regis
   }, 30_000);
 });
 
-// README가 인쇄하는 모든 배포 CLI 호출이 실제로 실행되는지. 이 저장소는 인자가 필요한 CLI를
-// 인자 없이 보여준 채로 배포하였다. 그래서 이 사례는 문서의 명령을 읽어 판단하지 않고, CLI를
-// 실행하여 그것이 요구하는 인자를 회수한 뒤 문서가 그것을 담고 있는지 확인한다.
+// Does every shipped CLI invocation the README prints actually run? This repository shipped a CLI
+// that requires arguments while showing it with none. So this case does not judge by reading the
+// document's command: it runs the CLI, recovers the arguments it demands, and then checks that the
+// document carries them.
 describe('every shipped CLI invocation README prints can actually run', () => {
   it('the trigger invocation carries the arguments the CLI requires, recovered by executing it', () => {
-    // 자식에게 최소 환경을 준다. 개발자가 export한 `HELIX_*`가 닿지 않게 하고, node 진단
-    // 출력이 usage 문자열에 섞이지 않게 한다.
+    // The child gets a minimal environment, so a `HELIX_*` the developer exported cannot reach it
+    // and node's own diagnostics cannot mix into the usage string.
     const env = Object.fromEntries(
       Object.entries(process.env).filter(
         ([k, v]) => v !== undefined && !k.startsWith('HELIX_') && k !== 'NODE_OPTIONS' && k !== 'NODE_DEBUG',
@@ -594,10 +599,10 @@ describe('every shipped CLI invocation README prints can actually run', () => {
     const bare = spawnSync(process.execPath, [join(ROOT, 'bin', 'helix-trigger.mjs')], { encoding: 'utf8', env, timeout: 10_000 });
     expect(bare.status, 'the trigger CLI no longer refuses a bare invocation').toBe(2);
 
-    // usage가 요구하는 플래그를 실행 출력에서 회수한다. 문서에서 베끼지 않는다.
-    // `[...]`로 감싸인 구간은 선택 인자이므로 먼저 제거한다. 그러지 않으면 선택 인자까지
-    // 필수로 회수되어, README가 그것들까지 인쇄해야 통과하게 된다 — 잘못된 문서를 요구하는
-    // 테스트가 된다.
+    // The required flags are recovered from the run's own output, never copied from the document.
+    // Anything wrapped in `[...]` is optional and is stripped first; otherwise the optional
+    // arguments would be recovered as required, and the README would have to print those too to
+    // pass — a test demanding a wrong document.
     const usage = `${bare.stdout}${bare.stderr}`.replace(/\[[^\]]*\]/g, '');
     const required = [...usage.matchAll(/--([a-z-]+) </g)]
       .map((m) => m[1])
@@ -612,9 +617,10 @@ describe('every shipped CLI invocation README prints can actually run', () => {
   }, 30_000);
 });
 
-// README가 설정 가능하다고 말하는 egress leg의 이름과 기본값을 실제로 적는지. 문서는 leg를
-// 동작으로 서술하고 "per-leg overridable"이라고 적으면서 키 이름은 하나만 주었다 — 나머지를
-// 닫으려는 사용자는 키 이름을 알 수 없었다. 이 사례는 이름과 기본값을 모두 코드에서 회수한다.
+// Does the README actually state the name and default of every egress leg it calls configurable?
+// The document described the legs behaviourally and said "per-leg overridable" while naming exactly
+// one key, so a user wanting to close the rest could not learn the key names. This case recovers
+// both the names and the defaults from the code.
 describe('README documents every egress leg the config actually accepts', () => {
   it('names each leg and its shipped default, recovered from DEFAULT_CONFIG', () => {
     const legs = Object.entries(DEFAULT_CONFIG.dualVerify.egressPolicy);
@@ -624,10 +630,10 @@ describe('README documents every egress leg the config actually accepts', () => 
     expect(readme, 'README never names the `egressPolicy` key itself').toContain('`egressPolicy`');
 
     for (const [leg, shipped] of legs) {
-      // 표의 행이어야 한다. 산문에서 이름만 스쳐도 통과하면, 사용자가 값을 알 수 없는 상태가
-      // 그대로 남는다.
-      // 표가 불릿 안에 중첩되어 앞에 공백이 붙으므로 다듬어서 본다. 들여쓰기는 마크다운
-      // 중첩의 산물이지 의미가 아니다.
+      // It has to be a table row. If a name merely brushing past in prose were enough, the user
+      // would still be left unable to learn the value.
+      // The table is nested inside a bullet and so carries leading whitespace, which is trimmed
+      // before matching: the indentation is an artefact of markdown nesting, not meaning.
       const row = readme.split('\n').map((l) => l.trim()).find((l) => l.startsWith('| `' + leg + '`'));
       if (row === undefined) throw new Error(`README has no table row for the egress leg \`${leg}\``);
       expect(row, `README's row for \`${leg}\` does not state its shipped default \`${shipped}\``)
@@ -636,21 +642,21 @@ describe('README documents every egress leg the config actually accepts', () => 
   });
 });
 
-// README의 백업 절이 감사 기록 파일을 이름으로 적는지. 그 절은 원래 여섯 파일만 열거하여
-// `audit.jsonl`을 빠뜨렸는데, README는 다른 곳에서 삭제가 감사 가능하게 남는다고 약속하고
-// 복구 절차가 그 기록에 의존한다. 파일 이름을 산문에서 베끼지 않고 감사 기록을 실제로 남겨서
-// 회수한다.
+// Does the README's backup section name the audit log file? That section originally listed six
+// files and omitted `audit.jsonl`, while the README promises elsewhere that an erase stays auditable
+// and the recovery procedure depends on that log. The filename is not copied from prose: an audit
+// record is actually written and the name recovered from it.
 describe('README names the audit trail its erasure promise depends on', () => {
   it('the file the audit appender actually creates is named in the backup section', () => {
-    // 이름은 서버가 그것을 조립하는 자리에서 회수한다. 문서에서 베끼지 않는다.
+    // The name is recovered where the server composes it, not copied from the document.
     const wiring = readFileSync(join(ROOT, 'src/server/helix-server.ts'), 'utf8');
     const derived = /auditPath:\s*join\(home,\s*'([^']+)'\)/.exec(wiring)?.[1];
     if (derived === undefined) {
       throw new Error('the audit filename is no longer derived as join(home, ...) in helix-server.ts');
     }
 
-    // 회수한 이름이 실재하는지 구동으로 확인한다. 소스의 문자열만 보면 그 이름으로 파일이
-    // 실제로 생기는지는 알 수 없다.
+    // That the recovered name is real is confirmed by running: a string in the source says nothing
+    // about whether a file by that name is ever created.
     const home = mkdtempSync(join(tmpdir(), 'helix-doc-audit-'));
     appendAudit(join(home, derived), { kind: 'erase', ts: '2026-01-01T00:00:00.000Z', id: 'm_1', soft: true });
     expect(readdirSync(home), `the appender did not create ${derived}`).toContain(derived);
@@ -661,9 +667,10 @@ describe('README names the audit trail its erasure promise depends on', () => {
   });
 });
 
-// 배포 번들이 읽는 환경변수가 전부 README에 이름으로 나오는지. 사용자가 설정할 수 있고 동작을
-// 바꾸는데 문서에 없으면, 그 변수는 존재하지 않는 것처럼 보이면서 실제로는 작동한다. 이름을
-// 문서에서 베끼지 않고 배포된 번들에서 회수한다.
+// Is every environment variable the shipped bundles read named in the README? A variable the user
+// can set that changes behaviour, absent from the docs, looks as though it does not exist while
+// working all the same. The names are recovered from the shipped bundles, not copied from the
+// document.
 describe('README names every environment variable the shipped bundles read', () => {
   it('each HELIX_ variable recovered from bin/ appears in README', () => {
     const bundles = ['bin/helix-mcp.mjs', 'bin/helix-trigger.mjs', 'bin/helix-rebaseline.mjs', 'bin/hooks/session-start.mjs', 'bin/hooks/session-end.mjs'];
@@ -678,17 +685,17 @@ describe('README names every environment variable the shipped bundles read', () 
 
     const readme = doc('README.md');
     for (const name of [...found].sort()) {
-      // 단어 경계로 본다. `HELIX_SESSION`은 `HELIX_SESSIONS`의 접두사이므로, 부분 문자열
-      // 검사로는 후자만 문서화해도 전자가 통과한다.
+      // Matched on a word boundary. `HELIX_SESSION` is a prefix of `HELIX_SESSIONS`, so a
+      // substring check would pass the former on the strength of documenting only the latter.
       expect(readme, `${name} is read by a shipped bundle but appears nowhere in README`)
         .toMatch(new RegExp(name + '\\b'));
     }
   });
 
   it('README discloses that the user API key is forwarded to the Codex child', () => {
-    // Helix의 손잡이가 아니라 Codex의 변수이지만, dual-verify가 그것을 자식에게 전달한다.
-    // 무엇이 기계 밖으로 나가는지 서술하는 절이 그 사실을 적어야 한다. 허용 목록에 실제로
-    // 들어 있는지를 소스에서 회수한다.
+    // Codex's variable rather than a Helix control, but dual-verify forwards it to the child, and
+    // the section describing what leaves the machine has to say so. Whether it is really on the
+    // allowlist is recovered from the source.
     const codex = readFileSync(join(ROOT, 'src/verify/codex.ts'), 'utf8');
     const allowlist = /CHILD_ENV_ALLOWLIST[^=]*=\s*\[([\s\S]*?)\]/.exec(codex)?.[1];
     if (allowlist === undefined) throw new Error('CHILD_ENV_ALLOWLIST is no longer an array literal in codex.ts');
@@ -700,9 +707,10 @@ describe('README names every environment variable the shipped bundles read', () 
   });
 });
 
-// 복구 playbook이 서술하는 상호 배타를 도구가 실제로 강제하는지. 문서의 문구를 베끼지 않고
-// 거부를 구동으로 회수한다. 각각 단독으로는 거부되지 않는 것까지 확인해야 한다 — 모든 호출을
-// 거부하는 도구에서도 통과하는 단언이 되면 안 되기 때문이다.
+// Does the tool really enforce the mutual exclusion the recovery playbook describes? The refusal is
+// recovered by running rather than copied from the document's wording, and each argument alone must
+// be shown NOT to be refused — otherwise the assertion would pass over a tool that refuses every
+// call.
 describe('the recovery playbook states the exclusion the inspect tool actually enforces', () => {
   it('history+asOf is refused while each alone is served, recovered by execution', async () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-doc-excl-'));
@@ -723,8 +731,8 @@ describe('the recovery playbook states the exclusion the inspect tool actually e
     const onlyAsOf = await say({ asOf: TS });
     await client.close();
 
-    // 비공허성: 각각 단독은 거부되지 않아야 한다. 그러지 않으면 아래 단언은 무엇이든 거부하는
-    // 구현에서도 통과한다.
+    // Non-vacuity: neither argument alone may be refused, or the assertion below would pass over an
+    // implementation that refuses anything.
     expect(onlyHistory, 'history alone is refused — the refusal is not about the combination')
       .not.toMatch(/mutually exclusive/i);
     expect(onlyAsOf, 'asOf alone is refused — the refusal is not about the combination')
@@ -740,10 +748,10 @@ describe('the recovery playbook states the exclusion the inspect tool actually e
   }, 30_000);
 });
 
-// SECURITY.md가 파일 표면에서의 위조 불가를 주장한다. 그 주장을 구동으로 회수한다: 원시 JSON을
-// ledger에 덧붙여 상승 등급을 주장해도 `Fresh`로 clamp되고, MAC 없는 verify는 무시된다.
-// 비공허성은 같은 실행에서 정직하게 승급된 사실이 `Verified`로 남는 것으로 확보한다 — 모든
-// 항목을 `Fresh`로 만드는 구현에서도 통과하는 단언이 되면 안 되기 때문이다.
+// SECURITY.md claims unforgeability at the file surface. The claim is recovered by running:
+// appending raw JSON to the ledger to assert an elevated grade clamps to `Fresh`, and a verify with
+// no MAC is ignored. Non-vacuity comes from an honestly promoted fact staying `Verified` in the same
+// run — otherwise the assertion would pass over an implementation that makes every item `Fresh`.
 describe('SECURITY.md states the forgery resistance the ledger actually has', () => {
   it('a hand-appended elevated assert is clamped while a tool-minted grade survives', () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-doc-forge-'));
@@ -764,10 +772,10 @@ describe('SECURITY.md states the forgery resistance the ledger actually has', ()
     const reread = new MemoryStore(ledger, { home, sessionId: 't2' }).inspect();
     const state = (id: string): string | undefined => reread.find((r) => r.record.id === id)?.record.state;
 
-    // 비공허성: 도구가 부여한 등급은 살아남아야 한다.
+    // Non-vacuity: a grade the tool conferred must survive.
     expect(state(honest.id), 'the tool-minted grade did not survive — this case would pass on any all-Fresh build')
       .toBe('Verified');
-    // 본론: 손으로 덧붙인 상승 주장은 clamp된다.
+    // The point: a hand-appended claim to an elevated grade is clamped.
     expect(state('m_forged-assert'), 'a hand-appended elevated assert kept its claimed grade').toBe('Fresh');
 
     const sec = doc('SECURITY.md');
@@ -776,11 +784,12 @@ describe('SECURITY.md states the forgery resistance the ledger actually has', ()
   }, 30_000);
 });
 
-// SECURITY.md가 표식의 존재는 위조 가능하다고 공시한다. 그 공시가 사실인지 확인한다 — 잔여
-// 위험 서술이 실제와 어긋나면 잘못된 안심을 준다. 술어를 직접 구동하여 회수한다.
+// SECURITY.md discloses that a marker's mere presence is forgeable. Whether that disclosure is true
+// is checked here: a residual-risk statement that disagrees with reality gives false assurance. The
+// predicate is driven directly.
 describe('SECURITY.md states the marker forgeability the predicates actually have', () => {
   it('any marker-shaped row with the prefix is taken as canonical, with no MAC consulted', () => {
-    // MAC 없는 verify 모양. 공시가 말하는 바로 그 형태이다.
+    // The shape of a verify with no MAC — exactly the form the disclosure names.
     const forged = (id: string): never =>
       ({ id, type: 'verify', supersedes: null, target: null } as unknown as never);
 
@@ -789,8 +798,8 @@ describe('SECURITY.md states the marker forgeability the predicates actually hav
     expect(isHorizonMarker(forged('horizon_anything_an_adversary_picks')),
       'an appended horizon_-prefixed row is no longer taken as the marker').toBe(true);
 
-    // 비공허성: 접두사가 다르면 거짓이어야 한다. 그러지 않으면 위 두 단언은 항상 참을 반환하는
-    // 술어에서도 통과한다.
+    // Non-vacuity: a different prefix must be false, or the two assertions above would pass over a
+    // predicate that always returns true.
     expect(isIntegrityMarker(forged('m_ordinary_row')), 'the predicate answers true for any id').toBe(false);
     expect(isHorizonMarker(forged('m_ordinary_row')), 'the predicate answers true for any id').toBe(false);
 
@@ -802,8 +811,9 @@ describe('SECURITY.md states the marker forgeability the predicates actually hav
   });
 });
 
-// SECURITY.md의 지원 버전 표가 실제로 배포되는 버전을 지원한다고 적는지. 표의 숫자를 읽어
-// 확인하지 않고, 배포 매니페스트에서 버전을 회수한 뒤 그 계열이 표에 있는지 본다.
+// Does SECURITY.md's supported-versions table say the version actually shipping is supported? The
+// table's figure is not read and checked: the version is recovered from the shipped manifest and its
+// series looked up in the table.
 describe('SECURITY.md supports the version the plugin actually ships', () => {
   it('the shipped version line is marked supported, recovered from the manifest', () => {
     const shipped = (JSON.parse(doc('.claude-plugin/plugin.json')) as { version: string }).version;
@@ -816,26 +826,27 @@ describe('SECURITY.md supports the version the plugin actually ships', () => {
     if (mine === undefined) throw new Error(`SECURITY.md has no support row for the shipped series ${series}`);
     expect(mine, `SECURITY.md does not mark ${series} supported`).toContain('✅');
 
-    // 비공허성: 표가 모든 줄을 지원으로 표시하지는 않아야 한다.
+    // Non-vacuity: the table must not mark every row as supported.
     expect(rows.some((l) => l.includes('❌')), 'the support table marks nothing unsupported').toBe(true);
   });
 });
 
-// compaction 설정이 전역 config에서만 읽힌다는 주장. 파괴적 동작이므로 clone한 저장소가 그것을
-// 켜거나 조율할 수 없어야 한다. 접근자를 두 위치에 대해 구동하여 회수한다.
+// The claim that the compaction settings are read from the global config only. The operation is
+// destructive, so a cloned repository must be unable to enable or tune it. Recovered by driving the
+// accessor against both locations.
 describe('the compaction setting is read from the global config only, as the changelog states', () => {
   it('a project-side config cannot enable it while the global one can', () => {
     const globalHome = mkdtempSync(join(tmpdir(), 'helix-doc-cmpglobal-'));
     const projectDir = mkdtempSync(join(tmpdir(), 'helix-doc-cmpproject-'));
     const enabled = JSON.stringify({ compaction: { auto: true, minRows: 1 } });
 
-    // 프로젝트 쪽에만 두었을 때: 켜지지 않아야 한다.
+    // Placed on the project side alone: it must not turn on.
     writeFileSync(join(projectDir, 'config.json'), enabled);
     expect(compactionConfigFromGlobal(globalHome).auto,
       'a config outside the global home enabled compaction').toBe(false);
 
-    // 비공허성: 같은 내용을 전역에 두면 켜져야 한다. 그러지 않으면 위 단언은 언제나 false를
-    // 반환하는 구현에서도 통과한다.
+    // Non-vacuity: the same content in the global home must turn it on, or the assertion above
+    // would pass over an implementation that always returns false.
     writeFileSync(join(globalHome, 'config.json'), enabled);
     expect(compactionConfigFromGlobal(globalHome).auto,
       'the global config could not enable compaction either — the case above proves nothing').toBe(true);
@@ -845,8 +856,9 @@ describe('the compaction setting is read from the global config only, as the cha
   });
 });
 
-// 복구 playbook이 교차 scope supersede의 거부를 문구까지 인용한다. 그 문구를 문서에서 베끼지
-// 않고 실제 거부에서 회수한 뒤, 문서가 같은 문구를 담는지 본다.
+// The recovery playbook quotes the refusal of a cross-scope supersede down to its wording. That
+// wording is recovered from an actual refusal rather than copied from the document, and the document
+// is then checked to carry the same words.
 describe('the playbook quotes the cross-scope refusal the store actually raises', () => {
   it('a supersede whose target lives in the other ledger is refused, recovered by execution', () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-doc-scope-'));
@@ -859,8 +871,8 @@ describe('the playbook quotes the cross-scope refusal the store actually raises'
     const inGlobal = store.commit({ content: 'a fact in the global ledger', source: 'user', scope: 'global' });
     const inProject = store.commit({ content: 'a fact in the project ledger', source: 'user', scope: 'project' });
 
-    // 비공허성: 같은 ledger 안에서의 supersede 는 거부되지 않아야 한다. 그러지 않으면 아래
-    // 단언은 모든 supersede 를 거부하는 구현에서도 통과한다.
+    // Non-vacuity: a supersede within one ledger must not be refused, or the assertion below would
+    // pass over an implementation that refuses every supersede.
     const digest = store.inspect().find((r) => r.record.id === inGlobal.id)?.contentDigest;
     expect(digest, 'the read path no longer dispenses contentDigest').toBeDefined();
     expect(() => store.commit({ content: 'a same-scope replacement', source: 'user', scope: 'global',
@@ -878,8 +890,8 @@ describe('the playbook quotes the cross-scope refusal the store actually raises'
   }, 30_000);
 });
 
-// 복구 playbook의 "무엇이 돌아오는가" 표. 재커밋은 텍스트만 되살리고 id·등급·서명·구간은
-// 되살리지 않는다고 적는다. 세 줄을 구동으로 회수한다.
+// The recovery playbook's "what comes back" table. It says a re-commit restores the text only, and
+// not the id, the grade, the signature or the interval. Three of its rows are recovered by running.
 describe('the playbook table matches what a re-commit actually restores', () => {
   it('the text returns while the id and the grade do not, recovered by execution', () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-doc-recommit-'));
@@ -888,7 +900,7 @@ describe('the playbook table matches what a re-commit actually restores', () => 
     const original = store.commit({ content: TEXT, source: 'user' });
     store.confirm(original.id);
 
-    // 비공허성: 원본이 실제로 상승 등급을 가졌어야 "등급은 돌아오지 않는다"가 의미를 갖는다.
+    // Non-vacuity: "the grade does not come back" means something only if the original really held one.
     const before = store.inspect().find((r) => r.record.id === original.id)?.record.state;
     expect(before, 'the original never reached an elevated grade — the claim below would be untestable')
       .toBe('Verified');
@@ -897,9 +909,9 @@ describe('the playbook table matches what a re-commit actually restores', () => 
     const recommitted = store.commit({ content: TEXT, source: 'user' });
     const now = store.inspect().find((r) => r.record.id === recommitted.id)?.record;
 
-    expect(now?.content, 'the text did not come back').toBe(TEXT);                    // 표: The text — Yes
-    expect(recommitted.id, 'the re-commit reused the old id').not.toBe(original.id);  // 표: Item id — No
-    expect(now?.state, 'the re-committed item kept the old grade').toBe('Fresh');     // 표: Trust grade — No
+    expect(now?.content, 'the text did not come back').toBe(TEXT);                    // table row: The text — Yes
+    expect(recommitted.id, 'the re-commit reused the old id').not.toBe(original.id);  // table row: Item id — No
+    expect(now?.state, 'the re-committed item kept the old grade').toBe('Fresh');     // table row: Trust grade — No
 
     const play = doc('docs/release/recovery-playbook.md');
     expect(play, 'the table no longer says the id does not come back').toContain('**No — a new `m_<uuid>`.**');
@@ -907,8 +919,9 @@ describe('the playbook table matches what a re-commit actually restores', () => 
   }, 30_000);
 });
 
-// SECURITY.md가 compaction이 발행하는 표식의 성질을 서술한다: 내용이 없고, 서명되지 않으며,
-// 종류마다 하나의 상수 id로 합쳐진다. 그 셋을 compaction을 실제로 구동하여 회수한다.
+// SECURITY.md describes the properties of the markers a compaction mints: content-free, unsigned,
+// and coalesced onto one constant id per kind. All three are recovered by actually running a
+// compaction.
 describe('SECURITY.md describes the marker a compaction actually mints', () => {
   it('the minted integrity marker is content-free, unsigned, and carries the constant id', () => {
     const dir = mkdtempSync(join(tmpdir(), 'helix-doc-marker-'));
@@ -921,8 +934,9 @@ describe('SECURITY.md describes the marker a compaction actually mints', () => {
     writeFileSync(path, row({ id: 'm_1', content: 'the deploy target is staging' })
                       + row({ id: 'v_forged', type: 'verify', state: 'Verified', supersedes: 'm_1' }));
 
-    // 비공허성: 표식은 위조 verify가 실제로 버려질 때에만 발행되어야 한다. 아무것도 버리지
-    // 않는 compaction이 표식을 남기면 아래 단언은 무엇을 확인하는지 알 수 없다.
+    // Non-vacuity: a marker must be minted only when a forged verify was really dropped. If a
+    // compaction that drops nothing still left a marker, there would be no telling what the
+    // assertion below establishes.
     const kept = mkdtempSync(join(tmpdir(), 'helix-doc-nomarker-'));
     const keptPath = join(kept, 'm.jsonl');
     writeFileSync(keptPath, row({ id: 'm_1', content: 'the deploy target is staging' }));
@@ -944,15 +958,15 @@ describe('SECURITY.md describes the marker a compaction actually mints', () => {
   }, 30_000);
 });
 
-// README가 자동 compaction은 파괴적이므로 켜기 전까지 꺼져 있다고 적는다. 그 기본값을
-// 접근자를 실행하여 회수한다.
+// The README says automatic compaction is destructive and therefore off until you turn it on. That
+// default is recovered by running the accessor.
 describe('README states the compaction default the accessor actually returns', () => {
   it('auto compaction is off in an untouched home, recovered by execution', () => {
     const empty = mkdtempSync(join(tmpdir(), 'helix-doc-cmpdefault-'));
     const shipped = compactionConfigFromGlobal(empty);
     expect(shipped.auto, 'auto compaction is on by default — README says it is off').toBe(false);
 
-    // 비공허성: 접근자가 무엇을 주든 false를 반환하는 것이 아님을 같은 실행에서 확인한다.
+    // Non-vacuity: the same run confirms the accessor does not simply return false whatever it is given.
     writeFileSync(join(empty, 'config.json'), JSON.stringify({ compaction: { auto: true } }));
     expect(compactionConfigFromGlobal(empty).auto,
       'the accessor answers false whatever the config says — the case above proves nothing').toBe(true);
@@ -962,8 +976,9 @@ describe('README states the compaction default the accessor actually returns', (
   });
 });
 
-// 복구 playbook이 undo 창은 compaction이 ledger를 물리적으로 다시 쓸 때에만 닫힌다고 적는다.
-// soft erase 후 asOf가 내용을 돌려주고, compaction 뒤에는 돌려주지 않는 것으로 회수한다.
+// The recovery playbook says the undo window closes only when a compaction physically rewrites the
+// ledger. Recovered by having asOf return the content after a soft erase, and not after a
+// compaction.
 describe('the playbook states the only thing that closes the undo window', () => {
   it('an erased fact stays retrievable until a compaction rewrites the ledger', () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-doc-window-'));
@@ -973,7 +988,7 @@ describe('the playbook states the only thing that closes the undo window', () =>
     const rec = store.commit({ content: TEXT, source: 'user' });
     store.erase(rec.id);
 
-    // 삭제 직후: live view에는 없지만 파일에는 남아 있다 — 그것이 undo 창이다.
+    // Right after the erase: gone from the live view but still in the file — that is the undo window.
     expect(store.inspect().some((r) => r.record.id === rec.id), 'the erased fact is still live').toBe(false);
     expect(readFileSync(path, 'utf8'), 'the erased text left the file before any compaction').toContain(TEXT);
 
@@ -985,8 +1000,9 @@ describe('the playbook states the only thing that closes the undo window', () =>
   }, 30_000);
 });
 
-// README의 첫 두 문단이 제품을 소개하면서 검증 가능한 것을 함께 주장한다. 소개문이라는 이유로
-// 검사 밖에 두지 않는다 — 신규 사용자가 가장 먼저 읽는 자리이다.
+// The README's first two paragraphs introduce the product and assert checkable things while doing
+// it. Being an introduction is no reason to leave them unchecked: it is the first thing a new user
+// reads.
 describe('README opening states the surfaces and defaults the build actually has', () => {
   it('the engine is exposed as MCP tools and session hooks, recovered from the shipped artifacts', async () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-doc-opening-'));
@@ -1011,7 +1027,8 @@ describe('README opening states the surfaces and defaults the build actually has
   }, 30_000);
 
   it('the cross-validation the opening calls optional is off until configured', () => {
-    // "optional" 은 기본값에 대한 주장이다. 접근자가 아니라 배포되는 기본 설정에서 회수한다.
+    // "optional" is a claim about a default, so it is recovered from the shipped default config
+    // rather than from an accessor.
     expect(DEFAULT_CONFIG.dualVerify.enabled, 'dual-verify ships enabled — README calls it optional').toBe(false);
 
     const readme = doc('README.md');
@@ -1022,14 +1039,14 @@ describe('README opening states the surfaces and defaults the build actually has
   });
 });
 
-// SECURITY.md가 서명된 위트니스 때문에 master key가 첫 verify가 아니라 첫 메모리 쓰기에
-// 물질화된다고 적는다. 빈 홈에 commit 하나만 하여 회수한다.
+// SECURITY.md says the signed witness makes the master key materialise on the first memory write
+// rather than the first verify. Recovered with a single commit into an empty home.
 describe('SECURITY.md states when the master signing key actually comes into existence', () => {
   it('one commit with no verify already materializes the key', () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-doc-keybirth-'));
     const key = join(home, 'ledger-mac-master.key');
 
-    // 비공허성: 쓰기 전에는 없어야 한다. 그러지 않으면 아래 단언은 언제나 참이다.
+    // Non-vacuity: it must be absent before the write, or the assertion below is always true.
     expect(readdirSync(home), 'the home was not empty before the first write').toEqual([]);
 
     new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 't' })
@@ -1041,8 +1058,8 @@ describe('SECURITY.md states when the master signing key actually comes into exi
   });
 });
 
-// SECURITY.md가 marker-erase 라우팅을 서술하면서 구현 함수와 커밋된 probe를 경로로 인용한다.
-// 인용은 낡을 수 있으므로 세 이름이 모두 실재하는지 확인한다.
+// SECURITY.md describes the marker-erase routing and cites the implementing functions and a
+// committed probe by path. A citation can go stale, so all three names are checked to exist.
 describe('SECURITY.md cites marker-erase routing that still exists', () => {
   it('the named resolver, family helper and committed probe are all present', () => {
     const sec = doc('SECURITY.md');
@@ -1050,12 +1067,12 @@ describe('SECURITY.md cites marker-erase routing that still exists', () => {
 
     for (const fn of ['resolveEraseTarget', 'markerFamilyOf']) {
       expect(sec, `SECURITY.md no longer names ${fn}`).toContain(fn);
-      // 두 이름은 MemoryStore 의 메서드이다. 선언 자리를 찾는다.
+      // Both names are methods on MemoryStore; the declaration site is what is looked up.
       expect(store, `SECURITY.md names ${fn} but src/memory/store.ts does not declare it`)
         .toMatch(new RegExp(`(private\\s+)?${fn}\\s*\\(`));
     }
 
-    // 문서가 경로로 인용한 probe. 파일이 사라지거나 이름이 바뀌면 인용이 매달린다.
+    // The probe the document cites by path. If the file goes or is renamed, the citation dangles.
     const cited = 'test/memory/provenance-audit/marker-erase-routing.test.ts';
     expect(sec, 'SECURITY.md no longer cites the marker-erase probe').toContain(cited);
     expect(existsSync(join(ROOT, cited)), `SECURITY.md cites ${cited} but it does not exist`).toBe(true);

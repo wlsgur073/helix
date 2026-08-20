@@ -62,9 +62,10 @@ describe('committed bundles are fresh', () => {
   // This catches the real failure mode: a dev edits src, runs green tests, and commits
   // without rebuilding — shipping a stale bundle. (esbuild is deterministic for a fixed
   // version + input, so identical src reproduces identical bytes.)
-  // 재빌드와 비교 자체는 `test/helpers/bundle-freshness.ts`가 담당한다. 같은 사실을
-  // `test/docs/shipped-claims.doc.test.ts`도 필요로 하기 때문이다 — 그 파일의 핀들은 `src/`를
-  // 실행해 값을 얻으므로, 그것이 배포 번들에 대한 증거가 되는 근거가 바로 이 비교이다.
+  // The rebuild and the comparison live in `test/helpers/bundle-freshness.ts`, because
+  // `test/docs/shipped-claims.doc.test.ts` needs the same fact: its pins obtain their values by
+  // running `src/`, and this comparison is what makes those values evidence about the shipped
+  // bundle.
   it('rebuilding from src reproduces bin/ byte-for-byte (else: run npm run build)', () => {
     expect(staleBundles(), 'bin/ is stale — run npm run build and commit bin/').toEqual([]);
   }, 30_000);

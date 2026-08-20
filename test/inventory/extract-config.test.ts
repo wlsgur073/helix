@@ -6,8 +6,9 @@ import { loadConfig } from '../../src/config.js';
 import { extractConfigLeaves, extractEnvVars } from '../../scripts/inventory/extract-config.js';
 
 /**
- * 객체의 leaf 경로를 회수한다. 추출기의 `walk`를 재사용하지 않는다 — 같은 코드로 두 집합을
- * 만들면 정의상 같아져 아래 단언이 아무것도 확인하지 못한다.
+ * Recovers an object's leaf paths. The extractor's own `walk` is deliberately not reused: building
+ * both sets with the same code makes them equal by definition, and the assertion below would
+ * establish nothing.
  */
 function leafPaths(node: unknown, prefix: string[] = [], out: string[] = []): string[] {
   if (typeof node === 'object' && node !== null && !Array.isArray(node)) {
@@ -21,7 +22,7 @@ function leafPaths(node: unknown, prefix: string[] = [], out: string[] = []): st
 describe('config leaf extraction', () => {
   it('reaches the compaction keys, which DEFAULT_CONFIG does not carry', () => {
     const paths = extractConfigLeaves().map((l) => l.path);
-    // DEFAULT_CONFIG만 훑으면 이 여섯 개가 통째로 누락된다.
+    // Walking DEFAULT_CONFIG alone drops all six of these.
     expect(paths).toContain('compaction.auto');
     expect(paths).toContain('compaction.dirtyRatio');
     expect(paths).toContain('compaction.minRows');
@@ -45,15 +46,17 @@ describe('config leaf extraction', () => {
   });
 
   /**
-   * 설정 회수가 AST 추출이 아니라 기본값 walk이므로, 기본값 없이 수용되는 키가 생기면
-   * 인벤토리에서 조용히 누락된다. 그 부류를 검출하는 단언이다: `loadConfig`가 실제로
-   * 수용하여 반환한 leaf 경로가 전부 인벤토리의 leaf 집합에 들어 있어야 한다.
+   * Config recovery is a walk over the defaults rather than an AST extraction, so a key that is
+   * accepted without having a default drops silently out of the inventory. This assertion detects
+   * that class: every leaf path `loadConfig` actually accepted and returned must appear in the
+   * inventory's leaf set.
    */
   it('accepts no configuration key that the inventory does not carry as a leaf', () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-cfgaccept-'));
     try {
-      // 문서화된 키 전부를 기본값이 **아닌** 유효한 값으로 채운다. 기본값과 같은 값을 쓰면
-      // 대입이 일어나지 않아도 단언이 통과하므로, 수용 경로를 실제로 지나게 한다.
+      // Every documented key is filled with a valid value that is NOT its default. Using the
+      // default would let the assertion pass even if no assignment happened, so this drives the
+      // acceptance path for real.
       writeFileSync(join(home, 'config.json'), JSON.stringify({
         dualVerify: {
           enabled: true, mode: 'critique', stakesFloor: 'low', model: 'gpt-5.6', effort: 'high',
@@ -74,7 +77,7 @@ describe('config leaf extraction', () => {
         'loadConfig accepts a key with no inventoried leaf — the inventory omits it silently',
       ).toEqual([]);
     } finally {
-      try { rmSync(home, { recursive: true, force: true }); } catch { /* 최선 노력 */ }
+      try { rmSync(home, { recursive: true, force: true }); } catch { /* best effort */ }
     }
   });
 
@@ -91,7 +94,7 @@ describe('environment variable extraction', () => {
     const names = extractEnvVars().map((e) => e.name);
     expect(names).toContain('HELIX_HOME');
     expect(names).toContain('HELIX_LEDGER');
-    // 배포 번들이 읽지만 배포 문서에 없는 변수. 인벤토리에서 사라지면 안 된다.
+    // A variable the shipped bundles read but the shipped docs do not name. It must not vanish from the inventory.
     expect(names).toContain('HELIX_SESSIONS');
   });
 

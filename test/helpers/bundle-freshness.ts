@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** `build.mjs`가 산출하는 다섯 번들. 이 목록이 곧 배포되는 실행 가능 표면이다. */
+/** The five bundles `build.mjs` produces. This list IS the executable surface that ships. */
 const BUNDLES: readonly string[] = [
   'helix-mcp.mjs',
   'helix-trigger.mjs',
@@ -16,16 +16,18 @@ const BUNDLES: readonly string[] = [
 ];
 
 /**
- * `src/`를 임시 디렉터리로 재빌드하여 커밋된 `bin/`과 바이트 비교하고, 어긋난 번들의 상대 경로를
- * 반환한다. 빈 배열이면 `bin/`이 `src/`의 재빌드와 동일하다.
+ * Rebuilds `src/` into a temporary directory, compares the result byte for byte against the
+ * committed `bin/`, and returns the relative paths of the bundles that differ. An empty array means
+ * `bin/` is identical to a rebuild of `src/`.
  *
- * 이 함수가 헬퍼로 분리된 이유는 두 곳이 같은 사실을 필요로 하기 때문이다.
- * `test/plugin/packaging.test.ts`는 `bin/`이 낡았는지를 묻고, `test/docs/shipped-claims.doc.test.ts`는
- * 자신이 `src/`를 실행해 얻은 값이 배포 번들에 대한 증거가 될 수 있는지를 묻는다. 후자의 근거가
- * 바로 전자의 사실이므로, 두 파일이 각자 재빌드 논리를 복사해 두면 한쪽이 조용히 표류할 수 있다.
+ * It is a shared helper because two places need the same fact. `test/plugin/packaging.test.ts` asks
+ * whether `bin/` is stale; `test/docs/shipped-claims.doc.test.ts` asks whether the values it
+ * obtained by running `src/` can stand as evidence about the shipped bundle. The second question is
+ * answered by the first fact, so if each file kept its own copy of the rebuild logic one of them
+ * could drift without anyone noticing.
  *
- * esbuild는 같은 버전과 같은 입력에 대해 같은 바이트를 낸다. 따라서 차이가 나면 `src/`와 `bin/`이
- * 어긋난 것이며, `npm run build` 후 `bin/`을 커밋해야 한다.
+ * esbuild emits the same bytes for the same version and the same input. A difference therefore means
+ * `src/` and `bin/` have diverged, and `bin/` must be rebuilt with `npm run build` and committed.
  */
 export function staleBundles(): string[] {
   const out = mkdtempSync(join(tmpdir(), 'helix-freshbuild-'));

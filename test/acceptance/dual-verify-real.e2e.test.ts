@@ -11,9 +11,9 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-// 옵트인이 없으면 아래 블록은 스킵된다. 스킵이 유일한 신호이므로,
-// `expect(enabled).toBe(false)`만 하는 짝 블록은 두지 않는다 — 기본 환경에서 실패할 수 없는
-// 단언이 통과 건수에 집계되면 부재가 가려진다.
+// Without the opt-in the block below is skipped. The skip is the only signal, so there is no
+// companion block asserting `expect(enabled).toBe(false)`: an assertion that cannot fail in the
+// default environment would count toward the pass total and hide the absence.
 const enabled = process.env.HELIX_REAL_CODEX === '1';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BUNDLE = join(root, 'bin', 'helix-mcp.mjs');
