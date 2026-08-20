@@ -268,7 +268,7 @@ Partial-removal note: deleting only the signing key (`ledger-mac-master.key`) is
 
 ## Trust & data flow (what runs on your machine)
 
-Helix is local-first. Installing it lets Claude Code run code on your machine — here is exactly what that code does:
+Helix keeps your memory on your machine, under `~/.helix/` and an owned `<project>/.helix/`. Installing it lets Claude Code start the programs below; each entry names what it touches and whether it can leave the machine:
 
 - **MCP server** (`node bin/helix-mcp.mjs`, launched by Claude Code): reads and writes memory under `~/.helix/` (and an owned `<project>/.helix/` ledger when present). It makes **no network calls** except the optional dual-verify path below.
 - **Re-baseline ceremony** (`node bin/helix-rebaseline.mjs --scope global`, or `--scope <absoluteProjectRoot>` for a project; run by you): an interactive, TTY-only maintenance command that re-blesses a ledger scope after the rollback witness flags it as regressed (see [SECURITY.md](./SECURITY.md)). It is never launched automatically and is not exposed as an MCP tool.
@@ -311,7 +311,7 @@ Helix is local-first. Installing it lets Claude Code run code on your machine �
 
 ## Security & threat model
 
-Helix is a defense kit for **memory & context poisoning** (OWASP Agentic Top 10 — ASI06). Its guarantees:
+Helix implements controls against **memory & context poisoning** (the class OWASP's Agentic Top 10 calls ASI06). Each is bounded — what they do not cover is stated below and in [SECURITY.md](./SECURITY.md):
 
 - **Provenance firewall (fail-closed):** a reality-check raises a fact only to `Corroborated`; only you can promote it to `Verified`; external agreement never can. `Corroborated`/`Verified` are tamper-evident at the file surface — conferred only by HMAC-authenticated `verify` records (key held only in `~/.helix`), so a forged or edited ledger record replays as `Fresh`. Unforgeable at the file surface against an adversary that cannot read `~/.helix`; still not an enforceable tool-surface approval (do **not** allow-list `helix_memory_confirm`, or `helix_memory_adopt` — the only other tool that moves what Helix trusts).
 - **Trust states & re-verify:** `Fresh / Corroborated / Verified / Suspect`, with re-verification required before a `Suspect` item is used on a high-blast-radius path.
