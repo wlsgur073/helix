@@ -12,7 +12,7 @@
   {
     "rowId": "r002",
     "surfaceItem": "tool:helix_dual_verify",
-    "claimId": "CHANGELOG.md#76e2469f27ce",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "D2 metered: spawned Codex, DATA-framed verdict, audit spawned=true",
@@ -42,7 +42,7 @@
   {
     "rowId": "r005",
     "surfaceItem": "tool:helix_memory_confirm",
-    "claimId": "CHANGELOG.md#78da11dcf310",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "C fixture: confirm through the bundle produced a Verified grade",
@@ -62,7 +62,7 @@
   {
     "rowId": "r007",
     "surfaceItem": "tool:helix_memory_inspect",
-    "claimId": "CHANGELOG.md#78da11dcf310",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "B2 headless inspect; C4 asOf/history recipe through the bundle",
@@ -82,7 +82,7 @@
   {
     "rowId": "r009",
     "surfaceItem": "tool:helix_memory_recheck",
-    "claimId": "CHANGELOG.md#78da11dcf310",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "A1 suite (reality-check paths); not driven end to end in B/C/D",
@@ -152,7 +152,7 @@
   {
     "rowId": "r016",
     "surfaceItem": "config:dualVerify.effort",
-    "claimId": "CHANGELOG.md#520f6397a1d6",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
@@ -162,7 +162,7 @@
   {
     "rowId": "r017",
     "surfaceItem": "config:dualVerify.egressPolicy.memoryEcho",
-    "claimId": "CHANGELOG.md#76e2469f27ce",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
@@ -172,7 +172,7 @@
   {
     "rowId": "r018",
     "surfaceItem": "config:dualVerify.egressPolicy.piiBulk",
-    "claimId": "CHANGELOG.md#76e2469f27ce",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
@@ -182,7 +182,7 @@
   {
     "rowId": "r019",
     "surfaceItem": "config:dualVerify.egressPolicy.piiHigh",
-    "claimId": "CHANGELOG.md#76e2469f27ce",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
@@ -192,7 +192,7 @@
   {
     "rowId": "r020",
     "surfaceItem": "config:dualVerify.egressPolicy.secretEntropy",
-    "claimId": "CHANGELOG.md#76e2469f27ce",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
@@ -202,7 +202,7 @@
   {
     "rowId": "r021",
     "surfaceItem": "config:dualVerify.egressPolicy.secretEntropyExempt",
-    "claimId": "CHANGELOG.md#d02a2ded839c",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
@@ -212,7 +212,7 @@
   {
     "rowId": "r022",
     "surfaceItem": "config:dualVerify.egressPolicy.secretHeuristic",
-    "claimId": "CHANGELOG.md#76e2469f27ce",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
@@ -242,7 +242,7 @@
   {
     "rowId": "r025",
     "surfaceItem": "config:dualVerify.mode",
-    "claimId": "CHANGELOG.md#520f6397a1d6",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
@@ -252,7 +252,7 @@
   {
     "rowId": "r026",
     "surfaceItem": "config:dualVerify.model",
-    "claimId": "CHANGELOG.md#520f6397a1d6",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
@@ -262,7 +262,7 @@
   {
     "rowId": "r027",
     "surfaceItem": "config:dualVerify.stakesFloor",
-    "claimId": "CHANGELOG.md#78da11dcf310",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
@@ -272,7 +272,7 @@
   {
     "rowId": "r028",
     "surfaceItem": "config:dualVerify.timeoutMs",
-    "claimId": "CHANGELOG.md#76e2469f27ce",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
@@ -292,7 +292,7 @@
   {
     "rowId": "r030",
     "surfaceItem": "env:HELIX_HOME",
-    "claimId": "CHANGELOG.md#d02a2ded839c",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "B2 live session used it to place the isolated store; A1 shipped-claims pins it",
@@ -302,7 +302,7 @@
   {
     "rowId": "r031",
     "surfaceItem": "env:HELIX_LEDGER",
-    "claimId": "CHANGELOG.md#d02a2ded839c",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles",
@@ -352,7 +352,7 @@
   {
     "rowId": "r036",
     "surfaceItem": "hook:SessionStart",
-    "claimId": "CHANGELOG.md#78da11dcf310",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "B2 live session: nonce-framed DATA block injected automatically",
@@ -362,7 +362,7 @@
   {
     "rowId": "r037",
     "surfaceItem": "cli:bin/helix-rebaseline.mjs",
-    "claimId": "CHANGELOG.md#78da11dcf310",
+    "claimId": "CHANGELOG.md#39bfd532c277",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "D1 TTY ceremony success path + refusal negative control",
@@ -392,7 +392,7 @@
   {
     "rowId": "r040",
     "surfaceItem": "cross-cutting",
-    "claimId": "CHANGELOG.md#76938dd82b17",
+    "claimId": "CHANGELOG.md#1bd44f318627",
     "verdict": "UNEVIDENCED",
     "repairTarget": null,
     "evidence": null,
@@ -482,7 +482,7 @@
   {
     "rowId": "r049",
     "surfaceItem": "cross-cutting",
-    "claimId": "README.md#6f59ab49c46c",
+    "claimId": "README.md#b27b3d1fb743",
     "verdict": "UNEVIDENCED",
     "repairTarget": null,
     "evidence": null,
@@ -512,7 +512,7 @@
   {
     "rowId": "r052",
     "surfaceItem": "cross-cutting",
-    "claimId": "README.md#8c1e0e9d33cc",
+    "claimId": "README.md#bfa0596f656b",
     "verdict": "UNEVIDENCED",
     "repairTarget": null,
     "evidence": null,
@@ -690,16 +690,6 @@
     "securityBoundary": false
   },
   {
-    "rowId": "r070",
-    "surfaceItem": "cross-cutting",
-    "claimId": "docs/release/recovery-playbook.md#465d07a79dc7",
-    "verdict": "UNEVIDENCED",
-    "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
-    "securityBoundary": false
-  },
-  {
     "rowId": "r071",
     "surfaceItem": "cross-cutting",
     "claimId": "docs/release/recovery-playbook.md#90716eb2c539",
@@ -735,7 +725,7 @@
     "claimId": "docs/release/recovery-playbook.md#ada98792d6d0",
     "verdict": "MET",
     "repairTarget": null,
-    "evidence": "C4: the row carried DATA[erase:global:…] naming its scope",
+    "evidence": "C4: the row carried DATA[erase:global:\u2026] naming its scope",
     "candidate": "01483ce9192028177c594a1a977d47a154535af6",
     "securityBoundary": false
   },
