@@ -667,6 +667,25 @@ describe('agreement map', () => {
     expect(punctuated.verdict).toBe('agree');
   });
 
+  it('H1 accepted cost, measured: the unit tail grabs the word after a figure, so an ordinary word swap beside a matching number is withheld', () => {
+    // FIGURE_RE carries up to 8 following letters so a UNIT travels with its number ("25 minutes" vs
+    // "25 seconds"). It cannot tell a unit from any other short word, so two claims that quote the
+    // SAME number and differ only in the ordinary word after it compare unequal and the clamp fires.
+    // The cost is bounded by the withholding design rather than removed: this reads 'indeterminate'
+    // with both readings printed, not 'diverge' — an abstention the caller can resolve by looking,
+    // not a manufactured conflict. Closing it needs a unit lexicon or a parser, neither of which a
+    // lexical aligner has. Measured 2026-08-20; pinned so a future reader sees it was measured, not
+    // missed. Not asserting desired behavior.
+    const m = buildAgreementMap('The retry limit is 3 today.', 'The retry limit is 3 now.');
+    expect(m.verdict).toBe('indeterminate');
+    expect(m.divergences).toEqual([
+      'figures differ — "The retry limit is 3 today" cites 3 today; "The retry limit is 3 now" cites 3 now',
+    ]);
+    // The control: the same shape with the trailing word IDENTICAL still agrees, so the test above is
+    // pinning the word tail specifically and not a figure comparison that is simply broken.
+    expect(buildAgreementMap('The retry limit is 3 retries.', 'The retry limit is 3 retries.').verdict).toBe('agree');
+  });
+
   it('a figure on ONE side only is withheld, and the empty side is stated as "no figure"', () => {
     // A missing figure is a difference in the multiset, so the clamp fires. The note has to say so
     // rather than print an empty gap that reads like a rendering bug.

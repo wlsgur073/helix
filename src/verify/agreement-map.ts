@@ -145,8 +145,11 @@ const COLLAPSE_GAP = String.raw`[\s*_~\u0060]+`;
  *  up to 8 letters or a `%` so the UNIT travels with the number ("25 minutes" vs "25 seconds" is a
  *  substitution this must see). The bound is 8 because it is a unit-catcher, not a phrase-catcher —
  *  it deliberately grabs the following word whether or not that word is a unit ("12 next" out of
- *  "codex.ts:12 next to"), which costs nothing because both sides are normalized the same way and
- *  only compared with each other.
+ *  "codex.ts:12 next to"). ITS ACCEPTED COST, measured rather than assumed: two claims quoting the
+ *  SAME number that differ only in the ordinary word after it ("the limit is 3 today" / "is 3 now")
+ *  compare unequal and are withheld. The withholding design is what bounds that — such a pair reads
+ *  'indeterminate' with both readings printed, not 'diverge' — and closing it needs a unit lexicon
+ *  or a parser, neither of which a lexical aligner has. Pinned as a limit test.
  *  A separator counts ONLY between digits. The looser `[\d,.:]*` this started as swallowed ordinary
  *  sentence punctuation and the word after it, so "the retry limit is 3, always" yielded "3, always"
  *  and did not match a plain "3" — the clamp fired on a pair that quotes the SAME figure, which is
