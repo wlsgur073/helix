@@ -509,7 +509,11 @@ describe('agreement map', () => {
     ]);
   });
 
-  it('cross-pairing cannot manufacture agreement: sentences are assigned one-to-one (H1)', () => {
+  // Same fixture as the I3-closed case directly above, with strictly weaker assertions — a pure
+  // duplicate, kept (not deleted) because the review brief named this exact repro by title. It does
+  // NOT establish that cross-pairing is closed in general: 4a/4b below pin the opposite, on
+  // fixtures where a cross pair outscores or ties the true pairs.
+  it("the brief's repro: the lock/sweep pair renders diverge, not agree (H1)", () => {
     const m = buildAgreementMap(
       'The lock is safe. The sweep is not safe.',
       'The lock is not safe. The sweep is safe.',

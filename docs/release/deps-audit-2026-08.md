@@ -63,7 +63,11 @@ advisory in this snapshot needs a `--force`/breaking bump), but none of them ent
 bundle regardless of version, so bumping their lockfile entries now would widen the freeze-window
 diff without closing any reachable finding. They are left for ordinary dependency maintenance (the
 next unconstrained `npm install`/lockfile refresh, which will most naturally happen alongside the
-close-day rebuild) rather than acted on individually mid-freeze.
+close-day rebuild) rather than acted on individually mid-freeze. The `bundled-unreachable` verdict
+for `@hono/node-server`, `hono`, `body-parser`, and `ip-address` specifically holds only as long as
+Helix ships stdio-only: the moment an HTTP transport (or any other code path importing the SDK's
+Express/hono adapter or OAuth-handler modules) is wired into `src/`, every one of these four rows
+reopens and must be re-triaged against its advisory set before that change ships.
 
 **Expected residue after the decided upgrades land:** 7 advisories total (`{"low":2,"moderate":2,
 "high":3}`; production-only: `{"low":1,"moderate":2,"high":1}`, from `@hono/node-server`,

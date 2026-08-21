@@ -209,3 +209,31 @@ This file records what shipped in each release of Helix. It follows
   that finds trust-store files beside a relocated ledger refuses to start and names both
   directories, rather than minting a fresh key and silently dropping every grade the old one
   conferred.
+
+### Changed
+- `helix_memory_commit`'s `content` field now rejects payloads over 16,384 characters, enforced by
+  both the MCP schema (before the handler runs) and the store (`store.commit`), so no non-MCP
+  caller into the same store can bypass it.
+- `helix_dual_verify`'s `question`/`helixAnswer` and `helix_memory_recheck`'s `check.path`/
+  `check.pattern` fields now carry MCP schema maxima: 65,536 characters each for `question` and
+  `helixAnswer` (their sum is kept under `classifyEgress`'s existing 200,000-char joint scan
+  limit), 4,096 for `check.path`, 2,048 for `check.pattern`.
+- `helix_memory_recall` and `helix_memory_inspect` (default, `history`, and `asOf` shapes) now cap
+  their rendered response at 262,144 characters: an oversized response drops whole tail items —
+  never a partial one — and appends a trailing `N item(s) omitted (response cap)` note.
+  `helix_memory_recall`'s optional `maxItems` (≤ 200) and `maxChars` (≤ 10,000) arguments now carry
+  matching schema maxima.
+- The SessionStart and SessionEnd hooks now bound their stdin read at 1 MiB and refuse fail-closed
+  past it; SessionEnd additionally truncates the record's `session_id` (128 chars) and `reason`
+  (256 chars) fields to their caps instead of storing them unbounded.
+- `helix_memory_erase`, `helix_memory_adopt`, `helix_memory_recheck`, and `helix_memory_confirm`
+  now report success as `<verb> {json}` — one JSON object carrying the id or path — matching
+  `helix_memory_commit`'s existing shape. A caller-controlled id or path no longer re-enters the
+  success prose as a bare, unescaped string.
+- `helix_dual_verify` agreement now assigns claim sentences one-to-one instead of scoring every
+  candidate pair independently: a sentence pair whose figures differ can no longer render `agree` —
+  the verdict withholds and names both values instead. Two narrower cross-pairing shapes remain
+  disclosed, pinned limits (see `src/verify/agreement-map.ts`).
+- Dependency advisory triage refreshed (`docs/release/deps-audit-2026-08.md`); `fast-uri` is
+  overridden to `3.1.5` in `package.json`/`package-lock.json` as defense-in-depth for the one
+  advisory-bearing package that ships (the shipped bundle itself picks it up at the next rebuild).
