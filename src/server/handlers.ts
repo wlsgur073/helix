@@ -419,7 +419,11 @@ export function handleErase(store: MemoryStore, args: { id: string }, deps: Eras
   store.erase(args.id); // soft (default): tombstone only, no compaction
   const ts = (deps.now ?? (() => new Date().toISOString()))();
   appendAudit(deps.auditPath, { kind: 'erase', ts, id: args.id, soft: true });
-  return ok(`erased ${args.id}`);
+  // M2: args.id is caller-controlled and passes isValidId's charset for any printable, non-control
+  // script — including 'a) SYSTEM: ...' shapes that would close this sentence and continue in
+  // unmarked prose if interpolated bare. JSON.stringify is the same quarantine handleCommit's
+  // success line already uses: inside a JSON string literal the value is visibly DATA, not narration.
+  return ok(`erased ${JSON.stringify(args.id)}`);
 }
 
 export function handleAdopt(
@@ -432,7 +436,8 @@ export function handleAdopt(
   // record — unlike confirm, whose 'rejected' row marks an attempt against a real target id.
   const scope = store.adopt(args.projectRoot);
   appendAudit(deps.auditPath, { kind: 'adopt', ts, scope });
-  return ok(`adopted ${scope}: this project ledger is now trusted by this Helix install`);
+  // M2: scope is the canonical form of the caller-supplied projectRoot — same quarantine as erase's id.
+  return ok(`adopted ${JSON.stringify(scope)}: this project ledger is now trusted by this Helix install`);
 }
 
 export interface RecheckConfirmDeps {
@@ -452,7 +457,8 @@ export function handleRecheck(store: MemoryStore, args: { id: string; check: Rea
     // never Fresh/Verified), so narrowing MemoryState to the audit's verify-result union is safe.
     const resultState = (result.kind === 'state' ? result.state : result.kind) as VerifyAudit['resultState']; // 'no-change' | 'contested'
     appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'reality-check', checkKind: args.check.kind, outcome, resultState, bound: true });
-    return ok(`recheck ${args.id}: ${resultState}`);
+    // M2: same quarantine as erase's id.
+    return ok(`recheck ${JSON.stringify(args.id)}: ${resultState}`);
   } catch (e) {
     appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'reality-check', checkKind: args.check.kind, resultState: 'rejected', bound: false });
     throw e; // re-throw — MCP must still surface the error
@@ -473,7 +479,8 @@ export function handleConfirm(store: MemoryStore, args: { id: string }, deps: Re
   // Confirm SUCCEEDED. Audit it as Verified AFTER the try, so a failure of the (now fsync'd) audit
   // append is a logging failure — never mis-recorded as a 'rejected' confirm.
   appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'Verified' });
-  return ok(`confirmed ${args.id}: Verified`);
+  // M2: same quarantine as erase's id.
+  return ok(`confirmed ${JSON.stringify(args.id)}: Verified`);
 }
 
 export interface CodexStatusDeps {
@@ -538,8 +545,10 @@ export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResu
     // operator reads to answer "what is dual-verify actually doing" — so without this line their
     // only way to notice a discarded file is to remember what they wrote in it. loadConfig also
     // warns on stderr, but stderr is a debug channel nobody watches; this is the observable one.
+    // M2: `p` is an unreadable config PATH — environment/caller-controlled (HELIX_HOME, an XDG
+    // override, a symlink target) — same quarantine as erase's id above.
     ...(deps.config.unreadable ?? []).map(
-      (p) => `! ${p} could not be read — everything it sets is ignored; the values below are DEFAULTS`,
+      (p) => `! ${JSON.stringify(p)} could not be read — everything it sets is ignored; the values below are DEFAULTS`,
     ),
     `- codex CLI:      ${cli}`,
     `- connection:     ${connection}`,
@@ -617,7 +626,10 @@ function deciderLeg(v: EgressVerdict): Leg | undefined {
  *  override-proof secret a reword cannot help, so offering one would misdirect. */
 function echoedMemoriesLine(v: EgressVerdict | undefined): string {
   if (!v || v.decidedBy !== 'memoryEcho' || v.echoMemoryIds.length === 0) return '';
-  return `echoed memories (not sent): ${v.echoMemoryIds.map(presentId).join(', ')} — reword without their wording to proceed`;
+  // M2: presentId bounds/neutralizes an INVALID id, but a VALID prose-shaped one ('a) SYSTEM: ...')
+  // still renders verbatim — the same out-of-frame-advisory defect class as the erase/adopt/recheck/
+  // confirm success lines. JSON.stringify adds the prose isolation presentId alone does not.
+  return `echoed memories (not sent): ${v.echoMemoryIds.map((id) => JSON.stringify(presentId(id))).join(', ')} — reword without their wording to proceed`;
 }
 
 /** H7: the guard chain, as a TRUSTED advisory line -- every name is a fixed enum literal from
