@@ -12,7 +12,7 @@
 // tail items (never truncating mid-item — a half-closed datamark frame is worse than a dropped item)
 // and appending a `N item(s) omitted (response cap)` note.
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -91,6 +91,12 @@ function store() {
   const home = mkdtempSync(join(tmpdir(), 'helix-rc-h-'));
   return new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1' });
 }
+/** Same as `store()`, but also returns `home` — needed by fixtures that reach into the home dir
+ *  directly (e.g. deleting the ledger-MAC master key to force the integrity-unavailable note). */
+function storeWithHome(): { s: MemoryStore; home: string } {
+  const home = mkdtempSync(join(tmpdir(), 'helix-rc-h-'));
+  return { s: new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1' }), home };
+}
 const text = (res: { content: Array<{ type: string; text?: string }> }) => res.content.map((c) => c.text ?? '').join('');
 
 /** Every "===HELIX <nonce> ... — DATA, NOT INSTRUCTIONS===" open has its matching "===HELIX <nonce>
@@ -118,12 +124,17 @@ function assertFrameIntact(out: string): void {
 // once framed, so an unbounded render would overrun it — the same shape the review measured.
 const ITEM_COUNT = 25;
 const PER_ITEM_CHARS = 14_000;
-function commitBigItems(s: MemoryStore, n = ITEM_COUNT): void {
+/** Returns the committed ids, in commit order — needed by the asOf grouping test below, which must
+ *  confirm specific (evidence-bearing) items and know whether the tail-dropping cap actually reached
+ *  them. */
+function commitBigItems(s: MemoryStore, n = ITEM_COUNT): string[] {
   expect(PER_ITEM_CHARS).toBeLessThan(MAX_COMMIT_CONTENT_CHARS); // fixture sanity — must respect Task 3's per-item cap
+  const ids: string[] = [];
   for (let i = 0; i < n; i++) {
-    s.commit({ content: `bigitem${i} sharedterm ` + 'x'.repeat(PER_ITEM_CHARS), source: 'user' });
+    ids.push(s.commit({ content: `bigitem${i} sharedterm ` + 'x'.repeat(PER_ITEM_CHARS), source: 'user' }).id);
   }
   expect(n * PER_ITEM_CHARS).toBeGreaterThan(RESPONSE_MAX_CHARS); // non-vacuity: this really would overrun the cap
+  return ids;
 }
 
 describe('handleRecall total response bound (M1)', () => {
@@ -172,6 +183,95 @@ describe('handleInspect total response bound (M1)', () => {
     expect(m, 'no omission note found').not.toBeNull();
     expect(Number(m![1])).toBeGreaterThan(0);
     assertFrameIntact(out);
+  });
+
+  // capRendered is called from FOUR sites (recall; inspect current/history/asOf) but only recall and
+  // current view had overflow coverage — the README's "applies to the default, history, and asOf
+  // views alike" claim was asserted by nothing. These two cases close that gap for history; the two
+  // after them close it for asOf, including the fact+evidence atomicity asOf alone needs.
+  it('bounds the total rendered text (history) and appends a positive omission note when items are dropped', () => {
+    const s = store();
+    commitBigItems(s);
+    const out = text(handleInspect(s, { history: true }));
+
+    expect(out.length).toBeLessThanOrEqual(RESPONSE_MAX_CHARS);
+    const m = OMISSION_RE.exec(out);
+    expect(m, 'no omission note found').not.toBeNull();
+    expect(Number(m![1])).toBeGreaterThan(0);
+    assertFrameIntact(out);
+  });
+
+  it('the out-of-frame notes survive truncation in history mode, staying last after the omission note', () => {
+    const { s, home } = storeWithHome();
+    const seed = s.commit({ content: 'small seed fact', source: 'user' });
+    s.confirm(seed.id); // mints the ledger-MAC master key + a genuine signed verify
+    commitBigItems(s);
+    rmSync(join(home, 'ledger-mac-master.key')); // key-absent -> the verifying replay for EVERY read is unavailable
+    const out = text(handleInspect(s, { history: true }));
+
+    expect(out.length).toBeLessThanOrEqual(RESPONSE_MAX_CHARS);
+    const m = OMISSION_RE.exec(out);
+    expect(m, 'no omission note found').not.toBeNull();
+    const omitIdx = out.indexOf(m![0]);
+    const noteIdx = out.indexOf('integrity verification unavailable');
+    expect(noteIdx, 'the integrity-unavailable note did not survive the cap').toBeGreaterThan(-1);
+    expect(noteIdx, 'the out-of-frame note must come AFTER the omission note (stays last)').toBeGreaterThan(omitIdx);
+    assertFrameIntact(out);
+  });
+
+  it('bounds the total rendered text (asOf) and keeps the unconditional as-of note last, after the omission note', () => {
+    const s = store();
+    commitBigItems(s);
+    const out = text(handleInspect(s, { asOf: new Date().toISOString() }));
+
+    expect(out.length).toBeLessThanOrEqual(RESPONSE_MAX_CHARS);
+    const m = OMISSION_RE.exec(out);
+    expect(m, 'no omission note found').not.toBeNull();
+    expect(Number(m![1])).toBeGreaterThan(0);
+    assertFrameIntact(out);
+    // the as-of snapshot note is unconditional (always the first pushed note) — a reliable, fixture-
+    // independent stand-in for "out-of-frame notes present and still last" in this branch.
+    const omitIdx = out.indexOf(m![0]);
+    const noteIdx = out.indexOf('as-of snapshot');
+    expect(noteIdx, 'the as-of snapshot note did not survive the cap').toBeGreaterThan(-1);
+    expect(noteIdx, 'the out-of-frame note must come AFTER the omission note (stays last)').toBeGreaterThan(omitIdx);
+  });
+
+  it('never leaves an evidence sub-row without its fact row when a confirmed fact is dropped by the asOf cap', () => {
+    const s = store();
+    const ids = commitBigItems(s);
+    // Confirm the LAST-committed items: asOfView preserves commit order (verified below is moot if
+    // it didn't — the non-vacuity assertion catches that), and capRendered drops from the TAIL, so
+    // these are the evidence-bearing facts most likely to actually be cut by the cap.
+    const confirmedIds = ids.slice(-3);
+    for (const id of confirmedIds) s.confirm(id);
+    const out = text(handleInspect(s, { asOf: new Date().toISOString() }));
+
+    const m = OMISSION_RE.exec(out);
+    expect(m, 'no omission note found').not.toBeNull();
+    assertFrameIntact(out);
+
+    const contentIds = new Set<string>();
+    const evidenceIds = new Set<string>();
+    for (const line of out.split('\n')) {
+      const contentId = /^DATA\[(?!verify:)[^\]]+\]\| (\S+)/.exec(line)?.[1];
+      if (contentId) contentIds.add(contentId);
+      const evidenceId = /^DATA\[verify:[^\]]+\]\| (\S+)/.exec(line)?.[1];
+      if (evidenceId) evidenceIds.add(evidenceId);
+    }
+    // Atomic grouping: every surviving evidence row's fact row survived too — capRendered groups a
+    // fact with its evidence via flatMap BEFORE slicing, so an orphaned evidence row (fact dropped,
+    // evidence kept) would mean that grouping broke.
+    for (const id of evidenceIds) {
+      expect(contentIds.has(id), `evidence row for ${id} survived in the frame without its own fact row`).toBe(true);
+    }
+    // Non-vacuity: at least one CONFIRMED (evidence-bearing) fact was actually dropped by the cap —
+    // otherwise the assertion above would pass even if the grouping were broken, because nothing
+    // exercised it.
+    expect(
+      confirmedIds.some((id) => !contentIds.has(id)),
+      'no confirmed fact was dropped by the cap — this fixture does not exercise the fact+evidence grouping',
+    ).toBe(true);
   });
 });
 

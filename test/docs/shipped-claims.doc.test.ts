@@ -28,6 +28,7 @@ import { parseLedger, isIntegrityMarker, isHorizonMarker, compactLedger } from '
 import { noopMetricsSink, type CompactionInput } from '../../src/metrics.js';
 import { DEFAULT_CONFIG, compactionConfigFromGlobal } from '../../src/config.js';
 import { appendAudit } from '../../src/audit.js';
+import { MAX_COMMIT_CONTENT_CHARS, RESPONSE_MAX_CHARS } from '../../src/limits.js';
 import { staleBundles } from '../helpers/bundle-freshness.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -70,6 +71,20 @@ describe('shipped docs state what the code actually does', () => {
     expect(readme).toContain(`over ${formCap.toLocaleString('en-US')} characters`);
     expect(readme).toContain(`over ${ledgerCap.toLocaleString('en-US')} characters`);
     expect(readme).toContain('refused unscanned rather than sent');
+  });
+
+  // ---- M1.doc ----------------------------------------------------------------------------------
+  // The recall/inspect total-response cap (M1, 2026-08-18 review) put a new literal — "262,144
+  // characters" — in the README's tool table, with nothing recovering it from RESPONSE_MAX_CHARS: the
+  // same D6-shaped gap this file exists to close. The SAME table row also carries the commit-content
+  // cap ("16,384 characters", Task 3) with the identical pre-existing gap — pinned together here
+  // rather than leaving one twin of the row guarded and the other free to drift silently.
+  it('README states the commit content cap and the recall/inspect response cap, recovered from src/limits.ts (M1.doc)', () => {
+    const readme = doc('README.md');
+    // README writes both with thousands separators; the numbers still come from src/limits.ts, so
+    // raising either constant fails this until the prose is updated too.
+    expect(readme).toContain(`content capped at ${MAX_COMMIT_CONTENT_CHARS.toLocaleString('en-US')} characters`);
+    expect(readme).toContain(`total response capped at ${RESPONSE_MAX_CHARS.toLocaleString('en-US')} characters`);
   });
 
   it('both documents name the entropy exemption and the default the code actually ships (D2.c)', () => {
