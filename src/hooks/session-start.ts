@@ -22,12 +22,8 @@ import type { WitnessVerdict } from '../memory/witness-core.js';
 import { createMetricsSink } from '../metrics.js';
 import { metricsEnabledFromGlobalConfig } from '../config.js';
 import type { MemoryScope, ScopedRecord } from '../types.js';
-
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-  return Buffer.concat(chunks).toString('utf8');
-}
+import { readStdinCapped } from './session-record.js';
+import { HOOK_STDIN_MAX_BYTES } from '../limits.js';
 
 export interface GatherInput {
   home: string;
@@ -129,10 +125,18 @@ async function main(): Promise<void> {
     }
 
     let cwd: string | undefined;
-    try {
-      const j = JSON.parse(await readStdin()) as { cwd?: unknown };
-      if (typeof j.cwd === 'string') cwd = j.cwd;
-    } catch { /* no/garbage stdin -> global only */ }
+    // H3: fail-closed on an over-cap stdin -- proceed exactly as if stdin were `{}` (global scope
+    // only, same as garbage/absent stdin below) rather than reading a truncated, possibly-malformed
+    // prefix. One stderr note names the cap so an operator can tell "no cwd" from "cwd was dropped".
+    const stdinText = await readStdinCapped(process.stdin, HOOK_STDIN_MAX_BYTES);
+    if (stdinText === null) {
+      writeSync(2, `helix: NOTE - stdin exceeded ${HOOK_STDIN_MAX_BYTES} bytes; proceeding as if stdin were {} (global scope only).\n`); // ASCII only
+    } else {
+      try {
+        const j = JSON.parse(stdinText) as { cwd?: unknown };
+        if (typeof j.cwd === 'string') cwd = j.cwd;
+      } catch { /* no/garbage stdin -> global only */ }
+    }
 
     const { records, integrityAvailable, replays, projectDisposition, witnessNotes } = gatherScopedRecords({ home, globalLedger, cwd });
     const text = formatSessionStartContext(records, newNonce(), {

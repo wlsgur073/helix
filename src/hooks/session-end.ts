@@ -5,17 +5,16 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { buildSessionEndRecord } from './session-record.js';
+import { buildSessionEndRecord, readStdinCapped } from './session-record.js';
 import { ensureHelixDir } from '../memory/home-permissions.js';
-
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-  return Buffer.concat(chunks).toString('utf8');
-}
+import { HOOK_STDIN_MAX_BYTES } from '../limits.js';
 
 try {
-  const record = buildSessionEndRecord(await readStdin());
+  // H3: fail-closed on an over-cap stdin -- `stdinText === null` short-circuits straight past
+  // buildSessionEndRecord, so an oversized payload writes NOTHING to sessions.jsonl (same as
+  // garbage/empty stdin below), never a record built from a truncated prefix.
+  const stdinText = await readStdinCapped(process.stdin, HOOK_STDIN_MAX_BYTES);
+  const record = stdinText === null ? null : buildSessionEndRecord(stdinText);
   if (record) {
     const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
     const path = process.env.HELIX_SESSIONS ?? join(home, 'sessions.jsonl');

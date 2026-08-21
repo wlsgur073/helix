@@ -5,7 +5,10 @@ import { z } from 'zod';
 import type { MemoryStore } from '../memory/store.js';
 import type { RealityCheck } from '../memory/reality-check.js';
 import { MAX_QUERY_CHARS } from '../memory/retrieval.js';
-import { MAX_COMMIT_CONTENT_CHARS } from '../limits.js';
+import {
+  MAX_COMMIT_CONTENT_CHARS, MAX_DV_QUESTION_CHARS, MAX_DV_ANSWER_CHARS,
+  MAX_RECHECK_PATH_CHARS, MAX_RECHECK_PATTERN_CHARS,
+} from '../limits.js';
 import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, MAX_ID_CHARS, isValidId, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus, checkCodexModel } from '../verify/codex.js';
@@ -137,7 +140,13 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       '(prevents laundering an unrelated passing check into trust). Use for objective, checkable facts.',
     inputSchema: {
       id: ID_SCHEMA,
-      check: z.object({ kind: z.literal('file-contains'), path: z.string(), pattern: z.string() }),
+      // H3: same bounded-input discipline as commit's content above -- an oversized path/pattern is
+      // refused by schema validation before the handler (and its file read / checkBinding scan) runs.
+      check: z.object({
+        kind: z.literal('file-contains'),
+        path: z.string().max(MAX_RECHECK_PATH_CHARS).describe(`File path to check (max ${MAX_RECHECK_PATH_CHARS} characters).`),
+        pattern: z.string().max(MAX_RECHECK_PATTERN_CHARS).describe(`Substring the file must contain (max ${MAX_RECHECK_PATTERN_CHARS} characters).`),
+      }),
     },
   }, async (args) => m.runOp('helix_memory_recheck', () => handleRecheck(store, args as { id: string; check: RealityCheck }, { auditPath: dv.auditPath, now: dv.now })));
 
@@ -163,8 +172,12 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     title: 'Dual-verify with Codex',
     description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor.",
     inputSchema: {
-      question: z.string(),
-      helixAnswer: z.string(),
+      // H3: same bounded-input discipline as commit's content above -- an oversized question/answer
+      // is refused by schema validation before the handler (and the JSON-parse allocation it would
+      // otherwise pay for) runs. classifyEgress's downstream 200,000-char joint scan limit (see
+      // limits.ts) is a separate, later gate; these caps exist to reject early, not to duplicate it.
+      question: z.string().max(MAX_DV_QUESTION_CHARS).describe(`The question being verified (max ${MAX_DV_QUESTION_CHARS} characters).`),
+      helixAnswer: z.string().max(MAX_DV_ANSWER_CHARS).describe(`Your answer to cross-validate (max ${MAX_DV_ANSWER_CHARS} characters).`),
       stakes: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
     },
   }, async (args, extra) => {
