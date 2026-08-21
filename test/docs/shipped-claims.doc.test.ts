@@ -198,10 +198,12 @@ describe('shipped docs state what the code actually does', () => {
 
   // ---- D4 ----------------------------------------------------------------------------------
   // stakesFloor was documented as an unconditional gate, and a follow-up (S2) found that under the
-  // SHIPPED default the bypass is the ordinary path rather than an edge case. The code leg runs the
-  // real gate at the real default floor and counts metered invocations — `ran === true` alone would
-  // not distinguish "the floor was skipped" from "the floor let it through".
-  it('README discloses that omitting `stakes` bypasses stakesFloor, which it does (D4)', async () => {
+  // SHIPPED default the bypass was the ordinary path rather than an edge case. From 07-28 to 08-20 that
+  // was resolved by DISCLOSING it (README + CHANGELOG) rather than closing it. DV-STAKES-OMIT reopened
+  // it as a design decision and it is now CLOSED in code: an omitted `stakes` reads as the lowest tier,
+  // so the floor refuses it. Both legs still matter — `ran === false` alone would not distinguish "the
+  // floor refused it" from "a later gate did", and only the counter proves no quota was spent.
+  it('README states that an omitted `stakes` is refused by stakesFloor, which it is (D4)', async () => {
     const cfg = structuredClone(DEFAULT_CONFIG);
     cfg.dualVerify.enabled = true;                       // flip ONLY this; keep the shipped floor
     const floor = cfg.dualVerify.stakesFloor;
@@ -220,14 +222,14 @@ describe('shipped docs state what the code actually does', () => {
     expect(metered).toBe(0);
 
     const omitted = await dualVerify({ question: 'q', helixAnswer: 'a' }, deps);
-    expect(omitted.attempted).toBe(true);                // omitting the argument spends quota anyway
-    expect(metered).toBe(1);
+    expect(omitted.attempted).toBe(false);               // omission is not an exemption
+    expect(metered).toBe(0);                             // the silent path spends no quota either
 
     // The two shortest phrases that carry the claim. Pinned deliberately narrow: a rewrite is allowed
     // to fail this and be re-pinned, but a DELETION of the disclosure must not pass.
     const readme = doc('README.md').replace(/\s+/g, ' ');
-    expect(readme).toContain('gates only calls that');
-    expect(readme).toContain('bypasses the floor');
+    expect(readme).toContain('read as the lowest tier');
+    expect(readme).toContain('omission is not an exemption');
   });
 
   // ---- D1 ----------------------------------------------------------------------------------

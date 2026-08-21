@@ -101,7 +101,8 @@ This file records what shipped in each release of Helix. It follows
 - Dual-verify `xhigh` stakes tier: a 4th, strictest self-classified stakes level above `high`
   (`stakes` on `helix_memory`-adjacent `helix_dual_verify`, and `dualVerify.stakesFloor` in config).
   With `stakesFloor: "xhigh"`, only calls the agent classifies `xhigh` spend Codex quota — `high`
-  and below are skipped. Omitting `stakes` still bypasses the floor (an explicit call signals intent).
+  and below are skipped. Omitting `stakes` is read as the lowest tier, so any floor above `low`
+  refuses an undeclared call — omission is not an exemption.
 - Every `helix_dual_verify` result whose payload was actually TRANSMITTED — a successful `sent` run
   AND a run that reached Codex but then errored out — now carries an `egress: ...` disclosure line,
   rendered ABOVE the quarantine frame, so the calling agent can tell a config-valved release from a

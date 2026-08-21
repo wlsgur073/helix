@@ -71,8 +71,10 @@ at startup saying it is being ignored.)
 
 - `mode` — `compare` (independent answer + an agreement map) or `critique` (Codex reviews your answer).
 - `stakesFloor` — skip the metered Codex call below this stakes level (`low` / `medium` / `high` / `xhigh`).
-  It gates only calls that **declare** `stakes`. A call that omits the argument bypasses the floor and
-  spends quota at any setting — omitting it is read as an explicit request, not as the lowest tier.
+  A call that omits `stakes` is **read as the lowest tier**, so any floor above `low` refuses it:
+  omission is not an exemption. Declare the level a call deserves, or set `stakesFloor` to `low` to
+  gate nothing. (Through 0.1.0 development an omitted value bypassed the floor instead; that is
+  closed — a caller who declared `low` honestly was refused where a silent caller was not.)
 - `model` / `effort` — omit (or `null`) to inherit your `~/.codex/config.toml`; set to override for
   dual-verify only. Valid efforts are `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. Support varies
   by model — `codex debug models` lists what yours accepts.

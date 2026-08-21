@@ -3,7 +3,7 @@ import type { ProjectDisposition } from '../memory/ownership.js';
 import type { HelixConfig } from '../config.js';
 import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS, DEFAULT_CONFIG } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
-import { dualVerify, persistedReason, type EchoSource } from '../verify/dual-verify.js';
+import { dualVerify, persistedReason, type EchoSource, type GateTrace } from '../verify/dual-verify.js';
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, asOfWitnessNotes } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
 import { appendAudit, type VerifyAudit } from '../audit.js';
@@ -534,6 +534,26 @@ function deciderLeg(v: EgressVerdict): Leg | undefined {
   }
 }
 
+/** H6: when the ECHO leg is what stopped the call, name the memories it matched -- IDs only, the same
+ *  presentId-bounded values already written to audit.jsonl, so nothing new leaves this machine and the
+ *  echo set itself is untouched. This opens the DIAGNOSIS, not the gate: the filters the channel asked
+ *  for (drop project scope / drop the caller's own commits) would each unblock exactly the records the
+ *  leg exists to hold, and authorship is not authenticable here -- `provenance.source` is caller-chosen
+ *  (see N2-CONTESTED). A caller that cannot see WHICH memory it echoed can only re-guess its whole
+ *  question; one that can, drops the overlapping phrase. Rendered only when echo DECIDED -- under an
+ *  override-proof secret a reword cannot help, so offering one would misdirect. */
+function echoedMemoriesLine(v: EgressVerdict | undefined): string {
+  if (!v || v.decidedBy !== 'memoryEcho' || v.echoMemoryIds.length === 0) return '';
+  return `echoed memories (not sent): ${v.echoMemoryIds.map(presentId).join(', ')} — reword without their wording to proceed`;
+}
+
+/** H7: the guard chain, as a TRUSTED advisory line -- every name is a fixed enum literal from
+ *  dual-verify, never caller or Codex bytes, so it needs no datamark and no quarantine frame. */
+function guardLine(g: GateTrace | undefined): string {
+  if (!g) return '';
+  return `guards: ${g.evaluated.join(', ')} — stopped at ${g.stoppedAt}`;
+}
+
 /** The D1 disclosure line, composed EXCLUSIVELY from the verdict's closed typed fields — never from the
  *  free-form `reason` (a comment that reason is content-free is not a type). Rendered on every SENT
  *  result (pass / allowed_override only — a blocked verdict never reaches the sent path).
@@ -583,6 +603,10 @@ export async function handleDualVerify(
     // for why this site can't use assertValidId's reject-outright rule; fix round 2 Minor: this
     // comment was previously pasted twice verbatim here).
     echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds.map(presentId) : undefined,
+    // H7: the guard that ended the call, as an enum -- so a later reader of this ledger does not have
+    // to infer the gate order from refusal WORDING, which is how the dogfood channel spent three weeks
+    // arriving at the reverse of it. Absent on a call that ran: passing every gate is what running is.
+    stoppedGate: result.gates?.stoppedAt,
   });
   // Opt-in conversation log (default OFF). audit.jsonl above is the always-on content-free ledger;
   // this writes the exact prompt+response ONLY on a 'sent' outcome, metadata-only otherwise (a
@@ -623,7 +647,11 @@ export async function handleDualVerify(
       );
       return ok(lines.join('\n'));
     }
-    return ok(`dual-verify did not run: ${result.reason}. (No Codex answer — nothing fabricated.)`);
+    return ok([
+      `dual-verify did not run: ${result.reason}. (No Codex answer — nothing fabricated.)`,
+      guardLine(result.gates),
+      echoedMemoriesLine(result.egress),
+    ].filter(Boolean).join('\n'));
   }
   // Codex output is untrusted DATA: frame it with a per-call nonce delimiter + instruction
   // semantics + per-line datamarks so a forged marker cannot close the block early and inject

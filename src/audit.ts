@@ -2,6 +2,7 @@ import { mkdirSync, openSync, fsyncSync, closeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeAll, realFsOps, fsyncDir } from './memory/fs-ops.js';
 import type { EgressLeg } from './config.js';
+import type { GateName } from './verify/dual-verify.js';
 import { ensureHelixDir } from './memory/home-permissions.js';
 
 /** Schema note (append-only history): `decidedLeg` replaces the mis-named `blockedLeg` (an
@@ -27,6 +28,12 @@ export interface DualVerifyAudit {
   releasedLegs?: EgressLeg[];                                          // policy keys a policy released
   piiKinds?: Array<'email' | 'phone' | 'credit_card' | 'national_id'>; // labels, never values
   echoMemoryIds?: string[];                                            // ledger IDs, never text
+  /** H7: the guard that ended the call (`enabled` / `stakesFloor` / `egress` / `available` /
+   *  `runner`), sourced from GateName so this schema cannot drift from the chain it records. Absent
+   *  on a call that ran. It exists so a reader of this ledger reconstructs the gate ORDER from data
+   *  rather than from refusal wording -- the inference that took the dogfood channel three weeks and
+   *  landed on the reverse of the truth. */
+  stoppedGate?: GateName;
 }
 
 /** Erase audit (F1): every helix_memory_erase is recorded — best-effort (the fsync'd row is appended

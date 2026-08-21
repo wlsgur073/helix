@@ -25,11 +25,24 @@ export interface DualVerifyParams {
   question: string;
   helixAnswer: string;
   /** Caller-classified stakes; below the configured floor the (metered) call is skipped.
-   *  Unspecified => proceed: an explicit tool invocation already signals intent. */
+   *  Unspecified => treated as 'low' (DV-STAKES-OMIT): omission is not an exemption. Kept optional in
+   *  the schema so existing callers still type-check; the floor, not the schema, does the refusing. */
   stakes?: Stakes;
   /** MCP request cancellation (extra.signal), forwarded to the metered runner call so a cancel or
    *  transport close kills the codex child instead of leaving it running unattended. */
   signal?: AbortSignal;
+}
+
+/** H7: which gates ran, and which one stopped the call. Every name is a fixed literal, so the trace
+ *  is content-free and safe for the persisted sinks. Emitted on refusals only -- a call that RAN
+ *  passed every gate by construction, and its answer is the report. The cost of NOT having this is
+ *  measured: the dogfood channel spent three weeks and four entries inferring the order from message
+ *  strings, arrived at the REVERSE of it, and recorded that reversal as confirmed by prediction --
+ *  the prediction being unfalsifiable, since the floor returns before the egress leg is reached. */
+export type GateName = 'enabled' | 'stakesFloor' | 'egress' | 'available' | 'runner';
+export interface GateTrace {
+  readonly evaluated: readonly GateName[];
+  readonly stoppedAt: GateName;
 }
 
 export interface DualVerifyResult {
@@ -47,6 +60,8 @@ export interface DualVerifyResult {
   critique?: string;      // critique mode: Codex's review of helixAnswer, verbatim (DATA)
   /** S1 egress verdict (enum/ID/label only). Present on every return AFTER the egress gate. */
   egress?: EgressVerdict;
+  /** H7 gate trace. Present on every return that did NOT run. */
+  gates?: GateTrace;
 }
 
 /**
@@ -87,15 +102,31 @@ export function buildCritiquePrompt(question: string, helixAnswer: string): stri
  * On any gate failure it degrades with a reason and NO codexAnswer (never fabricates).
  */
 export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps): Promise<DualVerifyResult> {
+  const evaluated: GateName[] = [];
+  const stoppedAt = (at: GateName): GateTrace => ({ evaluated: [...evaluated], stoppedAt: at });
+
+  evaluated.push('enabled');
   if (!deps.config.dualVerify.enabled) {
-    return { ran: false, attempted: false, outcome: 'skipped', reason: 'dual-verify is disabled in config' };
+    return { ran: false, attempted: false, outcome: 'skipped', reason: 'dual-verify is disabled in config', gates: stoppedAt('enabled') };
   }
 
+  evaluated.push('stakesFloor');
+
   const floor = deps.config.dualVerify.stakesFloor;
-  if (params.stakes && STAKES_RANK[params.stakes] < STAKES_RANK[floor]) {
-    // Actionable refusal (H4): name the lowest value that would run and where the floor lives.
-    // Both interpolations are enum values, so the persisted reason stays content-free.
-    return { ran: false, attempted: false, outcome: 'skipped', reason: `stakes '${params.stakes}' below configured floor '${floor}' — lowest accepted: '${floor}' (dualVerify.stakesFloor in ~/.helix/config.json)` };
+  // DV-STAKES-OMIT: an ABSENT `stakes` is the lowest tier, not an exemption. This guard used to read
+  // `params.stakes && …`, which short-circuits to false on omission -- so the floor bound only callers
+  // who volunteered a value, an honest 'low' was refused where a silent caller was not, and the tool's
+  // own description ("checked against the configured floor") documented a check it skipped on the path
+  // that mattered. Defaulting to 'low' collapses both into one rule; a 'low' floor still admits both.
+  const declared: Stakes = params.stakes ?? 'low';
+  if (STAKES_RANK[declared] < STAKES_RANK[floor]) {
+    // Actionable refusal (H4): name the lowest value that would run and where the floor lives. The two
+    // refusals are worded apart because the caller's next move differs -- declare a value vs raise it.
+    // Every interpolation is an enum value, so the persisted reason stays content-free.
+    const what = params.stakes
+      ? `stakes '${params.stakes}' below configured floor '${floor}'`
+      : `stakes not declared (treated as '${declared}'), below configured floor '${floor}'`;
+    return { ran: false, attempted: false, outcome: 'skipped', reason: `${what} — lowest accepted: '${floor}' (dualVerify.stakesFloor in ~/.helix/config.json)`, gates: stoppedAt('stakesFloor') };
   }
 
   // Build the EXACT outbound payload first, then gate it. The gate must clear the bytes that actually
@@ -107,6 +138,7 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
 
   // Outbound egress firewall (S1): secret / PII / memory-echo legs. A NAMED secret blocks regardless of
   // policy (deny-dominant); every other leg is gated per-leg by dualVerify.egressPolicy. Free, pre-spawn.
+  evaluated.push('egress');
   const ledger = deps.echo.mode === 'enforce' ? deps.echo.ledgerTexts() : null;
   const verdict = classifyEgress({
     texts: [params.question, params.helixAnswer],
@@ -115,16 +147,18 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
     policy: deps.config.dualVerify.egressPolicy,
   });
   if (verdict.decision === 'blocked') {
-    return { ran: false, attempted: false, outcome: 'refused', reason: verdict.reason, egress: verdict };
+    return { ran: false, attempted: false, outcome: 'refused', reason: verdict.reason, egress: verdict, gates: stoppedAt('egress') };
   }
 
+  evaluated.push('available');
   const avail = await deps.checkAvailable();
   if (!avail.available) {
-    return { ran: false, attempted: false, outcome: 'unavailable', reason: avail.reason ?? 'codex unavailable', egress: verdict };
+    return { ran: false, attempted: false, outcome: 'unavailable', reason: avail.reason ?? 'codex unavailable', egress: verdict, gates: stoppedAt('available') };
   }
 
   // Past the gates: the next call spends the user's Codex quota (metered). `prompt` is the byte-identical
   // string the gate just cleared -- never rebuild it here.
+  evaluated.push('runner');
   const res = await deps.runner(prompt, {
     model: deps.config.dualVerify.model,
     effort: deps.config.dualVerify.effort,
@@ -132,7 +166,7 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
     signal: params.signal,
   });
   if (!res.ok) {
-    return { ran: false, attempted: true, outcome: 'error', reason: `codex run failed: ${res.error}`, egress: verdict };
+    return { ran: false, attempted: true, outcome: 'error', reason: `codex run failed: ${res.error}`, egress: verdict, gates: stoppedAt('runner') };
   }
 
   if (mode === 'critique') {

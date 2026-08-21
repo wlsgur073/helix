@@ -65,6 +65,37 @@ describe('formatSessionStartContext', () => {
     expect(out).toContain('DATA[Fresh:global]| user prefers Korean replies');
   });
 
+  it('names the non-verifying source instead of calling every one of them relayed (H8)', () => {
+    const out = formatSessionStartContext(g([
+      rec({ content: 'pasted release notes claim X', provenance: { source: 'user-relayed', sessionId: 's1' } }),
+      rec({ content: 'the parser is quadratic', provenance: { source: 'agent-inference', sessionId: 's1' } }),
+      rec({ content: 'the suite runs green at HEAD', provenance: { source: 'agent-test-verified', sessionId: 's1' } }),
+      rec({ content: 'codex concurred on the plan', provenance: { source: 'codex-agree', sessionId: 's1' } }),
+    ]), N);
+    expect(out).toContain('(relayed source — confirm with user) pasted release notes claim X');
+    expect(out).toContain('(agent inference — unconfirmed) the parser is quadratic');
+    expect(out).toContain('(agent test-verified — self-asserted) the suite runs green at HEAD');
+    expect(out).toContain('(codex agreement — unconfirmed) codex concurred on the plan');
+  });
+
+  it('an unrecognised provenance source is still flagged, and claims no third party (H8)', () => {
+    const out = formatSessionStartContext(g([
+      rec({ content: 'legacy row', provenance: { source: 'a-source-from-a-later-version' as never, sessionId: 's1' } }),
+    ]), N);
+    expect(out).toContain('(non-authoritative — confirm before use) legacy row');
+  });
+
+  it('a Suspect item keeps the re-verify wording even when its source is also non-verifying (H8)', () => {
+    const out = formatSessionStartContext(g([
+      rec({
+        content: 'deploy uses the blue cluster', state: 'Suspect', blastRadius: 'external',
+        provenance: { source: 'agent-inference', sessionId: 's1' },
+      }),
+    ]), N);
+    expect(out).toContain('(re-verify — reality may have changed) deploy uses the blue cluster');
+    expect(out).not.toContain('(agent inference');
+  });
+
   it('renders a Corroborated badge and uses source-aware reverify wording for a relayed Corroborated item', () => {
     const scoped = [{
       record: {
