@@ -463,3 +463,47 @@ describe('every egressPolicy leg round-trips from the file, including the one th
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('-> block'));
   });
 });
+
+// L1 (2026-08-18 system review, §6.5): the round-trip block above pins the single-file case. Nothing
+// drove the two-LAYER fixture the review actually measured — a legal value in the global file
+// followed by an invalid value for the SAME leg in the project file. loadConfig merges
+// [global, project] in that order (src/config.ts:181), so the warning for the project-layer typo
+// fires with `merged` already holding whatever the global layer legitimately set — the assertion
+// below is written as agreement (the warning must name whatever `effective` turns out to be), not as
+// a hardcoded 'allow', so it cannot pass by coincidence with the default.
+describe('a two-layer egressPolicy fixture: the warning names the value the merge actually kept (L1)', () => {
+  it('an invalid project value after a global allow: the warning names the value actually kept', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    const g = join(dir, 'g.json'); const p = join(dir, 'p.json');
+    writeFileSync(g, JSON.stringify({ dualVerify: { egressPolicy: { piiHigh: 'allow' } } }));
+    writeFileSync(p, JSON.stringify({ dualVerify: { egressPolicy: { piiHigh: 'maybe' } } }));
+    const cfg = loadConfig({ globalPath: g, projectPath: p, warn });
+    const effective = cfg.dualVerify.egressPolicy.piiHigh;
+    const msgs = warn.mock.calls.map((c) => String(c[0]));
+    const line = msgs.find((m) => m.includes('invalid dualVerify.egressPolicy.piiHigh'));
+    expect(line, 'the invalid project value must be warned about').toBeTruthy();
+    // L1's defect was DISAGREEMENT: "-> block" while 'allow' stayed in force. Whatever the merge
+    // keeps, the warning must name that same value.
+    expect(line!).toContain(`-> keeping ${effective}`);
+    // Non-vacuity: the global layer's legal 'allow' is what survives a project-layer typo.
+    expect(effective).toBe('allow');
+  });
+
+  it('an invalid global value overridden by a valid project allow: the global-layer warning names what was kept at that moment', () => {
+    const dir = tmpDir(); const warn = vi.fn();
+    const g = join(dir, 'g.json'); const p = join(dir, 'p.json');
+    writeFileSync(g, JSON.stringify({ dualVerify: { egressPolicy: { piiHigh: 'maybe' } } }));
+    writeFileSync(p, JSON.stringify({ dualVerify: { egressPolicy: { piiHigh: 'allow' } } }));
+    const cfg = loadConfig({ globalPath: g, projectPath: p, warn });
+    const effective = cfg.dualVerify.egressPolicy.piiHigh;
+    const msgs = warn.mock.calls.map((c) => String(c[0]));
+    const line = msgs.find((m) => m.includes('invalid dualVerify.egressPolicy.piiHigh'));
+    expect(line, 'the invalid global value must be warned about').toBeTruthy();
+    // The global layer is processed BEFORE the project layer is merged (src/config.ts:181), so at the
+    // moment this warning fires, `merged` still holds DEFAULT_CONFIG's value for the leg — not the
+    // project layer's later 'allow'. Read the default from DEFAULT_CONFIG rather than hardcoding it.
+    expect(line!).toContain(`-> keeping ${DEFAULT_CONFIG.dualVerify.egressPolicy.piiHigh}`);
+    // The project layer's legal 'allow' still wins in the final merge.
+    expect(effective).toBe('allow');
+  });
+});
