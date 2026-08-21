@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { classifyEmission, type EgressVerdict, type Leg } from '../risk/trifecta.js';
 import { appendCodexLog } from '../codex-log.js';
 import type { RealityCheck } from '../memory/reality-check.js';
+import { RESPONSE_MAX_CHARS } from '../limits.js';
 
 export interface ToolResult {
   content: Array<{ type: 'text'; text: string }>;
@@ -196,20 +197,57 @@ function witnessNotesText(notes: string[]): string {
   return notes.map((n) => `\n\n${n}`).join('');
 }
 
+/** M1 (2026-08-18 review): every read surface (recall; inspect current/history/asOf) frames an item
+ *  or row set with no cap on the TOTAL rendered response — maxItems/maxChars on recall and the
+ *  store's own per-item content cap (MAX_COMMIT_CONTENT_CHARS) each bound ONE axis, and their product
+ *  was never bounded: a single 1 MiB committed fact alone produced a ~1.049 MB recall response AND a
+ *  ~1.049 MB inspect response (measured). Fixed HERE, at the handler layer — store.ts stays
+ *  freeze-pinned, and the review's own structural recommendation (store returns structured items,
+ *  handler frames once, history cursor pagination) is deferred to its own owner go/no-go.
+ *
+ *  Drops WHOLE TAIL items, never truncates mid-item: a half-closed datamark frame — or, in the asOf
+ *  branch, a fact's content row torn from its own evidence sub-rows — would be a WORSE quarantine
+ *  failure than a dropped item (an unclosed `===HELIX ... ===` frame is exactly the shape the
+ *  datamark quarantine exists to prevent). `render(n)` must render the FULL frame (open + semantics +
+ *  lines + close) for the first `n` of the caller's own ordered items, so a shrunk item count re-runs
+ *  the SAME datamark/normalizeUntrusted quarantine the full render already goes through — never a
+ *  substring cut of a finished string.
+ *
+ *  Binary-searches the largest `n` whose render, plus its own omission note, fits `budget`. Valid
+ *  because `render` is monotonic in `n`: each additional item's own datamark prefix (`DATA[...]| `,
+ *  never shorter than ~15 characters) is always more bytes than the at-most-one-character the
+ *  omission count's digit width can ever shrink by as `n` grows. Binary search over a linear scan
+ *  matters because inspect's currentView has no item cap at all — an unbounded-scale store must still
+ *  resolve this in O(items * log items) render calls, not O(items^2).
+ *
+ *  `budget` is the space available for the frame PLUS its own omission note — callers pass
+ *  `RESPONSE_MAX_CHARS - trailingNotes.length` so the (unchanged, out-of-frame) trailing notes always
+ *  still fit after this return value, appended by the caller LAST — never reordered ahead of them.
+ *  Residual, accepted rather than hidden: if `budget` is so small that even zero items do not fit
+ *  (unreachable at today's caps — RECALL_MAX_ITEMS_CAP/RESPONSE_MAX_CHARS leave orders of magnitude of
+ *  headroom), the zero-item render is still returned rather than refusing the call outright. */
+function capRendered(total: number, render: (n: number) => string, budget: number): { text: string; omitted: number } {
+  const full = render(total);
+  if (full.length <= budget) return { text: full, omitted: 0 };
+  const noteFor = (n: number): string => `\n\n(${n} item(s) omitted (response cap))`;
+  let lo = 0, hi = total - 1, best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (render(mid).length + noteFor(total - mid).length <= budget) { best = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  const kept = Math.max(best, 0);
+  const omitted = total - kept;
+  return { text: omitted > 0 ? render(kept) + noteFor(omitted) : render(kept), omitted };
+}
+
 export function handleCommit(store: MemoryStore, args: CommitInput): ToolResult {
   const rec = store.commit(args);
   return ok(`committed ${JSON.stringify({ id: rec.id, state: rec.state, classification: rec.classification })}`);
 }
 
 export function handleRecall(store: MemoryStore, args: { query: string; maxItems?: number; maxChars?: number }): ToolResult {
-  const { items, framed, integrityAvailable, projectDisposition, witnessNotes } = store.recall(args.query, { maxItems: args.maxItems });
-  // H5: recall bounds ITEM COUNT but had no byte bound — 30 prose items rendered 74.6 KB and were
-  // client-truncated into uselessness. maxChars is a per-item cap applied by re-framing at the
-  // handler (the store's frame is built without it; store.ts is freeze-pinned), with the same
-  // datamark/normalizeUntrusted quarantine and a fresh nonce.
-  const framedOut = args.maxChars !== undefined
-    ? frameAsData(items.map(({ record, scope }) => ({ record, scope })), newNonce(), args.maxChars)
-    : framed;
+  const { items, integrityAvailable, projectDisposition, witnessNotes } = store.recall(args.query, { maxItems: args.maxItems });
   // H1 (recency crowding) is NOT fixed here: a handler-side recency appendix would need a full
   // currentView() read per recall, which violates the A4 recall-cache lock (a cached recall must
   // not re-read ledgers), pollutes the replay metric, and inflates the §6 index-trigger latency
@@ -249,7 +287,20 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
   const conflictNote = conflictIds.length
     ? `\n\n(integrity conflict — equal-generation verify mismatch or duplicate fact id: ${conflictIds.join(', ')})`
     : '';
-  return ok(framedOut + reverifyNote + egressNote + integrityNote + conflictNote + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
+  const trailingNotes = reverifyNote + egressNote + integrityNote + conflictNote + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes);
+  // M1: total response bound (capRendered's docstring). `items` can be arbitrarily large — maxItems
+  // only bounds the STORE's own rank cutoff (default 20, capped at RECALL_MAX_ITEMS_CAP by the
+  // schema); it was never a bound on the rendered RESPONSE. Re-frame at whatever item count fits:
+  // the store's own `framed` (built once, over ALL items, before any per-item maxChars) can no longer
+  // be reused once dropping items is possible — exactly like the existing maxChars branch already
+  // re-frames instead of reusing it (H5), just for every call now, not only a maxChars-bearing one.
+  const scoped = items.map(({ record, scope }) => ({ record, scope }));
+  const { text: framedOut } = capRendered(
+    scoped.length,
+    (n) => frameAsData(scoped.slice(0, n), newNonce(), args.maxChars),
+    RESPONSE_MAX_CHARS - trailingNotes.length,
+  );
+  return ok(framedOut + trailingNotes);
 }
 
 /** Inspect is a READ surface: both id and content of every row are attacker-controllable (a forged
@@ -266,15 +317,6 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
     // asOf does not clamp, so the live mismatch note — which promises a clamp — is false here.
     const asOfNotes = asOfWitnessNotes(witnessNotes);
     if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + unadoptedNote(projectDisposition) + witnessNotesText(asOfNotes));
-    const lines: Array<{ text: string; mark: string }> = [];
-    for (const f of facts) {
-      lines.push({ text: `${presentId(f.record.id)} ${f.record.content}`, mark: `DATA[${f.grade}:${f.scope}]| ` });
-      for (const e of f.evidence) {
-        const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? 'Y' : 'N'} applicable=${e.applicable ? 'Y' : 'N'}${e.winner ? ' WINNER' : ''}`;
-        lines.push({ text: `${presentId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
-      }
-    }
-    const frame = makeDataFrame({ label: `MEMORY AS OF ${args.asOf}`, nonce: newNonce(), lines });
     const notes: string[] = ['\n\n(as-of snapshot — membership and timing are declared, not authenticated; only auth=Y verify timing is MAC-bound)'];
     if (!keyAvailable) notes.push('\n\n(integrity verification unavailable — trust grades shown are unverified)');
     // Same two causes as the recall note above (equal-gen verify mismatch OR duplicate fact id) — this
@@ -284,20 +326,28 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
     if (truncated) notes.push('\n\n(history may be truncated by a past compaction — reconstruction before the horizon is unreliable)');
     if (projectDisposition === 'unadopted-present') notes.push(unadoptedNote(projectDisposition));
     for (const n of asOfNotes) notes.push(`\n\n${n}`);
-    return ok(frame + notes.join(''));
+    const trailingNotes = notes.join('');
+    // M1: total response bound (capRendered's docstring). Drop whole FACTS from the tail — never
+    // split a fact's content row from its own evidence sub-rows, which the plain per-LINE granularity
+    // recall/history use would risk here.
+    const buildLines = (n: number): Array<{ text: string; mark: string }> => facts.slice(0, n).flatMap((f) => {
+      const out: Array<{ text: string; mark: string }> = [{ text: `${presentId(f.record.id)} ${f.record.content}`, mark: `DATA[${f.grade}:${f.scope}]| ` }];
+      for (const e of f.evidence) {
+        const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? 'Y' : 'N'} applicable=${e.applicable ? 'Y' : 'N'}${e.winner ? ' WINNER' : ''}`;
+        out.push({ text: `${presentId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
+      }
+      return out;
+    });
+    const { text: frame } = capRendered(
+      facts.length,
+      (n) => makeDataFrame({ label: `MEMORY AS OF ${args.asOf}`, nonce: newNonce(), lines: buildLines(n) }),
+      RESPONSE_MAX_CHARS - trailingNotes.length,
+    );
+    return ok(frame + trailingNotes);
   }
   if (args.history) {
     const { rows, anomalies, truncated, integrityAvailable, projectDisposition, witnessNotes } = store.historyView();
     if (rows.length === 0) return ok('(memory is empty)' + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
-    const frame = makeDataFrame({
-      label: 'MEMORY HISTORY',
-      nonce: newNonce(),
-      lines: rows.map((r) => {
-        const verb = r.closedBy ? r.closedBy.kind : r.record.state; // closed: verb; live: grade (both enums)
-        const interval = `${iso(r.record.tx)}..${r.txTo === null ? '' : iso(r.txTo)}`;
-        return { text: `${presentId(r.record.id)} ${r.record.content}`, mark: `DATA[${verb}:${r.scope}:${interval}]| ` };
-      }),
-    });
     const notes: string[] = [];
     // Key-absent => the verifying replay clamped every live grade to Fresh; say grades are unverified
     // (same out-of-band note recall uses), so a Fresh row is not over-trusted as "checked and fresh".
@@ -306,30 +356,53 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
     if (truncated) notes.push('\n\n(history may be truncated by a past compaction — older closed entries are not retained)');
     if (projectDisposition === 'unadopted-present') notes.push(unadoptedNote(projectDisposition));
     for (const n of witnessNotes) notes.push(`\n\n${n}`);
-    return ok(frame + notes.join(''));
+    const trailingNotes = notes.join('');
+    // M1: total response bound — one row is one item here, so dropping tail rows needs no grouping.
+    const { text: frame } = capRendered(
+      rows.length,
+      (n) => makeDataFrame({
+        label: 'MEMORY HISTORY',
+        nonce: newNonce(),
+        lines: rows.slice(0, n).map((r) => {
+          const verb = r.closedBy ? r.closedBy.kind : r.record.state; // closed: verb; live: grade (both enums)
+          const interval = `${iso(r.record.tx)}..${r.txTo === null ? '' : iso(r.txTo)}`;
+          return { text: `${presentId(r.record.id)} ${r.record.content}`, mark: `DATA[${verb}:${r.scope}:${interval}]| ` };
+        }),
+      }),
+      RESPONSE_MAX_CHARS - trailingNotes.length,
+    );
+    return ok(frame + trailingNotes);
   }
   const { records: rows, projectDisposition, witnessNotes } = store.currentView();
   if (rows.length === 0) return ok('(memory is empty)' + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
-  return ok(makeDataFrame({
-    label: 'CURRENT MEMORY',
-    nonce: newNonce(),
-    lines: rows.map(({ record, scope, contentDigest }) => ({
-      // The mark is the SAME known-enum `DATA[state:scope]| ` label recall/SessionStart use (mirrored
-      // byte-for-byte, not reinvented). The SANITIZED id is prepended to the datamarked content so
-      // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
-      // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
-      //
-      // The digest rides along for VERIFIED rows only. Superseding one now requires echoing it back as
-      // `supersedesDigest` (proof of read), so without it here the tool surface could never replace a
-      // verified fact at all. Verified-only keeps 64 hex characters off every other row: it is emitted
-      // exactly where it is needed, and it discloses nothing — a reader holding this line already holds
-      // the content it digests.
-      text: record.state === 'Verified' && contentDigest !== undefined
-        ? `${presentId(record.id)} ${record.content}\n    supersedesDigest=${contentDigest}`
-        : `${presentId(record.id)} ${record.content}`,
-      mark: `DATA[${record.state}:${scope}]| `,
-    })),
-  }) + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
+  const trailingNotes = unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes);
+  // M1: total response bound — one record is one item; a VERIFIED row's extra `supersedesDigest`
+  // sub-line rides along inside that SAME item's `text`, so it is never split from its own row.
+  const { text: frame } = capRendered(
+    rows.length,
+    (n) => makeDataFrame({
+      label: 'CURRENT MEMORY',
+      nonce: newNonce(),
+      lines: rows.slice(0, n).map(({ record, scope, contentDigest }) => ({
+        // The mark is the SAME known-enum `DATA[state:scope]| ` label recall/SessionStart use (mirrored
+        // byte-for-byte, not reinvented). The SANITIZED id is prepended to the datamarked content so
+        // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
+        // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
+        //
+        // The digest rides along for VERIFIED rows only. Superseding one now requires echoing it back as
+        // `supersedesDigest` (proof of read), so without it here the tool surface could never replace a
+        // verified fact at all. Verified-only keeps 64 hex characters off every other row: it is emitted
+        // exactly where it is needed, and it discloses nothing — a reader holding this line already holds
+        // the content it digests.
+        text: record.state === 'Verified' && contentDigest !== undefined
+          ? `${presentId(record.id)} ${record.content}\n    supersedesDigest=${contentDigest}`
+          : `${presentId(record.id)} ${record.content}`,
+        mark: `DATA[${record.state}:${scope}]| `,
+      })),
+    }),
+    RESPONSE_MAX_CHARS - trailingNotes.length,
+  );
+  return ok(frame + trailingNotes);
 }
 
 export interface EraseDeps {

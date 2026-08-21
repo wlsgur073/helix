@@ -7,7 +7,7 @@ import type { RealityCheck } from '../memory/reality-check.js';
 import { MAX_QUERY_CHARS } from '../memory/retrieval.js';
 import {
   MAX_COMMIT_CONTENT_CHARS, MAX_DV_QUESTION_CHARS, MAX_DV_ANSWER_CHARS,
-  MAX_RECHECK_PATH_CHARS, MAX_RECHECK_PATTERN_CHARS,
+  MAX_RECHECK_PATH_CHARS, MAX_RECHECK_PATTERN_CHARS, RECALL_MAX_ITEMS_CAP, RECALL_MAX_CHARS_CAP,
 } from '../limits.js';
 import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, MAX_ID_CHARS, isValidId, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
@@ -111,10 +111,14 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     // bounds distinct TERMS, which needs the tokenizer) for callers that do not come through MCP.
     inputSchema: {
       query: z.string().max(MAX_QUERY_CHARS),
-      maxItems: z.number().int().positive().optional(),
+      // M1 (2026-08-18 review): maxItems/maxChars accepted ANY positive integer — a caller could ask
+      // for far more items, or a far larger per-item cap, than the response will ever actually
+      // deliver (the handler's own RESPONSE_MAX_CHARS total bound drops the excess anyway). Capping
+      // the inputs here too is a client-facing rejection instead of a silently-shrunk result.
+      maxItems: z.number().int().positive().max(RECALL_MAX_ITEMS_CAP).optional(),
       // H5: count bounds are not size bounds — long prose items made a 30-item recall render
       // 74.6 KB. Per-item character cap; truncation is marked with an ellipsis.
-      maxChars: z.number().int().positive().optional()
+      maxChars: z.number().int().positive().max(RECALL_MAX_CHARS_CAP).optional()
         .describe('Per-item character cap for rendered content (truncated with …). Use when the caller can only read a bounded result.'),
     },
   }, async (args) => m.runOp('helix_memory_recall', () => handleRecall(store, args)));
