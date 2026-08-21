@@ -143,6 +143,28 @@ describe('Helix MCP server (end-to-end via in-memory transport)', () => {
     expect(res.isError).toBe(true);
   });
 
+  it('a legal at-cap commit runs the handler and registers its op, so the rejection below is not a silent sink (H3)', async () => {
+    // Non-vacuity leg for the case below (mirrors schema-bound-precedes-handler.test.ts:51-55, the
+    // N2-QUERY-DOS.c "reaches the handler" case): through the SAME sink-wired client, a legal
+    // commit at exactly the cap must reach the handler and be recorded, or the over-cap case's
+    // "not in ops" assertion below could pass for the wrong reason -- e.g. if connectedClient's
+    // metrics sink ever silently stopped reaching buildServer, ops would stay empty regardless of
+    // whether the schema, the handler, or nothing at all ran.
+    const ops: string[] = [];
+    const sink: MetricsSink = {
+      emitReplay: () => {},
+      emitCompaction: () => {},
+      runOp: async (tool, fn) => { ops.push(tool); return await fn(); },
+    };
+    const client = await connectedClient(sink);
+    const res = await client.callTool({
+      name: 'helix_memory_commit',
+      arguments: { content: 'x'.repeat(MAX_COMMIT_CONTENT_CHARS), source: 'user' },
+    });
+    expect(res.isError, 'a legal at-cap commit was rejected').toBeFalsy();
+    expect(ops, 'the handler ran and its op should be recorded by the sink').toContain('helix_memory_commit');
+  });
+
   it('rejects an over-cap commit content at the schema, BEFORE the handler runs (H3)', async () => {
     // Mirrors N2-QUERY-DOS.c (schema-bound-precedes-handler.test.ts): "the call fails" does not
     // discriminate schema rejection from the store's own throw, since both fail today. What
