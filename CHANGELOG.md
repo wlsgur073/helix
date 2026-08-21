@@ -234,6 +234,9 @@ This file records what shipped in each release of Helix. It follows
   candidate pair independently: a sentence pair whose figures differ can no longer render `agree` —
   the verdict withholds and names both values instead. Two narrower cross-pairing shapes remain
   disclosed, pinned limits (see `src/verify/agreement-map.ts`).
+- `helix_dual_verify` now labels every `agree` as lexical agreement in the response itself — "matched
+  claims share tokens and polarity; not a semantic check" — instead of leaving a bare `verdict: agree`
+  to read as semantic verification. The enum value and the `audit.jsonl` field are unchanged.
 - Dependency advisory triage refreshed (`docs/release/deps-audit-2026-08.md`); `fast-uri` is
   overridden to `3.1.5` in `package.json`/`package-lock.json` as defense-in-depth for the one
   advisory-bearing package that ships (the shipped bundle itself picks it up at the next rebuild).

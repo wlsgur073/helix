@@ -55,6 +55,37 @@ describe('handleDualVerify', () => {
     expect(JSON.parse(readFileSync(d.auditPath, 'utf8').trim()).kind).toBe('dual-verify');
   });
 
+  it("'agree' is labelled as lexical agreement, never left to read as a semantic check (H1 relabel)", async () => {
+    // The aligner's 'agree' means the matched claims share content tokens and negation polarity —
+    // nothing more. A role swap with an identical token set still renders it (agreement-map.test.ts,
+    // open hole 2). Until 2026-08-21 the only place that said so was a source comment and the
+    // CHANGELOG; the response the caller actually reads printed a bare `verdict: agree`, which is
+    // exactly what the 2026-08-18 review asked not to present as semantic verification. The
+    // disclosure is fixed text derived from the verdict alone, so it sits beside the verdict line,
+    // un-datamarked, the same way the 'indeterminate' guidance does.
+    const d = deps({});
+    const res = await handleDualVerify({ stakes: 'high', question: 'db?', helixAnswer: 'use postgres' }, d);
+    const t = text(res);
+    expect(t).toContain('verdict: agree (mode: compare)\n\u2014 lexical agreement only: matched claims share tokens and polarity; not a semantic check, so read both answers before relying on it');
+    // Data field untouched: the audit row still records the enum value, not the label.
+    expect(JSON.parse(readFileSync(d.auditPath, 'utf8').trim()).verdict).toBe('agree');
+  });
+
+  it('the lexical-agreement disclosure is printed on the agree route only', async () => {
+    // A sentence about the verdict must be true on every route that prints it; 'diverge' and
+    // 'indeterminate' are not agreements, so the line must be absent there — each already carries
+    // its own guidance.
+    const diverge = deps({ runner: async () => ({ ok: true, answer: 'The migration is not safe to apply.' }) });
+    const dRes = await handleDualVerify({ stakes: 'high', question: 'q', helixAnswer: 'The migration is safe to apply.' }, diverge);
+    expect(text(dRes)).toContain('verdict: diverge (mode: compare)');
+    expect(text(dRes)).not.toContain('lexical agreement only');
+
+    const indeterminate = deps({ runner: async () => ({ ok: true, answer: 'The retry limit is 30.' }) });
+    const iRes = await handleDualVerify({ stakes: 'high', question: 'q', helixAnswer: 'The retry limit is 3.' }, indeterminate);
+    expect(text(iRes)).toContain('verdict: indeterminate (mode: compare)');
+    expect(text(iRes)).not.toContain('lexical agreement only');
+  });
+
   it('when disabled, reports no Codex call and audit-logs enabled=false', async () => {
     const d = deps({ config: structuredClone(DEFAULT_CONFIG) });
     const res = await handleDualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' }, d);

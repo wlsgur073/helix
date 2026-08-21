@@ -789,6 +789,15 @@ export async function handleDualVerify(
     frameOpen('DUAL-VERIFY', nonce),
     DATA_SEMANTICS,
     `verdict: ${a.verdict} (mode: ${result.mode})`,
+    // H1 relabel (review 2026-08-18, owner decision 2026-08-21): 'agree' is a statement about token
+    // sets and negation polarity, not about meaning — a role swap with an identical token set still
+    // renders it (agreement-map.ts, open hole 2). The review asked that 'agree' never be PRESENTED as
+    // semantic verification; the limit was disclosed in the aligner's header and the CHANGELOG, but
+    // not where the caller reads the verdict. Fixed text derived from the verdict alone, so it sits
+    // beside the verdict un-datamarked, the same way the 'indeterminate' guidance below does.
+    ...(a.verdict === 'agree'
+      ? ['\u2014 lexical agreement only: matched claims share tokens and polarity; not a semantic check, so read both answers before relying on it']
+      : []),
     // Zero-pair abstention guidance: a trusted derivation (fixed text, no untrusted bytes), so it
     // sits un-datamarked beside the verdict line. 'indeterminate' must never read as a divergence
     // finding — the caller's move is to read both answers. The 'no claim pairs found by aligner'

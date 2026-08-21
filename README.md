@@ -70,6 +70,10 @@ at startup saying it is being ignored.)
 ```
 
 - `mode` — `compare` (independent answer + an agreement map) or `critique` (Codex reviews your answer).
+  In `compare`, `agree` is **lexical** agreement — the matched claims share content tokens and
+  negation polarity — not a semantic check, and the response says so on every `agree`. A role swap
+  with an identical token set ("A approved B" / "B approved A") still reads `agree`; that limit is
+  pinned in `src/verify/agreement-map.ts`. Read both answers before relying on an agreement.
 - `stakesFloor` — skip the metered Codex call below this stakes level (`low` / `medium` / `high` / `xhigh`).
   A call that omits `stakes` is **read as the lowest tier**, so any floor above `low` refuses it:
   omission is not an exemption. Declare the level a call deserves, or set `stakesFloor` to `low` to
