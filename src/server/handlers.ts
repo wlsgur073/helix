@@ -419,11 +419,14 @@ export function handleErase(store: MemoryStore, args: { id: string }, deps: Eras
   store.erase(args.id); // soft (default): tombstone only, no compaction
   const ts = (deps.now ?? (() => new Date().toISOString()))();
   appendAudit(deps.auditPath, { kind: 'erase', ts, id: args.id, soft: true });
-  // M2: args.id is caller-controlled and passes isValidId's charset for any printable, non-control
-  // script — including 'a) SYSTEM: ...' shapes that would close this sentence and continue in
-  // unmarked prose if interpolated bare. JSON.stringify is the same quarantine handleCommit's
-  // success line already uses: inside a JSON string literal the value is visibly DATA, not narration.
-  return ok(`erased ${JSON.stringify(args.id)}`);
+  // M2 (fix round 1): args.id is caller-controlled and passes isValidId's charset for any printable,
+  // non-control script — including 'a) SYSTEM: ...' shapes that would close this sentence and
+  // continue in unmarked prose if interpolated bare. A bare `JSON.stringify(args.id)` mid-sentence
+  // (round 1) IS correctly escaped, but the escaping signal is invisible to a reader that only
+  // substring-matches instead of parsing JSON — so, matching `handleCommit`'s own convention, the
+  // ENTIRE trailing payload is now one JSON object with an unambiguous brace boundary and nothing
+  // after it, not a quoted span inside English prose.
+  return ok(`erased ${JSON.stringify({ id: args.id })}`);
 }
 
 export function handleAdopt(
@@ -436,8 +439,9 @@ export function handleAdopt(
   // record — unlike confirm, whose 'rejected' row marks an attempt against a real target id.
   const scope = store.adopt(args.projectRoot);
   appendAudit(deps.auditPath, { kind: 'adopt', ts, scope });
-  // M2: scope is the canonical form of the caller-supplied projectRoot — same quarantine as erase's id.
-  return ok(`adopted ${JSON.stringify(scope)}: this project ledger is now trusted by this Helix install`);
+  // M2 (fix round 1): scope is the canonical form of the caller-supplied projectRoot — same
+  // object-payload quarantine as erase's id (see its comment above).
+  return ok(`adopted ${JSON.stringify({ projectRoot: scope, note: 'this project ledger is now trusted by this Helix install' })}`);
 }
 
 export interface RecheckConfirmDeps {
@@ -457,8 +461,8 @@ export function handleRecheck(store: MemoryStore, args: { id: string; check: Rea
     // never Fresh/Verified), so narrowing MemoryState to the audit's verify-result union is safe.
     const resultState = (result.kind === 'state' ? result.state : result.kind) as VerifyAudit['resultState']; // 'no-change' | 'contested'
     appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'reality-check', checkKind: args.check.kind, outcome, resultState, bound: true });
-    // M2: same quarantine as erase's id.
-    return ok(`recheck ${JSON.stringify(args.id)}: ${resultState}`);
+    // M2 (fix round 1): same object-payload quarantine as erase's id.
+    return ok(`recheck ${JSON.stringify({ id: args.id, state: resultState })}`);
   } catch (e) {
     appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'reality-check', checkKind: args.check.kind, resultState: 'rejected', bound: false });
     throw e; // re-throw — MCP must still surface the error
@@ -479,8 +483,8 @@ export function handleConfirm(store: MemoryStore, args: { id: string }, deps: Re
   // Confirm SUCCEEDED. Audit it as Verified AFTER the try, so a failure of the (now fsync'd) audit
   // append is a logging failure — never mis-recorded as a 'rejected' confirm.
   appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'Verified' });
-  // M2: same quarantine as erase's id.
-  return ok(`confirmed ${JSON.stringify(args.id)}: Verified`);
+  // M2 (fix round 1): same object-payload quarantine as erase's id.
+  return ok(`confirmed ${JSON.stringify({ id: args.id, state: 'Verified' })}`);
 }
 
 export interface CodexStatusDeps {
@@ -518,8 +522,11 @@ export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResu
     : 'not logged in — run `codex login`';
   const auth = AUTH_MODE_LABEL[s.authMode];
   const dualVerify = dv.enabled ? `enabled, mode=${dv.mode}` : 'disabled';
+  // M2: codexLogPath is built the same way as the config path fixed below (`join(home, …)`, where
+  // `home` follows HELIX_HOME/an XDG override/a symlink target) — same caller/environment-controlled
+  // class, same quarantine.
   const contentLog = dv.logContent
-    ? `ON — ${deps.codexLogPath} (${codexLogCount(deps.codexLogPath)} entries)`
+    ? `ON — ${JSON.stringify(deps.codexLogPath)} (${codexLogCount(deps.codexLogPath)} entries)`
     : 'OFF — set dualVerify.logContent=true to record prompts+responses';
 
   // An explicit model wins at argv, so codex's own default is irrelevant — do not spend ~1s asking.
