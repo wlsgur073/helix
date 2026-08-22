@@ -83,9 +83,10 @@ describe('reaper-gated stealing', () => {
 describe('contract 10b: an excluded platform never reclaims on a pre-boot mtime', () => {
   it('leaves an unparseable lock alone when the boot instant is unavailable', () => {
     // The result-level half of the gate. With bootInstantMs() null — which is what an excluded
-    // platform now gets — lock.ts:137 must answer alive-unknown however old the file looks, and
-    // lock.ts:251 must abandon the steal. Losing a reclamation is the safe direction; deleting a
-    // live holder's lock is not.
+    // platform now gets — lock.ts's acquireFileLock must answer alive-unknown in its
+    // malformed-payload branch however old the file looks, and stealUnderGate must abandon the
+    // steal in its own malformed-payload branch. Losing a reclamation is the safe direction;
+    // deleting a live holder's lock is not.
     const t = target();
     writeFileSync(lockPathOf(t), 'not a payload at all');
     utimesSync(lockPathOf(t), new Date(0), new Date(0));       // mtime far in the past

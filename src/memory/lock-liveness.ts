@@ -66,13 +66,15 @@ export const realProbe: LivenessProbe = {
   uptimeSec() { return gatedUptimeSec(); },
   bootInstantMs() {
     // Reads the GATED value, not the raw one. Both consumers of this number turn it into a `dead`
-    // verdict (lock.ts:137 classifies, lock.ts:251 unlinks), and the subtraction below reads the
-    // wall clock and the uptime non-atomically — wall clock first — so on a platform where the
-    // clock can step between the two reads the result can be erroneously HIGH, under which a LIVE
-    // lock's mtime looks pre-boot and gets stolen. PRECONDITION, stated rather than assumed, in the
-    // same voice as the same-host/same-user/one-boot-domain precondition at lock.ts:7-8: this
-    // inference holds only where the wall clock does not step backward between two adjacent reads.
-    // Excluded platforms return null and fall through to alive-unknown, exactly as they do today.
+    // verdict from their own malformed-payload path in lock.ts — acquireFileLock's holder
+    // classification step classifies there, stealUnderGate's steal check unlinks there — and the
+    // subtraction below reads the wall clock and the uptime non-atomically — wall clock first — so
+    // on a platform where the clock can step between the two reads the result can be erroneously
+    // HIGH, under which a LIVE lock's mtime looks pre-boot and gets stolen. PRECONDITION, stated
+    // rather than assumed, in the same voice as the same-host/same-user/one-boot-domain
+    // precondition at lock.ts:7-8: this inference holds only where the wall clock does not step
+    // backward between two adjacent reads. Excluded platforms return null and fall through to
+    // alive-unknown, exactly as they do today.
     const u = gatedUptimeSec();
     return u === null ? null : Date.now() - u * 1000;
   },

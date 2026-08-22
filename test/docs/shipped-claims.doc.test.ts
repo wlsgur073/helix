@@ -294,6 +294,29 @@ describe('SECURITY.md states the lock-liveness limitation the code actually has'
     expect(sec).toMatch(/alive-unknown/);
     expect(sec).toMatch(/age is deliberately not used/i);
   });
+
+  // The Windows half of this same limitation used to go stale silently: the case above exercises
+  // only darwin, so a doc edit describing Windows behavior had nothing binding it to classifyHolder.
+  it('the doc also states the Windows cross-boot reclaim, and the classifier still behaves that way', async () => {
+    const { classifyHolder, selfIdentity, realProbe } = await import('../../src/memory/lock-liveness.js');
+    const win = { platform: 'win32', bootId: null, pidNs: null };
+    const base = { ...selfIdentity('c'.repeat(32)), ...win, uptimeSec: 5_000 };
+    const recorded = { ...base, token: 'd'.repeat(32), pid: 4242, startTicks: null, uptimeSec: 5_000 };
+    const probe = {
+      ...realProbe,
+      uptimeSec: () => 10,            // a strictly lower fresh sample: the machine rebooted since
+      kill0: () => 'alive' as const,  // and some live process now holds that pid
+      startTicksOf: () => null, stateOf: () => null,
+    };
+
+    // No start time anywhere — recorded or fresh — yet the lock reclaims: the cross-boot proof the
+    // doc now claims for Windows comes from uptime, not from /proc.
+    expect(classifyHolder(recorded, base, probe)).toBe('dead');
+
+    const sec = doc('SECURITY.md');
+    expect(sec).toMatch(/cross-boot/i);
+    expect(sec).toMatch(/uptime/i);
+  });
 });
 
 // D5.b — the at-rest section listed `~/.helix/audit.jsonl` as content-free and said nothing about its

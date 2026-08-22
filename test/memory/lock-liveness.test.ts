@@ -244,8 +244,9 @@ describe('the uptime witness field (contract 6)', () => {
     expect(tryParsePayload(raw('1e309'))).toBeNull();
   });
 
-  it('accepts a finite number and an explicit null', () => {
+  it('accepts a finite number (including zero) and an explicit null', () => {
     expect(tryParsePayload(raw('1225.5'))!.uptimeSec).toBe(1225.5);
+    expect(tryParsePayload(raw('0'))!.uptimeSec).toBe(0);   // 0 is a legal uptime — `??` must keep it, not fold it into null like `||` would
     expect(tryParsePayload(raw('null'))!.uptimeSec).toBeNull();
   });
 
@@ -291,8 +292,9 @@ describe('cross-boot uptime witness (contracts 3, 4, 5, 8)', () => {
   });
 
   it('contract 8: the sample is taken at CLASSIFICATION time, not from the pre-loop self snapshot', () => {
-    // The defect this locks out: lock.ts:86 builds `self` ONCE before the retry loop at :107, and
-    // :140 reuses that snapshot every iteration. A rule reading self.uptimeSec would compare a
+    // The defect this locks out: lock.ts's acquireFileLock builds `self` ONCE (via selfIdentity)
+    // before the `for (;;)` retry loop, and its classifyHolder(parsed, self, probe) call inside
+    // that loop reuses that snapshot every iteration. A rule reading self.uptimeSec would compare a
     // stale reading against a lock acquired AFTER the waiter started, see now < recorded, and steal
     // a live holder's lock. Three DISTINCT values, so the result alone identifies which reading was
     // used: 200 for the stale snapshot, 150 recorded, 100 fresh. Only the fresh reading yields dead
@@ -321,6 +323,28 @@ describe('cross-boot uptime witness (contracts 3, 4, 5, 8)', () => {
     const recorded = mk({ ...win, pid: 4242, startTicks: null, uptimeSec: 5_000 });
     expect(classifyHolder(recorded, asWin(self()), probeOf({
       uptimeSec: () => -1,
+      kill0: () => 'alive', startTicksOf: () => null, stateOf: () => null,
+    }))).toBe('alive-unknown');
+  });
+
+  it('a null fresh sample never classifies dead — an allowlisted platform whose probe could not read uptime this round', () => {
+    // The `now !== null` conjunct, isolated the same way ruling T2-1 isolates non-negativity: a
+    // gated sampler can still come back null (rawUptimeSec's own try/catch, or a probe that fails
+    // this one call), and that is uncertainty — never evidence of a different boot.
+    const recorded = mk({ ...win, pid: 4242, startTicks: null, uptimeSec: 5_000 });
+    expect(classifyHolder(recorded, asWin(self()), probeOf({
+      uptimeSec: () => null,
+      kill0: () => 'alive', startTicksOf: () => null, stateOf: () => null,
+    }))).toBe('alive-unknown');
+  });
+
+  it('a non-finite fresh sample never classifies dead — NaN/Infinity is uncertainty, not a low reading', () => {
+    // The `Number.isFinite(now)` conjunct, isolated the same way. A non-finite reading must not be
+    // compared against the recorded uptime at all, even though `Infinity < recorded.uptimeSec` is
+    // false anyway here — a differently-shaped recorded value must not change this verdict.
+    const recorded = mk({ ...win, pid: 4242, startTicks: null, uptimeSec: 5_000 });
+    expect(classifyHolder(recorded, asWin(self()), probeOf({
+      uptimeSec: () => Infinity,
       kill0: () => 'alive', startTicksOf: () => null, stateOf: () => null,
     }))).toBe('alive-unknown');
   });

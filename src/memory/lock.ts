@@ -89,7 +89,9 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
   // would put avoidable variation into the one artifact they depend on. `self` is also what every
   // loop iteration classifies incumbents against — do NOT let the refresh below touch it.
   // The WITNESS is different: it is a measurement of when this attempt happened, so it is resampled
-  // for each creation attempt below (contract 9).
+  // for each creation attempt below (contract 9). `self.uptimeSec`, sampled once here by
+  // selfIdentity, is NOT that witness — it is always superseded by the per-attempt sample in the
+  // published payload below, and must never be read as one.
   const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   // MEASURED elapsed, not a retry tally. This used to be `waited += RETRY_MS` per pass, i.e. a count
   // of retries reported in milliseconds — so under scheduling pressure a `maxWaitMs: 500` call could
