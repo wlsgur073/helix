@@ -257,3 +257,71 @@ describe('the uptime witness field (contract 6)', () => {
     expect(parsed!.uptimeSec).toBeNull();
   });
 });
+
+describe('cross-boot uptime witness (contracts 3, 4, 5, 8)', () => {
+  const win = { platform: 'win32', bootId: null, pidNs: null };
+  const asWin = (p: LockPayload): LockPayload => ({ ...p, ...win, uptimeSec: 5_000 });
+
+  it('contract 3: a recorded uptime ABOVE the fresh sample is dead', () => {
+    const recorded = mk({ ...win, pid: 4242, startTicks: null, uptimeSec: 5_000 });
+    expect(classifyHolder(recorded, asWin(self()), probeOf({
+      uptimeSec: () => 10,             // the machine has been up 10 s; the holder recorded 5000
+      kill0: () => 'alive',            // and some live process now holds that pid
+      startTicksOf: () => null, stateOf: () => null,
+    }))).toBe('dead');
+  });
+
+  it('contract 4: a recorded uptime EQUAL to the fresh sample is alive-unknown', () => {
+    // Uptime is coarse, so a waiter can legitimately read the value the holder recorded.
+    // Relaxing the strict < to <= here manufactures a false dead and steals a live lock.
+    const recorded = mk({ ...win, pid: 4242, startTicks: null, uptimeSec: 5_000 });
+    expect(classifyHolder(recorded, asWin(self()), probeOf({
+      uptimeSec: () => 5_000,
+      kill0: () => 'alive', startTicksOf: () => null, stateOf: () => null,
+    }))).toBe('alive-unknown');
+  });
+
+  it('contract 5: Darwin stays alive-unknown even with a recorded uptime above the sample', () => {
+    const mac = { platform: 'darwin', bootId: null, pidNs: null };
+    const recorded = mk({ ...mac, pid: 4242, startTicks: null, uptimeSec: 5_000 });
+    expect(classifyHolder(recorded, { ...self(), ...mac, uptimeSec: 5_000 }, probeOf({
+      uptimeSec: () => 10,             // would be 'dead' on an allowlisted platform
+      kill0: () => 'alive', startTicksOf: () => null, stateOf: () => null,
+    }))).toBe('alive-unknown');
+  });
+
+  it('contract 8: the sample is taken at CLASSIFICATION time, not from the pre-loop self snapshot', () => {
+    // The defect this locks out: lock.ts:86 builds `self` ONCE before the retry loop at :107, and
+    // :140 reuses that snapshot every iteration. A rule reading self.uptimeSec would compare a
+    // stale reading against a lock acquired AFTER the waiter started, see now < recorded, and steal
+    // a live holder's lock. Three DISTINCT values, so the result alone identifies which reading was
+    // used: 200 for the stale snapshot, 150 recorded, 100 fresh. Only the fresh reading yields dead
+    // — 200 < 150 is false, so an implementation reading the snapshot answers alive-unknown. The
+    // RESULT carries the proof; no call-count assertion, which would pin a count no contract fixes.
+    const seq = [200, 100];
+    let calls = 0;
+    const probe = probeOf({
+      uptimeSec: () => seq[calls++] ?? 100,
+      kill0: () => 'alive', startTicksOf: () => null, stateOf: () => null,
+    });
+    const staleSelf = { ...selfIdentity('c'.repeat(32), probe), ...win };
+    expect(staleSelf.uptimeSec).toBe(200);            // the snapshot really is the first reading
+    const recorded = mk({ ...win, pid: 4242, startTicks: null, uptimeSec: 150 });
+    expect(classifyHolder(recorded, staleSelf, probe)).toBe('dead');
+  });
+
+  it('ruling T2-1: a negative fresh sample never classifies dead, even against a positive recorded uptime', () => {
+    // Task 2's review found that a negative uptimeSec passes the "finite" validator. A negative
+    // RECORDED value is harmless — it only makes `now < recorded` harder to satisfy. But a negative
+    // FRESH sample against a positive recorded value DOES satisfy `now < recorded`, and an unguarded
+    // rule would answer dead: a stolen live lock, the one outcome this module forbids outright. No
+    // real source goes negative (Linux reads /proc/uptime or CLOCK_BOOTTIME, Windows reads
+    // GetTickCount64()), so this is a nonsense reading rather than a live scenario — but uncertainty
+    // resolves to alive-unknown here, never to evidence.
+    const recorded = mk({ ...win, pid: 4242, startTicks: null, uptimeSec: 5_000 });
+    expect(classifyHolder(recorded, asWin(self()), probeOf({
+      uptimeSec: () => -1,
+      kill0: () => 'alive', startTicksOf: () => null, stateOf: () => null,
+    }))).toBe('alive-unknown');
+  });
+});

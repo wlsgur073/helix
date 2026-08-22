@@ -108,11 +108,37 @@ export function tryParsePayload(raw: string): LockPayload | null {
   } catch { return null; }
 }
 
+/** Whether the RECORDED payload carries a witness this host may reason about. Deliberately ignores
+ *  the freshly sampled value — the call site validates that one, so a null or non-finite sample
+ *  means the witness is unavailable (alive-unknown), never dead. Re-asserts the platform match that
+ *  rule 1 already enforces, so the rule's placement is not its only guard. */
+const usableUptimeWitness = (recorded: LockPayload, self: LockPayload): boolean =>
+  recorded.platform === self.platform
+  && UPTIME_WITNESS_PLATFORMS.has(recorded.platform)
+  && typeof recorded.uptimeSec === 'number' && Number.isFinite(recorded.uptimeSec);
+
 /** Spec Layer 2, precedence-fixed. EVERY uncertainty resolves to alive-unknown (never stolen);
  *  only positively-established death (or cross-boot impossibility) resolves to dead. */
 export function classifyHolder(recorded: LockPayload, self: LockPayload, probe: LivenessProbe): HolderClass {
   if (recorded.platform !== self.platform) return 'alive-unknown';                        // rule 1
   if (recorded.bootId !== null && self.bootId !== null && recorded.bootId !== self.bootId) return 'dead'; // rule 2
+  // Rule 2b — rule 2's reasoning for platforms that have no boot id. Uptime rises monotonically
+  // within a boot, so a current reading BELOW the recorded one proves the two readings came from
+  // different boots, and a process cannot survive a reboot. Like rule 2 this deliberately precedes
+  // the pidNs and pid-validity checks: a cross-boot proof does not depend on the recorded pid still
+  // meaning anything. STRICTLY less-than — uptime is coarse and equality is not evidence. Sampled
+  // HERE, at classification time, NEVER from `self`, which lock.ts builds once before its loop.
+  if (usableUptimeWitness(recorded, self)) {
+    const now = probe.uptimeSec();
+    // `now >= 0` is practically unreachable — Linux reads /proc/uptime or CLOCK_BOOTTIME, Windows
+    // reads GetTickCount64(), and none of those can go negative. It stays because a negative FRESH
+    // sample against a positive recorded value would otherwise satisfy `now < recorded` and answer
+    // dead — a stolen live lock. (A negative RECORDED value is harmless on its own: it only makes
+    // `now < recorded` harder to satisfy.) A nonsense reading is uncertainty, and this module's
+    // standard resolves uncertainty to alive-unknown, never to evidence — do not delete this guard
+    // as dead code.
+    if (now !== null && Number.isFinite(now) && now >= 0 && now < recorded.uptimeSec!) return 'dead';
+  }
   if ((recorded.bootId === null) !== (self.bootId === null)) return 'alive-unknown';
   if (recorded.pidNs !== self.pidNs) return 'alive-unknown';                              // rule 3 (null === null ok)
   if (!Number.isSafeInteger(recorded.pid) || recorded.pid <= 0) return 'alive-unknown';
