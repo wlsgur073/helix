@@ -1,5 +1,6 @@
 import { readFileSync, readlinkSync } from 'node:fs';
 import { threadId } from 'node:worker_threads';
+import { uptime as osUptime } from 'node:os';
 
 /** Identity a lock holder records at acquisition, and everything a later waiter needs to decide
  *  dead / alive / cannot-know. startTicks is a DECIMAL STRING (proc stat field 22): exact, and a
@@ -14,6 +15,7 @@ export interface LivenessProbe {
   stateOf(pid: number): string | null;
   bootId(): string | null;
   pidNs(): string | null;
+  uptimeSec(): number | null;
   bootInstantMs(): number | null;
 }
 
@@ -24,6 +26,26 @@ export function parseAfterLastParen(stat: string): string[] | null {
   if (i < 0) return null;
   return stat.slice(i + 2).split(' ');
 }
+
+/** Platforms whose os.uptime() backend is a proven monotonic within-boot counter: Linux reads
+ *  /proc/uptime falling back to CLOCK_BOOTTIME, Windows reads GetTickCount64(). Darwin is EXCLUDED:
+ *  libuv reads kern.boottime and then calls time(NULL) SEPARATELY, so a backward clock step landing
+ *  between the two reads yields an arbitrarily low uptime, and no finite tolerance covers that.
+ *  Anything unlisted is refused by default — an unproven backend is not a witness. */
+export const UPTIME_WITNESS_PLATFORMS: ReadonlySet<string> = new Set(['linux', 'win32']);
+
+/** The ONE place the operating system is asked. Shared implementation, never a shared sample:
+ *  every caller gets a fresh reading, because a cached one is exactly the staleness §3.4 forbids. */
+const rawUptimeSec = (): number | null => {
+  try { const u = osUptime(); return Number.isFinite(u) ? u : null; } catch { return null; }
+};
+
+/** The ONE platform policy. Exported because process.platform cannot be varied in-process, so this
+ *  is the only way to test the gate directly rather than by inference from the host it runs on. */
+export const gateUptime = (platform: string, raw: number | null): number | null =>
+  raw !== null && UPTIME_WITNESS_PLATFORMS.has(platform) ? raw : null;
+
+const gatedUptimeSec = (): number | null => gateUptime(process.platform, rawUptimeSec());
 
 export const realProbe: LivenessProbe = {
   kill0(pid) {
@@ -41,8 +63,18 @@ export const realProbe: LivenessProbe = {
   },
   bootId() { try { return readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(); } catch { return null; } },
   pidNs() { try { return readlinkSync('/proc/self/ns/pid'); } catch { return null; } },
+  uptimeSec() { return gatedUptimeSec(); },
   bootInstantMs() {
-    try { return Date.now() - Number(readFileSync('/proc/uptime', 'utf8').split(' ')[0]) * 1000; } catch { return null; }
+    // Reads the GATED value, not the raw one. Both consumers of this number turn it into a `dead`
+    // verdict (lock.ts:137 classifies, lock.ts:251 unlinks), and the subtraction below reads the
+    // wall clock and the uptime non-atomically — wall clock first — so on a platform where the
+    // clock can step between the two reads the result can be erroneously HIGH, under which a LIVE
+    // lock's mtime looks pre-boot and gets stolen. PRECONDITION, stated rather than assumed, in the
+    // same voice as the same-host/same-user/one-boot-domain precondition at lock.ts:7-8: this
+    // inference holds only where the wall clock does not step backward between two adjacent reads.
+    // Excluded platforms return null and fall through to alive-unknown, exactly as they do today.
+    const u = gatedUptimeSec();
+    return u === null ? null : Date.now() - u * 1000;
   },
 };
 

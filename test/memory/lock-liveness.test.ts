@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { classifyHolder, selfIdentity, realProbe, tryParsePayload, parseAfterLastParen, type LockPayload, type LivenessProbe } from '../../src/memory/lock-liveness.js';
+import { classifyHolder, selfIdentity, realProbe, tryParsePayload, parseAfterLastParen, gateUptime, type LockPayload, type LivenessProbe } from '../../src/memory/lock-liveness.js';
 
 const self = (): LockPayload => selfIdentity('a'.repeat(32));
 const mk = (over: Partial<LockPayload>): LockPayload => ({ ...self(), token: 'b'.repeat(32), ...over });
@@ -198,5 +198,24 @@ describe('a payload from a build with no uptime witness (contract 7, characteriz
     expect(classifyHolder(recorded, selfWin, probeOf({
       kill0: () => 'alive', startTicksOf: () => null, stateOf: () => null,
     }))).toBe('alive-unknown');
+  });
+});
+
+describe('the uptime policy gate (contracts 2 and 10a)', () => {
+  it('contract 2: the derived boot instant precedes this process own start', () => {
+    // An INVARIANT, run unmocked, that must hold both before and after the change — which is what
+    // makes it catch a wrong unit or a flipped sign introduced by the change. The expectation is
+    // computed from process.uptime(), never from the code under test, so a defect cannot move both
+    // sides together. A missing `* 1000` or a `+` would put the result near Date.now(), far above.
+    const boot = realProbe.bootInstantMs()!;
+    expect(boot).toBeLessThan(Date.now() - process.uptime() * 1000 + 1_000);
+  });
+
+  it('contract 10a: the gate admits linux and win32 and refuses everything else', () => {
+    expect(gateUptime('linux', 5_000)).toBe(5_000);
+    expect(gateUptime('win32', 5_000)).toBe(5_000);
+    expect(gateUptime('darwin', 5_000)).toBeNull();   // kern.boottime + time(NULL) are read apart
+    expect(gateUptime('aix', 5_000)).toBeNull();      // unproven backend: refuse by default
+    expect(gateUptime('linux', null)).toBeNull();     // no reading is not a reading
   });
 });

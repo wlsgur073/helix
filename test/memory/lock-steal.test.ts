@@ -79,3 +79,20 @@ describe('reaper-gated stealing', () => {
     expect(readFileSync(lockPathOf(t), 'utf8')).toContain('f'.repeat(32)); // the replacement survived — never unlinked
   });
 });
+
+describe('contract 10b: an excluded platform never reclaims on a pre-boot mtime', () => {
+  it('leaves an unparseable lock alone when the boot instant is unavailable', () => {
+    // The result-level half of the gate. With bootInstantMs() null — which is what an excluded
+    // platform now gets — lock.ts:137 must answer alive-unknown however old the file looks, and
+    // lock.ts:251 must abandon the steal. Losing a reclamation is the safe direction; deleting a
+    // live holder's lock is not.
+    const t = target();
+    writeFileSync(lockPathOf(t), 'not a payload at all');
+    utimesSync(lockPathOf(t), new Date(0), new Date(0));       // mtime far in the past
+    const gated = { ...realProbe, bootInstantMs: () => null };
+    let threw = '';
+    try { withFileLock(t, () => 1, { maxWaitMs: 60, probe: gated }); } catch (e) { threw = (e as Error).message; }
+    expect(threw).toMatch(/timed out/);                        // waited, did not steal
+    expect(existsSync(lockPathOf(t))).toBe(true);              // and the victim is still there
+  });
+});
