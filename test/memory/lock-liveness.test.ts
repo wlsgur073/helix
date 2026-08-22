@@ -219,3 +219,41 @@ describe('the uptime policy gate (contracts 2 and 10a)', () => {
     expect(gateUptime('linux', null)).toBeNull();     // no reading is not a reading
   });
 });
+
+describe('the uptime witness field (contract 6)', () => {
+  const raw = (uptimeSecLiteral: string): string =>
+    `{"v":1,"token":"${'f'.repeat(32)}","pid":4242,"startTicks":null,"bootId":null,` +
+    `"pidNs":null,"threadId":0,"platform":"win32","uptimeSec":${uptimeSecLiteral}}`;
+
+  it('selfIdentity records a finite uptime on an allowlisted platform', () => {
+    expect(Number.isFinite(selfIdentity('a'.repeat(32)).uptimeSec)).toBe(true);   // this host is linux
+  });
+
+  it('a present but non-numeric uptimeSec is REJECTED, not coerced', () => {
+    // The same fail-OPEN shape isStringOrNull exists for: a wrongly typed field that survives
+    // parsing goes on to be compared, and a bad comparison here mis-classifies a LIVE holder.
+    expect(tryParsePayload(raw('"1225"'))).toBeNull();
+    expect(tryParsePayload(raw('true'))).toBeNull();
+    expect(tryParsePayload(raw('{"s":1}'))).toBeNull();
+  });
+
+  it('a present but NON-FINITE uptimeSec is rejected — reachable from raw JSON, unlike Infinity', () => {
+    // JSON cannot spell Infinity, so serialising it yields null and looks unreachable. PARSING is
+    // different: the literal 1e309 overflows to Infinity. Measured, not assumed.
+    expect(JSON.parse('{"u":1e309}').u).toBe(Infinity);
+    expect(tryParsePayload(raw('1e309'))).toBeNull();
+  });
+
+  it('accepts a finite number and an explicit null', () => {
+    expect(tryParsePayload(raw('1225.5'))!.uptimeSec).toBe(1225.5);
+    expect(tryParsePayload(raw('null'))!.uptimeSec).toBeNull();
+  });
+
+  it('a payload from an older build, with the field absent, parses and NORMALISES to null', () => {
+    const older = JSON.parse(raw('null')) as Record<string, unknown>;
+    delete older.uptimeSec;
+    const parsed = tryParsePayload(JSON.stringify(older));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.uptimeSec).toBeNull();
+  });
+});

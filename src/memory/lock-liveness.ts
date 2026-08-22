@@ -5,7 +5,7 @@ import { uptime as osUptime } from 'node:os';
 /** Identity a lock holder records at acquisition, and everything a later waiter needs to decide
  *  dead / alive / cannot-know. startTicks is a DECIMAL STRING (proc stat field 22): exact, and a
  *  string dodges any numeric-precision debate. All-null identity fields = non-Linux platform. */
-export interface LockPayload { v: 1; token: string; pid: number; startTicks: string | null; bootId: string | null; pidNs: string | null; threadId: number; platform: string; }
+export interface LockPayload { v: 1; token: string; pid: number; startTicks: string | null; bootId: string | null; pidNs: string | null; threadId: number; platform: string; uptimeSec: number | null; }
 
 export type HolderClass = 'dead' | 'alive' | 'alive-unknown' | 'reentrant-self';
 
@@ -79,7 +79,7 @@ export const realProbe: LivenessProbe = {
 };
 
 export function selfIdentity(token: string, probe: LivenessProbe = realProbe): LockPayload {
-  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform };
+  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform, uptimeSec: probe.uptimeSec() };
 }
 
 /** A LockPayload identity field that must be `string | null`. A well-formed-JSON payload carrying a
@@ -89,13 +89,22 @@ export function selfIdentity(token: string, probe: LivenessProbe = realProbe): L
  *  this was the lone fail-OPEN one. Reject => alive-unknown (never stolen). */
 const isStringOrNull = (x: unknown): boolean => x === null || typeof x === 'string';
 
+/** ABSENT is legal — a payload written by an older build has no uptimeSec, and §3.6 requires it to
+ *  keep parsing rather than fall to the litter path's wall-clock mtime inference. PRESENT but not a
+ *  finite number is REJECTED, never coerced: same fail-OPEN shape as isStringOrNull above. Note
+ *  non-finite IS reachable here even though JSON cannot spell Infinity — the literal 1e309 parses
+ *  to it. Absent is normalised to null below, so no reader has to handle undefined. */
+const isFiniteNumberOrAbsent = (x: unknown): boolean =>
+  x === undefined || x === null || (typeof x === 'number' && Number.isFinite(x));
+
 export function tryParsePayload(raw: string): LockPayload | null {
   try {
     const p = JSON.parse(raw) as LockPayload;
     if (p === null || typeof p !== 'object' || p.v !== 1) return null;
     if (typeof p.token !== 'string' || typeof p.pid !== 'number' || typeof p.threadId !== 'number' || typeof p.platform !== 'string') return null;
     if (!isStringOrNull(p.startTicks) || !isStringOrNull(p.bootId) || !isStringOrNull(p.pidNs)) return null;
-    return p;
+    if (!isFiniteNumberOrAbsent(p.uptimeSec)) return null;
+    return { ...p, uptimeSec: p.uptimeSec ?? null };
   } catch { return null; }
 }
 
