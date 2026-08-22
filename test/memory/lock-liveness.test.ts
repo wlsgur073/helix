@@ -177,3 +177,26 @@ describe('pid reuse without /proc — the gap is the probe, not the rule', () =>
     expect(cls).toBe('alive-unknown');
   });
 });
+
+describe('a payload from a build with no uptime witness (contract 7, characterization)', () => {
+  // Written and passing BEFORE any source change, so it pins today's answer rather than
+  // tomorrow's. Every later task re-runs it unchanged; if it ever moves, backward compatibility
+  // broke. Raw JSON rather than selfIdentity(), so it stays a v1 payload with no witness even
+  // after selfIdentity starts writing one.
+  const legacyRaw = JSON.stringify({
+    v: 1, token: 'e'.repeat(32), pid: 4242, startTicks: null,
+    bootId: null, pidNs: null, threadId: 0, platform: 'win32',
+  });
+
+  it('parses', () => {
+    expect(tryParsePayload(legacyRaw)).not.toBeNull();
+  });
+
+  it('classifies alive-unknown when the pid is live but unidentifiable', () => {
+    const recorded = tryParsePayload(legacyRaw)!;
+    const selfWin = { ...self(), platform: 'win32', bootId: null, pidNs: null };
+    expect(classifyHolder(recorded, selfWin, probeOf({
+      kill0: () => 'alive', startTicksOf: () => null, stateOf: () => null,
+    }))).toBe('alive-unknown');
+  });
+});
