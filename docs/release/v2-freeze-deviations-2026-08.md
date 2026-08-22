@@ -228,11 +228,13 @@ exposure D-2026-08-10 predicted, arriving on schedule.** That entry closed with 
 startup may move the clone again", having falsified both preventive controls. It did.
 
 > **This entry carries MORE THAN ONE instance.** Its closing paragraph says each further instance
-> is appended here, and two have been — *Instance 2* (2026-08-17) and *Instance 3* (2026-08-18) —
-> so the statement below describes the FIRST instance only. Read the whole entry before quoting a
-> count from its opening; the close report's §4.7 marker asks for the list, not for this heading.
-> Count the `### Instance` headings rather than trusting this line, which has already been stale
-> once.
+> is appended here, and several have been, so the statement below describes the FIRST instance only.
+> Read the whole entry before quoting a count from its opening; the close report's §4.7 marker asks
+> for the list, not for this heading. **Count the `### Instance` headings — this line does not name
+> them any more, because naming them is what made it stale twice.** It named two while instance 4
+> existed (corrected 2026-08-17 and stale again by 2026-08-19), and instances 5, 6 and 7 were
+> appended 2026-08-22. Instance 1 has no `### Instance` heading of its own: it is the Statement
+> immediately below, so the instance count is the heading count plus one.
 
 **Statement.** The marketplace clone fast-forwarded off the candidate on 2026-08-15 20:26:24 KST
 (11:26:24Z): `pull origin HEAD: Fast-forward`, HEAD `94dd136 -> 3bd63d0`. Corroborated
@@ -369,7 +371,7 @@ forced into the earlier pattern.
 
 **Byte continuity BROKE — the first time on either window, and it was measured.** `19b4746` carries
 the second clone's in-window `bin/` rebuild (deviation `D-2026-08-18-in-window-product-rebuild`,
-RULING PENDING below): seven commits touch `bin/` in `94dd136..19b4746` (`8ca8a2f`, `08bc3da`,
+below — pending when this instance was written on 2026-08-19, RULED NOT A RESET later the same day): seven commits touch `bin/` in `94dd136..19b4746` (`8ca8a2f`, `08bc3da`,
 `535de65`, `c3456ec`, `e5a3f3d`, `9f0ca5a`, `7c22bfc`). FOUR of the nine files in
 `v2-freeze-runtime-pins-2026-08.txt` failed the pin list on the marketplace load path —
 `bin/helix-mcp.mjs` (`e04a0164…`, 936,649 B vs the candidate's `075fc39e…`, 933,389 B),
@@ -398,6 +400,100 @@ day. The owner approved manual remediation in-session; `reset --hard` to the can
 interval 1 h 32 m 27 s — with the same caveat as instances 2-3: detection happened because a
 documentation sweep re-ran the guard by hand, so the number measures session activity, not the
 control's latency.
+
+### Instance 5 — 2026-08-20, and the byte-continuity sentence the earlier instances used stopped being true
+
+**Statement.** The clone fast-forwarded off the candidate on 2026-08-20 12:00:55Z (21:00:55 KST):
+`pull origin HEAD: Fast-forward`, HEAD `94dd136 -> 92d5d0a`. Both `autoUpdate` flags were `false`
+and `DISABLE_AUTOUPDATER=1` was exported, unchanged since instance 1. **This instance has no
+independent corroboration and that is stated rather than papered over**: `known_marketplaces.json`
+holds one `helix.lastUpdated` value, which instances 6 and 7 have since overwritten, so the reflog
+is the only witness for the instant. The pattern of instances 1-4 makes a session-start pull the
+likely mechanism, but nothing here measures it.
+
+**Byte continuity. Unbroken — and the four-tree test the earlier instances used no longer states
+it correctly.** Instances 1-3 read `git diff 94dd136 <target> -- bin/ .claude-plugin/ hooks/ data/`
+and found it empty. At `92d5d0a` it is NOT empty: `data/inventory/claims.json`,
+`data/inventory/surface.json` and `data/inventory/verdicts.json` differ, because the inventory
+subsystem built on 2026-08-19 writes generated artefacts under `data/`. None of the three is on the
+nine-file pin list (`v2-freeze-runtime-pins-2026-08.txt` names exactly one `data/` path,
+`semantic-neighbors.json`) and none is read by the plugin — the readers are `scripts/inventory/*`
+and their tests. The measurement that carries the verdict is therefore the pin list itself: **all
+nine pinned runtime files hash to their pinned values at `92d5d0a`**, and `bin/`,
+`.claude-plugin/` and `hooks/` are git-identical to the candidate's. Anyone writing a further
+instance should measure the nine and name the `data/` divergence, not reuse the four-tree sentence.
+
+**A class no earlier entry recorded: the drift carried PINNED TOOL SOURCE onto a pinned load path.**
+Of the 67 paths that differ between `94dd136` and `92d5d0a`, two are among the receipt's 28 pins —
+`src/memory/ownership.ts` and `src/memory/store.ts`. Instances 1-3 had a pin intersection of exactly
+∅; instance 4's target `19b4746` had the same two and its entry does not say so. The underlying
+edits are already adjudicated (`Ruling R-2026-08-19` and
+`D-2026-08-22-in-window-pinned-source-edit`), so what is new is not the edits but the fact that they
+RODE onto the marketplace clone, which is a pinned runtime load path. **The guard cannot see this
+and did not object**: `scripts/freeze-runtime-check.sh` step 5 verifies the nine runtime-surface
+files under both roots and nothing checks the 26 `payload.tools` in the clone. This does not change
+the runtime verdict — source files are not loaded by the plugin — but it does mean the automated
+control's coverage of the clone is the nine, not the twenty-eight. Widening it is queued for after
+`txClose`, on the same grounds as the `head -3` fix above: it is the live guard.
+
+**Healed 2026-08-20 12:36:06Z** (21:36:06 KST) back to `94dd136`, the seventh line of
+`~/.cache/freeze-guard-heals.log` and the fourth automatic heal of this window. **Detection latency:
+35 m 11 s** — with the standing caveat from instances 2-4 that the figure measures when a shell
+happened to open, not how well the check works.
+
+**The daily automatic opportunity was missed by 1 m 47 s.** The dogfood unit started 2026-08-20
+11:59:08Z (20:59:08 KST) and its `ExecStartPre` found nothing to heal; the pull landed 107 seconds
+later. This is instance 2's finding holding a fourth time, now from the near side of the margin.
+
+### Instance 6 — 2026-08-21, and a run that DIED still spent its healing pass before dying
+
+**Statement.** The clone fast-forwarded again on 2026-08-21 11:52:40Z (20:52:40 KST):
+`pull origin HEAD: Fast-forward`, HEAD `94dd136 -> d93cb19`. Flags and environment unchanged. As
+with instance 5, `helix.lastUpdated` has since been overwritten and the reflog is the only witness.
+
+**Byte continuity. Unbroken**, measured the way instance 5 sets out: nine of nine pinned runtime
+files at their pinned values at `d93cb19`; `bin/`, `.claude-plugin/` and `hooks/` git-identical; the
+same three `data/inventory/*` files divergent and neither pinned nor plugin-loaded. Of the 90
+differing paths the pin intersection is again `src/memory/ownership.ts` and `src/memory/store.ts`.
+
+**Healed 2026-08-21 12:51:35Z** (21:51:35 KST), the eighth heal-log line and the fifth of this
+window. **Detection latency: 58 m 55 s.**
+
+**What this one adds.** Instance 2 established that a run which later dies has already taken its
+healing pass, so run failure costs no heal. Today shows the other half of that claim and confirms
+it: the unit started 11:15:11Z, its `ExecStartPre` healed nothing because there was nothing to heal,
+and the run was then killed at 11:21:04Z (`code=killed, status=15/TERM`). The pull arrived 31 m 36 s
+AFTER the unit had already exited. So the run's death is again not what left the clone off-pin —
+the ordering is. The healing opportunity is one instant per day and it is spent whether the run
+succeeds or not.
+
+### Instance 7 — 2026-08-22, the clone returned to the commit it had just been healed away from
+
+**Statement.** The clone fast-forwarded on 2026-08-22 04:03:43Z (13:03:43 KST):
+`pull origin HEAD: Fast-forward`, HEAD `94dd136 -> d93cb19` — the SAME target instance 6 was healed
+away from seventeen hours earlier. Corroborated independently of the reflog:
+`known_marketplaces.json`'s `helix.lastUpdated` reads `2026-08-22T04:03:43.869Z`, the same instant
+to the second, with `autoUpdate` `false`. CLI `2.1.239`.
+
+**Byte continuity. Unbroken**, on the same measurement as instances 5 and 6 and against the same
+target commit, so the readings are identical: nine of nine pins, three runtime trees git-identical,
+`data/inventory/*` divergent and out of scope, pin intersection `src/memory/ownership.ts` and
+`src/memory/store.ts`.
+
+**Healed 2026-08-22 06:33:35Z** (15:33:35 KST), the ninth heal-log line and the sixth of this
+window. **Detection latency: 2 h 29 m 52 s**, the longest of this window apart from instance 1's
+14 h 17 m 20 s. The dogfood unit had started 01:19:23Z and finished 01:28:20Z, so the pull arrived
+2 h 35 m after the unit exited and the automatic opportunity was again spent before the drift.
+
+**What the three together establish, which no single one of them does.** Drift has gone from
+intermittent to daily: 08-15, 08-17, 08-18, 08-19, then 08-20, 08-21 and 08-22 without a gap. Every
+one of the last three was healed by a human opening a shell, never by the unit, and the unit's start
+time now ranges 10:19-20:59 KST rather than the 10:43-20:01 recorded at instance 2 — a wider window
+in which the one daily opportunity can fall on the wrong side of a pull. Instance 7 also shows that
+healing restores state without fixing it: the clone returned to the same commit it had been reset
+away from the previous day, because the refresh does not consult anything the reset changed. None of
+this alters `D-2026-08-10`'s conclusion that prevention is unavailable; it raises the expected
+number of remaining instances before `txClose`.
 
 ## Ruling R-2026-08-16 — two in-window edit classes ruled NOT a reset
 
@@ -442,10 +538,11 @@ re-measuring a metric that a §9a-mandatory report section is then rewritten aro
 lands on the clause's first limb and was refused on 2026-08-16 for exactly that reason (see the
 close report §4.5).
 
-## Deviation D-2026-08-18-in-window-product-rebuild — RULING PENDING
+## Deviation D-2026-08-18-in-window-product-rebuild — RULED 2026-08-19: NOT A RESET
 
 **Status: RULED 2026-08-19 — NOT A RESET (Ruling R-2026-08-19 below).** As first written this line
-read: the ruling is the owner's and has not been taken. This entry records the facts, the rule
+read: the ruling is the owner's and has not been taken. The HEADING above carried the same stale
+word until 2026-08-22; it read `— RULING PENDING`, which this line had contradicted since 08-19. This entry records the facts, the rule
 they land on, and the readings, in the shape D-2026-08-13 established. Nothing here asserts a reset;
 nothing here asserts the window continues.
 
@@ -903,8 +1000,17 @@ bundle. `compareSurfaces` prints only tool NAMES on a disagreement, and the name
 here, which is why the cause stayed unidentified: it was found by diffing the two surfaces directly.
 
 This does not move the measured surface — the deployed bytes are unchanged — but an entry that said
-"no source-side consequence" would have been false, and the §9a report's failure baseline needs
+"no source-side consequence" would have been false, and the recorded failure baseline needs
 correcting independently of this ruling.
+
+**Corrected 2026-08-22: the sentence above named the wrong document.** It read "the §9a report's
+failure baseline". The §9a report carries no failure baseline — the word does not occur in it — and
+the close run sheet does not ask for one, because §9a content is the measured chain rather than the
+development suite. The stale baseline lives in the untracked defect ledger, where the 2026-08-20
+reading of "3 failed" was TRUE when taken: the two commits that added the other three arrived in
+this clone by the 2026-08-21T11:52Z pull, after that measurement. It has now been superseded in
+place, with all six failures named individually and an instruction to gate on the names rather than
+the count, since gating on the count is what hid these three for two days.
 
 ### The write-path point, stated rather than buried
 

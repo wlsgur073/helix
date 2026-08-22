@@ -693,7 +693,11 @@ close-day program other than this one.
 
 **Two as of 2026-08-17, both of the predicted kind; the second is written up after the first.**
 *(This section opened "One so far" until 2026-08-17. The count is provisional by construction — the
-marker at the end of this section is what fixes it at the close.)*
+marker at the end of this section is what fixes it at the close. It has since been overtaken twice:
+the ledger carried four instances by 2026-08-19 and seven by 2026-08-22. Those instances are
+deliberately NOT restated here — two accounts of the same events drift apart, and the ledger is the
+record. What this section keeps is the reading below, which the later instances confirm rather than
+revise.)*
 
 **Instance 1.** The marketplace clone fast-forwarded off the candidate
 on 2026-08-15 11:26:24Z — `pull origin HEAD: Fast-forward`, `94dd136 -> 3bd63d0` — with both
@@ -784,7 +788,26 @@ independence bullet in `pilot-amendment-1.md` both bear on the act of taking it 
 substitutes for the measurement. If those two ever disagree at the close, that disagreement is
 itself a finding, and it is the close-day value that governs.
 
-- Owner disposition on `R-2026-08-18`: <<FILL AT CLOSE: the ruling, its date, and whether it changed the window's identities | owner decision. If it is ruled a reset, this report is not published for THIS window and the entry's recorded anchor instant is what the new window is cut from >>
+- **Owner disposition on `R-2026-08-18`: NOT A RESET, ruled 2026-08-18, changing no window
+  identity.** The ledger states it in terms: the six passes reimplemented two frozen RULES but built
+  none of the method's tooling, the act produced no input to any chain step and changed nothing on
+  the measured surface, and the window stands with the close unchanged at
+  `2026-09-11T06:20:01.000Z`. The identity check is recorded with it — all 26 `payload.tools` blob
+  ids and both `payload.methodDocs` sha256 values recomputed against the receipt, zero mismatches.
+  Two qualifications travel with the disposition and are not close-day values either: it states the
+  recording party's conflict of interest before its reasoning, and it does not clear the five
+  conduct findings it lists.
+
+  *(Corrected 2026-08-22. This bullet was a close-time fill marker asking for the ruling, its date,
+  and whether it moved the window's identities, with a conditional tail for the case where it was
+  ruled a reset. All of that was answered on 2026-08-18 — three weeks before the close and fourteen
+  lines below a paragraph in this same section that already names the disposition in the report's
+  own voice. The conditional tail resolved with it: the ruling was NOT A RESET, so the branch in
+  which this report goes unpublished for this window does not arise, and the anchor instant it
+  points at, `2026-08-18T10:58:05Z`, is fixed in the ledger as history rather than as an input.
+  Leaving the marker and recording the answer somewhere else was considered and rejected: the
+  marker's own definition admits only values that can exist at the close alone, so a marker standing
+  over a settled value misstates what close day owes. Same defect as §4.4's, same remedy.)*
 
 ---
 
@@ -802,9 +825,14 @@ evidence, the gate fails.**
 
 **Element 1 — freeze receipt** (method half, issued at T).
 `v2-freeze-receipt-2026-08.json`, payload `360ffe80f6baf853fdc5acb4bc949a14b84838c3827cbeb56832da56bfcc7332`,
-issued 2026-08-02T11:48:35.264Z, binding the candidate commit, the runtime identity at both load
+issued 2026-08-14T06:20:34.216Z, binding the candidate commit, the runtime identity at both load
 paths, the configuration bytes, K, the window, and every tool and method-doc hash of §2. Its
-`issuedAt` is a self-reported wall clock and the artifact says so.
+`issuedAt` is a self-reported wall clock and the artifact says so. *(Corrected 2026-08-22. This
+line read `2026-08-02T11:48:35.264Z`, which is the VOID receipt's issuance — the first window's,
+retained unedited as `v2-freeze-receipt-2026-08-02-void.json`. The payload sha on the line above was
+already the live receipt's, so the element cited two different artifacts in two consecutive lines.
+It is the same class of residue the 2026-08-17 reconciliation was cleaning up: a first-window
+constant that survived the re-date because nothing recomputed it.)*
 
 **Element 1b — input pins** (input half, derived at the close, bound back by `freezeSha256`).
 <<FILL AT CLOSE: the input-pins artifact path and the ten input pin values | `input-pins`, run in the candidate-commit checkout **after the manifest, classifier and universe exist** — its `--freeze`, `--manifest`, `--classifier`, `--universe`, `--snapshot` and `--out` are all required, so it is the fourth chain step and not the first >>
@@ -1116,9 +1144,14 @@ runtime identity pin is declared rather than re-derived from bytes inside the ch
 counterparty is the runtime-pin observation recorded in §2.3 — an observation of the deployment as
 it stood before the post-close redeploy, not a derivation, and one that cannot be repeated after
 that redeploy has replaced the bytes it read. The clone-HEAD identity pin did not hold continuously
-during the window (§4.1–§4.3), and this report does not claim it did — it claims byte continuity,
-which is a different and weaker statement, evidenced by the tree comparisons in the deviation
-ledger.
+during the window (§4.1–§4.3 for the first window, §4.7 for the second), and this report does not
+claim it did. Neither can it claim byte continuity without qualification, which an earlier draft of
+this paragraph did: on 2026-08-19 the marketplace clone carried non-candidate bytes for
+1 h 32 m 27 s with four of the nine pin-list files off-pin, while the install cache stayed
+candidate-identical throughout. The claim is therefore the narrower one — byte continuity held at
+both load paths for the whole window EXCEPT that one measured interval, evidenced by the tree
+comparisons in the deviation ledger — and what cannot be claimed at all is that no short-lived
+process bound the marketplace bundle inside it.
 
 ---
 
