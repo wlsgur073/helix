@@ -84,8 +84,12 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
   const lockPath = canon + '.lock';
   const token = randomBytes(16).toString('hex');
   const self = selfIdentity(token, probe);
-  const payloadText = JSON.stringify(self);
-  if (tryParsePayload(payloadText) === null) throw new Error('withFileLock: internal — payload failed its own well-formedness check'); // completeness invariant, testable
+  // `self` is the STABLE identity and is built once on purpose: pid, start ticks, boot id and pid
+  // namespace are what other processes match this holder against, and re-deriving them per attempt
+  // would put avoidable variation into the one artifact they depend on. `self` is also what every
+  // loop iteration classifies incumbents against — do NOT let the refresh below touch it.
+  // The WITNESS is different: it is a measurement of when this attempt happened, so it is resampled
+  // for each creation attempt below (contract 9).
   const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   // MEASURED elapsed, not a retry tally. This used to be `waited += RETRY_MS` per pass, i.e. a count
   // of retries reported in milliseconds — so under scheduling pressure a `maxWaitMs: 500` call could
@@ -106,6 +110,16 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
 
   for (;;) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString('hex')}.tmp`;
+    // Serialise THIS attempt's payload, with a witness sampled for THIS attempt, and validate the
+    // exact bytes about to be published. The completeness invariant is about the bytes that reach
+    // the name, not about a representative built once: a check that passes on a payload which is
+    // then discarded has validated something that is not the artifact — the same defect class as
+    // reasoning about a stale sample on the read side. Cost is one field assignment, one
+    // JSON.stringify and one parse of a nine-field flat object per pass: microseconds against a
+    // 25 ms cadence that already performs a write, a link, an unlink and an lstat.
+    const payloadText = JSON.stringify({ ...self, uptimeSec: probe.uptimeSec() });
+    // A failure here is an INTERNAL defect, not contention, so it aborts rather than retrying.
+    if (tryParsePayload(payloadText) === null) throw new Error('withFileLock: internal — payload failed its own well-formedness check');
     try {
       writeFileSync(srcTmp, payloadText, { flag: 'wx', mode: 0o600 });   // full write returns before...
       try { linkSync(srcTmp, lockPath); break; }            // ...the name is published (atomic, with content)

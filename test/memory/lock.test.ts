@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withFileLock, withFileLockAsync, lockPathOf, writeLockFileForTest } from '../../src/memory/lock.js';
-import { selfIdentity, realProbe, type LivenessProbe } from '../../src/memory/lock-liveness.js';
+import { selfIdentity, realProbe, tryParsePayload, type LivenessProbe, type LockPayload } from '../../src/memory/lock-liveness.js';
 
 const target = (): string => { const d = mkdtempSync(join(tmpdir(), 'helix-lock-')); writeFileSync(join(d, 'ledger.jsonl'), ''); return join(d, 'ledger.jsonl'); };
 
@@ -216,5 +216,31 @@ describe('timeout guidance does not recommend an inference the code itself refus
       startTicks: null, bootId: null, pidNs: null,
     });
     expect(msg).toMatch(/reus/i);
+  });
+});
+
+describe('contract 9: the written witness belongs to the attempt that published it', () => {
+  it('records the uptime sampled for the successful creation attempt, not the pre-loop snapshot', () => {
+    // 100 on the first call (the pre-loop identity), 200 on every call after. Returning the SAME
+    // later value on every subsequent call keeps the expectation independent of how many creation
+    // attempts contention happened to cost.
+    let first = true;
+    const probe: LivenessProbe = {
+      ...realProbe,
+      uptimeSec: () => { if (first) { first = false; return 100; } return 200; },
+    };
+    const t = target();
+    // An incumbent that forces at least one failed creation attempt and then classifies DEAD, so
+    // the lock is reclaimed and this process's own payload is what ends up on disk.
+    //   - bootId, pidNs and platform are left as THIS host reports them. Nulling bootId would make
+    //     the null-vs-non-null asymmetry check answer alive-unknown, the steal would never happen,
+    //     and the waiter would simply time out.
+    //   - uptimeSec is pinned to 0 so the cross-boot witness cannot fire; the death must come from
+    //     the dead pid via kill0, which is the route this fixture is meant to exercise.
+    writeLockFileForTest(lockPathOf(t), { ...selfIdentity('a'.repeat(32)), pid: 999_999, startTicks: null, uptimeSec: 0 });
+    let written: LockPayload | null = null;
+    withFileLock(t, () => { written = tryParsePayload(readFileSync(lockPathOf(t), 'utf8')); return 1; }, { maxWaitMs: 2_000, probe });
+    expect(written).not.toBeNull();
+    expect(written!.uptimeSec).toBe(200);          // the attempt's own sample, not the snapshot
   });
 });
