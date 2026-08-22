@@ -324,4 +324,18 @@ describe('cross-boot uptime witness (contracts 3, 4, 5, 8)', () => {
       kill0: () => 'alive', startTicksOf: () => null, stateOf: () => null,
     }))).toBe('alive-unknown');
   });
+
+  it('ruling T3-1: rule 2b requires matching pidNs too — a container waiter must not "prove" a live host holder dead via a lower virtualized /proc/uptime reading', () => {
+    // boot_id is NOT namespaced, so a sibling container reads the host's own value — it matches here
+    // naturally (both sides are real values read from this Linux host, exactly as in the pre-existing
+    // "same boot, foreign pid namespace" test above) and rule 2 stays silent. /proc/uptime IS
+    // virtualized under lxcfs: without the pidNs conjunct in usableUptimeWitness, a container waiter
+    // sampling a lower reading than a live HOST holder recorded would satisfy `now < recorded` and
+    // steal that live lock. Only pidNs differs from a real, matching, self()-derived fixture.
+    const recorded = mk({ pidNs: 'pid:[999]', pid: 4242, startTicks: null, uptimeSec: 5_000 });
+    expect(classifyHolder(recorded, self(), probeOf({
+      uptimeSec: () => 10,              // the container's own, virtualization-lowered reading
+      kill0: () => 'alive', startTicksOf: () => null, stateOf: () => null,
+    }))).toBe('alive-unknown');
+  });
 });

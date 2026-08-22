@@ -111,11 +111,22 @@ export function tryParsePayload(raw: string): LockPayload | null {
 /** Whether the RECORDED payload carries a witness this host may reason about. Deliberately ignores
  *  the freshly sampled value — the call site validates that one, so a null or non-finite sample
  *  means the witness is unavailable (alive-unknown), never dead. Re-asserts the platform match that
- *  rule 1 already enforces, so the rule's placement is not its only guard. */
+ *  rule 1 already enforces, so the rule's placement is not its only guard.
+ *
+ *  The pidNs conjunct: rule 2b, below, inherits rule 2's POSITION ahead of rule 3 (the pid-namespace
+ *  check) but not rule 2's REASONING for standing there. boot_id is not namespaced, so a sibling
+ *  container reads the host's own value and a mismatch there really does prove a different boot —
+ *  but /proc/uptime IS virtualized under lxcfs, so a container waiter can sample a LOWER uptime than
+ *  a live HOST holder recorded, with matching bootId and a finite recorded value, and without this
+ *  conjunct that pair would wrongly prove death. Costs nothing real: where pidNs differs, rule 3
+ *  already answers alive-unknown, so this conjunct only moves WHERE that answer comes from, never
+ *  widens who receives a 'dead' verdict — do not delete it as redundant with rule 3, which runs
+ *  AFTER rule 2b and cannot retroactively undo a 'dead' this predicate already returned. */
 const usableUptimeWitness = (recorded: LockPayload, self: LockPayload): boolean =>
   recorded.platform === self.platform
   && UPTIME_WITNESS_PLATFORMS.has(recorded.platform)
-  && typeof recorded.uptimeSec === 'number' && Number.isFinite(recorded.uptimeSec);
+  && typeof recorded.uptimeSec === 'number' && Number.isFinite(recorded.uptimeSec)
+  && recorded.pidNs === self.pidNs;
 
 /** Spec Layer 2, precedence-fixed. EVERY uncertainty resolves to alive-unknown (never stolen);
  *  only positively-established death (or cross-boot impossibility) resolves to dead. */
