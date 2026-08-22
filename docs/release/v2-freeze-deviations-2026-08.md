@@ -868,3 +868,84 @@ relationship was already ruled outside the clause.
 the §9a report cites as verification evidence. It does not license writing a producer for any §9
 chain artifact — the close-bounded snapshot still has none, and writing one today would reset this
 window under the reading applied here.
+
+## Deviation D-2026-08-22-in-window-pinned-source-edit — RULED NOT A RESET
+
+Recorded in the shape R-2026-08-16 established, because this ledger is the §9a report's source for
+reset history.
+
+### The facts, measured
+
+| | |
+|---|---|
+| Commit | `95c65e7` *"fix(memory): cap commit content at the schema AND the store, so one oversized fact cannot become a permanent per-read cost (H3)"* |
+| Author date | 2026-08-20T09:00:28Z — **inside** the window (`2026-08-14T06:20:01Z < tx ≤ 2026-09-11T06:20:01Z`) |
+| Path | `src/memory/store.ts` — **one of the 28 pins** (`payload.tools`) |
+| Change | 8 lines: a 6-line comment and a 2-line length check at the head of `commit()` |
+| Origin | the second clone, which owns v0.1 certification. It reached this clone by a `pull` at 2026-08-21T11:52Z together with 26 other commits |
+| `bin/` | **unchanged.** The deployed runtime is still the candidate bytes; `scripts/freeze-runtime-check.sh` exits 0 |
+| Detection | manual. The guard compares the deployed cache and the marketplace clone, not the worktree, so a pinned *source* edit is invisible to it |
+
+### A fact the first draft of this entry did not carry, measured 2026-08-22
+
+`95c65e7` is the store half of finding H3. Its **schema half is `1cf487f`** (2026-08-20, *"one
+authoritative table for input and response caps (H3/M1)"*), which arrived in the same pull and added
+input-size caps to four tool schemas — `maxLength` 65536 on the dual-verify `question`/`helixAnswer`,
+16384 on `helix_memory_commit.content`, `maximum` 200 and 10000 on two recall parameters, and 4096
+and 2048 on the two recheck parameters.
+
+That desynchronized the SOURCE tool registry from the shipped bundle, and
+`scripts/inventory/extract-tools.ts:112` (`compareSurfaces`) asserts the two are equal. The
+consequence is **three suite failures that no status document records**: `extract-tools` twice and
+`inventory-drift`. The project's recorded baseline of 3 pre-existing failures is therefore stale;
+the measured baseline on 2026-08-22 is **6**, and all six are one class — source ahead of the frozen
+bundle. `compareSurfaces` prints only tool NAMES on a disagreement, and the names are identical
+here, which is why the cause stayed unidentified: it was found by diffing the two surfaces directly.
+
+This does not move the measured surface — the deployed bytes are unchanged — but an entry that said
+"no source-side consequence" would have been false, and the §9a report's failure baseline needs
+correcting independently of this ruling.
+
+### The write-path point, stated rather than buried
+
+The change is on the **write path**. The W-CITE analysis established that `buildRankArtifacts`
+tokenizes persisted `record.content`, so write-path changes move the measured *corpus* — pinning
+protects the algorithm, not the data. A commit-length cap can in principle change which records
+exist. Against this: the cap is not in the deployed bytes, so no record minted in this window was
+affected by it. That is checkable, and it is true as of 2026-08-22.
+
+### DISPOSITION — NOT A RESET, ruled 2026-08-22
+
+The owner ruled with the facts above in front of them, including the `1cf487f` consequence and the
+write-path point. **Ruled NOT A RESET, on R-2026-08-19's grounds:**
+
+- *The tooling limb is not reached.* `src/` and `bin/` are the measured PRODUCT, not the method's
+  tooling. A commit-length cap resolves no unspecified METHOD detail, which is the harm that limb
+  exists to prevent.
+- *The first limb is not reached on the surface the window measures.* Every pinned measurement of
+  the close chain runs from a clean checkout of the CANDIDATE commit
+  (`v2-close-procedure-2026-08.md`, "The rule"), and `94dd136` does not contain this commit. `bin/`
+  is unchanged, the deployed cache and marketplace clone remain candidate-identical, and
+  `scripts/freeze-guard.ts:17-19` records the doctrine directly: undeployed repo work during the
+  window is legitimate.
+
+**Precedent.** Both prior instances of this exact shape were disposed of the same way —
+`D-2026-08-09` (in-window marketplace drift) and `R-2026-08-19` (the second clone's in-window `bin/`
+rebuild, which hit three commits across `ownership.ts` and `store.ts`). `R-2026-08-19` is the
+closest: the **same file** and the **same clone**. The only candidate difference is the write-path
+point above, and it does not survive the fact that the cap never reached the deployed bytes.
+
+**What this ruling does NOT do.** It licenses nothing: no further pinned-path edits, no in-window
+`bin/` rebuild, no redeploy. A recurrence lands back on the clause with this ruling as precedent to
+DISTINGUISH, not to extend — what is ruled is one disclosed incident, not a class permission. It
+also does not clear the detection gap: a pinned *source* edit remains invisible to the automated
+guard, and the only thing that caught this one was a manual edit-set check.
+
+**Consequence accepted with the ruling.** The window runs to its scheduled close,
+`txClose 2026-09-11T06:20:01.000Z`, carrying the §5 sample state as measured — 4 in-window probes
+and **0 eligible** against a floor of 2 at the 2026-08-21 measurement. Declining the reset declines
+the restart vehicle for that starvation, and the owner declined it knowing so. The disposition of
+the resulting shortfall is deferred to the close instant, when eligibility is recomputed against
+every live competitor, rather than settled now: amending the pass rule while its outcome is pending
+is what the fixed-close architecture of §5 exists to prevent, and it would buy no schedule in any
+case, since the close instant and the post-close `bin/` rebuild are fixed independently of it.
