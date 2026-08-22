@@ -15,19 +15,34 @@ code, by tests, and by the freeze guard, so they cannot be folded into prose.
 
 ---
 
-## 1. Three names that are not three releases
+## 1. One release, and two names that are not it
 
-The main source of confusion in this directory is that three different version-shaped names appear
-in it. Only one of them is a product version.
+**There is exactly one release in this project's plan: `v0.1.0`, the first one. Nothing is planned
+after it.** There is no `v0.2.0` on the roadmap, no later version, and no maintenance line. When a
+file here names a version other than `0.1.0`, it is naming a past event or a measurement method —
+never a future release.
 
-| Name | What it actually is |
-| --- | --- |
-| **`v0.1.0`** | **The product version, and the first release.** Currently unreleased. Every document here is ultimately about getting this one shipped. |
-| `v0.2.0` | **Not a release — an attempt that was withdrawn.** A release cycle opened in July 2026, failed its own gate, and was stood down on 2026-07-22. The version identity was reverted to `0.1.0` the same day. Nothing was ever published under it. |
-| `v2` | **Not a product version at all — the second edition of the *pilot protocol*.** The recall pilot's method was rewritten after the first edition's gate failed, and the rewritten method is called protocol v2. A file named `v2-*` is about measurement methodology, never about a product version. |
+Two other version-shaped names appear in this directory, and neither is a release:
 
-So: one release, one withdrawn attempt, and a methodology now on its second edition. When a file
-name says `v2`, read "protocol v2".
+**`v0.2.0` — a past event, not a plan.** A release cycle opened under that number in July 2026 and
+was withdrawn when it failed its own gate. Nothing was published under it, the version identity was
+reverted to `0.1.0` on 2026-07-22, and the number is not scheduled to return. The next release is
+still the first one.
+
+**`v2` — a gate on the way to `v0.1.0`, not a version of the product.** After the July gate failed,
+the recall *pilot protocol* was rewritten, and the rewritten method is called protocol v2. Every
+`v2-*` filename here is that method, not a product version.
+
+It is also not a parallel track that could be dropped. `gate-decision-2026-07-22.md` is binding and
+states that a future release requires **one of**: (a) an explicit user-signed deviation for the
+failing probe with mechanism evidence attached, or (b) a prospectively preregistered protocol v2 —
+and its D1 chose path (b) as policy. **The v2 pilot is therefore a precondition of shipping
+`v0.1.0`, not a separate release and not an alternative to it.** Its window closing is a step in
+the first release, which is why the certification run-sheet schedules its remaining work after that
+close.
+
+So: one release, one withdrawn attempt that is over, and one gate standing between the code and
+that release.
 
 ## 2. What has happened so far
 
@@ -48,9 +63,11 @@ and 07-22. **It did not pass.** The registered 51-probe verdict is NOT MET perma
 conditional frozen-method Hit@1 gate failed at 27/28. The candidate was stood down on 2026-07-22
 and the identity reverted to `0.1.0`.
 
-That failure produced the governance the project now runs under. `gate-decision-2026-07-22.md` is
-**binding**: a release redo requires a prospectively preregistered protocol v2, and the earlier
-protocol cannot be reused to make a recall-quality claim.
+That failure produced the governance the project still runs under. `gate-decision-2026-07-22.md`
+is **binding**, and in its own words *a future release* requires a prospectively preregistered
+protocol v2 (its chosen path (b)); the earlier protocol cannot be reused to make a recall-quality
+claim. The release that clause governs is the first one — `v0.1.0` — because that is the next
+release there is.
 
 **Late July 2026 — deciding what "ready" means.** `readiness-criteria-2026-07.md` was ratified on
 2026-07-24 after every owner decision closed, including a domain-by-domain interview that mapped
@@ -82,12 +99,14 @@ the bundles again and would discard an earlier run.
 
 - `gate-decision-2026-07-22.md` — binding gate-path decision. Any recall-quality claim is governed
   by it. Byte-pinned by the freeze receipt; do not edit while the window is open.
-- `readiness-criteria-2026-07.md` — ratified service-readiness criteria and the redo roadmap.
+- `readiness-criteria-2026-07.md` — ratified service-readiness criteria and the roadmap its own
+  title calls a "redo roadmap". Read *redo* as redoing the release **attempt** that was withdrawn
+  in July, not as a second product version: its target is `v0.1.0`.
 - `o67-class-rule-2026-07.md` — the frozen offline classification rule for superset-competition
   cases, without which the exercised/unexercised report the gate decision requires cannot be
   produced. Byte-pinned by the freeze receipt; also read at runtime by `src/memory/retrieval.ts`.
 
-**The withdrawn v0.2.0 attempt, kept as the redo protocol**
+**The withdrawn July attempt — kept because the first release inherits its governance**
 
 - `pilot-protocol.md` (historical), `pilot-amendment-1.md`, `pilot-manifest.json`,
   `pilot-manifest-amended-1.json`, `pilot-oracle-mapping.json`,
@@ -132,6 +151,10 @@ the bundles again and would discard an earlier run.
   built, because rebuilding would move the frozen bytes. They ship together after the close.
 - **A validated close receipt** that retires the freeze guard and restores the settings the freeze
   turned off.
+
+**And then the list ends.** Nothing on it is preparation for a version after `v0.1.0`, because no
+such version is planned. When the public push happens, the work this directory records is done,
+and what follows is whatever the first release turns out to need — not a queued `v0.2.0`.
 
 ## 5. Why this directory is not yet one file
 
