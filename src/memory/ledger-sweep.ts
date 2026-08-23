@@ -22,11 +22,13 @@ export function orphanTmpPattern(base: string): RegExp {
  *
  *  That distinction is load-bearing, not defensive coding. An older docstring here claimed "callers
  *  hold the lock, so every match is a dead/aborted writer's leftover"; that premise is FALSE. A lock
- *  CONTENDER writes `<artifact>.lk-<hex32>.tmp` while it does not yet hold the lock (lock.ts:75),
- *  and every tmp writer removes its own file with a catch that already anticipates a racing sweeper
- *  (lock.ts:79, ledger.ts:514, ledger-mac.ts:49, witness-store.ts:101). Both sides delete the same
- *  path; only one of them used to survive losing. Root-caused 2026-07-29 from a 1-in-30 suite flake
- *  whose blast radius is every commit/erase append (ledger.ts:80), not just the observed key mint. */
+ *  CONTENDER writes `<artifact>.lk-<hex32>.tmp` while it does not yet hold the lock (the srcTmp
+ *  write in lock.ts's acquireFileLock), and every tmp writer removes its own file with a catch that
+ *  already anticipates a racing sweeper (that same function's unlink-in-finally, plus `compactLedger`
+ *  in ledger.ts, `ensureMaster` in ledger-mac.ts and `writeStoreFileAt` in witness-store.ts). Both
+ *  sides delete the same path; only one of them used to survive losing. Root-caused 2026-07-29 from
+ *  a 1-in-30 suite flake whose blast radius is every commit/erase append (`appendRecordUnlocked` in
+ *  ledger.ts), not just the observed key mint. */
 export function sweepOrphanTmps(artifactPath: string, opts: { fsOps?: DurableFsOps; keep?: string } = {}): number {
   const fs = opts.fsOps ?? realFsOps;
   const dir = dirname(artifactPath);

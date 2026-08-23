@@ -7,7 +7,7 @@
  *  Protocol (all inside ONE `withFileLock(ledger)` critical section — lock order ledger -> witness,
  *  matching §4.2; the nested witness lock taken by completeTransition/advanceWitness below targets
  *  a DIFFERENT path, `witnessPath(home)`, so nesting is safe — withFileLock is only non-reentrant
- *  PER PATH, lock.ts:107):
+ *  PER PATH — enforced by the `reentrant-self` throw in lock.ts's acquireFileLock):
  *    1. read current bytes and classify them against this scope's witness state (PRE-append verdict).
  *    2. transition-heal        -> completeTransition FIRST (resolve-before-any-write), using the
  *       bytes just read (classifyState already proved they match journal.expected exactly) and the
