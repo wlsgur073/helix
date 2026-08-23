@@ -495,6 +495,60 @@ away from the previous day, because the refresh does not consult anything the re
 this alters `D-2026-08-10`'s conclusion that prevention is unavailable; it raises the expected
 number of remaining instances before `txClose`.
 
+### Instance 8 — 2026-08-23, and a run that SUCCEEDED spent its healing pass 40 seconds too early
+
+**Statement.** The clone fast-forwarded again on 2026-08-23 11:34:29Z (20:34:29 KST):
+`pull origin HEAD: Fast-forward`, HEAD `94dd136 -> 7454033`. Both `autoUpdate` flags were `false`
+and `DISABLE_AUTOUPDATER=1` was exported, unchanged since instance 1. Corroborated independently of
+the reflog by `known_marketplaces.json`'s `helix.lastUpdated`, which reads
+`2026-08-23T11:34:29.744Z` — the same second, with `autoUpdate` `false`. CLI `2.1.241`, read from
+`/proc/<pid>/exe` of the session process that started two seconds after the pull.
+
+**One ordering detail differs from instances 1-2 and is recorded as observed rather than forced into
+their pattern.** There the pull landed 16 seconds AFTER a Claude Code session start. Here it
+PRECEDES the live `claude` process's own start (`ps lstart` 20:34:31 KST) by two seconds, and
+follows a refresh of two official-marketplace entries in `installed_plugins.json`
+(`lastUpdated 2026-08-23T11:34:19.661Z`) by ten. The pull sits inside a startup refresh sequence
+that begins before `ps` reports the process; nothing measured here names what issued it.
+
+**Byte continuity. Unbroken**, measured the way instance 5 sets out rather than by the four-tree
+sentence it retired: all nine pinned runtime files hash to their pinned values at `7454033`, and
+`bin/` (`e6bd010a`), `.claude-plugin/` (`e47c958f`) and `hooks/` (`3e1b6a4a`) are git-identical to
+the candidate's; the same three `data/inventory/*` files are divergent and neither pinned nor
+plugin-loaded. Of the 97 differing paths the pin intersection is again `src/memory/ownership.ts` and
+`src/memory/store.ts`, carried by four already-adjudicated commits — `7c22bfc`, `c3456ec`, `08bc3da`
+(`R-2026-08-19`) and `95c65e7` (`D-2026-08-22`). **Runtime verdict: control/provenance deviation
+with continuous runtime bytes**, on that pin-list measurement and nothing weaker. One difference
+from instances 3-7, whose targets all reached this clone by `pull`: `7454033` was committed HERE
+(2026-08-22 14:03:33Z) and pushed at 14:03:41Z, so instance 3's other-machine exposure is not in
+play — this is the first locally-authored drift target since instance 2.
+
+**Healed 2026-08-23 11:42:33Z** (20:42:33 KST), the tenth heal-log line and the seventh automatic
+heal of this window. **Detection latency: 8 m 4 s**, the shortest of this window — and the standing
+caveat from instances 2-7 holds undiminished: it measures when a shell happened to open, not how
+well the check works. A shell again, and not the unit, for the fourth consecutive instance.
+
+**What this one adds — it closes the pair instance 6 left half-measured.** Instance 2 established
+that the healing opportunity is one instant per day and precedes the run; instance 6 showed a run
+that was KILLED had already spent it. Today is the other side: the dogfood unit's `ExecStartPre` ran
+11:33:49Z and exited 0 with nothing to heal, `ExecStart` then ran to completion at 11:45:51Z
+(`Result=success`), and the pull landed **40 seconds** after that `ExecStartPre`. A successful run
+therefore buys no more coverage than a dead one — the pass is spent at unit start and the run's
+outcome does not touch it. Three of the eight instances have now landed within two minutes of the
+daily opportunity: 59 s at instance 2, 1 m 47 s at instance 5, and 40 s here, the tightest recorded.
+
+**And a push does not move the clone, which the two reflogs settle.** After `7454033` was pushed at
+2026-08-22 14:03:41Z the clone did not move for **21 h 30 m 48 s**. Across the 29 h 0 m 54 s between
+instance 7's heal and this pull, origin advanced five commits — `bc0614e`, `03af698`, `0f8b304`,
+`337690a`, `7454033` — the clone stayed on the candidate throughout, and the pull then took all five
+in one fast-forward. This bounds the trigger from one side only, and the other side is NOT measured
+here: whether a session started inside that gap without pulling.
+
+**Nothing here changes the operating mode.** Prevention remains unachievable with documented
+configuration (`D-2026-08-10`), detection plus reset stays the mode, and this is the eighth instance
+in the nine days since 2026-08-15, with 08-16 still the only gap. Expect further instances before
+`txClose`; each is appended here.
+
 ## Ruling R-2026-08-16 — two in-window edit classes ruled NOT a reset
 
 Recorded here because this ledger is the §9a report's source for reset history, and "this was
