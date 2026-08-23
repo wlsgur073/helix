@@ -2,7 +2,7 @@ import type { HelixConfig } from '../config.js';
 import type { Availability, CodexRunner } from './codex.js';
 import { buildAgreementMap, type AgreementMap } from './agreement-map.js';
 import { normalizeUntrusted } from '../memory/content-frame.js';
-import { classifyEgress, type EgressVerdict, type LedgerItem } from '../risk/trifecta.js';
+import { classifyEgress, type EgressVerdict, type LedgerItem, type QuotedMemory } from '../risk/trifecta.js';
 import type { CodexOutcome } from '../codex-log.js';
 
 /** Compile-time-required ledger source for the echo leg. No silent fail-open: a server that forgets
@@ -28,6 +28,13 @@ export interface DualVerifyParams {
    *  Unspecified => treated as 'low' (DV-STAKES-OMIT): omission is not an exemption. Kept optional in
    *  the schema so existing callers still type-check; the floor, not the schema, does the refusing. */
   stakes?: Stakes;
+  /** H6: memories this call deliberately quotes, each with the record's `contentDigest` as proof of
+   *  read. INTERNAL FOR NOW — `helix_dual_verify`'s `inputSchema` does not carry this field yet,
+   *  because `compareSurfaces` forbids a tool-surface change while `bin/` holds candidate bytes, so
+   *  in-window this is always `undefined` and behaviour is unchanged. The schema field and the
+   *  `args` hand-off are the post-close half, and they are the only remaining work: everything
+   *  below this line already honours a declaration once one arrives. */
+  quotedMemory?: readonly QuotedMemory[];
   /** MCP request cancellation (extra.signal), forwarded to the metered runner call so a cancel or
    *  transport close kills the codex child instead of leaving it running unattended. */
   signal?: AbortSignal;
@@ -145,6 +152,7 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
     outbound: prompt,
     ledger,
     policy: deps.config.dualVerify.egressPolicy,
+    quoted: params.quotedMemory,
   });
   if (verdict.decision === 'blocked') {
     return { ran: false, attempted: false, outcome: 'refused', reason: verdict.reason, egress: verdict, gates: stoppedAt('egress') };

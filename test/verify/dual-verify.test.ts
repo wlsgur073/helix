@@ -309,6 +309,30 @@ describe('dualVerify egress gate (S1)', () => {
     expect(r.attempted).toBe(true);
     expect(r.egress?.decision).toBe('pass');
   });
+
+  // H6: the declaration has to survive the trip from the caller's params to the classifier. The
+  // second call asserts only that the ECHO leg stopped refusing — whether it then runs is the
+  // stub runner's business, and asserting on that would couple this test to the stub.
+  it('H6: a quoted declaration in params reaches the egress classifier', async () => {
+    const memo = 'the deploy uses the blue cluster in us-east-1';
+    let spawned = 0;
+    const mk = (): DualVerifyDeps => deps({
+      config: enabled(),
+      echo: echoEnforce([item('m_1', memo)]),
+      runner: async () => { spawned += 1; return { ok: true, answer: 'ok' }; },
+    });
+
+    const undeclared = await dualVerify({ stakes: 'high', question: `restate: ${memo}`, helixAnswer: 'ok' }, mk());
+    expect(undeclared.outcome).toBe('refused');
+    expect(undeclared.reason).toContain('memory-echo');
+    expect(spawned).toBe(0);                       // refused BEFORE any spawn, as the S1 gate requires
+
+    const declared = await dualVerify(
+      { stakes: 'high', question: `restate: ${memo}`, helixAnswer: 'ok',
+        quotedMemory: [{ id: 'm_1', contentDigest: digestContent(memo) }] }, mk());
+    expect(declared.reason ?? '').not.toContain('memory-echo');
+    expect(declared.egress?.echoExemptIds).toEqual(['m_1']);
+  });
 });
 
 describe('dualVerify: outcome + promptSent (for opt-in content logging)', () => {
