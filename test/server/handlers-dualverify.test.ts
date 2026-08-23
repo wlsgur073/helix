@@ -413,6 +413,41 @@ describe('handleDualVerify egress audit', () => {
     const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
     expect(audit.echoMemoryIds).toEqual([legitimateId]); // verbatim, not the safeId-mangled 'note2026id'
   });
+
+  // H6: the refusal is ADVICE — reword around these. A record the caller already proved it read is
+  // advice it has acted on, so listing it sends the caller back to a memory it cannot drop.
+  it('H6: the echoed-memories line omits a record the caller proved it read', async () => {
+    const memo = 'the deploy uses the blue cluster in us-east-1';
+    const other = 'unrelated: the cache runs on redis behind the proxy';
+    const d = deps({
+      echo: echoEnforce([item('m_1', memo), item('m_2', other)]),
+      runner: async () => { throw new Error('must not spawn'); },
+    });
+    const res = await handleDualVerify(
+      { stakes: 'high', question: `${memo} and ${other}`, helixAnswer: 'ok',
+        quotedMemory: [{ id: 'm_1', contentDigest: digestContent(memo) }] }, d);
+    const out = text(res);
+    expect(out).toContain('echoed memories (not sent):');
+    expect(out).toContain('m_2');
+    expect(out).not.toContain('m_1');
+    // The AUDIT still records both: echoMemoryIds reports the payload, not the policy.
+    const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
+    expect(audit.echoMemoryIds).toEqual(['m_1', 'm_2']);
+  });
+
+  // A working runner here, deliberately: the echo leg no longer refuses, so the call proceeds and a
+  // throwing stub would fail this test for a reason that has nothing to do with what it measures.
+  it('H6: no echoed-memories line at all when every match was proven', async () => {
+    const memo = 'the deploy uses the blue cluster in us-east-1';
+    const d = deps({
+      echo: echoEnforce([item('m_1', memo)]),
+      runner: async () => ({ ok: true, answer: 'agreed' }),
+    });
+    const res = await handleDualVerify(
+      { stakes: 'high', question: `restate: ${memo}`, helixAnswer: 'ok',
+        quotedMemory: [{ id: 'm_1', contentDigest: digestContent(memo) }] }, d);
+    expect(text(res)).not.toContain('echoed memories (not sent):');
+  });
 });
 
 describe('handleDualVerify: error reason is content-free in the persisted sinks', () => {

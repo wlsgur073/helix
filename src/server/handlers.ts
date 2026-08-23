@@ -8,7 +8,7 @@ import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAs
 import { isIsoInstant } from '../memory/history.js';
 import { appendAudit, type VerifyAudit } from '../audit.js';
 import { readFileSync } from 'node:fs';
-import { classifyEmission, type EgressVerdict, type Leg } from '../risk/trifecta.js';
+import { classifyEmission, type EgressVerdict, type Leg, type QuotedMemory } from '../risk/trifecta.js';
 import { appendCodexLog } from '../codex-log.js';
 import type { RealityCheck } from '../memory/reality-check.js';
 import { RESPONSE_MAX_CHARS } from '../limits.js';
@@ -633,10 +633,17 @@ function deciderLeg(v: EgressVerdict): Leg | undefined {
  *  override-proof secret a reword cannot help, so offering one would misdirect. */
 function echoedMemoriesLine(v: EgressVerdict | undefined): string {
   if (!v || v.decidedBy !== 'memoryEcho' || v.echoMemoryIds.length === 0) return '';
+  // H6: name only what STILL blocks. `echoMemoryIds` deliberately reports every DETECTED record so
+  // the audit row stays a record of the payload, but this line is ADVICE — reword around these — and
+  // a record the caller proved it read is advice it has already acted on. Listing it sends the
+  // caller back to a memory it cannot drop without dropping the question.
+  const exempt = new Set(v.echoExemptIds);
+  const remaining = v.echoMemoryIds.filter((id) => !exempt.has(id));
+  if (remaining.length === 0) return '';
   // M2: presentId bounds/neutralizes an INVALID id, but a VALID prose-shaped one ('a) SYSTEM: ...')
   // still renders verbatim — the same out-of-frame-advisory defect class as the erase/adopt/recheck/
   // confirm success lines. JSON.stringify adds the prose isolation presentId alone does not.
-  return `echoed memories (not sent): ${v.echoMemoryIds.map((id) => JSON.stringify(presentId(id))).join(', ')} — reword without their wording to proceed`;
+  return `echoed memories (not sent): ${remaining.map((id) => JSON.stringify(presentId(id))).join(', ')} — reword without their wording to proceed`;
 }
 
 /** H7: the guard chain, as a TRUSTED advisory line -- every name is a fixed enum literal from
@@ -665,7 +672,11 @@ function egressLine(v: EgressVerdict | undefined): string {
 }
 
 export async function handleDualVerify(
-  args: { question: string; helixAnswer: string; stakes?: 'low' | 'medium' | 'high' | 'xhigh' },
+  /** `quotedMemory` is H6 and is NOT yet on the tool's inputSchema — `compareSurfaces` forbids a
+   *  tool-surface change while `bin/` holds candidate bytes, so in-window no caller can populate it.
+   *  It is typed here because the post-close half is one schema field plus this hand-off, and a
+   *  parameter the handler cannot express is a wire that has to be re-derived later. */
+  args: { question: string; helixAnswer: string; stakes?: 'low' | 'medium' | 'high' | 'xhigh'; quotedMemory?: readonly QuotedMemory[] },
   deps: DualVerifyHandlerDeps,
   /** MCP request cancellation (the SDK's extra.signal), NOT a tool argument -- kept out of `args`
    *  so it can never be smuggled through the zod-validated user input. */
