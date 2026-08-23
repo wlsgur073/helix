@@ -10,6 +10,12 @@ import type { EgressPolicy, EgressLeg } from '../config.js';
 export interface LedgerItem {
   id: string;
   content: string;
+  /** The record's proof-of-read token, exactly as `inspect()` already returns it
+   *  (`store.ts:767`, labelled there as the token for a guarded supersede). REQUIRED rather than
+   *  optional so the compiler locates every supplier: an echo source that silently omitted it would
+   *  make every quote declaration against its records unresolvable, and the failure mode would be a
+   *  block that looks correct. Supplying it is a pass-through — never recompute a digest here. */
+  contentDigest: string;
 }
 
 export interface DetectEchoOptions {

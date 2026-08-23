@@ -21,6 +21,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { MemoryStore } from '../../src/memory/store.js';
 import { buildServer } from '../../src/server/helix-server.js';
 import { classifyEgress, type EgressInput } from '../../src/risk/trifecta.js';
+import { digestContent } from '../../src/memory/ledger-mac.js';
 import { dualVerify } from '../../src/verify/dual-verify.js';
 import { hardenHomePermissions } from '../../src/memory/home-permissions.js';
 import { assessGradeLoss, strayTrustFiles } from '../../src/memory/trust-store-layout.js';
@@ -142,8 +143,10 @@ describe('shipped docs state what the code actually does', () => {
     expect(formVerdict.decidedBy).toBe('scan_limit');
     const formCap = Number(/\((\d+) chars\)/.exec(formVerdict.reason)![1]);
 
-    // Same idea for the ledger leg: a small payload, an oversized aggregate ledger.
-    const ledger = [{ id: 'm_1', content: 'y'.repeat(20_000_000) }];
+    // Same idea for the ledger leg: a small payload, an oversized aggregate ledger. The digest is
+    // irrelevant to what this test measures (the scan-limit cap, not echo matching), so it is taken
+    // over a short fixed string rather than hashing the 20MB fixture content.
+    const ledger = [{ id: 'm_1', content: 'y'.repeat(20_000_000), contentDigest: digestContent('scan-limit-fixture') }];
     const ledgerVerdict = classifyEgress({ texts: ['q'], outbound: 'q', ledger, policy: allow });
     expect(ledgerVerdict.decidedBy).toBe('scan_limit');
     const ledgerCap = Number(/\((\d+) chars\)/.exec(ledgerVerdict.reason)![1]);

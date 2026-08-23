@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { buildAgreementMap } from '../../src/verify/agreement-map.js';
 import { buildCodexExecArgs } from '../../src/verify/codex.js';
-import { detectEcho } from '../../src/risk/trifecta.js';
+import { detectEcho, type LedgerItem } from '../../src/risk/trifecta.js';
+import { digestContent } from '../../src/memory/ledger-mac.js';
+
+const item = (id: string, content: string): LedgerItem => ({ id, content, contentDigest: digestContent(content) });
 
 // AUDIT 2026-06-15 — J4 verify path. CHARACTERIZATION (current behavior).
 
@@ -45,11 +48,11 @@ describe('J1-9 audit — detectEcho scale correctness (behavior-preserving perf 
   const phrase = 'the deploy uses the blue cluster in us-east-1';
   it('over a 400-item ledger, returns exactly the one echoing item', () => {
     const ledger = Array.from({ length: 400 }, (_, i) =>
-      i === 200 ? { id: 'echo', content: phrase } : { id: `m_${i}`, content: `unrelated note ${i} on assorted other topics entirely` });
+      i === 200 ? item('echo', phrase) : item(`m_${i}`, `unrelated note ${i} on assorted other topics entirely`));
     expect(detectEcho([phrase], ledger).memoryIds).toEqual(['echo']);
   });
   it('a clean payload over a 400-item ledger returns [] (the former quadratic worst case)', () => {
-    const ledger = Array.from({ length: 400 }, (_, i) => ({ id: `m_${i}`, content: `unrelated note ${i} about assorted unrelated matters here` }));
+    const ledger = Array.from({ length: 400 }, (_, i) => item(`m_${i}`, `unrelated note ${i} about assorted unrelated matters here`));
     expect(detectEcho(['a totally different question with zero overlap whatsoever present'], ledger).memoryIds).toEqual([]);
   });
 });

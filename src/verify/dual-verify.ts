@@ -2,13 +2,13 @@ import type { HelixConfig } from '../config.js';
 import type { Availability, CodexRunner } from './codex.js';
 import { buildAgreementMap, type AgreementMap } from './agreement-map.js';
 import { normalizeUntrusted } from '../memory/content-frame.js';
-import { classifyEgress, type EgressVerdict } from '../risk/trifecta.js';
+import { classifyEgress, type EgressVerdict, type LedgerItem } from '../risk/trifecta.js';
 import type { CodexOutcome } from '../codex-log.js';
 
 /** Compile-time-required ledger source for the echo leg. No silent fail-open: a server that forgets
  *  to wire it fails to compile; a test that genuinely skips echo writes { mode: 'disabled' }. */
 export type EchoSource =
-  | { mode: 'enforce'; ledgerTexts: () => Array<{ id: string; content: string }> }
+  | { mode: 'enforce'; ledgerTexts: () => LedgerItem[] }
   | { mode: 'disabled' };   // explicit opt-out — tests/dev ONLY, never production
 
 export interface DualVerifyDeps {

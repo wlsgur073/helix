@@ -5,11 +5,12 @@ import {
 } from '../../src/risk/trifecta.js';
 import type { EgressPolicy, EgressLeg } from '../../src/config.js';
 import { normalizeUntrusted } from '../../src/memory/content-frame.js';
+import { digestContent } from '../../src/memory/ledger-mac.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 
-const item = (id: string, content: string): LedgerItem => ({ id, content });
+const item = (id: string, content: string): LedgerItem => ({ id, content, contentDigest: digestContent(content) });
 
 describe('detectEcho', () => {
   it('returns the source id when a >=k verbatim run is shared', () => {
@@ -100,7 +101,7 @@ describe('classifyEgress', () => {
   });
 
   it('blocks a memory echo under policy=block, allowed_override under policy=allow', () => {
-    const ledger: LedgerItem[] = [{ id: 'm_1', content: 'the deploy uses the blue cluster in us-east-1' }];
+    const ledger: LedgerItem[] = [item('m_1', 'the deploy uses the blue cluster in us-east-1')];
     const texts = ['the deploy uses the blue cluster in us-east-1'];
     const blocked = classifyEgress(clean({ texts, ledger, policy: ALL('block') }));
     expect(blocked.decision).toBe('blocked');
@@ -144,7 +145,7 @@ describe('classifyEgress', () => {
   });
 
   it('reason is content-free (counts/labels only, never the matched span)', () => {
-    const ledger: LedgerItem[] = [{ id: 'm_1', content: 'the deploy uses the blue cluster in us-east-1' }];
+    const ledger: LedgerItem[] = [item('m_1', 'the deploy uses the blue cluster in us-east-1')];
     const texts = ['the deploy uses the blue cluster in us-east-1 and email kim@example.com'];
     const v = classifyEgress(clean({ texts, ledger, policy: ALL('block') }));
     expect(v.reason).not.toContain('blue cluster');
@@ -154,7 +155,7 @@ describe('classifyEgress', () => {
   });
 
   it('records all detected legs/kinds/ids even when a higher-precedence leg decides', () => {
-    const ledger: LedgerItem[] = [{ id: 'm_1', content: 'card 4111 1111 1111 1111 on file always' }];
+    const ledger: LedgerItem[] = [item('m_1', 'card 4111 1111 1111 1111 on file always')];
     const texts = ['card 4111 1111 1111 1111 on file always'];
     const v = classifyEgress(clean({ texts, ledger, policy: ALL('block') }));
     expect(v.decision).toBe('blocked');
@@ -286,7 +287,7 @@ describe('classifyEgress scans what is SENT (confusable normalization)', () => {
 // high-precedence leg (e.g. memoryEcho) silently exfiltrated everything below it (card PII,
 // keyword secrets, bulk PII). Blocked-dominant: ANY blocking leg wins, whatever else is allowed.
 describe('classifyEgress leg dominance (a blocked leg is never suppressed by an allowed one)', () => {
-  const ECHO_ITEM: LedgerItem = { id: 'm_1', content: 'the deploy uses the blue cluster in us-east-1' };
+  const ECHO_ITEM: LedgerItem = item('m_1', 'the deploy uses the blue cluster in us-east-1');
 
   // One payload fragment per leg, each independently verified by the tests above.
   const FRAG: Record<Exclude<EgressLeg, never>, string> = {
@@ -431,7 +432,7 @@ describe('classifyEmission', () => {
 
 describe('G1: the egress gate scans the EXACT outbound bytes', () => {
   const MEMO = 'PROJECT ORION LAUNCH CODE IS ALPHA';   // >= k (24)
-  const ledger = [{ id: 'm_secret', content: MEMO }];
+  const ledger = [item('m_secret', MEMO)];
 
   it('blocks a zero-width-padded memory that the outbound normalizer reconstitutes', () => {
     const zw = MEMO.split('').join('​');           // invisible char between every letter
@@ -475,7 +476,7 @@ describe('G1: the egress gate scans the EXACT outbound bytes', () => {
 // possibly catch it.
 describe('G1 mutation lock: each defense independently matters (not just redundantly)', () => {
   const MEMO = 'PROJECT ORION LAUNCH CODE IS ALPHA';
-  const ledger = [{ id: 'm_secret', content: MEMO }];
+  const ledger = [item('m_secret', MEMO)];
 
   it('Isolate-A: only scanning the outbound (fence-broken) form catches this — no Cf chars involved', () => {
     // The ledger memory already reads as a fence-broken string (single spaces between the dashes). The
@@ -491,7 +492,7 @@ describe('G1 mutation lock: each defense independently matters (not just redunda
     const PREFIX = 'zulu mesa';
     const SUFFIX = 'kilo tango';
     const FENCE_MEMO = `${PREFIX} - - - ${SUFFIX}`;
-    const fenceLedger = [{ id: 'm_fence', content: FENCE_MEMO }];
+    const fenceLedger = [item('m_fence', FENCE_MEMO)];
     const attackerRaw = `${PREFIX} --- ${SUFFIX}`;
     const v = classifyEgress({
       texts: [attackerRaw],
@@ -585,7 +586,7 @@ describe('EH-4: egress hex-literal exemption + credential proximity guard', () =
 
 describe('G2: the scan budget fails CLOSED', () => {
   const MEMO = 'PROJECT ORION LAUNCH CODE IS ALPHA';
-  const ledger = [{ id: 'm_secret', content: MEMO }];
+  const ledger = [item('m_secret', MEMO)];
 
   it('detects an echo that sits past the OLD 20k scan cap', () => {
     const payload = 'x'.repeat(25_000) + '\n' + MEMO;
@@ -596,7 +597,7 @@ describe('G2: the scan budget fails CLOSED', () => {
 
   it('detects an echo of the TAIL of a long memory (past the old per-item cap)', () => {
     const long = 'y'.repeat(12_000) + MEMO;
-    const v = classifyEgress({ texts: [MEMO], outbound: normalizeUntrusted(MEMO), ledger: [{ id: 'm_long', content: long }], policy: ALL('block') });
+    const v = classifyEgress({ texts: [MEMO], outbound: normalizeUntrusted(MEMO), ledger: [item('m_long', long)], policy: ALL('block') });
     expect(v.decision).toBe('blocked');                 // today: 'pass' -- the tail was truncated away
     expect(v.echoMemoryIds).toEqual(['m_long']);
   });
@@ -611,7 +612,7 @@ describe('G2: the scan budget fails CLOSED', () => {
   });
 
   it('REFUSES when the ledger is too large to inspect', () => {
-    const fat = [{ id: 'm_fat', content: 'w'.repeat(8_000_001) }];
+    const fat = [item('m_fat', 'w'.repeat(8_000_001))];
     const v = classifyEgress({ texts: ['hi'], outbound: 'hi', ledger: fat, policy: ALL('allow') });
     expect(v.decision).toBe('blocked');
     expect(v.decidedBy).toBe('scan_limit');
@@ -666,7 +667,7 @@ describe('D1: classifier reports leg OUTCOMES, not just detections', () => {
   it('a blocking card + a released echo reports BOTH (blocked-dominant, released still recorded)', () => {
     const memo = 'PROJECT ORION LAUNCH CODE IS ALPHA';
     const texts = [`card 4111 1111 1111 1111 and ${memo}`];
-    const v = classifyEgress(clean({ texts, ledger: [{ id: 'm_x', content: memo }], policy: { ...ALL('block'), memoryEcho: 'allow' } }));
+    const v = classifyEgress(clean({ texts, ledger: [item('m_x', memo)], policy: { ...ALL('block'), memoryEcho: 'allow' } }));
     expect(v.decision).toBe('blocked');
     expect(v.blockedLegs).toEqual(['piiHigh']);
     expect(v.releasedLegs).toEqual(['memoryEcho']);

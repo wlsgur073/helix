@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { dualVerify, persistedReason, type DualVerifyDeps, type EchoSource } from '../../src/verify/dual-verify.js';
 import { DEFAULT_CONFIG, type HelixConfig } from '../../src/config.js';
 import type { CodexOutcome } from '../../src/codex-log.js';
+import { digestContent } from '../../src/memory/ledger-mac.js';
+import type { LedgerItem } from '../../src/risk/trifecta.js';
 
 const disabledEcho: EchoSource = { mode: 'disabled' };
 
@@ -230,8 +232,8 @@ describe('critique mode', () => {
 });
 
 describe('dualVerify egress gate (S1)', () => {
-  const echoEnforce = (items: Array<{ id: string; content: string }>): EchoSource =>
-    ({ mode: 'enforce', ledgerTexts: () => items });
+  const item = (id: string, content: string): LedgerItem => ({ id, content, contentDigest: digestContent(content) });
+  const echoEnforce = (items: LedgerItem[]): EchoSource => ({ mode: 'enforce', ledgerTexts: () => items });
 
   it('blocks a memory echo before any spawn (policy=block) and surfaces the verdict', async () => {
     let called = false;
@@ -239,7 +241,7 @@ describe('dualVerify egress gate (S1)', () => {
       { stakes: 'high', question: 'the deploy uses the blue cluster in us-east-1', helixAnswer: 'yes' },
       deps({
         config: enabled(),
-        echo: echoEnforce([{ id: 'm_1', content: 'the deploy uses the blue cluster in us-east-1' }]),
+        echo: echoEnforce([item('m_1', 'the deploy uses the blue cluster in us-east-1')]),
         runner: async () => { called = true; return { ok: true, answer: 'x' }; },
       }));
     expect(r.ran).toBe(false);
@@ -255,7 +257,7 @@ describe('dualVerify egress gate (S1)', () => {
       { stakes: 'high', question: 'the deploy uses the blue cluster in us-east-1', helixAnswer: 'the answer is 4' },
       deps({
         config: cfg,
-        echo: echoEnforce([{ id: 'm_1', content: 'the deploy uses the blue cluster in us-east-1' }]),
+        echo: echoEnforce([item('m_1', 'the deploy uses the blue cluster in us-east-1')]),
       }));
     expect(r.ran).toBe(true);
     expect(r.egress?.decision).toBe('allowed_override');
@@ -403,7 +405,7 @@ describe('G1: what the gate scanned is what the runner is sent', () => {
       deps({
         config: enabled(),      // every egress leg already 'block' in this helper
         runner: async (prompt: string) => { runnerSaw = prompt; return { ok: true, answer: 'ok' }; },
-        echo: { mode: 'enforce', ledgerTexts: () => [{ id: 'm_secret', content: MEMO }] },
+        echo: { mode: 'enforce', ledgerTexts: () => [{ id: 'm_secret', content: MEMO, contentDigest: digestContent(MEMO) }] },
       }),
     );
     expect(result.outcome).toBe('refused');
@@ -426,7 +428,7 @@ describe('G1: what the gate scanned is what the runner is sent', () => {
       deps({
         config: enabled(),   // mode: 'compare' -- helixAnswer is not part of the sent prompt
         runner: async () => { called = true; return { ok: true, answer: 'ok' }; },
-        echo: { mode: 'enforce', ledgerTexts: () => [{ id: 'm_secret', content: MEMO }] },
+        echo: { mode: 'enforce', ledgerTexts: () => [{ id: 'm_secret', content: MEMO, contentDigest: digestContent(MEMO) }] },
       }),
     );
     expect(result.outcome).toBe('refused');

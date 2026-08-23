@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { MemoryStore } from '../memory/store.js';
+import { digestContent } from '../memory/ledger-mac.js';
 import type { RealityCheck } from '../memory/reality-check.js';
 import { MAX_QUERY_CHARS } from '../memory/retrieval.js';
 import {
@@ -52,7 +53,11 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     config: loadConfig({ globalPath: join(home, 'config.json') }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
-    echo: { mode: 'enforce', ledgerTexts: () => store.inspect().map(({ record }) => ({ id: record.id, content: record.content })) },
+    // inspect()'s own projection sets contentDigest unconditionally (store.ts:767), but the field is
+    // optional on ScopedRecord for pairings built outside that projection. The fallback computes the
+    // same pure function `inspect()` already applies rather than fabricating a value, so a record that
+    // ever arrives without one is still matchable instead of silently unquotable.
+    echo: { mode: 'enforce', ledgerTexts: () => store.inspect().map(({ record, contentDigest }) => ({ id: record.id, content: record.content, contentDigest: contentDigest ?? digestContent(record.content) })) },
     auditPath: join(home, 'audit.jsonl'),
     codexLogPath: join(home, 'codex-log.jsonl'),
   };
