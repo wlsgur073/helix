@@ -18,6 +18,16 @@ export interface LedgerItem {
   contentDigest: string;
 }
 
+/** A memory the caller declares it is deliberately quoting, with the record's `contentDigest` as
+ *  proof it actually read the record. NOT an authorization claim: nothing here says who wrote the
+ *  record, because `provenance.source` is caller-chosen and reading it to decide an egress question
+ *  is the defect `N2-CONTESTED` closed. What this proves is a READ, which is the same instrument
+ *  `SECURITY.md:199-206` already uses for a guarded supersede. */
+export interface QuotedMemory {
+  id: string;
+  contentDigest: string;
+}
+
 export interface DetectEchoOptions {
   /** Minimum verbatim run length (normalized chars) that counts as an echo. */
   k?: number;
@@ -101,6 +111,12 @@ export interface EgressInput {
   outbound: string;
   ledger: LedgerItem[] | null;     // null = echo leg explicitly disabled (EchoSource 'disabled')
   policy: EgressPolicy;            // dualVerify.egressPolicy (per-leg block/allow; named secrets ignore it)
+  /** H6: memories the caller declares it is quoting (see QuotedMemory). A pair that does not resolve
+   *  against `ledger` is discarded, never an error. Absent or empty reproduces the pre-H6 behaviour
+   *  byte-for-byte, which is the state the whole freeze window runs in — the tool parameter that
+   *  populates this is post-close, because `compareSurfaces` forbids a schema change while `bin/`
+   *  holds candidate bytes. */
+  quoted?: readonly QuotedMemory[];
 }
 
 export interface EgressVerdict {
@@ -108,6 +124,11 @@ export interface EgressVerdict {
   legs: Leg[];
   piiKinds: PiiKind[];
   echoMemoryIds: string[];
+  /** The subset of `echoMemoryIds` exempted by a RESOLVED quote declaration. `echoMemoryIds` keeps
+   *  reporting every DETECTED record so the audit row stays a record of what was in the payload
+   *  rather than of what policy allowed; the decision is taken on the remainder. Always present —
+   *  `[]` when nothing was declared or nothing resolved. */
+  echoExemptIds: string[];
   reason: string;                  // content-free: counts / labels only, never a matched span
   /** The leg that DECIDED (typed, machine-readable): the policy key that blocked or was released,
    *  'named' for the override-proof secret tier, or 'scan_limit' when the payload/ledger was too large to
@@ -252,7 +273,7 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   // payload costs O(1), not O(n). Content-free reason (a length, never a span).
   if (raw.length > MAX_FORM_SCAN || outbound.length > MAX_FORM_SCAN) {
     return {
-      decision: 'blocked', legs: [], piiKinds: [], echoMemoryIds: [], decidedBy: 'scan_limit',
+      decision: 'blocked', legs: [], piiKinds: [], echoMemoryIds: [], echoExemptIds: [], decidedBy: 'scan_limit',
       reason: `blocked: payload exceeds the egress scan limit (${MAX_FORM_SCAN} chars)`,
       blockedLegs: [], releasedLegs: [], auditOnlyLegs: [],
     };
@@ -262,7 +283,7 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
     for (const item of input.ledger) ledgerChars += item.content.length;
     if (ledgerChars > MAX_LEDGER_SCAN) {
       return {
-        decision: 'blocked', legs: [], piiKinds: [], echoMemoryIds: [], decidedBy: 'scan_limit',
+        decision: 'blocked', legs: [], piiKinds: [], echoMemoryIds: [], echoExemptIds: [], decidedBy: 'scan_limit',
         reason: `blocked: ledger exceeds the egress scan limit (${MAX_LEDGER_SCAN} chars)`,
         blockedLegs: [], releasedLegs: [], auditOnlyLegs: [],
       };
@@ -292,7 +313,23 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   // outbound prompt — a `pass` verdict on a payload that left as an exfiltrated memory.
   const echo = input.ledger === null ? { memoryIds: [] } : detectEcho(forms, input.ledger);
   const echoMemoryIds = echo.memoryIds;
-  const echoHit = echoMemoryIds.length > 0;
+  // H6: honour a quote declaration only when a record with that id exists AND its digest matches.
+  // A pair that fails either test is DISCARDED rather than rejected: a stale digest (the caller read
+  // the record, the record was then superseded) is indistinguishable from a wrong one, and the safe
+  // fallback is the behaviour that already exists — not exempt, so the leg fires and the diagnosis
+  // names it. Resolution happens HERE and not in detectEcho: the detector answers a pure content
+  // question, and keeping the subtraction in its caller is what lets `echoMemoryIds` stay a report
+  // of the payload rather than of the policy.
+  const proven = new Set<string>();
+  if (input.quoted && input.quoted.length > 0 && input.ledger !== null) {
+    const digestById = new Map(input.ledger.map((i) => [i.id, i.contentDigest]));
+    for (const q of input.quoted) {
+      if (digestById.get(q.id) === q.contentDigest) proven.add(q.id);
+    }
+  }
+  const echoExemptIds = proven.size === 0 ? [] : echoMemoryIds.filter((id) => proven.has(id));
+  const echoEffectiveIds = proven.size === 0 ? echoMemoryIds : echoMemoryIds.filter((id) => !proven.has(id));
+  const echoHit = echoEffectiveIds.length > 0;
   const piiHit = piiKinds.length > 0;            // kinds is empty iff there were no PII hits
 
   const legs: Leg[] = [];
@@ -308,7 +345,7 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   // whole payload. This was a first-match-wins chain, so `memoryEcho: allow` silently exfiltrated a
   // card / keyword-secret / bulk-PII sitting in the same payload (every lower leg was never reached).
   const gated: Array<{ hit: boolean; key: EgressLeg; label: string }> = [
-    { hit: echoHit, key: 'memoryEcho', label: `memory-echo (${echoMemoryIds.length} items)` },
+    { hit: echoHit, key: 'memoryEcho', label: `memory-echo (${echoEffectiveIds.length} items${echoExemptIds.length > 0 ? `, ${echoExemptIds.length} quoted` : ''})` },
     { hit: highPii, key: 'piiHigh', label: `high-severity PII (${highKinds.length} kinds)` },
     { hit: secretHeuristic, key: 'secretHeuristic', label: 'secret keyword-assignment (low-confidence)' },
     { hit: secretEntropy, key: 'secretEntropy', label: 'high-entropy token (low-confidence)' },
@@ -338,21 +375,21 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   // Every other leg is low/medium confidence and gated by its own egressPolicy key, so a false
   // positive cannot permanently wedge dual-verify.
   if (secretNamed) {
-    return { decision: 'blocked', legs, piiKinds, echoMemoryIds, decidedBy: 'named', reason: 'blocked: secret token (override-proof)', ...outcome };
+    return { decision: 'blocked', legs, piiKinds, echoMemoryIds, echoExemptIds, decidedBy: 'named', reason: 'blocked: secret token (override-proof)', ...outcome };
   }
   if (blocking.length > 0) {
     // Decider = highest-precedence BLOCKING leg. Released legs are still reported in `legs` for audit.
     const d = blocking[0]!;
-    return { decision: 'blocked', legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `blocked: ${d.label}`, ...outcome };
+    return { decision: 'blocked', legs, piiKinds, echoMemoryIds, echoExemptIds, decidedBy: d.key, reason: `blocked: ${d.label}`, ...outcome };
   }
   if (applicable.length > 0) {
     // Every hit leg was released by its own policy key. Name the highest-precedence one.
     const d = applicable[0]!;
-    return { decision: 'allowed_override', legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `allowed_override: ${d.label}`, ...outcome };
+    return { decision: 'allowed_override', legs, piiKinds, echoMemoryIds, echoExemptIds, decidedBy: d.key, reason: `allowed_override: ${d.label}`, ...outcome };
   }
   if (piiHit) {
     // single low-severity standalone PII (< N, no other leg) -> audit-only pass.
-    return { decision: 'pass', legs, piiKinds, echoMemoryIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)`, ...outcome };
+    return { decision: 'pass', legs, piiKinds, echoMemoryIds, echoExemptIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)`, ...outcome };
   }
   // EH-4 + C2.2: an exempt entropy span (hex literal or benign word-chain) is the only secret span
   // that reaches this fallthrough with secretHit true (named/heuristic/non-exempt-entropy all decide
@@ -362,6 +399,7 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
     legs,
     piiKinds,
     echoMemoryIds,
+    echoExemptIds,
     reason: secretHit ? 'pass: exempt entropy (hex or word-chain, audit-only)' : 'pass: no egress legs',
     ...outcome,
   };

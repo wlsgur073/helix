@@ -237,6 +237,78 @@ describe('classifyEgress', () => {
     expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), piiHigh: 'allow' } })).decision).toBe('allowed_override');
     expect(classifyEgress(clean({ texts, policy: { ...ALL('block'), piiBulk: 'allow' } })).decision).toBe('blocked');
   });
+
+  // H6: the caller declares what it is quoting and proves it read it. The declaration is a
+  // proof-of-READ, never a proof of authorship — `provenance.source` is caller-chosen, and reading
+  // it to decide an egress question is the defect N2-CONTESTED closed.
+  const QUOTED_CONTENT = 'the deploy uses the blue cluster in us-east-1';
+  const quotedLedger = (): LedgerItem[] => [item('m_1', QUOTED_CONTENT)];
+  const echoInput = (over: Partial<EgressInput> = {}): EgressInput => ({
+    texts: [`why did we decide that ${QUOTED_CONTENT}`, 'because the record says so'],
+    outbound: `why did we decide that ${QUOTED_CONTENT}`,
+    ledger: quotedLedger(),
+    policy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' },
+    ...over,
+  });
+
+  it('H6: an accurate quote declaration exempts its record and the echo leg does not fire', () => {
+    const v = classifyEgress(echoInput({ quoted: [{ id: 'm_1', contentDigest: digestContent(QUOTED_CONTENT) }] }));
+    expect(v.decision).toBe('pass');
+    expect(v.echoExemptIds).toEqual(['m_1']);
+    expect(v.echoMemoryIds).toEqual(['m_1']);   // detection is unchanged; only the decision moved
+    expect(v.legs).not.toContain('memory_echo');
+  });
+
+  it('H6: a declaration whose digest disagrees is discarded and the block stands', () => {
+    const v = classifyEgress(echoInput({ quoted: [{ id: 'm_1', contentDigest: digestContent('some other content entirely') }] }));
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('memoryEcho');
+    expect(v.echoExemptIds).toEqual([]);
+  });
+
+  it('H6: a declaration naming an id absent from the ledger is discarded and the block stands', () => {
+    const v = classifyEgress(echoInput({ quoted: [{ id: 'm_absent', contentDigest: digestContent(QUOTED_CONTENT) }] }));
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('memoryEcho');
+    expect(v.echoExemptIds).toEqual([]);
+  });
+
+  it('H6: declaring some of several matched records leaves the remainder blocking', () => {
+    const second = 'the rollback witness went live on the nineteenth of july';
+    const v = classifyEgress(echoInput({
+      texts: [`why did we decide that ${QUOTED_CONTENT} and also ${second}`, 'because the records say so'],
+      outbound: `why did we decide that ${QUOTED_CONTENT} and also ${second}`,
+      ledger: [item('m_1', QUOTED_CONTENT), item('m_2', second)],
+      quoted: [{ id: 'm_1', contentDigest: digestContent(QUOTED_CONTENT) }],
+    }));
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('memoryEcho');
+    expect(v.echoExemptIds).toEqual(['m_1']);
+    expect(v.echoMemoryIds).toEqual(['m_1', 'm_2']);
+    // The REMAINDER is counted, not the detection, and the exempted count rides along content-free.
+    expect(v.reason).toContain('memory-echo (1 items, 1 quoted)');
+  });
+
+  it('H6: an absent declaration reproduces the pre-H6 verdict exactly', () => {
+    const withUndefined = classifyEgress(echoInput());
+    const withEmpty = classifyEgress(echoInput({ quoted: [] }));
+    expect(withUndefined.decision).toBe('blocked');
+    expect(withUndefined.decidedBy).toBe('memoryEcho');
+    expect(withUndefined.echoExemptIds).toEqual([]);
+    expect(withEmpty).toEqual(withUndefined);
+  });
+
+  it('H6: a quote declaration cannot release a co-resident secret', () => {
+    const secretText = `${QUOTED_CONTENT} and the aws key is AKIAIOSFODNN7EXAMPLE`;
+    const v = classifyEgress(echoInput({
+      texts: [secretText, 'answer'],
+      outbound: secretText,
+      ledger: quotedLedger(),
+      quoted: [{ id: 'm_1', contentDigest: digestContent(QUOTED_CONTENT) }],
+    }));
+    expect(v.decision).toBe('blocked');
+    expect(v.legs).toContain('secret');
+  });
 });
 
 // The gate must inspect the SAME bytes the prompt builder sends. dual-verify normalizes untrusted
