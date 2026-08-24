@@ -5,14 +5,19 @@ import { dirname, basename, join } from 'node:path';
 import { classifyHolder, selfIdentity, tryParsePayload, realProbe, type HolderClass, type LivenessProbe, type LockPayload } from './lock-liveness.js';
 
 // Cross-process advisory lock around the JSONL ledger. Concurrent helix-mcp processes (one per
-// agent session, same host, same user, ONE kernel/boot domain — declared precondition) write the
-// same ledger. The lock is a regular FILE published atomically WITH its owner payload via
-// linkSync(sourceTmp, lockPath): the first instant the name exists its payload is complete, so a
-// LIVE creator can never present a malformed lock (write completes and closes BEFORE link — the
-// completeness invariant). Waiters classify the recorded holder with the liveness matrix
-// (lock-liveness.ts): only a provably-DEAD holder is ever reclaimed (Task 4's reaper gate); age
-// plays no role anywhere — age cannot distinguish suspension from death, and that misclassification
-// was exactly the erased-plaintext-resurrection defect (D3). Uncertainty always waits.
+// agent session, same host, same user, ONE kernel/boot domain, and ONE Linux time namespace —
+// declared precondition) write the same ledger. The time namespace is named rather than left to
+// "one boot" because it virtualizes /proc/uptime and CLOCK_BOOTTIME alike: two processes inside a
+// single boot then read different uptimes, which would let the cross-boot witness call a LIVE
+// holder dead, and a containerised deployment sharing this lock across that boundary reads as
+// satisfying the sentence while violating the witness. The lock is a regular FILE published
+// atomically WITH its owner payload via linkSync(sourceTmp, lockPath): the first instant the name
+// exists its payload is complete, so a LIVE creator can never present a malformed lock (write
+// completes and closes BEFORE link — the completeness invariant). Waiters classify the recorded
+// holder with the liveness matrix (lock-liveness.ts): only a provably-DEAD holder is ever
+// reclaimed (Task 4's reaper gate); age plays no role anywhere — age cannot distinguish suspension
+// from death, and that misclassification was exactly the erased-plaintext-resurrection defect
+// (D3). Uncertainty always waits.
 // This lock defends against ACCIDENTAL concurrency + OS scheduling + crashes, not an adversary.
 
 const RETRY_MS = 25;

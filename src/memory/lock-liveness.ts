@@ -72,8 +72,8 @@ export const realProbe: LivenessProbe = {
     // on a platform where the clock can step between the two reads the result can be erroneously
     // HIGH, under which a LIVE lock's mtime looks pre-boot and gets stolen. PRECONDITION, stated
     // rather than assumed, in the same voice as the same-host/same-user/one-boot-domain
-    // precondition at lock.ts:7-8: this inference holds only where the wall clock does not step
-    // backward between two adjacent reads. Excluded platforms return null and fall through to
+    // precondition declared in lock.ts's file header: this inference holds only where the wall
+    // clock does not step backward between two adjacent reads. Excluded platforms return null and fall through to
     // alive-unknown, exactly as they do today.
     const u = gatedUptimeSec();
     return u === null ? null : Date.now() - u * 1000;
