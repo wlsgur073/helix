@@ -1020,6 +1020,61 @@ the §9a report cites as verification evidence. It does not license writing a pr
 chain artifact — the close-bounded snapshot still has none, and writing one today would reset this
 window under the reading applied here.
 
+### AMENDMENT 2026-08-24 — the artifact moved after this ruling, and conduct finding 2's premise is falsified
+
+**The identification above is left exactly as ruled.** It names the bytes this disposition examined,
+and rewriting it to the current digest would claim an inspection that did not happen. What follows is
+the movement, and a re-measurement of the grounds the ruling turned on.
+
+**The movement.** `docs/issues/2026-08-12-home-pin-check.sh` is now **19,844 bytes, banner v3.4 dated
+2026-08-23, sha256 `e1a7be1289f5d71a41910b1f798c75d7d3bc0722e8be3e50afa06f4f39cb4df3`**. It moved
+twice after the ruling, at v3.3 (2026-08-22) and v3.4 (2026-08-23). The ruled bytes were recovered
+from `~/dev/helix-stale-sweep-restore-point-2026-08-19.tar.gz` and re-hashed to `0b5b11b5…`, so the
+comparison below is a diff of the two objects.
+
+**What the diff shows, ruled bytes → v3.4.** Two behavioural sites, both narrowing rather than
+widening. The runtime-tree comparison scope went from the whole `data` tree to
+`data/semantic-neighbors.json` at both `git diff --quiet` call sites; and the pin ∩ changed-set
+branch stopped printing *"report as a new finding"* and now prints the intersection as an
+observation, deferring judgment to the paired document's §5b table. Unchanged: the `CHECK 0`–
+`CHECK 5` section set is identical, `CHECK 4`'s read of `~/.helix/memory.jsonl` was already present
+in the ruled bytes, and every 64-hex constant embedded in the file — the nine runtime pin expected
+hashes among them — is byte-identical.
+
+**Which of the two revisions carried what is NOT measured here, and the distinction matters.** The
+v3.3 bytes (`cf3a2001…`) survive in no copy on this machine, so only the net change from the ruled
+object could be diffed. That both behavioural sites belong to v3.3, and that v3.4 changed three
+banner comment lines with the non-comment body byte-identical, rests on the paired document's
+changelog and on the measurement recorded when v3.4 was written — not on a diff run today.
+
+**The ruling's grounds, re-measured against v3.4. Both hold.**
+
+- *Read-only.* The same measurement this entry records, re-run on the current bytes: no `tee`,
+  `mkdir`, `rm`, `cp`, `mv`, `truncate` or `dd`; no `git reset`/`pull`/`checkout`/`clean`/`fetch`/
+  `merge`/`rebase`/`push`/`commit`; and with comments stripped, every redirection it performs is
+  `>/dev/null` or `2>&1`. Two `>` characters survive a naive grep, at `:164` and `:262`; both are
+  angle brackets inside a quoted `echo` argument. A third, at `:12`, is the operator instruction in
+  the banner comment, which the script does not execute.
+- *Decides no rank, issues no §9-chain artifact.* It invokes no program under `scripts/pilot/` —
+  those four paths appear in it only as entries in the pin path list it hashes. Its only ledger
+  contact is `CHECK 4`, which counts total, in-window and unparseable rows — the activity §8 covers
+  when it says *"Counting qualifying exposures during the window needs no special procedure"*. Its
+  output is stdout.
+
+**The falsified premise, recorded against the ruler's interest.** Conduct finding 2 above gives the
+reason the v3 edit removed the known-acceptable-set branch as *"the second window's known set is
+empty, so a branch comparing against an empty expectation can only manufacture reassurance"*. The
+first half was true when written and is no longer true. Measured 2026-08-24 against this receipt,
+pin ∩ (candidate `94dd136` → branch HEAD) = **`src/memory/ownership.ts`, `src/memory/store.ts`**. It
+was empty at this entry's own commit `58a9af9` (2026-08-18T23:18:58+09:00): the second clone's
+ownership fixes were authored earlier that day but reached this branch only at merge `ef43323`
+(2026-08-19T10:05:41+09:00), and `95c65e7` (2026-08-20) added `store.ts`. Both paths are carried by
+commits already adjudicated — `ownership.ts`'s three at `R-2026-08-19`, which ruled with them in
+view, and `store.ts`'s at `D-2026-08-22` below. **The removal survives the correction on the other
+half of its own reasoning**: a known set hardcoded into a transferred script goes stale on the
+operator's machine with nothing there to warn them, which is why v3.3 moved the judgment into the
+paired document. The premise as recorded is corrected; the disposition is unchanged.
+
 ## Deviation D-2026-08-22-in-window-pinned-source-edit — RULED NOT A RESET
 
 Recorded in the shape R-2026-08-16 established, because this ledger is the §9a report's source for

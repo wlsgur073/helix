@@ -70,10 +70,21 @@ publication. The entry was written 2026-08-14 at `3bd63d0`; see A4.)*
   owner. Script: `docs/issues/2026-08-12-home-pin-check.sh` (strictly read-only: writes nothing,
   changes no git state, no heal/reset/pull; expected values are embedded so it needs neither the
   repository nor a network). Paired doc: `docs/issues/2026-08-03-freeze-pin-verification-home-machine.md`
-  (**confirm the v3.1 banner** before running — the paired doc was re-anchored to this window as v3
-  on 2026-08-14 and corrected to v3.1 on 2026-08-17, when five first-window expected values were
-  found still live in its manual path and judgment table; a v2 or v3 copy will mis-verify the
-  transfer and mis-judge a correct machine).
+  (**confirm the v3.4 banner** before running — the paired doc was re-anchored to this window as v3
+  on 2026-08-14 and has been corrected four times since: v3.1 on 2026-08-17, when five first-window
+  expected values were found still live in its manual path and judgment table; v3.2 the same day,
+  aligning the Korean terminology with the script's own variable names; **v3.3 on 2026-08-22, the
+  only revision that changed judgment behaviour** — it narrowed the runtime-tree comparison to
+  `data/semantic-neighbors.json`, which removed three false `POISONED` verdicts caused by
+  `data/inventory/*`, and it turned the pin ∩ changed-set line from an assertion into an
+  observation; and v3.4 on 2026-08-23, aligning the script's self-identifying banner, which v3.3 had
+  left saying v3.2. **Any copy labelled v2, v3, v3.1, v3.2 or v3.3 will mis-verify the transfer or
+  mis-judge a correct machine** — and a *matched* old pair, an old script beside the document of the
+  same vintage, passes that document's own §2 sha256 check, so the check does not reject it. The
+  banner label is what rejects it; confirm it on both files).
+  *(Corrected 2026-08-24. This line asked for the v3.1 banner until then, so an operator following it
+  would have met a mismatch that was not real — the same defect the v3.4 revision fixed one level
+  down, left uncorrected here because the 2026-08-23 pass never traced the citation upstream.)*
 
   Both files must be **transferred to the home machine first** — it has no copy of this repository,
   so the repo-relative paths above name them only on the box you are reading this on. Put them in
@@ -2001,9 +2012,13 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   line used to ask for is no longer available** — the DISPOSITION of `R-2026-08-18` rather than a
   blanket "no post-freeze method tooling was built inside the SECOND window". Something was: an
   in-window recomputation of two frozen rules, ruled NOT A RESET on 2026-08-18 on the ground that
-  it issues no §9-chain artifact. Acquire the disposition, its conduct findings, and the
-  second unadjudicated instance the entry names (the home-machine pin script's in-window v3
-  rewrite) — a blanket denial would now be false (A4)); evidence the declared
+  it issues no §9-chain artifact. Acquire the disposition, its conduct findings, and the second
+  instance the entry names — the home-machine pin script's in-window v3 rewrite, **adjudicated at
+  `R-2026-08-18b` the same day, NOT left for the close**, and carrying a 2026-08-24 amendment that
+  re-measures that ruling's grounds against the script's current v3.4 bytes and corrects one of its
+  conduct findings. *(Corrected 2026-08-24: this line called that instance "unadjudicated", which the
+  deviations ledger's own text had already stopped saying.)* A blanket denial would now be false
+  (A4)); evidence the declared
   consequence was actually applied; the D5 disclosures in full, not by reference; and the
   §1 claim + coverage statement **verbatim alongside every reported number**.
   Also confirm the report carries **Block A's outcomes**: the home-machine pin report or the
