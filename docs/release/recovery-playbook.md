@@ -163,14 +163,66 @@ tar -czf ~/backups/helix-$(date +%F).tar.gz -C ~ .helix -C / srv/code/app/.helix
 
 ⚠️ **Do not** write it as `tar -czf out.tgz -C ~ .helix -C /srv/code/app .helix`. Both units then
 archive under the same `.helix/` member path, and on extraction the project ledger **overwrites
-your global one** — verified by hash on 2026-07-27, GNU tar 1.35. Verify any archive with
-`tar -tvzf` before trusting it (file modes, including the key's `0600`, are preserved).
+your global one** — verified by hash on 2026-07-27, GNU tar 1.35. Verify any archive before trusting
+it — `tar -tvzf <archive>` for a plain one, and the two-step form below for an encrypted one. File
+modes, including the key's `0600`, survive both.
 
 Back up: `~/.helix/` entirely (ledger, `ledger-mac-master.key`, `projects.json`, `witness.json`,
 `witness-log.jsonl`, config, audit, metrics) **and** each project's `<root>/.helix/` (ledger +
 `.owner`). Enumerate adopted projects from the keys of `~/.helix/projects.json` — every key
 except the reserved `@global` entry. Copy — never `ln`: a hard-linked ledger is refused by every
 write path.
+
+**Encrypt it — the archive carries the key that makes grades unforgeable.** `~/.helix/` holds
+`ledger-mac-master.key` at `0600`, and that key is what stands between someone holding a copy of the
+archive and a forged `Verified` or `Corroborated` grade. A plain `tar.gz` hands it over intact, so an
+unencrypted backup trades one exposure for another. Pipe `tar` into `gpg` so the plaintext archive
+never reaches the disk at all:
+
+```bash
+mkdir -p ~/backups
+tar -czf - -C ~ .helix dev/<project>/.helix \
+  | gpg --symmetric --cipher-algo AES256 -o ~/backups/helix-$(date +%F).tar.gz.gpg
+```
+
+`gpg` prompts for the passphrase, and on a machine that has never run it the command also creates
+`~/.gnupg` (observed 2026-08-24). Symmetric is deliberate: there is no private key to lose, and the
+file describes its own format, so it opens years later on any machine with GnuPG. (Without a TTY, add
+`--batch --pinentry-mode loopback --passphrase-file <file>` — never `--passphrase` on the command
+line, which puts the secret in the process table.)
+
+**The passphrase has to be reachable without the machine you are backing up.** If it lives only in
+that machine's password store, the archive is unopenable in the exact situation it exists for. That
+is the same property Q1 asks of the GitHub recovery codes — different secret, same requirement.
+
+**Verify without extracting**, and confirm the key's mode survived:
+
+```bash
+gpg -d ~/backups/helix-<date>.tar.gz.gpg | tar -tvzf -   # expect -rw------- on ledger-mac-master.key
+```
+
+**To restore, decrypt to a file FIRST and check the exit status — never pipe decryption straight
+into `tar -x`:**
+
+```bash
+gpg -d -o /tmp/helix-restore.tar.gz ~/backups/helix-<date>.tar.gz.gpg \
+  && tar -xzf /tmp/helix-restore.tar.gz -C <destination>
+```
+
+⚠️ **Why two steps, measured 2026-08-24 (GnuPG 2.4.4) rather than assumed.** GnuPG checks the
+archive's integrity at the END of the stream, so it emits plaintext first and only then discovers a
+modification. Against a one-bit-flipped archive it printed
+`WARNING: encrypted message has been manipulated!` and exited 2 — correct — but **the entire
+plaintext archive had already reached stdout by then** (all 410 bytes of a deliberately tiny probe
+fixture; what matters is that it was *all* of it, and the mechanism does not change with size), and
+`gpg -d … | tar -xzf -` left `.helix/witness.json` on disk in the destination. **Without
+`set -o pipefail` that pipeline reported exit `0`** while a partial, unverified tree sat there. The
+detection is not early enough to protect a consumer downstream of the pipe; only the `&&` form
+above is, because nothing is extracted until `gpg` has finished and succeeded.
+
+**What this does not undo.** It protects archives written from here on. Any plain `tar.gz` an
+earlier command already wrote still carries the key in the clear — delete those, and if one ever
+left the machine, treat the key as exposed and re-key rather than re-encrypt.
 
 Cadence that fits a personal-scale install: before any upgrade or destructive operation, plus one
 fixed quiet slot per week.
