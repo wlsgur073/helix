@@ -85,4 +85,24 @@ describe('tool surface extraction', () => {
     const a = [{ name: 'x', description: 'd', inputSchema: { a: 1 } }];
     expect(() => compareSurfaces(a, structuredClone(a))).not.toThrow();
   });
+
+  // The names were IDENTICAL on the three suite failures this message hid for two days, so a
+  // report built from names alone carried no signal at all. The refusal has to name the field.
+  it('names the field when two same-named tools differ only by input schema', () => {
+    const a = [{ name: 'x', description: 'd', inputSchema: { a: 1 } }];
+    const b = [{ name: 'x', description: 'd', inputSchema: { a: 2 } }];
+    expect(() => compareSurfaces(a, b)).toThrow(/x\.inputSchema/);
+  });
+
+  it('names the field when two same-named tools differ only by description', () => {
+    const a = [{ name: 'x', description: 'before', inputSchema: {} }];
+    const b = [{ name: 'x', description: 'after', inputSchema: {} }];
+    expect(() => compareSurfaces(a, b)).toThrow(/x\.description/);
+  });
+
+  it('names the side a missing tool is missing from', () => {
+    const a = [{ name: 'x', description: 'd', inputSchema: {} }];
+    const b = [{ name: 'x', description: 'd', inputSchema: {} }, { name: 'y', description: 'd', inputSchema: {} }];
+    expect(() => compareSurfaces(a, b)).toThrow(/source-only=\[y\]/);
+  });
 });

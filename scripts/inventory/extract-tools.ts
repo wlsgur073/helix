@@ -104,6 +104,39 @@ export async function fromSource(): Promise<ToolFacet[]> {
   }
 }
 
+const clip = (v: string | undefined): string =>
+  v === undefined ? 'undefined' : v.length > 160 ? `${v.slice(0, 160)}\u2026 (${v.length} chars)` : v;
+
+/**
+ * The first field the two surfaces disagree on, as `<tool>.<field>` with both values.
+ *
+ * A name list is not a diagnosis. The three suite failures this refusal hid for two days had
+ * IDENTICAL names on both sides, so the reader was handed the one axis that had not moved and
+ * had to bisect by hand to find the one that had.
+ */
+function firstDifference(bundle: ToolFacet[], source: ToolFacet[]): string {
+  const bNames = bundle.map((t) => t.name);
+  const sNames = source.map((t) => t.name);
+  const bundleOnly = bNames.filter((n) => !sNames.includes(n));
+  const sourceOnly = sNames.filter((n) => !bNames.includes(n));
+  if (bundleOnly.length > 0 || sourceOnly.length > 0) {
+    return `tool set \u2014 bundle-only=[${bundleOnly.join(',')}] source-only=[${sourceOnly.join(',')}]`;
+  }
+  for (const [i, b] of bundle.entries()) {
+    const s = source[i];
+    if (s === undefined) break;
+    if (b.name !== s.name) return `position ${i} name \u2014 bundle=${b.name} source=${s.name}`;
+    for (const field of ['description', 'inputSchema'] as const) {
+      const bv = JSON.stringify(b[field]);
+      const sv = JSON.stringify(s[field]);
+      if (bv !== sv) return `${b.name}.${field} \u2014 bundle=${clip(bv)} source=${clip(sv)}`;
+    }
+  }
+  // Every name matches and every compared field matches, so the surfaces differ only in how many
+  // entries carry those names: one side repeats an entry the other lists once.
+  return `arity \u2014 bundle=${bundle.length} source=${source.length} over matching names`;
+}
+
 /** A disagreement is a failure, and no inventory is produced. */
 export function compareSurfaces(bundle: ToolFacet[], source: ToolFacet[]): void {
   const b = JSON.stringify(bundle);
@@ -111,6 +144,7 @@ export function compareSurfaces(bundle: ToolFacet[], source: ToolFacet[]): void 
   if (b === s) return;
   throw new Error(
     'tool-surface-disagreement: the shipped bundle and the source registry differ. ' +
+    `first difference: ${firstDifference(bundle, source)}. ` +
     `bundle=[${bundle.map((t) => t.name).join(',')}] source=[${source.map((t) => t.name).join(',')}]`,
   );
 }
