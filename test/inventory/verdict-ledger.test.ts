@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateLedger, gatePasses, type VerdictRow } from '../../scripts/inventory/verdict-ledger.js';
+import { validateLedger, gatePasses, danglingClaims, type VerdictRow } from '../../scripts/inventory/verdict-ledger.js';
+import { parseBlocks, DOC_CORPUS } from '../../scripts/inventory/classify-docs.js';
 
 const row = (over: Partial<VerdictRow> = {}): VerdictRow => ({
   rowId: 'r1', surfaceItem: 'tool:helix_memory_commit', claimId: 'README.md#abc123def456',
@@ -85,6 +86,36 @@ describe('the committed verdict ledger', () => {
     expect(Array.isArray(rows), 'data/inventory/verdicts.json is not a JSON array').toBe(true);
     expect(validateLedger(rows), 'the committed ledger carries a schema problem').toEqual([]);
     // `gatePasses` is `false` on an empty ledger, so no passing assertion can be made yet.
+  });
+
+  // The block id is content-addressed, so editing the document a claim lives in rotates the id and
+  // strands every verdict bound to the old one — with no error anywhere, because a verdict row is
+  // just a string. The opposite direction is already guarded: `classify-docs.test.ts` refuses a
+  // block that no classification covers. This is the direction that was not, and it had already
+  // gone wrong twice over on one block before the check existed.
+  it('names no claim that has stopped resolving to a live block', () => {
+    const rows = JSON.parse(readFileSync(VERDICTS_PATH, 'utf8')) as VerdictRow[];
+    const live = new Set(DOC_CORPUS.flatMap((f) => parseBlocks(f).map((b) => b.id)));
+    expect(danglingClaims(rows, live), 'a verdict is bound to a block that no longer exists').toEqual([]);
+  });
+});
+
+describe('claim binding', () => {
+  it('reports a row whose claim resolves to no live block', () => {
+    const rows = [row({ rowId: 'r9', claimId: 'README.md#000000000000' })];
+    expect(danglingClaims(rows, new Set(['README.md#abc123def456'])))
+      .toEqual(['r9: claimId README.md#000000000000 resolves to no live block']);
+  });
+
+  // Negative control: without it the check above stays green even if the function always returns [].
+  it('reports nothing when every claim resolves', () => {
+    expect(danglingClaims([row()], new Set(['README.md#abc123def456']))).toEqual([]);
+  });
+
+  // An UNDOCUMENTED row carries `claimId: null` by rule, and absence of a claim is not a broken
+  // reference. Reading null as an unresolvable id would make every honest UNDOCUMENTED row a defect.
+  it('does not read an absent claim as a broken reference', () => {
+    expect(danglingClaims([row({ verdict: 'UNDOCUMENTED', claimId: null })], new Set())).toEqual([]);
   });
 });
 

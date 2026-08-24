@@ -50,6 +50,21 @@ export function validateLedger(rows: VerdictRow[]): string[] {
 }
 
 /**
+ * Row ids whose `claimId` names no live document block.
+ *
+ * A block id is content-addressed, so any edit to the document rotates it and strands every verdict
+ * bound to the old value — silently, because a `claimId` is only a string and nothing dereferences
+ * it. `classify-docs` guards the opposite direction, refusing a block that no classification covers;
+ * this guards the one it does not. A `claimId` of `null` is the absence of a claim, which
+ * `validateLedger` already rules on, and not a reference that failed to resolve.
+ */
+export function danglingClaims(rows: VerdictRow[], live: ReadonlySet<string>): string[] {
+  return rows
+    .filter((r) => r.claimId !== null && !live.has(r.claimId))
+    .map((r) => `${r.rowId}: claimId ${r.claimId ?? ''} resolves to no live block`);
+}
+
+/**
  * The gate. A row's risk class does not change whether it passes — only what kind of evidence it
  * takes to get there. An empty ledger does not pass: no rows means the inventory is unfinished.
  */

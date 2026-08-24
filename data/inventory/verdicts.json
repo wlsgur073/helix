@@ -32,7 +32,7 @@
   {
     "rowId": "r004",
     "surfaceItem": "tool:helix_memory_commit",
-    "claimId": "README.md#417c2f633427",
+    "claimId": "README.md#51d1cec94afe",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "B2 headless commit through the installed bundle; A1 bundle.e2e.test.ts",
@@ -52,7 +52,7 @@
   {
     "rowId": "r006",
     "surfaceItem": "tool:helix_memory_erase",
-    "claimId": "README.md#417c2f633427",
+    "claimId": "README.md#51d1cec94afe",
     "verdict": "MET",
     "repairTarget": null,
     "evidence": "C4 soft erase through the bundle, then recovery via asOf",
