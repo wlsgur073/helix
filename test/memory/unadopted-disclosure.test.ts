@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -18,6 +18,26 @@ const text = (res: { content: Array<{ type: string; text?: string }> }) => res.c
 function cleanup(...dirs: string[]): void { for (const d of dirs) rmSync(d, { recursive: true, force: true }); }
 
 function foreignLedgerPath(root: string): string { return join(root, '.helix', 'memory.jsonl'); }
+
+/** The GLOBAL ledger of a `layeredStore` — the scope the as-of cursor below is derived from. The
+ *  project layer here is deliberately unadopted, so `asOfView` never adds its rows. */
+function globalLedgerPath(home: string): string { return join(home, 'memory.jsonl'); }
+
+/**
+ * The as-of cursor, taken from the ledger's OWN newest row — never from `new Date()`. A wall-clock
+ * cursor is a SECOND clock read taken after the rows were stamped from the first, and the as-of
+ * window is `tx <= t`, so a backward step of the wall clock between the two empties the snapshot.
+ * That is worse here than a plain flake: the empty branch STILL renders the unadopted note and still
+ * contains no project path, so `:holds on every surface` would have passed for the wrong reason.
+ * Measured 2026-08-24: a 1 ms step suffices. See the same helper in `test/server/inspect-asof.test.ts`.
+ */
+function asOfLatest(ledger: string): string {
+  const txs = readFileSync(ledger, 'utf8').split('\n')
+    .filter((l) => l.trim() !== '')
+    .map((l) => (JSON.parse(l) as { tx: string }).tx);
+  expect(txs.length, 'as-of cursor: the ledger has no rows to derive it from').toBeGreaterThan(0);
+  return txs.sort().at(-1)!;
+}
 
 /** Plant a foreign (unowned) project ledger file directly — simulates a team-shared/cloned repo,
  *  the same fixture pattern as project-disposition.test.ts's unadopted-present case. */
@@ -178,7 +198,7 @@ describe('unadopted-ledger disclosure note (B2)', () => {
         plantForeignLedger(root);
         const store = layeredStore(root, home);
         store.commit({ content: 'asof fact', source: 'user', scope: 'global' });
-        const out = text(handleInspect(store, { asOf: new Date().toISOString() }));
+        const out = text(handleInspect(store, { asOf: asOfLatest(globalLedgerPath(home)) }));
         expect(out).toContain('MEMORY AS OF');
         expect(out).toContain(UNADOPTED_LEDGER_NOTE);
       } finally { cleanup(home, root); }
@@ -189,6 +209,8 @@ describe('unadopted-ledger disclosure note (B2)', () => {
       try {
         plantForeignLedger(root);
         const store = layeredStore(root, home);
+        // Wall-clock cursor is CORRECT here: this fixture commits nothing, so the snapshot is empty
+        // by construction and no clock step can change what it renders.
         const t = new Date().toISOString();
         const out = text(handleInspect(store, { asOf: t }));
         expect(out).toBe(`(memory is empty as of ${t})\n\n${UNADOPTED_LEDGER_NOTE}\n\n${WITNESS_INIT_NOTE}`); // virgin global -> first-contact INIT note
@@ -200,6 +222,8 @@ describe('unadopted-ledger disclosure note (B2)', () => {
       try {
         const store = layeredStore(root, home);
         store.adopt(root);
+        // Wall-clock cursor is CORRECT here too: nothing is committed, so the assertion is about the
+        // note on an empty snapshot, not about window membership.
         const out = text(handleInspect(store, { asOf: new Date().toISOString() }));
         expect(out).not.toContain(UNADOPTED_LEDGER_NOTE);
       } finally { cleanup(home, root); }
@@ -309,8 +333,11 @@ describe('unadopted-ledger disclosure note (B2)', () => {
         const outs = [
           text(handleInspect(store, {})),
           text(handleInspect(store, { history: true })),
-          text(handleInspect(store, { asOf: new Date().toISOString() })),
+          text(handleInspect(store, { asOf: asOfLatest(globalLedgerPath(home)) })),
         ];
+        // Non-vacuity: an EMPTY as-of snapshot still renders the note and still names no project
+        // path, so every assertion below would pass without the fact ever being in the window.
+        expect(outs[2]!, 'the as-of snapshot is empty — the assertions below would be vacuous').toContain('MEMORY AS OF');
         for (const out of outs) {
           expect(out).toContain(UNADOPTED_LEDGER_NOTE);
           expect(out).not.toContain(root);

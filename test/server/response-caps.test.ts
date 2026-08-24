@@ -12,7 +12,7 @@
 // tail items (never truncating mid-item — a half-closed datamark frame is worse than a dropped item)
 // and appending a `N item(s) omitted (response cap)` note.
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -96,6 +96,22 @@ function store() {
 function storeWithHome(): { s: MemoryStore; home: string } {
   const home = mkdtempSync(join(tmpdir(), 'helix-rc-h-'));
   return { s: new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1' }), home };
+}
+
+/**
+ * The as-of cursor, taken from the ledger's OWN newest row — never from `new Date()`. A wall-clock
+ * cursor is a SECOND clock read taken after the rows were stamped from the first, and the as-of
+ * window is `tx <= t`, so a backward step of the wall clock between the two empties the snapshot:
+ * `OMISSION_RE` then finds nothing and the cap assertions below fail for a reason that has nothing to
+ * do with the cap. Measured 2026-08-24: a 1 ms step suffices, and the WSL2 box this runs on is
+ * stepped by Hyper-V TimeSync. See the same helper in `test/server/inspect-asof.test.ts`.
+ */
+function asOfLatest(ledger: string): string {
+  const txs = readFileSync(ledger, 'utf8').split('\n')
+    .filter((l) => l.trim() !== '')
+    .map((l) => (JSON.parse(l) as { tx: string }).tx);
+  expect(txs.length, 'as-of cursor: the ledger has no rows to derive it from').toBeGreaterThan(0);
+  return txs.sort().at(-1)!;
 }
 const text = (res: { content: Array<{ type: string; text?: string }> }) => res.content.map((c) => c.text ?? '').join('');
 
@@ -220,9 +236,9 @@ describe('handleInspect total response bound (M1)', () => {
   });
 
   it('bounds the total rendered text (asOf) and keeps the unconditional as-of note last, after the omission note', () => {
-    const s = store();
+    const { s, home } = storeWithHome();
     commitBigItems(s);
-    const out = text(handleInspect(s, { asOf: new Date().toISOString() }));
+    const out = text(handleInspect(s, { asOf: asOfLatest(join(home, 'm.jsonl')) }));
 
     expect(out.length).toBeLessThanOrEqual(RESPONSE_MAX_CHARS);
     const m = OMISSION_RE.exec(out);
@@ -238,14 +254,14 @@ describe('handleInspect total response bound (M1)', () => {
   });
 
   it('never leaves an evidence sub-row without its fact row when a confirmed fact is dropped by the asOf cap', () => {
-    const s = store();
+    const { s, home } = storeWithHome();
     const ids = commitBigItems(s);
     // Confirm the LAST-committed items: asOfView preserves commit order (verified below is moot if
     // it didn't — the non-vacuity assertion catches that), and capRendered drops from the TAIL, so
     // these are the evidence-bearing facts most likely to actually be cut by the cap.
     const confirmedIds = ids.slice(-3);
     for (const id of confirmedIds) s.confirm(id);
-    const out = text(handleInspect(s, { asOf: new Date().toISOString() }));
+    const out = text(handleInspect(s, { asOf: asOfLatest(join(home, 'm.jsonl')) }));
 
     const m = OMISSION_RE.exec(out);
     expect(m, 'no omission note found').not.toBeNull();
