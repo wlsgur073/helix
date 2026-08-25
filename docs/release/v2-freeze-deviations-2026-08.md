@@ -685,6 +685,60 @@ ledger is on the branch both clones pull, so the instruction travels with the by
 This addendum takes no position on the §8 reading; it restores the load-path premise the window's
 continuation arguments assume.
 
+### Corrigendum 2026-08-25 — one premise of the reach argument, and a consolidated continuity measurement
+
+**Scope: this corrects a PREMISE, not the ruling.** The conclusion was re-decided on other grounds
+at `R-2026-08-19` below, with the push and Instance 4 already in front of the owner. Nothing here
+reopens it. The premise is corrected because a close-day reader would otherwise reuse it.
+
+**The premise that is wrong.** The reach argument's third bullet reads: *"The measuring host is not
+this machine. The receipt's `runtime.loadPaths` are rooted in a different account's home directory;
+that account does not exist on this box."* Measured 2026-08-25, **both receipts on file pin their
+load paths under this box's own home**:
+
+| receipt | pinned runtime load paths |
+|---|---|
+| `v2-freeze-receipt-2026-08.json` (live) | `~/.claude/plugins/marketplaces/helix/bin/helix-mcp.mjs`, `~/.claude/plugins/cache/helix/helix/0.1.0/bin/helix-mcp.mjs` |
+| `v2-freeze-receipt-2026-08-02-void.json` (superseded) | the same two paths |
+
+Both are written out absolutely in the receipts themselves and are abbreviated with `~` here because
+`test/output-vocabulary.test.ts` reserves leading absolute home paths to the receipt alone. The `~`
+that both expand under is **this box's own account**, which is the point: it is not another host's.
+
+The Addendum above already falsified this bullet's *conclusion* by recording that the marketplace
+clone — "a pinned runtime load path" — pulled the pushed commits. It never corrected the sentence
+itself, and the sentence is the part a reader carries forward. **This box IS a measuring host for
+the pinned load paths.** The same-entry claim that "this box's own plugin cache … is not among the
+receipt's pinned load paths" is wrong on the same measurement.
+
+**The consolidated continuity measurement, which is what the byte argument actually needs.** Present
+equality is not continuity: hashes taken today cannot exclude a change that was later reverted. So
+the window's clone-HEAD history was re-read end to end, at the level of the pinned FILE rather than
+the commit:
+
+- Eight in-window heals are recorded in `~/.cache/freeze-guard-heals.log`, at seven distinct drifted
+  positions (`3bd63d0`, `0d2e55f`, `5c6e1c7`, `92d5d0a`, `d93cb19`, `7454033`, `cc6ef4a`). **At all
+  seven, `bin/helix-mcp.mjs` is the candidate blob `e3c3374c…`.** Every heal this window therefore
+  repaired a HEAD position, never the pinned bytes.
+- **The one byte-discontinuous episode is the one already recorded** in the Addendum above:
+  `19b4746` (2026-08-19T17:33:16+09:00) carried `bin/helix-mcp.mjs` at `9906e6a0…`, and `506e2fc`
+  (23:06:21 the same day) returned it to `e3c3374c…`. The marketplace clone's copy has an mtime of
+  2026-08-19 22:27:58 KST, which falls between the recorded 20:55:31 pull and that commit —
+  consistent with the recorded remediation reaching the clone, though the write itself is not
+  separately logged and this is inference rather than measurement.
+- `git diff --name-only 94dd136 origin/feat/helix-v1 -- bin/` is **empty**, so the standing
+  instruction ("`bin/` on this branch stays at the candidate bytes until `txClose`") has held on the
+  branch both clones pull.
+- Both pinned load paths hash to `e3c3374c…` on 2026-08-25.
+
+**What changed in the exposure, and it belongs on the record.** Before the push, a pull into the
+clone could not carry drifted pinned SOURCE, because the branch tip did not have any. It can now:
+`origin/feat/helix-v1` is a descendant of the candidate and carries `src/memory/ownership.ts` and
+`src/memory/store.ts` off-candidate, so the clone would fast-forward onto them. The pinned files are
+`bin/` bundles and are unaffected, and the runtime loads the bundle rather than `src/`, so this is
+an exposure of shape rather than of bytes — but it rests on the auto-update flags staying `false`
+rather than on there being nothing to pull.
+
 ## Ruling R-2026-08-19 — the in-window product rebuild is ruled NOT a reset
 
 Recorded in the shape R-2026-08-16 established, because this ledger is the §9a report's source for
