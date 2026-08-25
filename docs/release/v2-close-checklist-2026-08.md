@@ -171,14 +171,29 @@ candidate blob. `scripts/pilot/input-pins.ts` re-hashes `process.cwd()`, so invo
 refused **`method-drift`** (exit 1) — correctly, by its own contract. That refusal was, in effect,
 a fail-closed guard against running the chain from the wrong tree.
 
-**As measured on 2026-08-17** (second window, and this is the operative state): the re-freeze
-re-pinned all seven of those paths at their current bytes. `git diff --name-only 94dd136 HEAD`
-lists 12 changed paths and its intersection with the 28 pinned paths is **empty**. So
-`input-pins.ts` invoked in the development tree would **NOT** refuse today —
-it would proceed, and produce an artifact indistinguishable from one produced in the checkout.
+**As measured on 2026-08-17** (second window): the re-freeze re-pinned all seven of those paths at
+their current bytes. `git diff --name-only 94dd136 HEAD` listed 12 changed paths and its
+intersection with the 28 pinned paths was **empty**. So `input-pins.ts` invoked in the development
+tree would **NOT** have refused that day — it would have proceeded, and produced an artifact
+indistinguishable from one produced in the checkout.
 
-**The consequence, stated plainly: the mechanical protection this block used to rely on is gone,
-and the rule is now enforced only by the operator following it.** C8 therefore carries an inline
+**RE-MEASURED 2026-08-25, and the conclusion above INVERTS. This paragraph, not the one above, is
+the operative state.** `git diff --name-only 94dd136 HEAD` now lists 103 changed paths and the
+intersection with the 28 pins is **NOT empty**: it is `src/memory/ownership.ts` and
+`src/memory/store.ts`, both members of `payload.tools`. Four in-window commits moved them —
+`7c22bfc`, `c3456ec`, `08bc3da` (all 2026-08-18) and `95c65e7` (2026-08-20) — and that drift is
+adjudicated NOT A RESET at `R-2026-08-18` in the deviations ledger, so it is a known state and not
+a new finding. What changes here is only the prediction: `input-pins.ts` re-hashes
+`PINNED_TOOL_PATHS` under `process.cwd()` (`input-pins.ts:290`, `hashTools(process.cwd())`), and
+two of those paths now differ in the development tree, **so invoked there it WOULD refuse
+`method-drift` today.**
+
+**The consequence, restated: the mechanical protection is back, but only by accident, and it must
+not be leant on.** It exists because two pinned files happen to have drifted, not because anything
+guarantees they will still differ on close day; a revert, a merge, or a checkout removes it
+silently. Treat the rule as enforced by the operator, and read a `method-drift` refusal in the
+development tree as the expected consequence of that known drift rather than as an integrity
+finding. C8 therefore carries an inline
 fail-closed preflight that asserts the execution tree directly rather than inferring it from
 content drift — content identity and tree identity are different properties, and only the second
 is what "run from the candidate checkout" asserts. *(This paragraph stated the 08-13 divergence
@@ -300,9 +315,12 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
 
   **Expect ZERO warnings today, and for a reason that is NOT the txClose guard.** *(Corrected
   2026-08-17.)* The 7 warnings above were the FIRST window's; the re-freeze re-pinned all seven
-  paths at their current bytes, so the worktree-divergence loop finds nothing to warn about —
-  measured 2026-08-17, the intersection of the changed set with the 28 pins is empty. Their absence
-  before `txClose` therefore says the tree matches the pins, which is information. Their absence
+  paths at their current bytes, so the worktree-divergence loop found nothing to warn about —
+  measured 2026-08-17, the intersection of the changed set with the 28 pins was empty.
+  **CORRECTED 2026-08-25: that intersection is no longer empty** (`src/memory/ownership.ts`,
+  `src/memory/store.ts` — see Block B), so **expect TWO worktree-divergence warnings here, not
+  zero.** Those two are the known, adjudicated drift; a third is a finding. Their absence
+  before `txClose` therefore no longer says the tree matches the pins. Their absence
   AFTER `txClose` says only that the loop is guarded by `if (now <= p.txClose)`
   (freeze-guard.ts:90) and says nothing about the tree. **On close day you are past `txClose`, so
   read no reassurance from a quiet run**; the pre-close readings are where that evidence lives.
@@ -322,6 +340,30 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
   it reaches is byte-identical to the candidate's. Measure it; do not assume it. Keep running this
   step even though the exception shrank: it is also what catches the development tree drifting away
   from the candidate under you mid-close, which is a finding about the whole chain.
+
+  **THE LOOP BELOW DOES NOT ESTABLISH THAT CLAIM, and as of 2026-08-25 the claim is false.**
+  *(Correction 2026-08-25. The loop is left exactly as it was — rewriting it to follow imports would
+  be authoring close-day tooling inside the window, which is the act that reset the first one. What
+  is corrected is the sentence it was licensing.)* The loop walks `scripts/pilot`, `scripts/close`
+  and `src/entry-point.ts`. It never reaches `src/memory`. But `freeze-guard.ts:26` imports
+  `PINNED_TOOL_PATHS` and friends from `./pilot/pin-hashes.js`, and `pin-hashes.ts:22` imports
+  `projectLedgerPath` from `../../src/memory/ownership.js`, which it calls at `:296`. That module is
+  **pinned**, and measured today it **differs from the candidate**:
+
+  | pinned module reached by `freeze-guard` | blob at `94dd136` | blob in `~/dev/helix` |
+  |---|---|---|
+  | `src/memory/ownership.ts` | `8906b3f2111d` | `6b07743b31e8` |
+
+  (`src/memory/store.ts` is pinned and also differs — `89219c6b3a75` vs `f96aa9e95560` — but
+  `freeze-guard` does not reach it, so it is not part of this step's question.) Both are the
+  in-window drift adjudicated NOT A RESET at `R-2026-08-18`; neither is a new finding. **What is
+  new is only that this step's success line cannot be read as the licence it claims to be.**
+
+  So: run the loop for what it does cover, and read `byte-identity check done` as covering the
+  script directories and the entry point ONLY. Do not read it as "every pinned module `freeze-guard`
+  reaches is candidate-identical" — that sentence is false today, and the exception now rests on the
+  narrower ground that `ownership.ts`'s drift is known, recorded and confined to a path-resolution
+  helper the guard calls once.
 
   ```bash
   cd ~/dev/helix
@@ -384,6 +426,26 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
   `OnCalendar=*-*-* 09:00:00 Asia/Seoul` with `Persistent=true`, so a missed firing runs whenever
   the timer next becomes active — measured 2026-08-13, `LAST` was 11:48:03 KST, not 09:00. Stopping
   is therefore not enough; **mask**, so nothing can activate it.
+
+  **The mask has to be typed from a session that is ALREADY UP, and that — not forgetting the
+  command — is this step's real failure mode.** *(Added 2026-08-25.)* The catch-up fires when the
+  user session becomes active, and on this box that is boot: today's run started 21:18:12 KST
+  against a boot at 21:18:41, so the interval between power-on and the ledger write is seconds.
+  Sixteen consecutive daily firings, 2026-08-10 through 2026-08-25, read from `journalctl --user -u
+  helix-dogfood.service`, land like this against the close instant of 15:20:01 KST: **none of the
+  sixteen fired at the nominal 09:00**, and **ten of the sixteen fired after 15:20:01** — 08-10
+  20:43, 08-11 23:07, 08-12 20:58, 08-15 20:01, 08-18 19:18, 08-19 20:54, 08-20 20:59, 08-21 20:15,
+  08-23 20:33, 08-25 21:18. If the box is first booted on close day after 15:20:01 KST, the pending
+  catch-up writes the unrecoverable row before any command can be typed, and nothing in this step
+  reaches it.
+
+  > **PRECONDITION: boot the box BEFORE `2026-09-11T06:20:01.000Z` = 15:20:01 KST, and run 0.6 in
+  > that same session.** A firing that lands before the close instant is a row inside the window and
+  > is harmless; the mask then holds the post-close silence.
+
+  Set that alarm outside this repository — nothing here can wake a machine that is off. *(The one
+  measurement this step used to cite, `LAST` 11:48:03 KST on 2026-08-13, is one of the six that
+  happened to land early. It is not the distribution, and it read as reassurance.)*
 
   ```bash
   systemctl --user stop helix-dogfood.timer helix-dogfood.service
@@ -797,10 +859,14 @@ $TSX scripts/pilot/input-pins.ts \
   on an unreadable input before a single pin is derived. **Do not "fix" that by moving the chain to
   `~/dev/helix`.** The receipt is an input handed to the checkout, not a file of it. *(Corrected
   2026-08-17: this warning used to promise that moving the chain "would trip `method-drift` on the
-  very next line". Measured today, it would not — the intersection of the changed set with the 28
-  pins is empty, so `input-pins` invoked in the development tree satisfies every pin and exits 0.
-  Nothing mechanical now stops a chain that has been moved; only this instruction does. See Block
-  B, and C8's preflight for the one step that asserts its own tree.)*
+  very next line". Measured 2026-08-17 it would not have — the intersection of the changed set with
+  the 28 pins was empty then, so `input-pins` invoked in the development tree satisfied every pin
+  and exited 0.)* **Re-measured 2026-08-25, that correction itself inverts: the intersection is now
+  `src/memory/ownership.ts` + `src/memory/store.ts`, so a chain moved to `~/dev/helix` WOULD trip
+  `method-drift` again.** Do not read that as protection — it holds only while those two files
+  happen to differ, and a revert or a merge removes it without notice. The instruction, not the
+  mechanism, is what stops a moved chain. See Block B, and C8's preflight for the one step that
+  asserts its own tree.
 - [ ] **K and both window bounds are copied from the receipt and cannot be passed** — there is no
   flag for them. That is the mechanism that keeps close day from re-deciding the method.
 - [ ] Success: `pins.json` written, bound back to the freeze by `freezeSha256`.
@@ -1661,28 +1727,74 @@ behaviour, not a failed close.** Read this block before running `npm test` on cl
   *(rehearsed 2026-08-13 → `Tests 2 passed (2)`)*; red from the close instant until D2 removes the
   3 citations. **The fix is the removal, not the date.**
 
-- [ ] **E3. `test/acceptance/trust-store-home.e2e.test.ts` — auto-RESUMES at `txClose`.**
+- [ ] **E3. WITHDRAWN 2026-08-25 — the gate this step describes no longer exists. Do not expect
+  a red flip here.**
+
+  **What it used to say, and why it is unsupported now.** The step read:
+  "`test/acceptance/trust-store-home.e2e.test.ts` — auto-RESUMES at `txClose`.
   `itUnlessFrozenBundle = frozenBundleWindowOpen() ? it.skip : it`, and `frozenBundleWindowOpen()`
   reads the same `payload.txClose` from the receipt. **3** `itUnlessFrozenBundle` sites expand to
-  **5** skipped cases (one sits inside a per-adversary loop).
-  *(rehearsed 2026-08-13)* → `Tests 3 passed | 5 skipped (8)`.
-  These cases drive the **shipped bundle** `bin/helix-mcp.mjs`, so at `txClose` they un-skip
-  against a *stale* bundle and will fail until Block F rebuilds it. Expect: skip → red → green, in
-  that order. The source-level cases in `test/memory/trust-store-layout.test.ts` carried the
-  behaviour throughout; nothing was unguarded.
+  **5** skipped cases (one sits inside a per-adversary loop). *(rehearsed 2026-08-13)* →
+  `Tests 3 passed | 5 skipped (8)`. These cases drive the **shipped bundle** `bin/helix-mcp.mjs`,
+  so at `txClose` they un-skip against a *stale* bundle and will fail until Block F rebuilds it.
+  Expect: skip → red → green, in that order."
 
-- [ ] **E4.** Run the full suite once and confirm the failure set is exactly the one this block
-  predicts: `cd ~/dev/helix && npm test`.
-  **Which set depends on whether D2 has run**, and in this sheet's order it has: D2 removes the 3
-  citations, so `test/output-vocabulary.test.ts` is already green again by the time you get here.
-  **E1 is now conditional** — it appears only if `git diff --quiet $CANDIDATE HEAD -- bin/` FAILS
-  (see E1; it succeeded on 2026-08-16, so E1 was green). So:
-  - after D2 (the normal path): **E3, plus E1 only if that diff is non-empty**;
-  - before D2 (if you are running Block E early): **E2 + E3, plus E1 on the same condition**.
+  **Measured 2026-08-25.** `itUnlessFrozenBundle` and `frozenBundleWindowOpen` have **zero**
+  occurrences anywhere in `src/`, `test/` or `scripts/`. Commit `ea2dc1e`
+  (2026-08-19T15:21:01+09:00, *"retire the frozen-bundle gate, and restore the five startup cases
+  it suspended"*) removed the gate **inside this window** and un-suspended the five cases. The file
+  runs today and reports `Tests 8 passed (8)` — no skips, and nothing waiting on `txClose`.
 
-  Any failure outside that set is a real one — and so is E1 disagreeing with the `git diff` in
-  either direction, which would mean the rebuild is not reproducing what the committed bundles
-  contain.
+  **Consequence for close day: there is no third red flip.** Block E is headed "THE THREE
+  SIMULTANEOUS RED FLIPS"; on the measured state it is two. A red in this file on close day is a
+  **real** failure, not a scheduled one, because nothing here is gated on the close instant any
+  more.
+
+  **Nothing is being restored.** Reinstating the gate would be a code change inside the window for
+  no measurement benefit; the five cases have run green since `ea2dc1e`, which is more coverage
+  than the gate allowed, and the source-level cases in `test/memory/trust-store-layout.test.ts`
+  carried the behaviour throughout in either case.
+
+- [ ] **E4.** Run the full suite once and compare the failure set against the DATED MEASUREMENT
+  below: `cd ~/dev/helix && npm test`.
+
+  **Compare against a measurement, not against a prediction.** *(Reworked 2026-08-25, after E3's
+  prediction was found unsupported and Block B's was found inverted. A predicted set authored now
+  for a suite run three weeks from now is a guess; a dated measurement plus a re-measurement is
+  evidence.)* The instruction is therefore: **re-run the suite immediately BEFORE close day and
+  record that result too**, then compare close day's set against the most recent recorded one. A
+  set that matches is uninformative on its own; a set that DIFFERS is the finding.
+
+  **Measured 2026-08-25 at `742b096`, on the development tree:**
+  `Test Files 5 failed | 185 passed | 2 skipped (192)` / `Tests 6 failed | 2479 passed | 2 skipped
+  (2487)`. The six, by name — count them by name, never by number:
+
+  1. `test/acceptance/project-ledger.e2e.test.ts` › *a projectRoot that names nothing is refused, so
+     the prompt always has a target to show*
+  2. `test/docs/shipped-claims.doc.test.ts` › *the shipped bundle is a byte-identical rebuild of the
+     source these pins execute*
+  3. `test/inventory/extract-tools.test.ts` › *carries description and input schema, not just names*
+  4. `test/inventory/extract-tools.test.ts` › *removes the temporary home it created, so a run
+     outside vitest does not accumulate them*
+  5. `test/inventory/inventory-drift.test.ts` › *matches the committed snapshot exactly*
+  6. `test/plugin/packaging.test.ts` › *rebuilding from src reproduces bin/ byte-for-byte*
+
+  **All six share ONE cause, and that is what makes the set readable.** `bin/` is pinned to the
+  candidate and must not be rebuilt during the window, while `src/` has moved; every one of these
+  compares the shipped bundle against the source (`compareSurfaces` at
+  `scripts/inventory/extract-tools.ts:141` throws `tool-surface-disagreement` when the two differ,
+  and 1/2/6 compare bundle to source directly). **They are the freeze's own signature, and Block F's
+  rebuild is what clears them.** So the operative test on close day is not "are there six" but:
+  *does every failure trace to bundle-versus-source?* One that does not is real.
+
+  **E1 is conditional** — it appears only if `git diff --quiet $CANDIDATE HEAD -- bin/` FAILS (see
+  E1; measured 2026-08-25 that diff is still empty, so E1 is green and #6 above is the source-side
+  form of the same fact). E1 disagreeing with the `git diff` in either direction is a real failure,
+  and would mean the rebuild is not reproducing what the committed bundles contain.
+
+  **D2's effect on the set:** D2 removes the 3 citations, so `test/output-vocabulary.test.ts` is
+  already green again by the time you get here on this sheet's order. Running Block E before D2 adds
+  E2 to the set.
 
 ---
 
@@ -1891,9 +2003,12 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   §4.7's marker, which asks for entries appended after that date.
 
   *(The old step also cited "the divergence measured in Block B" as its input. Block B's divergence
-  was the first window's; the current intersection of changed paths with the 28 pins is empty. This
-  was the only step that consumed that measurement, so correcting Block B leaves no dangling
-  reference.)*
+  was the first window's. **Corrected 2026-08-25:** the current intersection of changed paths with
+  the 28 pins is not empty either — it is `src/memory/ownership.ts` + `src/memory/store.ts`, the
+  drift adjudicated at `R-2026-08-18`. That is a SECOND-window fact, so it still does not belong in
+  a first-window disclosure and the instruction not to write a new entry stands, on the corrected
+  premise rather than on an empty intersection. This was the only step that consumed that
+  measurement, so correcting Block B leaves no dangling reference.)*
 
 ---
 
