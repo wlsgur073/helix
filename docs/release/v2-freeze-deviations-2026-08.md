@@ -1289,3 +1289,56 @@ every live competitor, rather than settled now: amending the pass rule while its
 is what the fixed-close architecture of §5 exists to prevent, and it would buy no schedule in any
 case, since the close instant and the post-close `bin/` rebuild are fixed independently of it.
 
+---
+
+## Deviation D-2026-08-25-rehearsal-triggered-run — an operator-started dogfood run, aborted before it wrote
+
+**What happened.** During a rehearsal of close-day step 0.6 (the write freeze), the operator ran
+`systemctl --user start helix-dogfood.service` to test whether a mask applied moments earlier
+actually blocked a manual start. It did not, and a live autonomous dogfood run launched:
+started `2026-08-25T22:38:13+09:00`, killed with `SIGTERM` at `22:41:39`, 3 m 26 s elapsed,
+47.967 s CPU, 802.5 M peak memory. The kill was deliberate and immediate on discovery.
+
+**Why the mask did not hold, stated precisely because the first explanation was wrong.** The
+initial reading was that `systemctl --user daemon-reload` had been omitted. That is false, and a
+reload would not have helped. `systemctl --user mask --runtime` writes to
+`/run/user/<uid>/systemd/user/`, and `systemd-analyze --user unit-paths` places that directory
+BELOW `~/.config/systemd/user/`, where both real fragments live. The mask was shadowed from the
+moment it was created: measured immediately after, `LoadState=loaded` and `FragmentPath` still
+named the real fragment. **`mask --runtime` exits 0 and prints two "Created symlink" lines while
+having no effect on these units**, which is what made it credible enough to test against.
+
+**Blast radius, measured rather than estimated.**
+
+| surface | state |
+|---|---|
+| the two ledgers the close-day invariant protects | **UNCHANGED.** Global: 1 row, mtime 2026-07-19. Project (`tinytask`): 53 rows, mtime 2026-08-25 21:28:31 — that timestamp belongs to the day's own scheduled run, which had completed hours earlier |
+| `trigger.jsonl` | one postrun evaluation row for the aborted run, `overall: not-fired` |
+| `metrics.jsonl`, `sessions.jsonl` | mtimes moved; no row carries the aborted run's id |
+| `tinytask` working tree | two files left modified and uncommitted; the project's own suite passes on that tree |
+| `tinytask` `ISSUES.md` | the postrun adapter auto-filed **ISSUE-0009** against the `signal`/`TERM` result — a correctly-working harness recording an externally-caused abort |
+| systemd state | restored and verified field by field against a capture taken at `2026-08-25T13:37:00Z` before the rehearsal began: `is-enabled` `enabled`/`static`, next elapse the following 09:00 KST, last trigger 21:18:12 KST, `timers.target.wants` link present, persistent stamp byte-identical, both unit files hash-identical, no mask symlinks anywhere |
+
+**Why the corpus is untouched, and it was not luck.** The run writes its memory row near the END of
+its cycle — the day's scheduled run started 21:18:12 and wrote at 21:28:31, about ten minutes in.
+The abort came at 3 m 26 s, well inside that margin, and the row count and ledger mtime were
+measured before and after the kill and did not move. **The reversible direction was to abort:** an
+appended row in an append-only ledger cannot be removed, while an incomplete run is a state the
+system already handles (see the `ISSUE-0006` transient-failure record, where a run lost a day's
+sample to server trouble and the harness carried on).
+
+**§8 assessment.** No system, config, rule or metric changed: the systemd state was returned to its
+captured pre-rehearsal values, both unit files are byte-identical, and no row entered the measured
+corpus. What did occur is an in-window operator action on the corpus GENERATOR, and it is disclosed
+here rather than left implicit. The one residue is the `tinytask` working tree, whose disposition is
+the owner's: the auto-filed `ISSUE-0009` names no cause, and left as-is the next scheduled run would
+spend its sample diagnosing an abort that had an external cause.
+
+**What the rehearsal bought, which is the reason it was run at all.** Three defects in the step that
+guards the only unrecoverable close-day failure, every one of which would otherwise have been met
+for the first time on the single irreversible day: `mask` fails outright against a fragment in the
+config directory; `mask --runtime` is a convincing non-fix; and G6's `unmask` exits 0 while
+reversing nothing. The corrected blocks, with observed output, are at steps 0.6 and G6 of
+`v2-close-checklist-2026-08.md`. The step had been classified **UNREHEARSED by choice** on the
+ground that a rehearsal would take the live run down mid-window; measured, the interval between a
+completed run and the next elapse suppresses nothing, and on this day it was hours wide.

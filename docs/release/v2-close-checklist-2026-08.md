@@ -27,9 +27,16 @@ before close day and their observed output is recorded inline — including ever
 is pasted here in the form that was executed. Everything that needs the close-bounded snapshot is
 **UNREHEARSED** and marked so — the snapshot cannot exist before the close, so nothing downstream of
 it has ever been executed end to end; the C1 blocks were nonetheless driven against a *copy* of the
-live units under a throwaway `HOME`, which proves the commands and not the close-day corpus. Two
-steps are **UNREHEARSED by choice** and say so at the step: the 0.6 write freeze and its G6 reversal
-(rehearsing would have taken the live dogfood run down mid-window). D1's `freeze-runtime-check.sh`
+live units under a throwaway `HOME`, which proves the commands and not the close-day corpus.
+
+**0.6 and its G6 reversal are NO LONGER "unrehearsed by choice" — both were rehearsed 2026-08-25,
+and both were BROKEN.** The stated reason for not rehearsing them (it would take the live dogfood
+run down mid-window) does not survive measurement: between a completed run and the next elapse there
+is no run to suppress, and on 2026-08-25 that interval was hours long. Rehearsing found that 0.6's
+`mask` fails outright, that `mask --runtime` looks like a fix and is not one, and that G6's `unmask`
+exits 0 while reversing nothing. **Every one of those would have been discovered for the first time
+on the single irreversible day, at the step that guards the only unrecoverable failure.** Corrected
+blocks with observed output are at both steps. D1's `freeze-runtime-check.sh`
 line used to be listed here as a third; it no longer is, because the script's `FRC_*` env seams
 drive both of its branches against a throwaway receipt — only the unseamed live invocation retires
 the guard, and that single act is what stays irreversible.
@@ -465,9 +472,68 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
   Success: `is-enabled` prints `masked` twice and the `list-timers` grep finds nothing.
   *(unit names verified 2026-08-13 — `systemctl --user list-timers --all` shows
   `helix-dogfood.timer` → `helix-dogfood.service`, NEXT `Fri 2026-08-14 09:00:00 KST`, and
-  `list-unit-files` shows `helix-dogfood.timer enabled` / `helix-dogfood.service static`. The
-  stop/mask pair itself is **UNREHEARSED**: rehearsing it would have taken the live dogfood run
-  down during the window.)*
+  `list-unit-files` shows `helix-dogfood.timer enabled` / `helix-dogfood.service static`.)*
+
+  > ### REHEARSED 2026-08-25 — THE BLOCK ABOVE DOES NOT WORK. Use the corrected one below.
+  >
+  > The block above is left byte-identical because what it does is a finding. It was rehearsed on
+  > 2026-08-25 — safely, because the day's run had already fired and the next elapse was the
+  > following 09:00, so no run could be suppressed — and **`mask` failed**:
+  >
+  > ```
+  > Failed to mask unit: File ~/.config/systemd/user/helix-dogfood.timer already exists.
+  > exit=1
+  > ```
+  >
+  > *(rendered with `~`; the real message prints the path absolutely, which
+  > `test/output-vocabulary.test.ts` reserves to the receipt.)* Both unit fragments live in
+  > `~/.config/systemd/user/`, which is exactly where `systemctl --user mask` wants to put its
+  > `/dev/null` symlink, and systemd will not overwrite a regular file. **`--force` would, by
+  > destroying the unit file — do not use it.**
+  >
+  > **What is left after the failure is the danger.** `stop` exits 0, so the timer stops and
+  > `list-timers` shows no NEXT — which reads like success. But the unit is still `enabled`, so
+  > `timers.target` re-activates it at the next boot and `Persistent=yes` fires the missed run
+  > immediately. That is the `snapshot-after-close` row, arriving with no keystroke.
+  >
+  > **`mask --runtime` is a TRAP and was measured to be one.** It exits 0 and prints
+  > `Created symlink /run/user/<uid>/systemd/user/helix-dogfood.timer → /dev/null`, so it looks
+  > like it worked. It does not: `systemd-analyze --user unit-paths` puts
+  > `~/.config/systemd/user` ABOVE `/run/user/<uid>/systemd/user`, so the real fragment shadows the
+  > mask. Measured after it: `LoadState=loaded`, `FragmentPath` still the real file, and a
+  > `systemctl --user start helix-dogfood.service` **went straight through and launched a live
+  > autonomous run** (2026-08-25T22:38:13+09:00, killed at 22:41:39 before it wrote; recorded in
+  > `v2-freeze-deviations-2026-08.md`). A daemon-reload does not rescue it — the path order does not
+  > change.
+
+  **THE CORRECTED BLOCK — rehearsed end to end 2026-08-25, and reversed cleanly.** It masks from
+  `~/.config/systemd/user.control/`, the HIGHEST-priority entry in the user unit path, so the real
+  fragments are shadowed rather than replaced and both unit files survive byte-identical.
+
+  ```bash
+  systemctl --user stop helix-dogfood.timer helix-dogfood.service
+  mkdir -p ~/.config/systemd/user.control
+  ln -sfn /dev/null ~/.config/systemd/user.control/helix-dogfood.timer
+  ln -sfn /dev/null ~/.config/systemd/user.control/helix-dogfood.service
+  systemctl --user daemon-reload
+  systemctl --user is-enabled helix-dogfood.timer helix-dogfood.service
+  systemctl --user list-timers --all | grep helix-dogfood || echo "no helix-dogfood timer scheduled"
+  ```
+
+  Success, and it is the SAME criterion the original block stated: `is-enabled` prints `masked`
+  twice and the `list-timers` grep finds nothing. *(Observed 2026-08-25: `masked` / `masked`, then
+  `no helix-dogfood timer scheduled`. `LoadState=masked` and `FragmentPath` pointing into
+  `user.control` for both units. The two fragments in `~/.config/systemd/user/` hashed identically
+  before and after.)*
+
+  **`disable` is deliberately NOT in the block, and that is measured rather than assumed.** While
+  masked, every activation route is refused — `systemctl --user enable helix-dogfood.timer` →
+  *"Failed to enable unit: Unit file … is masked"*; `start` on the timer → *"Unit
+  helix-dogfood.timer is masked"*; `start` on the service → *"Unit helix-dogfood.service is
+  masked"*. So the mask alone closes the boot path, the timer path and the hand path, and it
+  survives a reboot because `user.control` is a config directory rather than a runtime one. Adding
+  `disable` would only create a second piece of state for G6 to remember to restore, and forgetting
+  it is the silent permanent change G6 warns about.
 
   Mask **both** units, not only the timer: the service is `static` but still reachable by hand and
   by `systemctl --user start`, and masking the timer alone leaves that door open.
@@ -1989,7 +2055,35 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   ```
 
   Success: `is-enabled` prints `enabled` and `list-timers` shows a NEXT at the following
-  09:00 KST. **UNREHEARSED** (the mask it reverses was never applied during the window).
+  09:00 KST.
+
+  > ### REHEARSED 2026-08-25 — `systemctl --user unmask` DOES NOT REVERSE 0.6's corrected mask.
+  >
+  > The block above is left byte-identical, because its first line failing silently is the finding.
+  > `systemctl --user unmask helix-dogfood.timer helix-dogfood.service` **exited 0 and removed
+  > nothing** — neither the `user.control` symlinks 0.6 creates nor the `/run` ones a stray
+  > `mask --runtime` would leave. `unmask` only looks where `mask` writes, and 0.6's corrected mask
+  > does not live there. **An operator checking exit codes would read that as a successful
+  > reversal, then leave the daily run dead.** Remove the symlinks by hand:
+  >
+  > ```bash
+  > rm -f ~/.config/systemd/user.control/helix-dogfood.timer \
+  >       ~/.config/systemd/user.control/helix-dogfood.service
+  > rmdir ~/.config/systemd/user.control 2>/dev/null || true   # 0.6 created it; leave it only if other units live there
+  > systemctl --user daemon-reload
+  > systemctl --user enable --now helix-dogfood.timer
+  > systemctl --user is-enabled helix-dogfood.timer
+  > systemctl --user list-timers --all | grep helix-dogfood
+  > ```
+  >
+  > **Order is forced, not stylistic:** `enable` is REFUSED while the unit is masked (*"Failed to
+  > enable unit: Unit file … is masked"*), so the symlinks must go first. Observed 2026-08-25 after
+  > this block: `is-enabled` → `enabled`, `list-timers` → NEXT at the following 09:00 KST,
+  > `LoadState=loaded` with `FragmentPath` back on the real fragment, and the persistent stamp
+  > unchanged, so **no catch-up fired on the restart** — the stamp was newer than the last elapse.
+  > Verify against a state you captured BEFORE 0.6, field by field; that is what caught the
+  > leftover `/run` symlink on the rehearsal.
+
   The daily run is a freeze-era control's *victim*, not the control: leaving it masked would be a
   silent, permanent change made by the close. `Persistent=true` means the first firing after the
   unmask may be an immediate catch-up — that is expected, and it is now safely after C1.2.
