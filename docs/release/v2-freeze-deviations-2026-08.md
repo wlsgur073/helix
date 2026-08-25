@@ -739,6 +739,76 @@ clone could not carry drifted pinned SOURCE, because the branch tip did not have
 an exposure of shape rather than of bytes — but it rests on the auto-update flags staying `false`
 rather than on there being nothing to pull.
 
+### Why-log — the peer reconciliation behind this corrigendum and the close-sheet corrections
+
+Recorded because the disagreements and how they resolved are the part no code or changelog keeps.
+It covers this corrigendum AND the four close-run-sheet corrections committed alongside it, which
+came out of the same consultation. The consultation was symmetric: one neutral question, an answer
+published before the call so the two were provably independent, then reconciliation against local
+evidence rather than by authorship. Two metered rounds of a three-round budget; convergence declared
+when the only residual was a measurement gap rather than a disagreement.
+
+**Instrument note.** Both rounds returned `verdict: diverge` from the agreement map while listing
+this side's OWN answer sentences in the divergence column. That is the known aligner mislabel, not a
+finding; both rounds were reconciled by reading the two answers point by point. Recorded so the
+header is not later mistaken for a substantive disagreement.
+
+**Divergence 1 — what makes a correction permissible. RESOLVED AGAINST ME on the ground, not the
+conclusion.** This side argued the run sheet may be corrected because it is not pinned and is not
+one of the two pinned method docs. The peer reasoner rejected that as the deciding test: *"The
+file's unpinned status is supporting evidence, not the deciding factor; semantic effect controls"*,
+and *"Executable bits, filename extension, repository location, and pinning do not control."*
+Correct — §8's tooling limb turns on the act of building, and CLAUDE.md's standing rule says the
+same in its own words ("the rule is about the act, not the directory"). The conclusion survives on
+the replaced ground, and it is why step 0.5's loop was left byte-identical while only the sentence
+it licensed was corrected.
+
+**Divergence 2 — E4's failure set. RESOLVED AGAINST ME, and it changed the work.** This side
+proposed re-deriving E4's predicted failure set from the corrected E3. The peer reasoner separated
+E4 from the other three: *"changing which failures count as 'real' changes an operative
+classification if that classification affects acceptance. The safe correction is to mark the old
+prediction unsupported, not create a new expected-failure exemption."* Adopted, with a refinement
+the reviewer's own criterion licenses (*"Changes to comments or displayed expected output are
+prose"*): E4 now carries a DATED MEASUREMENT and an instruction to re-measure immediately before
+close, rather than a set authored three weeks ahead of the run it describes. This was the single
+largest change the consultation made.
+
+**Divergence 3 — the witness substitute. CONVERGED, with the reviewer stronger on mechanism.** Both
+sides concluded that no substitute reaches independence and that saying otherwise would be the
+error. The reviewer supplied the part this side lacked: *"A local Git commit timestamp is weak
+because timestamps and history are operator-controlled. A commit hash pushed or otherwise anchored
+to an independently timestamped service is materially stronger."* That is why the corrected sheet
+was pushed rather than only committed — the pre-commitment instrument has to be anchored outside the
+operator to constrain them.
+
+**Divergence 4 — the byte argument. LIMITED BY THE REVIEWER, THEN CONFIRMED BY MEASUREMENT.** This
+side claimed present byte identity at the pinned load paths was load-bearing on its own. The
+reviewer limited it correctly: *"hashes measured only today prove present equality, not that the
+files never changed temporarily and were restored… The direct limb carries the conclusion only if
+contemporaneous evidence or history establishes continuity across the relevant interval."* The
+demanded evidence was then produced and is the consolidated measurement above. The conclusion
+survived on stronger ground than it had been given. **The reviewer's limit is the reason this entry
+contains a measurement rather than an assertion.**
+
+**Divergence 5 — splitting close-day execution. CONVERGED BY DIFFERENT ROUTES.** This side reached
+it from the clause's enumeration (a calendar is not a system, config, rule or metric) and from the
+fixed close's stated purpose. The reviewer reached it by naming the conditions under which splitting
+stays scheduling, and added one this side did not have: never pause while the shared cache path is
+absent or partially replaced, and if runtime continuity across the pause cannot be assured, split
+after the reinstall instead of before the uninstall.
+
+**Nothing here decides §8.** The disposition is `R-2026-08-19`'s, below. This consultation was about
+how to spend the days remaining before the close, not about the reading.
+
+**What the consultation did NOT catch, and measurement did — recorded against this side's
+interest.** The question put to the reviewer was framed on the premise that `D-2026-08-18`'s three
+reach limbs still stood and that the push had newly killed the first. That framing was wrong: the
+Addendum above had already recorded all three failing, on 2026-08-19, and `R-2026-08-19` had already
+re-decided the outcome on other grounds. Neither reasoner had that, because neither was given it;
+re-reading this ledger is what produced it, and it shrank the intended amendment to the premise
+correction and the continuity measurement above. **A peer consultation inherits the framing it is
+given, and verifying the framing is the operator's job, not the peer's.**
+
 ## Ruling R-2026-08-19 — the in-window product rebuild is ruled NOT a reset
 
 Recorded in the shape R-2026-08-16 established, because this ledger is the §9a report's source for
@@ -1218,3 +1288,4 @@ the resulting shortfall is deferred to the close instant, when eligibility is re
 every live competitor, rather than settled now: amending the pass rule while its outcome is pending
 is what the fixed-close architecture of §5 exists to prevent, and it would buy no schedule in any
 case, since the close instant and the post-close `bin/` rebuild are fixed independently of it.
+

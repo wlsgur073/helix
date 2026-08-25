@@ -8,6 +8,14 @@ document does not repeat it, it executes it.
 The deliverable is `docs/release/v2-close-report-2026-08.md` (§9a). Every step below either
 produces evidence that report cites, or removes a control the freeze installed.
 
+**Provenance of the 2026-08-25 corrections.** Five steps were re-anchored to measurement that day
+(0.5, 0.6, Block B's intersection claim and its three echoes, E3, E4) after four of this sheet's
+predictions were found false and two of them inverted. The reasoning, including the points where a
+symmetric peer consultation corrected this sheet's author rather than confirming him, is the
+`### Why-log — the peer reconciliation behind this corrigendum and the close-sheet corrections`
+section of `v2-freeze-deviations-2026-08.md`. It is recorded there rather than here because a
+run-sheet executes and a ledger explains.
+
 **Read "Which tree runs what" (after Block B) before you run anything.** Not every command here
 runs from the same directory, and one of them *cannot* run from the candidate checkout. The rule
 has four parts and every step below is tagged with the part that applies. *(Was two under the first
