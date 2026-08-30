@@ -741,6 +741,12 @@ The snapshot is assembled by the operator per `pilot-protocol.md` §9b.
   Then close every Claude Code session: an external copy is not covered by Helix's file lock, a
   copy taken mid-rewrite catches an inconsistent instant, and any `helix_memory_*` commit from a
   live session is itself a post-close write. **The 0.6 invariant governs from here to C1.2.**
+  *(query line rehearsed 2026-08-27, before any 0.6 — `is-enabled` → `enabled` / `static`, exit 0,
+  which is the pre-0.6 reading; `masked masked` is what this step expects AFTER 0.6. The session
+  census this step and A3 rely on: `pgrep -af helix-mcp` over-counts, because it matches the shell
+  that invoked it — three rows for one server on 2026-08-27 — while `ps -eo pid,args | grep
+  '[h]elix-mcp\.mjs' | wc -l` counted exactly 1; use the bracketed form. The session-close half is
+  unrehearsed for a measured reason: closing the rehearsing session is the act itself.)*
 
 - [ ] **C1.2 Copy both units, read-only, into the two-part layout.** The layout is not a convention
   this sheet invented — it is the one `snapshot.ts:61-64` reads (`home/memory.jsonl`,
@@ -772,6 +778,11 @@ The snapshot is assembled by the operator per `pilot-protocol.md` §9b.
   root, and `find` listed the eight files below. **If `PROJ` prints `AMBIGUOUS`** the registry holds
   more than one project: stop and decide by hand which unit the pilot measured — the freeze receipt
   pins one project ledger, not a set.
+  *(re-rehearsed 2026-08-27 in the same form, key stubbed)* → `project unit:
+  ~/dev/helix-dogfood/tinytask` read from the registry copy; the guarded line printed `no
+  ~/.helix/witness-log.jsonl — not a pinned file, absence is fine`; `find` listed exactly the eight
+  files; every copied non-stub file `cmp`-identical to its live source, and the stub key never left
+  the throwaway `HOME`.
 
   The files that must land — eight on this deployment, nine if `witness-log.jsonl` has appeared by
   close day: `home/{memory.jsonl,projects.json,witness.json,ledger-mac-master.key,config.json}` and
@@ -792,7 +803,9 @@ The snapshot is assembled by the operator per `pilot-protocol.md` §9b.
   e576ee4 $CANDIDATE` confirms it is an **ancestor of the candidate** *(re-measured 2026-08-14
   against `94dd136`: YES)* — so `canonicalRoot` is in the measured code, and
   `git show $CANDIDATE:src/memory/ownership.ts` shows it at `:12`, used at `:123`, `:164`
-  and `:208`. *(An earlier draft called it a post-freeze commit. It is not, and the difference
+  and `:212` *(re-measured 2026-08-27 against `94dd136`; this line said `:208` until then. The
+  development tree numbers the same four sites `:34`, `:176`, `:217`, `:265`, which is why the
+  candidate's numbering is the one to read)*. *(An earlier draft called it a post-freeze commit. It is not, and the difference
   matters in the reader's direction: post-freeze would have meant the trap belonged to code the
   chain does not run, and therefore that this step could be skipped. It cannot.)* A snapshot copied
   to a new
@@ -833,6 +846,14 @@ PY
   **The three fields are moved, never regenerated**: `stamp` is the value `.owner` must equal
   (`ownership.ts:120-126`) and `macNonce` derives the ledger MAC subkey, so minting either one
   invalidates every signed verify row in the snapshot.
+  *(re-rehearsed 2026-08-27, twice.)* On the C1.2 copy: the key list printed the LIVE key beside
+  `@global` while `realpath` printed the snapshot path — the trap as described; the heredoc printed
+  `rekeyed to: <snapshot realpath>`; keys afterwards `['@global', <that realpath>]`; the moved entry
+  carried exactly `adoptedAt`, `macNonce`, `stamp`; no `projects.json.tmp` left. Then inside the
+  synthetic chain, where the fixture had been copied into place WITHOUT this step: C3 refused
+  `scope-did-not-participate` (disposition `unadopted-present`, the project having contributed rows
+  to the recall bound) and wrote neither output; after this block and C1.4 it accepted. The refusal
+  described below is now observed, not predicted, and so is the repair.
 
   Success: the key set contains the realpath printed above (plus the reserved `@global` entry).
   Refusal, and this is why it matters: the degradation is **silent at copy time** and surfaces
@@ -868,6 +889,8 @@ PY
   count. Success: all three plus rows > 0. Refusal: `MISSING`, or `False` on the stamp — C1.3 did not
   take; fix it now. Re-running the same check against the un-rekeyed registry printed
   `MISSING`, which is the state that becomes `scope-did-not-participate` at C3.
+  *(re-rehearsed 2026-08-27 on the C1.2 copy, both ways)* → before C1.3: `MISSING` / `False` /
+  `False` / `project ledger rows in the snapshot: 55`; after: `present` / `True` / `True` / `55`.
 
   **This is a necessary condition, not the full probe.** Recall is exercised for real at C3, whose
   `scope-did-not-participate` refusal (`candidate-universe.ts:136-140`) is the tooling-backed
@@ -889,6 +912,17 @@ cd ~/close-run/snapshot && find . -type f | sort | xargs sha256sum | tee ~/close
   measurements of the same directory and neither replaces the other. `snapshot-hashes.txt` is
   written OUTSIDE the snapshot directory on purpose: a listing written inside it would change what
   it is a listing of.
+  *(rehearsed 2026-08-27 on the C1.2 copy under a throwaway `HOME`, inside `( … )` so the `cd` did
+  not escape)* → one composed line, `<64 hex>  = the snapshot hash (sha256 over the sorted per-file
+  sha256 listing)`; `snapshot-hashes.txt` had 8 lines in bytewise path order and was written outside
+  the snapshot; `sha256sum snapshot-hashes.txt` equalled the composed value; `find` still counted 8.
+  **One reproducibility caveat, measured and not fixed:** `sort` collates by locale, and the listing's
+  order is what the composed hash is over. This box has only `C`, `C.utf8` and `POSIX` installed
+  (`locale -a`), and both the interactive shell and the user systemd instance run `LANG=C.UTF-8`, so
+  here the order is bytewise and deterministic; a locale whose collation ignores leading punctuation
+  would place `./proj/.helix/.owner` after `./proj/.helix/config.json` and compose a different hash
+  over identical bytes. Whether to pin `LC_ALL=C` in the block is the owner's call — it is a command
+  change, and the value it protects is §9 element 2's anchor.
 
 ### C2. Manifest — ledger-only, both bounds required
 
@@ -912,6 +946,27 @@ $TSX scripts/pilot/generate-manifest.ts \
   coerced; a close at or before the cutoff is refused rather than yielding an empty manifest
   indistinguishable from a starved window. If the manifest is **empty**, that is a result, not a
   failure — record it and do not re-run to obtain a different one.
+- [ ] *(rehearsed 2026-08-27, synthetic snapshot: one home row and four project rows with `tx` at
+  the cutoff instant, twice inside the window, and at the close instant)* → `probes: 3 (ledger 3,
+  oracle 0); unambiguous: 2`, exit 0; the manifest carried `k` 20 and the receipt's `txAfter` /
+  `txClose`; probe ids `L_m_1`, `L_m_2`, `L_m_hi` — the row at `tx == txAfter` excluded, the row at
+  `tx == txClose` included, which is the strict-lower / inclusive-upper window stated above, now
+  observed. Probe ids are `L_<row id>`.
+- [ ] *(refusals rehearsed 2026-08-28 over the same snapshot, a fresh `--out` each)* → `--after
+  2026-08-14T06:20:01Z` (no fractional seconds) → `Error: non-canonical-cutoff: … is not a canonical
+  UTC instant (YYYY-MM-DDTHH:MM:SS.sssZ); the cutoff comparison is a string comparison and only that
+  form orders correctly`, exit 1; `--close 2026-02-30T00:00:00.000Z` → `non-canonical-close`, exit 1;
+  the bounds swapped → `window-never-opens: close … is not after cutoff …`, exit 1; no file for any
+  of the three. A window opening 2026-08-23 → `probes: 1 (ledger 1, oracle 0); unambiguous: 0`,
+  exit 0 — the row AT the close instant is still inside, the inclusive upper bound again; a window
+  closing before that row → `probes: 0 (ledger 0, oracle 0); unambiguous: 0`, exit 0, and a
+  108-byte manifest carrying `"probes": []` — the empty result the bullet above calls a result.
+  Re-issuing either over its own `--out` → `output-exists`, exit 2, file unchanged. *(The SHAPE of a
+  refusal, recorded so the transcript reads right: a gate refusal (exit 1) from every pilot tool
+  arrives as a Node uncaught exception — a source excerpt, then `Error: <slug>: …`, then a stack
+  trace, fourteen lines for `score-gate`'s — with the slug on the `Error:` line; an invocation
+  refusal (exit 2: `output-exists`, `missing-input`, `unknown-input`, `bad-arguments`,
+  `input-unreadable`) is a one-liner. "Record it verbatim" means the whole trace.)*
 
 ### C3. Classifier + its `.universe.json` sibling
 
@@ -926,6 +981,30 @@ $TSX scripts/pilot/classify-o67.ts \
   (`classify-o67.ts:114` derives it from `<out>`). Both are inputs to the next two steps.
 - [ ] Refusal: `reserved-output-suffix` if `<out>` itself ends in `.universe.json` (it would let a
   later run overwrite this run's verdicts); `scope-did-not-participate` if C1.3 was skipped.
+- [ ] *(rehearsed 2026-08-27)* → against the un-rekeyed copy: exit 1, `scope-did-not-participate`
+  (disposition `unadopted-present`; the project had contributed 4 rows) and NEITHER file written;
+  after C1.3 + C1.4: exit 0, both files; the universe carried `artifact` `candidate-universe`,
+  `recallBound` 5, `projectDisposition` `owned`, `integrityAvailable` true, `rowsByScope`
+  `{global: 1, project: 4}`; `snapshot/home/projects.json` byte-identical across the run and the key
+  still mode 600.
+- [ ] *(refusals rehearsed 2026-08-28)* → an `<out>` ending in `.universe.json` →
+  `reserved-output-suffix: <out> must not end in .universe.json …`, exit 2, and `.UNIVERSE.JSON` the
+  same (the reserve is case-insensitive); a COPY of the snapshot whose registry key names the
+  original fixture path — the un-rekeyed state — → `Error: scope-did-not-participate: the project
+  ledger contributed 4 rows to the recall bound but its disposition is 'unadopted-present', so
+  recall served none of them …`, exit 1, and NEITHER file written (`assertScopeParticipated`,
+  `classify-o67.ts:165`, runs before either `writeArtifact`, `:176` / `:183`).
+- [ ] **A finding this step's refusal list does not carry, measured 2026-08-28 on a copy whose
+  registry LACKED `@global`: `classify-o67` does not refuse — its recall MINTS the entry**
+  (`ownership.ts:221-245`, reached through `verified-read.ts:27`), exits 0, and rewrites the
+  snapshot's `home/projects.json` (its sha256 changed, mode 664 → 600) and chmods `snapshot/home`
+  to 700. C4 then pins the minted bytes and nothing downstream notices; C7's
+  `snapshot-registry-incomplete` fires only on a snapshot C3 never ran over (in rehearsal it was
+  reached only by deleting the minted entry again). So a registry without `@global` is silently
+  COMPLETED here — after C1.5 has hashed the snapshot and before C4 pins it — and C1.5's composed
+  hash would no longer describe the directory. The live registry carries `@global` (measured
+  2026-08-27: keys `['@global', <the project unit>]`), and C1.3's success line already requires it:
+  read that line as the guard it is, and re-run C1.5 if it ever has to be added by hand.
 
 ### C4. Input pins — the close-time half of the freeze receipt
 
@@ -980,6 +1059,41 @@ $TSX scripts/pilot/input-pins.ts \
     produced.
   - exit **2** (invocation) if `config.path` is unreadable: the chain is bound to the deployment
     machine and there is no flag to skip it.
+- [ ] *(rehearsed 2026-08-27, `--freeze` through a throwaway `HOME` whose `~/dev/helix` was a
+  symlink to the real repository — the receipt is read, never written)* → three lines: `input pins
+  derived under freeze 360ffe80…`, `window 2026-08-14T06:20:01.000Z .. 2026-09-11T06:20:01.000Z
+  (k=20)`, `10 inputs pinned: manifest, classifier, universe, ledger:global, ledger:project,
+  ownership:registry, ownership:owner, trust:master-key, trust:witness, expansion:semantic-neighbors`,
+  exit 0. `pins.json` keys `attestation`, `freezeSha256`, `inputs`, `k`, `txAfter`, `txClose`;
+  `freezeSha256` equal to the receipt's `payloadSha256`; `inputs['trust:witness']` = `absent`. The
+  rule two bullets up, observed: `--k 20`, `--cutoff …` and `--close …` each → `unknown-input:
+  --<flag> is not an input of the pins …`, exit 2, no file. This is the chain's one read outside the
+  snapshot and the checkout — `~/.helix/config.json` at the path the receipt records — and its stat
+  was unchanged afterwards.
+- [ ] *(refusals rehearsed 2026-08-28)* → a checkout-relative `--freeze
+  docs/release/v2-freeze-receipt-2026-08.json` → `input-unreadable: --freeze … could not be read
+  (ENOENT …)`, exit 2, before any pin (`ls ~/close-candidate/docs/release | wc -l` → 20, no
+  receipt). **The moved chain, observed:** the same command from `~/dev/helix` at `eddf313` →
+  `Error: method-drift: 2 method pin(s) changed between the freeze and the close: tool
+  src/memory/store.ts (frozen 89219c6b…, close-time f96aa9e9…); tool src/memory/ownership.ts
+  (frozen 8906b3f2…, close-time 6b07743b…) …`, exit 1 — exactly the two files Block B names, as its
+  2026-08-25 re-measurement predicted, and only for as long as they differ. Scratch receipts, each a
+  copy of the real one with `payloadSha256` recomputed (the recomputation reproduced the live
+  value first): `config.path` → a file holding `{}` → `method-drift: 1 method pin(s) changed …
+  config …`, exit 1; `config.path` → an absent file → `input-unreadable`, exit 2; payload without
+  `tools` → `freeze-receipt-incomplete`, exit 1; `payload.k` = 21 with the sha left alone →
+  `freeze-receipt-tampered: the freeze receipt's payload hashes to … but 360ffe80… is recorded
+  beside it`, exit 1; `--freeze` handed the manifest → `not-a-freeze-receipt: --freeze names a file
+  whose artifact field is 'undefined'`, exit 1; a manifest generated under `--after
+  2026-08-15T00:00:00.000Z` → `manifest-method-mismatch: the manifest declares k=20, window
+  2026-08-15… ; the freeze receipt fixes k=20, window 2026-08-14… …`, exit 1. No `--out` appeared
+  for any refusal. *(Corrected 2026-08-28: `manifest-not-the-pinned-file`, paired with
+  `manifest-method-mismatch` in the list above, cannot be produced from this command line —
+  `input-pins.ts:276` reads the manifest text and `:281-283` (through `pin-hashes.ts:292`) hashes
+  the SAME `--manifest` path in one process, so the comparison at `:190-191` guards the exported
+  `inputPins()` API and is reached only by `test/pilot/input-pins.test.ts`. The refusal an operator
+  can see for "not the manifest C2 produced" is `manifest-method-mismatch`; do not wait for the
+  other.)*
 - [ ] **The runtime half is declared, not re-derived.** `input-pins.ts` says so itself. §10's "both
   are verified again at the close" is therefore discharged by **C11**, which must be observed
   **before D1 and before Block F** — not by Block F's post-redeploy check, which by then can only
@@ -1012,6 +1126,36 @@ $TSX scripts/pilot/prepare-gate.ts \
 
   *(rehearsed 2026-08-13: pasted unchanged it prints `NOT a 64-hex sha256`; with a 64-hex value it
   prints `PREPARE_SHA ok`.)*
+  *(rehearsed 2026-08-27, synthetic snapshot)* → `gate-set prepared: EXERCISED — 2/2; O_67
+  UNEXERCISED — 0 distinct cases observed (reporting only, non-blocking); stale UNEXPOSED — no
+  temporal evidence` and `payload sha256: 175550cf…`; the guard printed `PREPARE_SHA ok`;
+  recomputing sha256 over `json.dumps(payload, separators=(',', ':'), ensure_ascii=False)`
+  reproduced the recorded value, and `payload.window` carried the receipt's bounds. `--results x` →
+  `unknown-input: --results … outcome-blind`, exit 2, no file; the identical command re-issued →
+  `output-exists`, exit 2, bytes unchanged.
+  *(refusals rehearsed 2026-08-28, each on a copy re-keyed per C1.3 and re-derived through C2–C4
+  wherever the pins had to pass)* → a project row with `tx` `2026-09-11T06:20:01.001Z`: C2 excludes
+  it silently (3 probes), C3 accepts it into the universe (`rowsByScope` project 5), C4 pins it,
+  and only this step refuses — `Error: snapshot-after-close: project row m_late has tx
+  2026-09-11T06:20:01.001Z, after the pinned close 2026-09-11T06:20:01.000Z …`, exit 1, no file:
+  "surfaces at C5" is now observed. `home/ledger-mac-master.key` deleted from a copy: C2, C3 (exit
+  0, universe `integrityAvailable` false) and C4 (`trust:master-key` pinned `absent`) all pass, and
+  this step refuses `degraded-run: ledger integrity verification was unavailable for this recall`,
+  exit 1. Manifest copy with `txClose` moved one second → `pin-mismatch` (checked before the hashes,
+  `prepare-gate.ts:214`); classifier copy plus a trailing newline → `input-hash-mismatch: input
+  'classifier' hashes to … but the freeze pins …`; pins copy with `inputs['classifier']` renamed →
+  `input-set-mismatch` (both name lists printed); manifest copy with one probe's `unambiguous`
+  flipped, pins re-derived → `eligibility-disagreement: probe L_m_1 is unambiguous=false in the
+  manifest but hit1Eligible=true in the classifier …`; universe copy minus one probe, pins
+  re-derived → `universe-probe-mismatch`; a `supersede` row naming a missing id, dated BEFORE the
+  cutoff so it is not itself a probe → `dangling-closer: project row m_sup is a supersede naming
+  m_missing, which is not present in that scope …`. Every one exit 1 with no file.
+  `ledger-tx-non-canonical` was not exercised. *(Corrected 2026-08-28: the gloss "`degraded-run`
+  (C1.3 again)" names one cause of three at this step — `prepare-gate.ts:245-250` refuses it for
+  integrity unavailable (the missing key above), expansion unavailable, and the project
+  disposition — and `run-pilot.ts:179`, `:193`, `:240` add the disposition, a missing
+  `data/semantic-neighbors.json` and the witness state at C7. A missing key or asset is refused
+  with the same slug the registry trap gets; the quick index's row is widened accordingly.)*
 
   Keep it in the same shell as `$TSX` (the transcript shell of 0.1).
 - [ ] Refusals: **`snapshot-after-close`** (a row later than `txClose` reached the corpus — the §2
@@ -1035,6 +1179,12 @@ $TSX scripts/pilot/ordering-receipt.ts --mode append \
 - [ ] `--run-id` is **REFUSED** for `prepare-finished` and **REQUIRED** for the runner events.
 - [ ] This append must happen **before** C7. It is §9 evidence element 4 and nothing else in the
   chain records it.
+- [ ] *(rehearsed 2026-08-27)* → `appended seq 0 prepare-finished — payload 175550cf…` and `chain:
+  92e87b74…`; line 0 carried `seq` 0, `runId` null, `prev` sixty-four zeros. The REFUSED / REQUIRED
+  asymmetry measured both ways on the same log: `--run-id run1` on `prepare-finished` →
+  `run-id-on-prepare`, exit 2; `runner-started` without `--run-id` → `missing-run-id`, exit 2; the
+  log stayed at 1 line. A pre-existing zero-length log → `log-preexisting-empty`, exit 2, still 0
+  bytes.
 
 ### C7. Runner ×3 — stability
 
@@ -1094,6 +1244,51 @@ the `runner-finished` block, still carrying its unreplaced `PASTE_…` sha, prin
 and appended nothing; with a real 64-hex value it landed as the next line. The unguarded original,
 on the identical input, printed `appended seq 0 runner-started (run 'run')` — into a hash-chained
 file.)*
+
+*(rehearsed 2026-08-27, synthetic snapshot, longhand — the four blocks pasted three times with
+`RUN_N` 1, 2, 3, and once with the placeholder left.)* Placeholder pass: `STOP:` then the two
+`REFUSED locally` lines, the log still 1 line, no artifact. Real passes: seq 1–6 appended; each run
+printed `run <uuid> over 3 probe(s) at K=20`, `prepare sha256:` equal to `PREPARE_SHA`, `manifest
+sha256: d3b2d8de…`, `payload sha256: 7b94bf65…` — identical across the three runs while the three
+files' own sha256 differed; `run1.json`'s `receipts.runId` (a UUID) appears nowhere in the ordering
+log; `ordering.jsonl` 7 lines; `--mode verify --expect-prepare "$PREPARE_SHA"` → `ordering receipt
+VERIFIED — 7 entries, 1 prepare-finished, 3 run(s) bound`, exit 0. The two bullets below, observed:
+`--payload-sha PASTE_THE_PAYLOAD_SHA256_HERE` → `bad-payload-sha`, an uppercase hex → the same,
+`--run-id ''` → `bad-run-id`, the log still 7 lines; `run-pilot --run-id run1 …` → `unknown-input:
+--run-id is not an input of the runner`, exit 2, no file.
+
+*(verify-time refusals rehearsed 2026-08-28 on scratch logs built with the tool's own `append`
+mode — every append exited 0; every refusal came from `--mode verify`, which C10 runs)* → a
+`runner-started` with no `prepare-finished` before it → `run-before-any-prepare`; a
+`runner-finished` whose id no `runner-started` opened → `finish-without-start: seq 1 closes run
+'run1', which no earlier runner-started opened …` (the index row's "label differs between the
+pair" is one case of it; a finish with no start at all is the other, same remedy); two
+`runner-started run1` → `duplicate-run-id: run id 'run1' is claimed by seq 1 and again by seq 2
+…`; a `runner-started` carrying a 64-hex that no `prepare-finished` carries →
+`run-prepare-hash-unmatched`. All exit 1. **And one thing `VERIFIED — N run(s) bound` does NOT
+say, measured on a log with three `runner-started` and no `runner-finished`: it verifies at exit
+0 as `4 entries, 1 prepare-finished, 3 run(s) bound`, each run's line disclosing `NO
+runner-finished recorded` — "bound" counts an OPENED run, not a bracketed one. At C10 read the
+entry count (7) and the per-run lines, never the summary alone.**
+
+*(runner refusals rehearsed 2026-08-28, each on a copy with a fresh `--out`)* → gate-set copy with
+`payload.k` = 21 and the sha left alone → `gate-set-tampered`; manifest copy plus a trailing newline
+→ `manifest-not-pinned: this manifest hashes to … and the gate set pins …`; snapshot copy with one
+byte appended to `home/memory.jsonl` → `snapshot-not-pinned: ledger:global hashes to … and the gate
+set pins …`, and a copy given a `witness.json` where the pins say `absent` → the same slug with
+`trust:witness hashes to … and the gate set pins absent` (byte pins are checked before the
+disposition — `run-pilot.ts:160` before `:179` — so no re-key was needed); gate-set copy with
+`inputs['expansion:semantic-neighbors']` zeroed and the sha RE-stamped → `expansion-not-pinned:
+the resolved semantic-neighbor table hashes to c3cdbf64… and the gate set pins 0000…` (the re-stamp
+was accepted; `gate-set-tampered` did not fire); `data/semantic-neighbors.json` moved aside inside
+the stand-in checkout → `degraded-run: the semantic-neighbor asset (data/semantic-neighbors.json)
+did not resolve beside this executable, so recall would run without query expansion …` (moved back
+afterwards, sha256 and mtime unchanged); a snapshot copy whose registry lacks `@global`, with the
+entry C3 had minted deleted again → `snapshot-registry-incomplete: … has no '@global' entry. The
+store mints one on first recall — a write into the frozen snapshot — so the snapshot must be
+produced with a complete registry …`, the copy's registry bytes unchanged after the refusal. All
+exit 1, no file. See C3 for why that last one is reachable on close day only if C3 never ran over
+the snapshot.
 
 - [ ] The sha side needs no shell guard — `ordering-receipt` itself refuses any `--payload-sha`
   that is not 64 lowercase hex (`requireHex('payload-sha')`, before anything is written), so an
@@ -1232,6 +1427,17 @@ signatures. Note which arm catches case 4: the dev tree is its own toplevel, so 
 passes and the COMMIT check is what refuses. Both arms are needed — the root check catches a
 `~/close-candidate` lying inside another repository, where the commit could legitimately match.)*
 
+*(rehearsed 2026-08-27 under the synthetic chain, whose `~/close-candidate` was a `git archive` of
+the candidate — a stand-in with no `.git`.)* The preflight refused it: `PREFLIGHT: not a git
+repository`, exit 1, producer NOT invoked — fail-closed observed against the wrong object; the git
+arms do not apply to that stand-in and rest on the 2026-08-17 drill. The producer, then invoked
+directly over the chain's real `gate-set.json` / `run1.json`: `wrote …/adjudication.json`, `3
+contradiction judgment(s) required — one per frozen probe …`, `No stale-served-as-live judgments: …
+zero closer relationships`, the SCOPE line (§5a: judge EVERY returned record), the quote-both-sides
+line, the two-hashes line, exit 0; the identical command again → `output-exists`, exit 2, bytes
+unchanged; `--out ~/close-run/adjudication-2.json` → exit 0 with equal `gateSetSha256` and
+`runPayloadSha256` and equal entries; every `returnedId` pre-filled with the rank-1 id.
+
 **§8 disposition — RULED RESET for the first window, and it does not arise in this one.**
 *(Corrected 2026-08-17. This paragraph asserted "**The owner RULED on 2026-08-13: DISCLOSURE, not
 reset**" until then. That is the opposite of what happened: the owner ruled **RESET**, the first
@@ -1300,6 +1506,12 @@ score-gate as --run1, which is the run its adjudication check reads (score-gate.
   producer, **hand-author the adjudication** from the frozen probe list: the gate treats a
   hand-authored file and a stamped one identically, so nothing downstream changes.
 - [ ] **Pass `run1.json` here and as `--run1` to `score-gate`.** They must be the same file.
+  *(Measured 2026-08-28: the gate cannot enforce this. A skeleton stamped against `run2.json` is
+  BYTE-IDENTICAL to one stamped against `run1.json` — under a passing stability condition the three
+  run payloads hash the same — and a filled adjudication rebound to `run2`'s hash scores to the
+  same payload; `adjudication-unbound` fires only for a hash that names NO scored run (measured
+  with sixty-four `b`s). The rule is provenance discipline: keep it because the record says so,
+  not because anything checks it.)*
 - [ ] Success: the skeleton lands with one entry per frozen probe, complete and unduplicated by
   construction, both hashes recomputed from bytes, and the program prints how many judgments are
   outstanding.
@@ -1350,10 +1562,17 @@ else echo "REFUSED locally — IDS is still the placeholder. Nothing was read.";
   two real ids it printed both rows.)*
 
   *(rehearsed 2026-08-13 against a real ledger, exit 0. The field is `content` — `MemoryRecord`,
-  `src/types.ts:47` in the candidate checkout, `:50` in the development tree; `:43` is `validFrom`,
-  so read the candidate's numbering here — not `text`.)* Run it a second time against the project
+  `src/types.ts:50` in BOTH trees, `:46` being `validFrom` in both — not `text`. Corrected 2026-08-27:
+  this note gave `:47` for the candidate and `:43` for `validFrom`; measured, the two trees agree.)* Run it a second time against the project
   twin, `~/close-run/snapshot/proj/.helix/memory.jsonl` — a probe's rows may live in either unit.
   An id that appears in neither file is itself a finding: record it and stop.
+  *(re-rehearsed 2026-08-27 against COPIES of both live ledgers used as plain data — never as an
+  input of any tool)* → placeholder left: `STOP: replace IDS…` then `REFUSED locally — IDS is still
+  the placeholder. Nothing was read.`; two real project ids against the home snapshot: `IDS ok`, zero
+  rows (they live in the project unit); the same against the project twin: both rows, `<id> | <tx> |
+  Fresh | <content>`, exit 0; a nonexistent id in the quote block → `not in either snapshot ledger:
+  […] — that is a finding; stop`, exit 1, the adjudication byte-unchanged. Under the synthetic chain
+  the same block resolved `m_g` from home and `m_1` from the project twin.
 - [ ] **Do not retype the quotes — the rows are large.** The `<id> | <tx> | <state> | <content>`
   line is a *format*, not a size: measured over the 45 project rows on 2026-08-13, `content` ran
   **24 to 5004 characters** (median 2876), and **17 of 45 rows contain embedded newlines**, one of
@@ -1421,6 +1640,14 @@ else echo "REFUSED locally — one of PROBE_ID / TARGET_ROW_ID / RETURNED_ROW_ID
   `UNQUOTED — …` placeholder afterwards; with three real ids it quoted both sides, set `returnedId`
   and left the verdict `UNJUDGED`.)* Use it only for calls you have judged `contradiction`: a
   `none` verdict needs no quotes, and filling them anyway records evidence for a call nobody made.
+  *(re-rehearsed 2026-08-27, twice.)* On ledger copies with a skeleton-shaped file: `L_a: quoted
+  both sides (55 / 24 chars); verdict is still 'UNJUDGED' — set it by hand.`, no `.tmp` left, key
+  order and both hashes unchanged, `returnedId` set; the placeholder pass touched nothing. Under the
+  synthetic chain, against the producer's real skeleton: `L_m_1: quoted both sides (44 / 61 chars);
+  verdict is still 'UNJUDGED' — set it by hand.`; the verdicts were then set by hand (`L_m_1`
+  `contradiction`, with `returnedId` moved to the rank-2 record `m_g`; `L_m_2` and `L_m_hi` `none`),
+  and a read-only check found no `UNJUDGED`, no unquoted positive, key order preserved and both
+  hashes untouched — the file C9 then scored.
 - [ ] **The fail-closed property is NOT symmetric.** The gate validates contradiction verdicts and
   ignores any stale verdict that is not `violation`. An unfilled skeleton is refused because of its
   *contradictions*; judge those and leave a stale entry `UNJUDGED` and it is silently counted as
@@ -1440,6 +1667,34 @@ else echo "REFUSED locally — one of PROBE_ID / TARGET_ROW_ID / RETURNED_ROW_ID
   file to make room destroys them.
 - [ ] Refusals from the producer: `gate-set-tampered`, `run-tampered`,
   `run-not-bound-to-gate-set`, `run-probe-mismatch`, `gate-set-malformed`, `not-a-run`.
+  *(Corrected 2026-08-27: the producer also raises `not-a-gate-set`
+  (`adjudication-skeleton.ts:151`), `run-unparsable` (`:175`, an invocation failure, exit 2) and
+  `run-malformed` (`:186`, `:241`, `:251`), which this list omitted — read from the pinned source.)*
+  *(refusals rehearsed 2026-08-28 on copies of the chain's `gate-set.json` / `run1.json`, a fresh
+  `--out` each, a copy's `payloadSha256` re-stamped only where the case says so)* → run copy with
+  `artifact` `x` → `not-a-run: --run identifies itself as 'x', not 'run'`; `prepareSha256` changed
+  and re-stamped → `run-not-bound-to-gate-set: --run names prepare hash aaaa… and this gate set's
+  payload hashes to …`; a result id changed and re-stamped → `run-probe-mismatch: … In the run but
+  not in the frozen denominator: L_m_9; in the denominator but not in the run: L_m_1 …`;
+  `payload.k` = 21 with the sha left alone → `run-tampered`; the same on the gate set →
+  `gate-set-tampered`; `recallDenominator` removed and re-stamped, with a run rebound to the edited
+  hash → `gate-set-malformed: this gate set carries no recallDenominator array …`. The three
+  omitted slugs, demonstrated: `not-a-gate-set` (artifact `x`, exit 1), `run-malformed` (no
+  `payload`, exit 1), `run-unparsable` (three bytes cut off the end, exit 2 — the invocation
+  class). No `--out` appeared for any of the thirteen. **Two things the list's order hides:** the
+  tamper check (`:195`) runs before the binding check (`:202`), so an edit to `prepareSha256` or to
+  a result id WITHOUT re-stamping prints `run-tampered`, never the slug that names what was edited;
+  and `gate-set-malformed` for a missing denominator is reachable only through a run rebound to the
+  edited gate set, because binding is checked first. Measured check order: `not-a-gate-set` →
+  `gate-set-malformed` (payload) → `gate-set-tampered` → `run-unparsable` → `not-a-run` →
+  `run-malformed` → `run-tampered` → `run-not-bound-to-gate-set` → `gate-set-malformed`
+  (denominator) → `run-malformed` (results) → `run-probe-mismatch`. **The stale branch, forced**
+  (gate-set copy with `payload.stale.closerRelationships` = 1, re-stamped, and a run rebound to it):
+  exit 0 with `3 stale-served-as-live judgment(s) required — the gate set counts closer
+  relationships above zero …`, the `closedId` / `currentId` instruction, and the `WARNING — the
+  fail-closed property is NOT symmetric …` block verbatim; `staleViolations` carried three
+  `UNJUDGED` entries. The two bullets above it are borne out; the chain's own gate set counts zero,
+  so on close day this branch exists only if the corpus carries closer relationships.
 
 ### C9. Score
 
@@ -1466,6 +1721,28 @@ $TSX scripts/pilot/score-gate.ts \
   `gate-set-unpinned-*` (ledger / trust / manifest / expansion / disposition).
 - [ ] **A refusal is a result.** Record it verbatim in the report's §11 and do not re-run to obtain
   a different one.
+- [ ] *(rehearsed 2026-08-27, synthetic snapshot)* → `Hit@1 2/2 (EXERCISED — 2/2); Recall@K 3/3;
+  O_67 UNEXERCISED — 0 distinct cases observed (reporting only, non-blocking)`, `payload sha256:
+  6f822093…`, `RELEASE BLOCKED: Target-relative contradiction — 1 call(s)`, exit 0 — the block
+  reason is the one contradiction judged at C8, as designed; a wrong `--expect-payload` →
+  `gate-set-not-pinned: this gate set's payload hashes to 175550cf… but …`, exit 1, no file.
+  *(Corrected 2026-08-27: `stability-needs-three-runs` (`score-gate.ts:149`) cannot be reached from
+  this command line — `--run1`, `--run2` and `--run3` are required inputs, so omitting one is refused
+  `missing-input`, exit 2, by `parseFlags` (`:593`) before the run count is examined; read from the
+  pinned source, measured 2026-08-28 — see the refusal note below.)*
+- [ ] *(refusals rehearsed 2026-08-28, a fresh `--out` each)* → the UNFILLED twin
+  `adjudication-2.json` → `Error: adjudication-uncertain: probe L_m_1 is judged 'UNJUDGED'. An
+  unresolved judgment is a gate failure, never a pass by default`, exit 1; `--run1`, `--run2` and
+  `--run3` all naming `run1.json` → `runs-not-distinct: the three runs report run ids [<the same
+  UUID three times>] …`, exit 1; a filled copy with `runPayloadSha256` set to a hash no run carries
+  → `adjudication-unbound: the adjudication does not name this gate set and this runner output …`,
+  exit 1; `--run3` omitted → `missing-input: --run3 is required` and the usage line, exit 2 — the
+  measurement behind the correction above; a filled copy with a second verdict flipped to
+  `contradiction`, hashes untouched → exit 0, `RELEASE BLOCKED: Target-relative contradiction — 2
+  call(s)`, a different payload sha, and C9b's compare block over that pair printed `DIFFERENT —
+  stability FAILS` — the line the operator must never see on close day, now seen once. That flipped
+  verdict still carried its `UNQUOTED — …` placeholders and the gate ACCEPTED it (exit 0), exactly
+  as C8 warns.
 
 ### C9b. Re-score — the SECOND half of the Stability condition
 
@@ -1505,6 +1782,17 @@ print(a); print(b); print('EQUAL' if a==b else 'DIFFERENT — stability FAILS')"
   a tooling problem: record it and do not re-run for a third opinion.
 - [ ] C10 uses **`score.json`** (the C9 artifact). `score2.json` is evidence for §7.6 only and is
   never the release record's input.
+- [ ] *(rehearsed 2026-08-27)* → `score2.json`'s payload sha equal to `score.json`'s (`6f822093…`
+  twice, then `EQUAL`); re-issuing over `score.json` → `output-exists`, exit 2, bytes unchanged;
+  `cmp` differs at byte 4754 (line 120), and the only differing field is `receipts.scoredAt`
+  (`…50.682Z` vs `…51.023Z`) while the payload hashes match.
+- [ ] *(rehearsed 2026-08-28: `--out ~/close-run/run1.json` → `output-aliases-input: --out … and
+  --run1 … name the same file … the write destroys the very bytes the run is measured against`,
+  exit 2, `run1.json` byte-unchanged. And the rule two bullets up — `score2.json` is never the
+  release record's input — cannot be enforced by any artifact: a record made from `score2.json`
+  carries the same `scoreSha256` and the same `payloadSha256` as one made from `score.json`, the
+  payloads being identical by the very condition this step proves. It is provenance discipline;
+  keep it as such.)*
 
 ### C10. Release record
 
@@ -1598,6 +1886,41 @@ record and the signed payload carried that prose.)*
   `ordering-head-malformed`. The decision is compared against the score and must agree **in both
   directions** — you cannot record a release the gate blocked, nor a block the gate passed.
 - [ ] Record `release-record.json`'s **payload sha256**; Block D needs it.
+- [ ] *(rehearsed 2026-08-27, synthetic snapshot)* → verify: `ordering receipt VERIFIED — 7
+  entries, 1 prepare-finished, 3 run(s) bound`, head `d64fa421…`, `--expect-head: NOT SUPPLIED` and
+  five NOT-ESTABLISH caveats; with `--expect-head` supplied and matched, the tail-truncation caveat
+  closes. Guard: four `ok` lines (`DECISION=blocked`, following the score's `release.blocked`).
+  Record: `release record written: gate BLOCKED (1 reason(s)); decision blocked`, `score sha256:
+  6f822093…`, `payload sha256: bba58ece…`, `ordering head anchored (RECORDED, NOT verified …)` and
+  the ATTESTED-NOT-OBSERVED line; recomputing the payload sha256 from the file's bytes reproduced
+  the recorded value, and the payload carries `decision`, `scoreSha256`, `orderingHead`. Placeholder
+  pass: all four failure lines, `REFUSED locally … NOTHING was written.`, file bytes unchanged.
+  *(Corrected 2026-08-27, two mentions above: what the program refuses FIRST for a malformed
+  `--decision` or `--ordering-head` is `bad-arguments`, exit 2, from `parseFlags`
+  (`release-record.ts:354`, `:361`); `decision-unrecognised` (`:197`) and `ordering-head-malformed`
+  (`:258`) exist but sit behind it. The asymmetry the bullet describes — program-checked decision and
+  head, operator-checked prose — is unchanged; the slug an operator will see is not. Read from the
+  pinned source; the measurement is recorded with the refusal rehearsal below.)*
+- [ ] *(refusals rehearsed 2026-08-28 — the chain's real prose in both fields, a fresh `--out`
+  each)* → score copy with one payload character changed → `Error: score-tampered: the score's
+  payload does not hash to the value recorded beside it, so the release decision below would be
+  bound to bytes nobody scored …`, exit 1; copy with `blocked` true and `reasons` `[]`,
+  re-stamped → `score-self-contradictory: the score reports blocked=true with 0 reason(s) …`, exit
+  1; `--decision released` against the blocked score → `consequence-not-applied: the gate BLOCKED
+  and this record declares a release. The preregistered consequence of these 1 reason(s) is that
+  nothing ships: …`, exit 1; `--decision blocked` against an UNBLOCKED copy →
+  `consequence-overstated: this record declares a block, but the score reports the gate did not
+  block …`, exit 1 (and `released` against that copy wrote `release record written: gate DID NOT
+  BLOCK; decision released`, exit 0); `--consequence` set to a lone U+200B → all four guard lines
+  printed `ok` — the placeholder guard is a prefix test, and a zero-width space passes it — and the
+  program refused `consequence-unevidenced: --consequence carries no content — it is empty, or made
+  only of whitespace, zero-width and control characters …`, exit 1; `DECISION=Released` → the
+  guard's `NOT released|blocked …`, and forced past it → `bad-arguments: --decision must be exactly
+  'released' or 'blocked', got 'Released'`, exit 2 (`maybe` likewise); `--ordering-head` omitted →
+  `missing-input: --ordering-head is required`, exit 2; a 63-character head (`abc` and the empty
+  string likewise) → `bad-arguments: --ordering-head must be 64 lowercase hex characters, got …`,
+  exit 2 — the measurement behind the correction above. No `--out` appeared for any refusal, and no
+  stray file named `--out` in the checkout.
 
 ### C11. THE RUNTIME PIN — observe it NOW, while the measured deployment still exists
 
@@ -2447,18 +2770,21 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
 |---|---|---|
 | `method-drift` | `input-pins` | tools/method-docs under the cwd differ from the receipt, or `~/.helix/config.json` bytes. NOT a wrong-tree detector since the re-freeze — see Block B |
 | `scope-did-not-participate` | `candidate-universe` via `classify-o67` | `projects.json` realpath key (C1.3) |
-| `degraded-run` | `prepare-gate`, `run-pilot` | same — project scope contributed nothing |
+| `degraded-run` | `prepare-gate`, `run-pilot` | the registry (C1.3) is ONE of six causes — measured 2026-08-28: at C5 integrity unavailable (a missing `home/ledger-mac-master.key` passes C2–C4 and is refused here), expansion unavailable, the project disposition; at C7 the disposition, a missing `data/semantic-neighbors.json`, the witness state |
+| `snapshot-registry-incomplete` | `run-pilot` | `home/projects.json` without `@global` — but C3 MINTS one first (a write into the snapshot), so this fires only on a snapshot C3 never ran over; the guard is C1.3's success line (see C3) |
 | `snapshot-after-close` | `prepare-gate` | a row later than `txClose` reached the snapshot |
 | `adjudication-uncertain` | `score-gate` | a verdict is still `UNJUDGED` (C8) |
 | `adjudication-incomplete` / `-duplicate` / `-unbound` | `score-gate` | the skeleton was hand-edited; re-stamp |
-| `runs-not-distinct` / `stability-needs-three-runs` | `score-gate` | three separate run files, three separate executions |
+| `runs-not-distinct` / `stability-needs-three-runs` | `score-gate` | three separate run files, three separate executions — the second slug is unreachable from the command line, where a missing `--runN` is `missing-input` first (C9) |
 | `gate-set-tampered` / `run-tampered` | producer + `score-gate` | the file's `payloadSha256` no longer describes its bytes |
 | `consequence-not-applied` / `-overstated` / `-unevidenced` | `release-record` | `--consequence` / `--evidence` text — but `-unevidenced` fires ONLY on a field with no content; placeholder prose is accepted and signed in (C10) |
 | `close receipt present but INVALID` | `freeze-runtime-check.sh` | the three fields of D1 |
 | `output-exists` (exit 2) | every producer, incl. the skeleton and `score-gate` | name a NEW `--out`; the existing file must not be moved or deleted (C8, C9b) |
-| `finish-without-start` | `ordering-receipt` | the `--run-id` label of C7 differs between the started/finished pair — and the log is hash-chained, so the line cannot be removed |
+| `finish-without-start` | `ordering-receipt` | the `--run-id` label of C7 differs between the started/finished pair, or a finish was appended with no start at all — and the log is hash-chained, so the line cannot be removed |
+| `run-before-any-prepare` / `run-prepare-hash-unmatched` / `duplicate-run-id` | `ordering-receipt --mode verify` | accepted at `append`, refused only at C10's verify — and `N run(s) bound` counts OPENED runs, so read the entry count and the per-run lines (C7) |
 | `unknown-input` | `run-pilot` | a flag it does not take — there is no `--run-id` on the runner (C7) |
 | `missing-input` / `usage:` (exit 2) | every CLI | a required flag is absent, or a path that post-dates the candidate was given relative to the checkout (R4, C4) |
+| `bad-arguments` (exit 2) | every CLI's `parseFlags` | a flag without a value, or a malformed `--decision` / `--ordering-head` — it fires BEFORE `decision-unrecognised` / `ordering-head-malformed` can (C10) |
 | `ERR_MODULE_NOT_FOUND` (exit 1) | node | wrong tree for the step. Since the second freeze only `freeze-guard` (0.4) is dev-tree-only, and it fails on a MISSING RECEIPT rather than a missing module — this signature now means a chain step was run outside `~/close-candidate` |
 
 **A refusal is a result.** Record it verbatim in the report and do not re-run to obtain a
