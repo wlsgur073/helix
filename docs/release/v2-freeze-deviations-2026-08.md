@@ -627,6 +627,79 @@ mid-sheet. 2026-08-27 was itself the demonstration: had 0.6 been active that mor
 **Nothing here changes the operating mode.** Tenth instance since 2026-08-15; expect more before
 `txClose`.
 
+### Instance 11 — 2026-08-30, the pull landed two minutes before the branch tip moved, and the heal was fired by a machine
+
+**Statement.** The clone fast-forwarded on 2026-08-30 10:38:18Z (19:38:18 KST):
+`pull --upload-pack=git-upload-pack origin HEAD: Fast-forward`, HEAD `94dd136 -> eddf313`. Corroborated
+independently of the reflog by `known_marketplaces.json`'s `helix.lastUpdated`, `2026-08-30T10:38:18.549Z`
+— the same second — with `autoUpdate` still `false`. The reflog verb is new to this ledger: every earlier
+instance reads `pull origin HEAD`; `--upload-pack=git-upload-pack` first appears here, four minutes after
+the CLI on disk changed (below). As at instances 8 and 10, the pull sits inside a startup refresh: the
+three official-marketplace entries in `installed_plugins.json` were re-stamped 10:38:09.45Z, nine seconds
+earlier, and the other GitHub marketplace on this box was checked at 10:38:15.75Z. The CLI version of the
+process that pulled was not measured; the CLI on disk at pull time was 2.1.251, installed at 10:34:04Z.
+
+**The target is `eddf313` again — and the branch tip moved 2 m 14 s AFTER the pull.** Six close-sheet
+commits were pushed at 10:40:32Z (`f12878d`); the pull at 10:38:18Z caught the previous tip. `eddf313` is
+still the eighth distinct drifted position of this window (instance 10 counted it); no ninth position was
+created, and `f12878d` has not been pulled as of write time.
+
+**The day's healing pass was already spent — by 5 m 20 s.** The box booted 10:32:47Z; the dogfood unit's
+`ExecStartPre` ran at 10:32:58Z (the boot catch-up, eleven seconds after power-on) and exited 0 with nothing
+to heal; the pull landed 5 m 20 s after it — the fifth instance to land within minutes of the daily
+opportunity (59 s, 1 m 47 s, 40 s, 6 m 41 s, 5 m 20 s). The run itself (10:32:58Z–10:44:30Z) had bound its
+bytes before the pull, and wrote its ledger row at 10:42:23Z while the clone stood drifted; both positions
+carry the candidate `bin/`, so nothing it loaded differed.
+
+**Byte continuity. Unbroken**, measured at write time the way instance 5 sets out: at `eddf313` the `bin/`,
+`.claude-plugin/` and `hooks/` trees are git-identical to the candidate's (`e6bd010a`, `e47c958f`,
+`3e1b6a4a` at both commits); of the 103 differing paths the pin intersection is again
+`src/memory/ownership.ts` and `src/memory/store.ts`, both carried by already-adjudicated commits
+(`R-2026-08-19`, `D-2026-08-22`). **Runtime verdict: control/provenance deviation with continuous runtime
+bytes.**
+
+**Healed 2026-08-30 10:59:24Z (19:59:24 KST) by the SHELL channel — but the shell was not a person's.**
+Thirteenth heal-log line, tenth automatic heal of this window, detection latency 21 m 06 s. The interactive
+shell that sourced `~/.bashrc` (and therefore ran `freeze-runtime-check.sh`) was `bash -lic '…'`, executed by
+a read-only measurement subagent of an owner-flag consultation, whose task rules forbade every write under
+`~/.claude` and every `systemctl` verb but did not name "an interactive shell" — and `-i` is what turns a
+harmless `echo` into a guard invocation on this box. The guard did exactly what `D-2026-08-10` licenses:
+the sole violation was clone-HEAD drift, every byte and pin check passed, the clone was reset to the
+candidate and one line was appended to `~/.cache/freeze-guard-heals.log`. The subagent reported it as an
+accident with the exact command, reversed nothing (reversing would re-create the drift), and the operator
+verified the blast radius: clone `status --porcelain` empty at the candidate, both protected ledgers
+unchanged (global 1 row, mtime 2026-07-19; project 163,461 bytes, mtime 10:42:23Z — the day's own run),
+`settings.json` rewritten at 10:38:00Z with content byte-identical to the 2026-08-27 baseline. Recorded
+here under the same rule as `D-2026-08-25`: an in-window operator-side action on a live guard is disclosed,
+not left implicit — and this one was not even typed by the operator. The shape has a precedent in this
+ledger: instance 2's heal also "fired from a subagent's shell start during an unrelated verification
+pass" (above, and close report §4.7), so the channel the ledger calls "shell" has twice been a
+machine's shell, never only a person's.
+
+**Two residues from the same consultation, neither on a protected surface.** (1) A sibling subagent's
+`npm cache ls … --logs-max=0` made npm's own log rotation delete every file in `~/.npm/_logs` (the 08-27
+rehearsal's npm debug logs may have been among them; unrecoverable; `_cacache` untouched). (2) A
+`git status --short` in the clone may have refreshed its index stat cache (`.git/index` mtime 11:02:02Z;
+no tracked byte changed).
+
+**What this instance adds — the CLI updates itself under the flag that is supposed to stop it.** The three
+CLI versions installed inside this window all landed within seconds of a dogfood run's `Starting` line:
+2.1.246 at 2026-08-26 13:08:00Z (22 s after the 13:07:38Z start), 2.1.247 at 2026-08-27 01:59:24Z (5 s after
+the 01:59:19Z start), 2.1.251 at 2026-08-30 10:34:04Z (66 s after the 10:32:58Z start). The unit's drop-in
+sets `Environment=DISABLE_AUTOUPDATER=1` and the run script neither unsets nor re-execs the environment, so
+the variable reached `claude -p` and did not prevent the native installer's self-update — a measured
+correlation, not a traced mechanism. The CLI version is not a freeze surface (`payload.runtime` pins the
+commit and the two load paths, which C11 re-verifies), and this ledger has treated the host CLI as
+environment throughout — 2.1.226, 2.1.233, 2.1.239, 2.1.241, 2.1.247 and now 2.1.251 are each recorded
+at the instance that observed them and none was put to §8; that practice is stated here so a reader
+sees it was chosen rather than overlooked. But two of the three marketplace pulls of the last five days followed a CLI
+self-update by four to six minutes, and close-day step F4's `install` now refreshes the marketplace on its
+own (CLI 2.1.251, read from the binary) — see `R-2026-08-30` below.
+
+**Nothing here changes the operating mode.** Eleventh instance since 2026-08-15; expect more before
+`txClose`, and expect the interactive-shell trigger to recur wherever an automated agent is allowed a
+login shell on this box.
+
 ## Ruling R-2026-08-16 — two in-window edit classes ruled NOT a reset
 
 Recorded here because this ledger is the §9a report's source for reset history, and "this was
@@ -1420,3 +1493,198 @@ reversing nothing. The corrected blocks, with observed output, are at steps 0.6 
 `v2-close-checklist-2026-08.md`. The step had been classified **UNREHEARSED by choice** on the
 ground that a rehearsal would take the live run down mid-window; measured, the interval between a
 completed run and the next elapse suppresses nothing, and on this day it was hours wide.
+
+## Deviation D-2026-08-26-rehearsal-removed-guard — the freeze guard's drop-in was removed by hand for under one second, before its retirement condition
+
+**What happened.** During the close-sheet rehearsal audit, step G3 (remove the systemd drop-in and
+reload) was run LIVE on 2026-08-26 13:31:46Z (22:31:46 KST), between two scheduled dogfood runs: the
+service was `inactive` (the day's run had finished 13:18:49Z; next elapse 2026-08-27 00:00Z, about ten
+hours away). The drop-in `~/.config/systemd/user/helix-dogfood.service.d/freeze-guard.conf` was copied
+aside, then the step's four lines were run verbatim — `rm`, `rmdir`, `daemon-reload`, `show` — and the
+file was restored from the byte-identical copy and reloaded within the same wall-clock second. The
+rehearsal marker at run-sheet step G3 carries the observed output.
+
+**Why it is a deviation.** `D-2026-08-09` above records the drop-in as "additive and removed at close".
+For under one second before any validated close, the LOADED unit carried neither the guard's
+`ExecStartPre=… freeze-runtime-check.sh` nor `DISABLE_AUTOUPDATER=1` (`systemctl --user show` printed one
+`Environment=` line without it and no `ExecStartPre` line at all; `DropInPaths=` was empty). The
+restoration bounds the duration and the blast radius; it does not erase the fact that the protective
+control was absent from the loaded configuration before its retirement condition. No timer elapse was
+due for about ten hours and no `start` was issued — a manual start remained possible during the interval,
+which is exactly the path `D-2026-08-25` records launching a live run.
+
+**Blast radius, measured rather than estimated.**
+
+| surface | state |
+|---|---|
+| both unit files and the drop-in | sha-identical to the pre-rehearsal capture (`sha256sum -c` OK ×3); the drop-in kept its 2026-08-09 mtime (`cp -p`) |
+| the drop-in DIRECTORY | a NEW inode: `rmdir` + `mkdir`, mtime 2026-08-09 21:59:03 → 2026-08-26 22:31:46.99 KST, and `~/.config/systemd/user/` moved with it — the rehearsal's persistent fingerprint, still readable at write time |
+| systemd properties | a 12-property projection (8 service + 4 timer, `start_time`/`stop_time`/`pid` stripped) compared before and after: identical except `ExecStartPre`'s last-execution record (`code=exited ; status=0` → `code=(null) ; status=0/0`), which vanished across rm + reload + restore + reload; whether `daemon-reload` alone drops it was not isolated |
+| persistent timer stamp, `is-active`, `list-timers` LAST | unchanged; `inactive`; 13:07:38Z |
+| the two ledgers the close-day invariant protects | UNCHANGED (no run fired between 13:07:38Z and the next boot heal at 2026-08-27 01:59:19Z) |
+| the copy-aside | lived under `/tmp` and was wiped at the 2026-08-27 boot; identity rests on the recorded `sha256sum -c` lines and the live sha equalling the pre-capture |
+
+**The same audit's other live touches, listed so "only" is never written here.** On 2026-08-27 the audit
+ran, directly in `~/dev/helix`: `npm run freeze-guard` (02:12:31Z), `vitest run test/plugin/packaging.test.ts`
+(02:14:48Z, exit 1), the trust-store e2e (02:14:52Z), and the full `npm test` (02:16:33–02:17:03Z, exit 1 —
+the E4 re-measurement the run sheet records), which created `node_modules/.vite-temp/`, rewrote vitest's
+cache through a scratch clone's `node_modules` symlink, and left npm debug logs. None touches a pinned
+path, a load path, or a protected ledger.
+
+**§8 assessment — NOT A RESET requested.** No code, config or frozen rule of the measured method changed:
+the drop-in is the guard's, created inside the first window as `D-2026-08-09`'s remediation, and it lies
+outside `payload.config` (`~/.helix/config.json`), the tools and the method docs. Its one-second absence
+is a deviation of a CONTROL, of the class this ledger's first entry named — control/provenance deviation
+with continuous runtime bytes — and it is recorded because the report's §4 is sourced from this ledger
+and a rehearsal marker in the run sheet never reaches it. What the rehearsal bought is at G3 of the run
+sheet: the success criterion had to be re-read (the property is ABSENT rather than empty once the drop-in
+is gone) and the step's `show` line is now known to read vacuously while 0.6's mask is in force.
+
+### DISPOSITION — NOT A RESET, ruled 2026-08-31
+
+The drop-in is the guard's own control, created inside the first window as `D-2026-08-09`'s remediation
+and lying outside the measured surface (`payload.config`, the tools and the method docs); its sub-second
+absence before the retirement condition is a deviation of a CONTROL with continuous runtime bytes, not a
+change of code, config or frozen rule. Recorded as a Deviation because the retirement condition was
+written and was not met.
+
+## Disclosure R-2026-08-30 — three §8 questions surfaced by the owner-flag consultation, with the readings that were tested
+
+**Disposition REQUESTED, not asserted.** While the five items the 2026-08-27 rehearsal audit left to the
+owner were being worked (a peer consultation in compare mode, three rounds — why-log below), three facts
+surfaced that a strict reader could put to §8. Each is recorded with the reading the record supports AND
+the reading that was tested and failed, so the owner rules on text rather than on a summary, and so the
+instant a reset reading would need is fixed in each case.
+
+**Question 1 — is run-sheet step C1.5, the snapshot-hash composition, method tooling built inside the
+window?** The composition (`find . -type f | sort | xargs sha256sum | tee … | sha256sum`) first appears in
+this project's session transcripts at **2026-08-13T13:18:09Z** — 17 h 02 m before the second window's
+`txAfter`, `2026-08-14T06:20:01Z` — and entered git only with the sheet's ADD commit `21b47b4`
+(2026-08-16), whose message records that the drafts were "built on the void 2026-08-30 close … re-dated
+and re-pinned rather than rewritten". The term's meaning is fixed at `R-2026-08-18`'s disposition above:
+"the programs that execute or issue evidence for the measured chain"; the pinned source pins "every program
+the measured method runs" (`scripts/pilot/pin-hashes.ts:145`); and the sheet's C1 block is hand-run by
+design ("BY HAND. There is no producer script"). *Reading tested and failed:* "any hand-run line that
+issues report evidence is tooling" — it would make C11's runtime pin, G5's heal count, 0.5's byte check
+and the whole of C1 tooling, and the sheet's own 08-16 commit a reset, which `R-2026-08-16`, ruled the same
+day, did not treat as one; and its factual premise (authored after the freeze) is false by the transcript.
+**Recommended disposition: NOT A RESET.** Consequence carried into the sheet: C1.5's block stays
+byte-identical and no `LC_ALL=C` is added (the sheet already names that as a command change); instead the
+report's element-2 fill records the ORDER PROPERTY on the artifact — the composed value is `sha256sum` of
+the retained `snapshot-hashes.txt` exactly as written (re-sorting the listing yields a different value,
+because its lines begin with the digest), the path column is bytewise-ordered and checkable post hoc with
+`cut -c67- snapshot-hashes.txt | LC_ALL=C sort -c`, and per-file verification is order-free. Measured
+2026-08-30: `sort` under `C`, `C.UTF-8` and `POSIX` is identical on this box, so the pin would have had no
+effect here; `localedef` and the `en_US` source are installed, so a punctuation-ignoring collation CAN be
+built without root and reorders the listing — which is why the property is recorded on the artifact rather
+than inferred from `locale -a`.
+
+**Question 2 — did an in-window edit of the operator's global `~/.claude/CLAUDE.md` intervene on the
+corpus generator?** The file (8.4 KB of Korean writing-register and document-lint rules) was adopted
+2026-08-16 and last edited 2026-08-17T13:16:49Z; it is loaded into every Claude session on this box,
+including the dogfood run that generates the corpus. It names no pilot, corpus, memory tool or workload;
+its own exceptions clause excludes English output and repository-governed files; it was adopted for the
+operator's replies and documents, two days BEFORE the first eligible-count inspection (`R-2026-08-18`).
+The workload driver (`~/.local/bin/helix-dogfood-run.sh`, mtime 2026-07-20), its fixed nine-step prompt,
+its schedule, and the dogfood project's own `CLAUDE.md` (mtime 2026-07-20) are unchanged in-window.
+Measured on the generator's ledger without reading row content: all 57 rows, 2026-06-18 through
+2026-08-30, have a Hangul letter ratio of 0.00 — the rows are English before and after; mean row length
+was about 4,400 characters over 08-07..08-13 and about 2,400 over 08-16..08-30, one uncontrolled row per
+day — a temporal association, with no cause attributed. A related fact, separated because it is often
+conflated: the `fluent-korean` plugin installed 2026-08-19T12:18:02Z wrote the LIVE registry
+(`settings.json`'s `extraKnownMarketplaces`, `known_marketplaces.json`, `installed_plugins.json`, a new clone
+under `plugins/marketplaces/`), but its output style is selected only in the development tree's
+`.claude/settings.local.json`; the dogfood project has no `outputStyle`, so that style never configured a
+corpus-generating run. Helix's own entries (installedAt 2026-08-14) and load paths were untouched, and the
+guard reads only helix's flag. *Reading tested and failed:* "any in-window change to content the dogfood
+Claude process loads as instructions is an effective prompt change and therefore a §8 system change" —
+under it the window resets at EVERY run, because the dogfood session also loads its own auto-memory
+directory, which the runs themselves rewrite by design (its index was rewritten by the 2026-08-30 run at
+10:43:56Z; five of its nine files carry second-window mtimes), and the pre-registration offers no ground
+distinguishing operator-authored from agent-authored instruction content — it fixes the measured surface
+as the method's code, config and frozen rules and labels the corpus "same corpus, same process". The
+scope of the bar this ledger already carries (the `R-2026-08-18` why-log, Divergence 5) is remediation
+decisions informed by holdout contents, and "changing its prompt" there is the driver script's prompt.
+**Recommended disposition: NOT A RESET**, with this ruling text, functional rather than path-based:
+"For §8, changing the workload driver's prompt means changing its fixed prompt or making a functionally
+equivalent operator intervention intended or used to alter dogfood workload accrual. It does not freeze
+every mutable context file Claude loads: unrelated user-level standing instructions are environment, and
+auto-memory changes produced endogenously by the unchanged loop are process state. Dogfood-directed
+instructions placed in a global file would still be a driver-prompt change." If the owner rules RESET
+instead, the anchor instant is the last edit, 2026-08-17T13:16:49Z.
+
+**Question 3 — the host CLI self-updates inside the window.** Claude Code CLI versions 2.1.226, 2.1.233,
+2.1.239, 2.1.241, 2.1.247 and 2.1.251 were observed across the windows, each recorded at the instance
+that observed it (instances 1, 2, 5, 8, 10 and 11) and none put to §8. The three second-window installs
+landed within 66 s of a dogfood run's `Starting` line (2.1.246 at 2026-08-26 13:08:00Z, 2.1.247 at
+2026-08-27 01:59:24Z, 2.1.251 at 2026-08-30 10:34:04Z) although the unit's drop-in sets
+`DISABLE_AUTOUPDATER=1` and the run script does not unset it — a measured correlation, not proof that the
+dogfood process caused the installs. The host CLI is unpinned environment: the receipt's `payload.runtime`
+pins the plugin commit and the two load paths, and C11 re-verifies exactly those. *Reading tested and
+failed:* "a CLI version change is a §8 system change" — it would have reset the window at the first
+in-window update, and the six recorded transitions form a settled practice. **Recommended disposition:
+NOT A RESET**, stated as practice rather than left implicit; and the claim is NOT that the updates had no
+behavioural effect — in CLI 2.1.251 `claude plugin install <plugin>@<marketplace>` refreshes the
+marketplace before installing (read from the binary; skipped only when refreshed under 30 s earlier), so
+close-day step F4's third command pulls the live clone whether or not the middle command is typed, and the
+sheet's F4 is corrected for it. The close-day CLI path, version and binary checksum are to be recorded
+beside C11's observation.
+
+**Why-log — the peer reconciliation behind this entry and the five owner-flag recommendations.** Symmetric
+compare mode, one neutral question, this side's answer published before the call so the two were provably
+independent; three metered rounds of a three-round budget; convergence declared at round 3, which produced
+only agreement and one refinement. Instrument note: rounds 1 and 3 returned `indeterminate` and round 2
+`diverge` from the agreement map — the known aligner mislabel; every round was reconciled by reading the
+two answers point by point.
+
+- *Divergence 1 — C1.5 as in-window tooling (peer, round 1: RESET).* Resolved by the transcript dating and
+  the term's definition above; the peer retracted in round 2 and asked that the chronology be made
+  auditable outside local recollection — done here (timestamp; the transcript is on this box).
+- *Divergence 2 — G3's one-second guard absence (peer, round 1: RESET).* Resolved by the drop-in's own
+  in-window origin (`D-2026-08-09`, "additive and removed at close") and its position outside the measured
+  surface; the peer retracted the reset in round 2 but held that the CLASS is Deviation, on the ground that
+  a live protective control was removed before its written retirement condition. **Adopted against this
+  side's Disclosure class** — the entry is `D-2026-08-26-rehearsal-removed-guard` below.
+- *Divergence 3 — CLI self-updates as a reset trigger (peer, round 1).* Resolved by the six recorded
+  versions; the peer retracted and supplied the minimum text adopted in Question 3, including the clause
+  that no absence of behavioural effect is claimed.
+- *Divergence 4 — the global `CLAUDE.md` edit (peer, round 2: RESET).* Resolved by the auto-memory
+  reductio and the verbatim scope of the bar in the `R-2026-08-18` why-log; the peer conceded in round 3 and
+  added the functional anti-circumvention qualification, **adopted into the ruling text** of Question 2.
+- *Divergence 5 — an F4 rehearsal now (peer, round 1: yes, under four conditions).* Resolved on binary
+  churn — three self-updates in five days, so a rehearsal today measures a binary close day will not run —
+  and on the refresh-first leg needing a remote source; the peer withdrew in round 2; its four conditions
+  are carried into F4's written plan.
+- *Corrections the peer made to this side, adopted:* the expected result of a pre-close `cmp` against the
+  development tree's `bin/` is DIFFERENCE, equality being owed only against an independent build of the
+  same HEAD or the post-close live `bin/`; F1's paired correction runs `npm ci --offline --no-audit
+  --no-fund` once the single missing tarball is cached; never `--logs-max=0`; the report's §4.8 opening
+  ("Two ledger entries") becomes count-free; the deploy runbook is corrected together with F4.
+- *Corrections this side made to its own first draft, measured:* "three prior executions of F4" → two
+  verified (2026-07-24, 2026-08-14); "a throwaway config dir cannot pull the live clone" → unmeasured;
+  "twelve tarballs missing from the npm cache" → one (`fast-uri` 3.1.5; `npm cache ls` is not a
+  tarball-presence test); "no test has run on fast-uri 3.1.5" → CI has run the full suite on the lockfile's
+  3.1.5 on every push since 2026-08-21, and the 2026-08-30 run failed on exactly the six known in-window
+  cases by name.
+
+### DISPOSITION of Question 1 (C1.5) — NOT A RESET, ruled 2026-08-31
+
+The composition predates `txAfter` by 17 h 02 m and is a hand-run evidence line, not one of "the programs
+that execute or issue evidence for the measured chain". The block stays byte-identical; the order property
+is recorded on the artifact in the report's element-2 fill.
+
+### DISPOSITION of Question 2 (global CLAUDE.md) — NOT A RESET, ruled 2026-08-31
+
+The ruling text in Question 2 is adopted as written — functional, not path-based: changing the workload
+driver's prompt means changing its fixed prompt or making a functionally equivalent intervention intended
+or used to alter dogfood accrual; unrelated user-level standing instructions are environment and
+endogenous auto-memory rewrites are process state; dogfood-directed instructions placed in a global file
+would still be a driver-prompt change. The 2026-08-16/17 edit is disclosed with its measured effect and
+resets nothing.
+
+### DISPOSITION of Question 3 (host CLI) — NOT A RESET, ruled 2026-08-31
+
+The practice is stated, not changed: the host CLI is unpinned environment, consistent with the treatment
+of the five earlier versions. No absence of behavioural effect is claimed; the close-day CLI path, version
+and binary checksum are recorded beside C11's observation, and F4 is corrected for the install-time
+marketplace refresh.
