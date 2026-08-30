@@ -132,12 +132,23 @@ publication. The entry was written 2026-08-14 at `3bd63d0`; see A4.)*
   reachable **without** the GitHub account) and §Q2 (push-capable credential inventory beyond the
   active box). Neither is a close blocker; both are reported as open if unexecuted.
 
-- [ ] **A3. Q4 helix-data backup — currently BLOCKED, do not tick it off with a plain tar.**
+- [ ] **A3. Q4 helix-data backup — owner-executable; the "BLOCKED" premise is stale.**
   Q4 (`c4-drills-2026-07.md`) owes *"one **encrypted**, physically separate snapshot of both
-  units"*. `recovery-playbook.md` §6 ships **plain `tar -czf` commands only** — no encryption step
-  anywhere in the section. The playbook therefore does not yet satisfy the drill it was supposed to
-  carry the command for. Either add the encryption step to §6 and take the snapshot, or record Q4
-  as open in the report. **Do not treat a plain-tar backup as discharging Q4.**
+  units"*. *(Corrected 2026-08-27: this item said `recovery-playbook.md` §6 "ships plain `tar -czf`
+  commands only — no encryption step anywhere in the section". That was true until `fba205e`
+  (2026-08-24), which gave §6 the `tar -czf - … | gpg --symmetric --cipher-algo AES256` step
+  (`recovery-playbook.md:185`), the verify-without-extract line (`:201`) and the two-step restore
+  (`:208`), and recorded why `gpg -d` must never be piped into `tar -x`. The close report's §10
+  marker carried the same stale sentence and is corrected with this one.)* What remains is the real
+  snapshot, which is the owner's: the passphrase, the archive that carries `ledger-mac-master.key`,
+  and the physically separate medium. Precondition, from the drill's own text (*"while no session
+  runs and the dogfood timer is not due"*): `ps -eo pid,args | grep '[h]elix-mcp\.mjs'` prints
+  nothing (every Claude Code session closed — the one editing this sheet included; `pgrep -af`
+  over-counts by matching its own shell, see C1.1), `systemctl --user is-active
+  helix-dogfood.service` prints `inactive`, and `list-timers` shows the next elapse hours away.
+  Success: `~/backups/helix-<date>.tar.gz.gpg` exists, `gpg -d … | tar -tvzf -` lists
+  `.helix/ledger-mac-master.key` with mode `-rw-------`, no plain `.tar.gz` anywhere, and the copy
+  is on the separate medium. **Do not treat a plain-tar backup as discharging Q4.**
 
 - [x] **A4. The in-window producer's §8 disposition — RULED, and it does not arise again in this
   window. Nothing is owed here.** *(Corrected 2026-08-17. This item read "the owner must RULE …
@@ -607,6 +618,12 @@ candidate and showed the other's real reason was different; see R2.)*
   checkout because the rule says so, not because you expect a refusal.)* This is also why R3's
   dev-tree interpreter is harmless: `$TSX` chooses
   nothing about module resolution.
+  *(Corrected 2026-08-27: "the divergence is now zero" was true at the re-freeze and has been false
+  since 2026-08-18 — measured 2026-08-27, pin ∩ (candidate → HEAD) = `src/memory/ownership.ts`,
+  `src/memory/store.ts`, both adjudicated (`R-2026-08-19`, `D-2026-08-22`; Block B's 2026-08-25
+  paragraph). The rule stands on the FILE-decides-the-bytes property regardless; what the drift
+  changes is that a wrong-tree run of any tool importing either module would today load different
+  bytes — and nothing in this rule detects that, so the instruction is the only protection.)*
 - *The CWD decides what `input-pins` hashes.* `input-pins.ts:290-291` calls
   `hashTools(process.cwd())` and `hashMethodDocs(process.cwd())`, so the cwd decides which bytes
   become the pins of record. **It refuses `method-drift` only when those bytes DIFFER from the
@@ -614,7 +631,9 @@ candidate and showed the other's real reason was different; see R2.)*
   the wrong cwd produces a wrong-provenance artifact SILENTLY rather than a refusal. *(Corrected
   2026-08-17: this bullet read "Run it anywhere else and it refuses `method-drift` — correctly, by
   its own contract." The contract is unchanged; what changed is that the condition triggering it no
-  longer holds.)*
+  longer holds.)* *(Re-measured 2026-08-25 and 2026-08-27: they DO differ again — the two files named
+  in Block B — so today the wrong cwd would refuse `method-drift`; C4 records the refusal as observed
+  and says why that protection is accidental and must not be leant on.)*
 
 **R2 — the one step whose INPUT cannot exist in the checkout: the DEV TREE, with `cd ~/dev/helix`.**
 Exactly one: `npm run freeze-guard` (step 0.4). It reads the freeze receipt, and a freeze receipt is
@@ -627,7 +646,11 @@ past it either. **Do not copy the receipt into the checkout**: an untracked file
 safe because the guard reads the tree it runs in for nothing measured — it anchors on the candidate
 commit's blobs — and because **step 0.5 measures** that every pinned module it imports is
 byte-identical to the candidate's. Step 0.5's output is the licence for this rule; run it, and
-paste it into the report.
+paste it into the report. *(Corrected 2026-08-27: 0.5 does not walk `src/memory`, and
+`src/memory/ownership.ts`, which the guard reaches through `pin-hashes.ts:22`, differs from its pin
+in this window — see 0.5's 2026-08-25 correction and H5. The exception rests on the guard re-hashing
+the candidate's own blobs through git and on that drift being adjudicated at `R-2026-08-19`; 0.5's
+output is evidence of what it does cover, not the licence.)*
 
 *(Under the first window R2 covered two steps. The adjudication skeleton (C8) left it when the
 re-freeze put `scripts/close/` inside the candidate, and it now runs under **R1** with the rest of
@@ -2248,6 +2271,11 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   `3bd63d0`); **report §4.6 contains ZERO markers** — the single marker in that neighbourhood was
   §4.4's, about the pinned-src disclosure, and it is removed as dissolved; and A4 is discharged
   rather than owed. Nothing in Block A now blocks publication.)*
+  *(Corrected 2026-08-27: the 2026-08-24 amendment clause above was unsatisfiable as the report
+  stood — measured 2026-08-27, the report contained ZERO occurrences of `2026-08-24`, and its
+  `R-2026-08-18b` paragraph (§4.8) carried no marker that would pull the amendment in at the close.
+  The amendment paragraph was folded into §4.8 the same day, so this confirmation now checks a
+  paragraph that exists; the six one-marker-one-home checks below all passed on the same reading.)*
   And confirm these six, each of which has exactly one marker and no second home in the report:
   - the **close-day interpreter** (§2.3) — 0.3's two version lines;
   - **where the chain ran from, with the exception** (§2.3) — 0.2's `rev-parse` plus BOTH readings
@@ -2281,6 +2309,14 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   exception overstates the departure. Paste step 0.5's output and step 0.2's `rev-parse` + empty
   `status --porcelain`. *(Corrected 2026-08-17 — this step said "two post-candidate helpers … C8 …
   because they do not exist at the candidate"; C8's files do exist at `94dd136`.)*
+  *(Corrected 2026-08-27: the clause "under the byte-identity check of step 0.5, whose output is
+  recorded" overstates what 0.5 licenses — 0.5 does not walk `src/memory`, and the guard reaches
+  `src/memory/ownership.ts`, which differs from its pin in this window (0.5's 2026-08-25
+  correction). The exception rests on the guard re-hashing the candidate's own blobs through git and
+  on that drift being adjudicated at `R-2026-08-19`; paste 0.5's output as evidence of what it does
+  cover, not as the licence. Rehearsed 2026-08-27 on a copy of the report: the line-174 marker
+  replaced with 0.2's `rev-parse` + empty `status --porcelain` and 0.5's reading, the checkout
+  written as `~/close-candidate`; 58 markers remained and `PRIVATE_RE` found 0.)*
 
 - [ ] **H6. Remove the candidate worktree** (Block B, step 0.7) and run `npm test` once more:
   green except for anything genuinely open.
