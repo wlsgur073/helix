@@ -29,6 +29,35 @@ is pasted here in the form that was executed. Everything that needs the close-bo
 it has ever been executed end to end; the C1 blocks were nonetheless driven against a *copy* of the
 live units under a throwaway `HOME`, which proves the commands and not the close-day corpus.
 
+*(Corrected 2026-08-27. The two sentences above were decomposed, and most of the second was false
+about COMMANDS.)* "Everything that needs the close-bounded snapshot" was true of VALUES and false of
+COMMANDS: every C1 command is `cp`, `python3`, `sha256sum` or `systemctl is-enabled`, and every
+C2–C10 tool reads only its argv paths, `data/semantic-neighbors.json` beside the checkout and — C4
+alone — the configuration file at the path the receipt records; none reads `HOME`, the environment,
+systemd or the network (measured: the pinned tools' import closure carries only `node:` and relative
+imports). Snapshot-boundedness is therefore a property of the corpus the chain is pointed at, not of
+any command in it, and on 2026-08-27 the whole chain C2–C10 was run end to end on a SYNTHETIC
+two-ledger snapshot — one home row and four project rows, ids `m_g`, `m_lo`, `m_1`, `m_2`, `m_hi` —
+under a throwaway `HOME`, with the candidate materialised by `git archive`, the pasted text
+byte-identical and only the numbers different — twice, at 11:10 and at 23:54 KST, the second time
+with fresh random key material, every printed line the same and every hash different (the hashes
+recorded below are the second run's, whose logs survive); its refusal branches were driven over
+perturbed copies in the first minutes of 2026-08-28. Each step below now carries its observed output
+under a *(rehearsed 2026-08-27, synthetic snapshot)* marker, and its refusals under a *(refusals
+rehearsed 2026-08-28)* one. C1.2–C1.4 had carried 2026-08-13 markers all along and were re-driven
+2026-08-27; C1.1's query line and C1.5 had neither a marker nor a reason, and were rehearsed the
+same day. What remains unrehearsed, each with a reason that is measured rather than chosen: A1 (a
+machine this box is not), A2 (account-side, the owner's), A3's real snapshot (needs every session
+closed, and an MCP server is alive whenever this sheet is being edited), F3 (a commit and a push —
+outside any rehearsal by the repository's git agreement), F4 (`claude plugin marketplace update` is
+the one command the freeze names), F6 (its observable is a difference only F4 can produce), C1.1's
+session-close half (closing the rehearsing session is the act), 0.6's reboot-survival sentence
+(measuring it needs a suppressed live run), H2b's off-machine copy (the owner's medium), and H7's
+post-close lock re-run (needs `txClose` to have passed). **The lesson 0.6 taught, generalised: a
+reason for not rehearsing is itself a claim, and it has to be measured like any other.** The
+2026-08-25 reason ("it would take the live run down") and the 2026-08-16 reason ("the snapshot
+cannot exist") were both reasoning, and both dissolved on inspection.
+
 **0.6 and its G6 reversal are NO LONGER "unrehearsed by choice" — both were rehearsed 2026-08-25,
 and both were BROKEN.** The stated reason for not rehearsing them (it would take the live dogfood
 run down mid-window) does not survive measurement: between a completed run and the next elapse there
@@ -237,6 +266,11 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
 
   *(rehearsed 2026-08-13)* → `script -q -f -c 'echo hello-from-transcript' <log>` exit 0; the log
   carried `Script started on …`, the command output, and `Script done on … [COMMAND_EXIT_CODE="0"]`.
+  *(re-rehearsed 2026-08-27 in the same ttyless form, `script -q -f -c '…' <log>`, against a scratch
+  stand-in for `~/close-run`)* → stdout `hello` / `TSX=[]` / `exit=0`; the log carried `Script
+  started on 2026-08-27 11:15:21+09:00 [COMMAND="…" <not executed on terminal>]`, the two lines, and
+  `Script done on 2026-08-27 11:15:21+09:00 [COMMAND_EXIT_CODE="0"]`. `TSX=[]` inside the capture is
+  0.3's point measured again: nothing exported outside crosses in.
 
   **`script` spawns a NEW shell, and this is the shell every later step means.** Nothing exported in
   the shell you started from crosses into it, which is why 0.3 binds `$TSX` *inside* here and R3
@@ -265,6 +299,11 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
   `$CANDIDATE` from the loader block at the top, so it needs no edit between windows; re-run it and
   paste the real output. Expect `HEAD is now at 94dd136 docs(freeze): void the first window inside
   the pinned decision record`.
+  *(re-rehearsed 2026-08-27 against `94dd136`, into a scratch worktree path)* → `Preparing worktree
+  (detached HEAD 94dd136)` / `HEAD is now at 94dd136 docs(freeze): void the first window inside the
+  pinned decision record`, exit 0; `rev-parse` → `94dd136925253be74c58df92392044c550aa6ec2`;
+  `status --porcelain` printed nothing. The expected line above is now the observed one; the only
+  substitution was the path.
 
   Success: HEAD equals the candidate and `status --porcelain` is empty.
   Refusal: any output from `status --porcelain` → stop; the checkout is not the candidate and every
@@ -298,6 +337,15 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
   the only option then. The dev tree's pinned binary printed `tsx v4.23.5` / `node v24.17.0` on
   2026-08-14 and the checkout installs the same pinned version, so the expected output is that pair
   — but it is expected, not observed, and must be pasted from the real run.)*
+  *(REHEARSED 2026-08-27 against the checkout, offline.)* The fresh worktree listed `bin data docs
+  hooks scripts src test package.json …` and no `node_modules`; `npm ci --offline` → `added 144
+  packages, and audited 145 packages in 3s`, exit 0, with no `[esbuild] Trying to install package`
+  line and `node_modules/@esbuild/linux-x64/bin/esbuild` present; `git status --porcelain` stayed
+  empty; `node_modules/.bin/tsx` → `../tsx/dist/cli.mjs`; `export TSX=<checkout>/node_modules/.bin/tsx;
+  $TSX --version && node --version` → **`tsx v4.23.5` / `node v24.17.0`** — the expected pair, now
+  observed from the checkout's own binary. `--offline` was the rehearsal's one substitution (the
+  freeze forbids a network fetch), and it shows the cache holds every tarball the lockfile names; on
+  close day the block runs as written.
   **Record both lines in the report: they are the close-day interpreter** — report §2.3 carries a
   marker for exactly this pair. Every `$TSX` below is this binary. Do not substitute `npx tsx`:
   there is no global `tsx` on this box (`which tsx` → empty), so `npx` would resolve an **unpinned**
@@ -353,6 +401,15 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
   Note also that this loop's findings go to `warnings` and are excluded from `ok`, so
   `npm run freeze-guard` exits 0 on a drifted pin either way — it is the ANCHOR loop, not this one,
   that hard-fails.
+  *(re-rehearsed 2026-08-27)* → exactly two `::warning::worktree diverges from pin (pre-close,
+  informational):` lines — `src/memory/store.ts`, then `src/memory/ownership.ts` — then the
+  `note: out of scope (deploy-machine state): …` line, then `freeze-guard: anchors verified`,
+  `exit=0`. The 2026-08-25 expectation holds verbatim: two warnings, both the adjudicated drift, no
+  third. *(Residue, for the record: every `npm run` invocation leaves a debug log under
+  `~/.npm/_logs` — twelve there on 2026-08-27 — and `npm config get update-notifier` is `true` on
+  this box, so npm's periodic version check is a network egress at a moment nothing in this sheet
+  records; `npm_config_update_notifier=false` in the environment is npm's documented switch for it,
+  UNMEASURED here.)*
 
   Success: exit 0 with a final `freeze-guard: anchors verified`.
   Refusal: any `anchor:` / `pin-omitted:` / `payload-sha256:` line, or a final
@@ -416,6 +473,20 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
   its own preflight, so a `DIFFERS` line here is not a verdict on C8. Do not reinstate the coupling
   — and note the paragraph below, which says the same thing 20 lines later.)* **Paste this output
   into the report**: it is what makes the remaining 0.4 exception defensible rather than convenient.
+  *(re-rehearsed 2026-08-27, loader and loop in ONE shell)* → the loader printed the five values;
+  the loop printed no `DIFFERS`, then `byte-identity check done`; 19 paths compared (18 from
+  `ls-tree`, plus `src/entry-point.ts`), and the drifted `ownership.ts` / `store.ts` are outside the
+  walk, as the correction above says. **HAZARD, measured the same day: with `$CANDIDATE` unset the
+  loop does not fail.** `git ls-tree -r --name-only  -- scripts/pilot …` prints `fatal: Not a valid
+  object name scripts/pilot` on stderr and expands to nothing; the loop then runs once, over
+  `src/entry-point.ts`, comparing `git rev-parse :src/entry-point.ts` — the INDEX blob — against
+  `hash-object`, finds them equal (`184471fa…` both), and prints `byte-identity check done` with exit
+  0. A shell that never sourced the loader therefore produces the success line while checking
+  nothing. The loop is left byte-identical, per the 2026-08-25 correction; read stderr, and treat a
+  reading taken without the loader's echo line in the same transcript segment as no reading at all.
+  *(Whether to add a separate guard line before the loop — the `PASTE_`-guard class C5 and C7 use —
+  is left to the owner: a guard changes what the operator must type, and this sheet's rule is that a
+  command change passes the tooling judgment first.)*
 
   **Run this check TWICE and paste both readings — here, and again immediately before C8.** The
   licence it issues is point-in-time, not standing: `~/dev/helix` is written by a second clone, and
@@ -588,6 +659,12 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
   `HEAD is now at 27b4373`, `status --porcelain` empty; `worktree remove` + `prune` returned it
   cleanly. The mechanism is candidate-independent, so this rehearsal still covers the STEP; only
   the sha in its output is stale.)*
+  *(re-rehearsed 2026-08-27 on a scratch worktree at `94dd136` — with `node_modules` installed by
+  0.3 and one untracked probe file present)* → `fatal: '<path>' contains modified or untracked files,
+  use --force to delete it`, exit 128; with the probe removed, `git worktree remove` + `git worktree
+  prune` returned 0 **with `node_modules/` still in place** — the gitignored tree does not block
+  removal, which the paragraph below claimed and had not measured; `.git/worktrees` absent and
+  `worktree list` back to the single `~/dev/helix` line afterwards. `--force` was not used.
 
   **A `fatal:` here is anticipated, not alarming.** `git worktree remove` refuses a checkout holding
   modified or untracked files: *(measured 2026-08-13, by touching one file in a scratch checkout)*
@@ -2097,7 +2174,8 @@ bash ~/dev/helix/scripts/freeze-runtime-check.sh; echo "exit=$?"
 
   **The guard line is rehearsable — do it, and only the live invocation stays irreversible.**
   `freeze-runtime-check.sh` reads its close-receipt path from the `FRC_CLOSE_RECEIPT` env seam
-  (`freeze-runtime-check.sh:22`; the whole `FRC_*` family exists so drills never touch live state),
+  (`freeze-runtime-check.sh:27` — this cited `:22` until 2026-08-27, which is `FRC_CLONE`; the whole
+  `FRC_*` family exists so drills never touch live state),
   so both branches can be exercised against the throwaway receipt without retiring anything:
 
   ```bash
@@ -2119,7 +2197,19 @@ bash ~/dev/helix/scripts/freeze-runtime-check.sh; echo "exit=$?"
   `[freeze-guard] v2 freeze runtime-pin VIOLATION (1):` / `- close receipt present but INVALID: …`
   and **exit 1**. `FRC_HEAL=0` is belt-and-braces: the heal path only fires when clone-HEAD drift is
   the *sole* violation, which an invalid receipt already prevents. The receipt written by the python
-  block above satisfies the same validator, field for field (`freeze-runtime-check.sh:29-40`).
+  block above satisfies the same validator, field for field (`freeze-runtime-check.sh:33-43` — the
+  python field checks at `:34-41`, accept/reject at `:43`; this cited `:29-40` until 2026-08-27, and
+  `:29` is the `fails=()` initialiser).
+
+  *(re-rehearsed 2026-08-27 under a throwaway `HOME` — the writer with `HOME` overridden, then the
+  seamed drill with real scratch paths in `GOOD` / `BAD`)* → the writer exited 0 and wrote the
+  4-line receipt with `freezePayloadSha256` `360ffe80…` and `releaseRecordPayloadSha256` read from
+  the stand-in release record; `GOOD` → exit 0, silent; `BAD` (a 64-zero freeze sha) →
+  `[freeze-guard] v2 freeze runtime-pin VIOLATION (1):` / `- close receipt present but INVALID:
+  <path>`, exit 1 — one violation, NO clone-HEAD drift line (the clone was on the candidate that
+  day), the heal log unchanged at 12 lines, and the live receipt path absent before and after.
+  Inside the synthetic chain the reader half alone was run: `rr['payloadSha256']` → `bba58ece…`,
+  the C10 record's value. The unseamed line was never run.
 
   What remains **irreversible is only the unseamed line in the fence above**: run against the real
   close receipt it retires the guard for good, and that is the act to leave until the receipt is
@@ -2143,6 +2233,13 @@ bash ~/dev/helix/scripts/freeze-runtime-check.sh; echo "exit=$?"
 
   *(rehearsed 2026-08-13)* → `docs/release/o67-class-rule-2026-07.md:3`.
   Success after the edit: the command prints **nothing** (exit 1, no matches).
+  *(edit half rehearsed 2026-08-27 in a scratch CLONE of the repository, the tracked doc untouched)*
+  → the three backticked path tokens at lines 109, 157 and 167 replaced by title-form references
+  (the 2026-07-29 v2 gate-composition design; the 2026-07-26 o67-class-rule design), every sentence
+  kept; `git grep` printed nothing, exit 1; the doc's sha256 moved from `c1fe768c…` to `9741e615…`;
+  `test/output-vocabulary.test.ts` back to `2 passed` with the clone's receipt STILL past
+  `txClose` — the fix is the removal, not the date, now observed. The diff is three hunks of one
+  line each.
 
 ---
 
@@ -2212,6 +2309,11 @@ behaviour, not a failed close.** Read this block before running `npm test` on cl
   receipt's own `payload.txClose` rather than typed in. Green today
   *(rehearsed 2026-08-13 → `Tests 2 passed (2)`)*; red from the close instant until D2 removes the
   3 citations. **The fix is the removal, not the date.**
+  *(re-rehearsed 2026-08-27 in a scratch clone)* → `Tests 2 passed (2)` at HEAD; with the clone's
+  receipt `payload.txClose` set to `2026-08-01T00:00:00.000Z`: `Tests 1 failed | 1 passed (2)`,
+  `AssertionError: expected { …(1) } to deeply equal {}` /
+  `+ { "docs/release/o67-class-rule-2026-07.md": 3 }` at `test/output-vocabulary.test.ts:66` — the
+  instant is read from the receipt, confirmed by the flip following the edited copy.
 
 - [ ] **E3. WITHDRAWN 2026-08-25 — the gate this step describes no longer exists. Do not expect
   a red flip here.**
@@ -2240,6 +2342,8 @@ behaviour, not a failed close.** Read this block before running `npm test` on cl
   no measurement benefit; the five cases have run green since `ea2dc1e`, which is more coverage
   than the gate allowed, and the source-level cases in `test/memory/trust-store-layout.test.ts`
   carried the behaviour throughout in either case.
+  *(re-measured 2026-08-27: still zero occurrences; `ea2dc1e` is 1 file changed, 9 insertions, 22
+  deletions; the file reports `Tests 8 passed (8)`.)*
 
 - [ ] **E4.** Run the full suite once and compare the failure set against the DATED MEASUREMENT
   below: `cd ~/dev/helix && npm test`.
@@ -2439,6 +2543,8 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   *(rehearsed 2026-08-13, pasted verbatim against copies of both files under a throwaway `HOME`)*
   → both paths printed `-> True`, and the two re-read lines printed `True` / `True`; the live files
   were confirmed still `False` afterwards. On close day it runs against the real pair.
+  *(re-rehearsed 2026-08-27, same form, same result; the `.pre-close-bak` files existed only under
+  the throwaway `HOME`.)*
 
   Success: the two re-read lines both print `True`. The backups are kept until G4 has confirmed the
   guard still passes; delete them only then. Note this rewrites both files with `indent=2` and a
@@ -2450,6 +2556,10 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   and the interactive-shell `case $- in *i*) …` line that invokes
   `scripts/freeze-runtime-check.sh` by absolute path).
   Success: `grep -n "freeze\|DISABLE_AUTOUPDATER" ~/.bashrc` prints nothing.
+  *(rehearsed 2026-08-27 on a COPY: lines 129-131 are still exactly those three lines, and the last
+  three of a 131-line file; `sed -i '129,131d'` on the copy left 128 lines, `diff` against the live
+  file printed only `129,131d128`, and the `grep` printed nothing, exit 1. Re-read the three lines
+  before deleting — the numbers hold only while nothing is appended below them.)*
 
 - [ ] **G3. Remove the systemd drop-in and reload.** Verified present at
   `~/.config/systemd/user/helix-dogfood.service.d/freeze-guard.conf`, carrying
@@ -2469,10 +2579,31 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   check passes vacuously. **Re-run the `show` line after G6's unmask** and read it there; that
   reading is the one to record.
 
+  > ### REHEARSED 2026-08-26 22:31:46 KST — LIVE, between runs, and reversed within the second.
+  >
+  > Run while the service was `inactive` (the day's run had finished at 22:18:49 and the next elapse
+  > was 09:00 the following morning), with the drop-in copied aside first. The four lines above,
+  > verbatim: after `daemon-reload`, `show -p ExecStartPre -p Environment` printed a single line —
+  > `Environment=PATH=… LANG=C.UTF-8 GIT_TERMINAL_PROMPT=0`, with no `DISABLE_AUTOUPDATER` — and NO
+  > `ExecStartPre` line at all: the property is absent rather than empty once the drop-in is gone,
+  > which satisfies the success criterion as written. `DropInPaths=` was empty and the `.d`
+  > directory gone. Restored from the byte-identical copy and reloaded in the same second:
+  > `sha256sum -c` OK on the drop-in and both unit files, the persistent timer stamp unchanged, no
+  > run fired, `is-active` still `inactive`. The only difference in a field-by-field `show` before
+  > and after is `ExecStartPre`'s last-execution record (`code=exited ; status=0` → `code=(null) ;
+  > status=0/0`), which a `daemon-reload` drops — cosmetic, and the same thing G6's reload does. On
+  > close day nothing is restored, so the copy-aside is not part of the step.
+
 - [ ] **G4. Close receipt already written in D1** — confirm it still validates after G1–G3:
   `bash ~/dev/helix/scripts/freeze-runtime-check.sh; echo exit=$?` → **exit 0, silent**. (With the
   receipt valid the guard exits at step 0 and never reaches the flag checks, so G1 cannot make it
   red; if it *is* red, the receipt is the problem.)
+  *(rehearsed 2026-08-27 through the `FRC_*` seams with `FRC_HEAL=0`: a valid throwaway receipt →
+  exit 0, silent; the same receipt with BOTH flags flipped to `true` in copies named by
+  `FRC_SETTINGS` / `FRC_KNOWN_MP` → still exit 0, silent — the parenthetical is measured; the flipped
+  copies with the receipt path pointing at an absent file → `VIOLATION (2)` naming `settings
+  extraKnownMarketplaces.helix.autoUpdate not false (got True)` and `known_marketplaces
+  helix.autoUpdate not false (got True)`, exit 1, no heal.)*
 
 - [ ] **G5. Count the auto-heals for the report.**
 
@@ -2536,6 +2667,10 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   unmask may be an immediate catch-up — that is expected, and it is now safely after C1.2.
 
 - [ ] **G7. Delete the ACTIVE FREEZE section from `CLAUDE.md`** (local-only, never committed).
+  *(rehearsed 2026-08-27 on a copy: deleting from the first line starting `## ACTIVE FREEZE` up to
+  the next `## ` heading removed lines 6-41, left `## Commands` as the first heading at line 6, and
+  `diff` against the live file began `6,41d5`. The spans move with every edit to that file — read
+  them before deleting.)*
 
 - [x] **G8. Pinned-src disposition — DISSOLVED by the re-freeze. Write nothing.** *(Corrected
   2026-08-17. This step ordered a new deviation-ledger entry disclosing 6 pinned `src/memory` files
@@ -2558,6 +2693,9 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   a first-window disclosure and the instruction not to write a new entry stands, on the corrected
   premise rather than on an empty intersection. This was the only step that consumed that
   measurement, so correcting Block B leaves no dangling reference.)*
+  *(re-measured 2026-08-27: 28 pins in the receipt; `git diff --name-only 94dd136 HEAD -- <the 28>`
+  lists exactly `src/memory/ownership.ts` and `src/memory/store.ts`; the dissolution sentence is at
+  deviations-ledger line 220 and the DISSOLVED title at report line 373.)*
 
 ---
 
@@ -2581,6 +2719,16 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   rehearsed 2026-08-13. The absolute count moves with every edit to the draft, so re-measure rather
   than compare against a number written here — the two readings are given precisely to show that
   the NUMBER is not the invariant.)*
+  *(Corrected 2026-08-27: the paragraph above says the bare phrase "also occurs in the report's own
+  front-matter line explaining the grep", and the sentence that opens this step implies that
+  counting the OPENING delimiter escapes the ordering trap. It does not: report line 12, inside the
+  front-matter comment, is a complete `<<FILL AT CLOSE: what it is | where it comes from>>` pair —
+  the marker-format template — so before H2 the opening count cannot reach 0 either. Measured
+  2026-08-27: 59 / 59 / 60 = 58 real markers plus the template, the bare phrase adding line 14's
+  explainer; after H2's deletion on a copy, 58 / 58 / 58. The invariant as stated — openings equal
+  closings, bare = openings + 1 — is right, and line 12 is why the arithmetic works: it counts in
+  every total. "REFUSE TO PUBLISH while the opening count is above 0" is therefore satisfiable only
+  AFTER H2, where the count of record is taken; before H2, refuse while it is above 1.)*
 
   *(One limitation of the command as written, so it is not mistaken for a stronger check: `grep -c`
   counts LINES, not occurrences. Today every marker is alone on its line and the two agree, but a
@@ -2593,6 +2741,10 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
 - [ ] **H2. Delete the report's operator front-matter comment block and the 3-line DRAFT banner.**
   Then re-run H1's grep: with the front matter gone, the bare-phrase count and the delimiter count
   agree, and both must be 0.
+  *(rehearsed 2026-08-27 on a copy: the comment block occupied lines 3-33 and the DRAFT banner lines
+  35-38 that day — re-measure the spans, they move with every edit; with both deleted the copy kept
+  its title line, contained no `<!--`, and counted 58 / 58 / 58, all agreeing as this step
+  requires — 58 being the real markers, which close day fills.)*
 
 - [ ] **H2b. Retain the chain — `~/close-run/` is NOT retention.** §9 makes reconstructability from
   **retained** evidence a gate condition (`v2-preregistration-2026-07.md:385`) and a failed run
@@ -2639,10 +2791,16 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   capture and hashes it there**; its value fills the transcript's row in the index and report §6's
   transcript marker. Leave the row in the index with its hash pending until H7, then fill it and
   re-run the lock — this is why H7 sits after the sweep rather than at the end of Block C.
+  *(Measured again 2026-08-27, with one caveat: two captures completing within the SAME wall-clock
+  second produced byte-identical logs and the same digest — `script`'s header and footer stamp to
+  the second — so "a different one on each run" holds at one-second resolution, not per run.
+  Harmless for close day, which takes one capture; do not use the digest as a per-run nonce.)*
 
   - [ ] **`git add` the index FIRST, then run the two locks.** Tracked files under `docs/release/`
     may not carry a literal `/home/<user>` or `/mnt/c/Users/<user>` path — the only allowlisted
-    file is the freeze receipt itself (`PRIVATE_ALLOW`, `test/output-vocabulary.test.ts`). The
+    files are the two freeze receipts, the live one and the void `…-2026-08-02-void.json`, three
+    paths each (`PRIVATE_ALLOW`, `test/output-vocabulary.test.ts:102-105`; *corrected 2026-08-27 —
+    this said "the freeze receipt itself", one file*). The
     chain artifacts DO contain absolute paths (snapshot directory, config path), which is the
     reason this step commits an index and not the artifacts.
 
@@ -2666,6 +2824,13 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
     (Staging is not committing — the commit itself still needs the owner's per-change approval.)
   - [ ] **UNREHEARSED** — every input needs the close-bounded snapshot. The `git grep`/`git add`
     ordering above, however, was measured on 2026-08-13 and is not.
+  - [ ] *(the hash line and the index rehearsed 2026-08-27 on a 14-file stub: 14 hash lines, exit 0;
+    with `score2.json` removed, `sha256sum: score2.json: No such file or directory`, 13 lines, exit 1
+    — the line enumerates by name, so a missing artifact is a hard failure and not a shorter list. An
+    index draft with described locations and a pending transcript row: 22 lines, `PRIVATE_RE` 0
+    matches; a control row carrying a literal home path: 1; removed: 0. `git add` of a tracked file
+    was not rehearsed — staging inside the freeze is out of bounds — and the off-machine copy is the
+    owner's medium.)*
 
 - [ ] **H3. Confirm the report carries all of §9a's required content**: the freeze commit and every
   §10 pinned hash *plus the pins re-verified at the close*; cutoff and close with the
@@ -2719,6 +2884,9 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   failures in a report that exists at all, because every pipeline check fails closed. Name where
   their evidence actually lives: the freeze receipt, the as-of-close snapshot hash, and the
   append-only prepare-before-run receipt.
+  *(measured 2026-08-27: `structurally always-pass` at report lines 1013 (§7.5) and 1038 (§7.7); the
+  §7.5–§7.7 span names the freeze receipt, the snapshot hash and the prepare-before-run receipt —
+  four occurrences.)*
 
 - [ ] **H5. Record where the chain ran from — with the exception, not without it, and not with one
   that no longer exists.** The claim that survives scrutiny is: *every pinned measurement step
@@ -2757,6 +2925,11 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   of an **empty file**; run again from a plain shell after the session closed it printed a real
   digest, and a different one on each of the two runs — the log's last line is its own closing
   timestamp. An in-shell hash is not merely stale, it describes nothing.)*
+  *(Re-measured 2026-08-27, three captures: the in-session digest was the empty-file sha every
+  time; the finished digests were real — and two captures that completed within the same wall-clock
+  second were byte-identical, `733a6e82…` twice, while the third, a second later, was `b61ba5a5…`.
+  "Different on each run" is true at one-second resolution. The post-close lock re-run below is
+  unrehearsable until `txClose` has passed.)*
 
   Type `exit` (or Ctrl-D) at the transcript shell's prompt. You land back in the shell that started
   0.1, `script` prints its `Script done on …` line, and the file is final. Then:
