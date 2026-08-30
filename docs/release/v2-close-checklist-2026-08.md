@@ -469,6 +469,25 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
   > that same session.** A firing that lands before the close instant is a row inside the window and
   > is harmless; the mask then holds the post-close silence.
 
+  > **PRECONDITION (corrected 2026-08-27): boot the box early enough that the day's run has
+  > FINISHED — `journalctl --user -u helix-dogfood.service` shows its `Finished` line, equivalently
+  > `systemctl --user is-active helix-dogfood.service` prints `inactive` — BEFORE 15:20:01 KST, and
+  > run 0.6 in that session.** The sentence above ("a firing that lands before the close instant is a
+  > row inside the window and is harmless") assumed the row lands at the firing. It lands about ten
+  > minutes later: `Starting` 21:18:12 → ledger mtime 21:28:31 on 2026-08-25, `Starting` 22:07:38 →
+  > 22:17:44 on 2026-08-26, and every completed run from 2026-08-10 to 2026-08-27 took 8 m 57 s to
+  > 13 m 32 s from `Starting` to `Finished` (2026-08-27's boot catch-up: 10:59:19 → 11:08:49). A box
+  > first booted inside the last ~14 minutes before the close instant fires the catch-up before
+  > 15:20:01 and writes its row after it. If that happens, type the `stop` line of the corrected
+  > block IMMEDIATELY: a stop before the write yields `Stopped` and no ledger row (measured 08-14 at
+  > 4 m 21 s, 08-21 at 5 m 53 s, 08-25 at 3 m 27 s), and it is a deviation to record — the abort runs
+  > `ExecStopPost` (`dogfood-postrun.sh`), which appends to `~/.helix/trigger.jsonl` and to the
+  > project's `ISSUES.md` (`dogfood-postrun.sh:47`, `:68-70`); those are writes of the recoverable
+  > class, not the protected ledgers. **While a run is in flight the timer shows no NEXT at all**
+  > (`NextElapseUSecRealtime` empty, `list-timers` prints `-` under NEXT and LEFT; measured
+  > 2026-08-26 22:16:42 KST with the service `activating`), so never read the inter-run interval off
+  > the timer: read it off `is-active` = `inactive`.
+
   Set that alarm outside this repository — nothing here can wake a machine that is off. *(The one
   measurement this step used to cite, `LAST` 11:48:03 KST on 2026-08-13, is one of the six that
   happened to land early. It is not the distribution, and it read as reassurance.)*
