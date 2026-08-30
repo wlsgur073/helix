@@ -549,6 +549,84 @@ configuration (`D-2026-08-10`), detection plus reset stays the mode, and this is
 in the nine days since 2026-08-15, with 08-16 still the only gap. Expect further instances before
 `txClose`; each is appended here.
 
+### Instance 9 — 2026-08-24, and the corroboration channel this ledger leans on keeps only the LATEST instance
+
+**Statement.** The clone fast-forwarded again on 2026-08-24 13:21:57Z (22:21:57 KST):
+`pull origin HEAD: Fast-forward`, HEAD `94dd136 -> cc6ef4a`. Both `autoUpdate` flags were `false`
+and `DISABLE_AUTOUPDATER=1` was exported, unchanged since instance 1. The target is
+locally-authored, as at instance 8: `cc6ef4a` was committed here 2026-08-24 05:54:36Z and pushed at
+05:55:23Z, so the pull took it 7 h 26 m 34 s after the push.
+
+**Recorded late — 2026-08-27, together with instance 10 — and the delay cost one corroboration.**
+`known_marketplaces.json`'s `helix.lastUpdated`, the field instances 1, 2 and 8 used to corroborate
+the reflog to the second, is last-write-only: by write time it reads `2026-08-26T13:14:19.560Z`,
+instance 10's stamp, and instance 9's own stamp is unrecoverable from it. This instance therefore
+rests on the reflog and the heal log alone; the two agree (pull at 13:21:57Z, heal-log line 11 at
+13:52:22Z naming `cc6ef4a`). Append instances the day they land — the corroborating field does not
+wait.
+
+**Byte continuity. Unbroken**, and already consolidated: the Corrigendum 2026-08-25 above measured
+`cc6ef4a` as the seventh drifted position — all nine pinned runtime files at their pinned values,
+`bin/`, `.claude-plugin/` and `hooks/` git-identical to the candidate's, and the pin intersection of
+the differing paths again `src/memory/ownership.ts` and `src/memory/store.ts`, both carried by
+already-adjudicated commits. **Runtime verdict: control/provenance deviation with continuous
+runtime bytes.**
+
+**Healed 2026-08-24 13:52:22Z** (22:52:22 KST), the eleventh heal-log line and the eighth automatic
+heal of this window. **Detection latency: 30 m 25 s.** A shell and not the unit for the fifth
+consecutive instance — the day's `ExecStartPre` had run at 04:31:51Z, 8 h 50 m 06 s before the
+pull, and was long spent.
+
+**Nothing here changes the operating mode.** Ninth instance since 2026-08-15.
+
+### Instance 10 — 2026-08-26, the shell channel disappeared overnight and the unit healed for the first time since instance 1
+
+**Statement.** The clone fast-forwarded on 2026-08-26 13:14:19Z (22:14:19 KST):
+`pull origin HEAD: Fast-forward`, HEAD `94dd136 -> eddf313`. Corroborated independently of the
+reflog by `known_marketplaces.json`'s `helix.lastUpdated`, `2026-08-26T13:14:19.560Z` — the same
+second — with `autoUpdate` still `false`. As at instance 8, the pull sits inside a startup refresh:
+three official-marketplace entries in `installed_plugins.json` were re-stamped 2026-08-26T13:13:53Z,
+twenty-six seconds earlier. The CLI version of the process that pulled was not measured — the box
+was shut down before this entry was written and that process's `/proc` did not survive; the CLI on
+disk at write time is 2.1.247. The target is again locally-authored: `eddf313` was committed
+2026-08-25 13:54:42Z and pushed at 13:59:54Z, 23 h 14 m 25 s before the pull. `eddf313` is the
+eighth distinct drifted position of this window; the Corrigendum 2026-08-25 above counted seven, as
+of its date.
+
+**The day's healing pass was already spent — by 6 m 41 s.** The dogfood unit's `ExecStartPre` ran
+at 13:07:38Z (22:07:38 KST, the day's catch-up firing) and exited 0 with nothing to heal; the pull
+landed 6 m 41 s after it — the fourth instance to land within minutes of the daily opportunity
+(59 s at instance 2, 1 m 47 s at instance 5, 40 s at instance 8). What is new is what followed:
+**the box was then shut down for the night, so the shell channel — the healer in five consecutive
+instances — did not exist for any of the exposure.** The clone stood at `eddf313` from 13:14:19Z
+until the next boot.
+
+**Byte continuity. Unbroken**, measured at write time the way instance 5 sets out: at `eddf313` the
+`bin/`, `.claude-plugin/` and `hooks/` trees are git-identical to the candidate's (`e6bd010a`,
+`e47c958f`, `3e1b6a4a` at both commits), which carries all nine pinned runtime files; of the 103
+differing paths the pin intersection is again `src/memory/ownership.ts` and `src/memory/store.ts`,
+both carried by already-adjudicated commits (`R-2026-08-19`, `D-2026-08-22`). **Runtime verdict:
+control/provenance deviation with continuous runtime bytes.**
+
+**Healed 2026-08-27 01:59:19Z (10:59:19 KST) by the UNIT, not a shell — the first `ExecStartPre`
+heal since instance 1.** The boot catch-up's `Starting` line and the guard's own journal line share
+the second: `[freeze-guard] auto-healed marketplace clone HEAD drift (eddf313… -> candidate; bytes
+were candidate-identical; …)`. Twelfth heal-log line, ninth automatic heal of this window.
+**Detection latency: 12 h 45 m 00 s**, the longest of this window apart from instance 1's
+14 h 17 m 20 s — and the two long latencies share a shape: no shell opened between pull and heal,
+so the floor was the next unit invocation.
+
+**What this instance adds — the close-day consequence of run-sheet step 0.6 is now concrete.** 0.6
+suppresses the close-day catch-up, and this instance shows that suppression also suppresses the
+only heal that fires on a freshly booted box. An evening auto-pull the night before close followed
+by a shutdown — exactly this instance's shape — leaves the clone off-candidate for C11 to observe,
+with no heal in between. C11's instruction already covers it: record the observed HEAD, never heal
+mid-sheet. 2026-08-27 was itself the demonstration: had 0.6 been active that morning, C11's
+`rev-parse` would have read `eddf313`.
+
+**Nothing here changes the operating mode.** Tenth instance since 2026-08-15; expect more before
+`txClose`.
+
 ## Ruling R-2026-08-16 — two in-window edit classes ruled NOT a reset
 
 Recorded here because this ledger is the §9a report's source for reset history, and "this was

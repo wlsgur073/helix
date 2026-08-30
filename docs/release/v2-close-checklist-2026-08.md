@@ -1619,7 +1619,11 @@ part of the observation.** An earlier form of this step read `plugins['helix@hel
 reported that single value. *(Measured 2026-08-13: this deployment carries **two** entries — a
 `user`-scope one installed 2026-08-02T11:48:02.518Z, and a `local`-scope one installed
 2026-08-09T11:21:33.082Z whose `projectPath` is the single registered project root, i.e. exactly
-the project unit whose ledger C1.2 copies as the measured project corpus.)* Reading index 0 alone
+the project unit whose ledger C1.2 copies as the measured project corpus.)* *(Corrected 2026-08-27:
+those two `installedAt` values described entries the 2026-08-14 redeploy REPLACED; measured
+2026-08-27 the two entries carry `lastUpdated` `2026-08-14T06:20:16.525Z` (user) and
+`2026-08-14T06:20:20.094Z` (local). The structure — two entries, the local one's `projectPath` at
+the project unit — is unchanged.)* Reading index 0 alone
 would have observed the runtime pin of the user scope and said nothing about the scope the
 measurement actually ran under. Enumerate them. **Paste from column 0:**
 
@@ -1672,6 +1676,20 @@ marketplace clone HEAD `94dd136925253be74c58df92392044c550aa6ec2`; both load pat
 hash. That is a FREEZE-DAY reading, not a close-day one — it shows the deployment started the
 window on-pin, which is a different claim from ending it on-pin. Re-run on close day and record the
 observed values, whatever they are.
+
+*(re-observed 2026-08-27, read-only — all four green)* → `installed entries for helix@helix: 2`,
+both rows `OK`, `ALL ENTRIES EQUAL THE CANDIDATE`; clone HEAD
+`94dd136925253be74c58df92392044c550aa6ec2` — healed at that morning's boot (10:59 KST) from
+`eddf313`, the 2026-08-26 evening auto-pull (deviations ledger, Instance 10); both load paths and the
+candidate blob `075fc39e16bf3aea613c8d0a7538bc29b871f6f544eb314fa3d35051486b6db3`. The MISMATCH
+branch, on a COPY of `installed_plugins.json` with the second entry's `gitCommitSha` set to forty
+zeros: `scope=local … sha=0000… MISMATCH` and `1 ENTRY/ENTRIES DIVERGE — a deviation; record the
+values verbatim` — the verdict is a printed line, not an exit code (the heredoc exits 0 either way),
+so it has to be READ. **HAZARD, measured the same day: the block's last line, `git show
+$CANDIDATE:bin/helix-mcp.mjs`, degrades silently when `$CANDIDATE` is unset** — it becomes `git show
+:bin/helix-mcp.mjs`, the INDEX blob, and today that prints the SAME `075fc39e…`, so a shell that
+never sourced the loader produces an indistinguishable success. Source the loader in the transcript
+shell first, and keep its echo line in the same transcript segment as this block's output.
 
 - [ ] Success: **every** `installed_plugins.json` entry's `gitCommitSha` equals the candidate — not
   just the first — and the marketplace clone's HEAD equals it too; and the two bundle hashes equal
@@ -2066,6 +2084,12 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   `2026-08-12T14:41:24Z` and `2026-08-13T04:08:31Z` (both from `0bbb000a…`), each reset to the
   candidate. Re-read on close day — the count may have grown. The §9a report's deviation history
   must carry the final number and the lines verbatim.
+  *(re-read 2026-08-27: **12 lines** — the three first-window heals above, to `27b4373…`, and nine
+  second-window heals to `94dd136…`, 2026-08-16 through 2026-08-27; line 12,
+  `2026-08-27T01:59:19Z healed eddf313… -> 94dd136…`, is the unit's boot heal — the first
+  `ExecStartPre` heal since instance 1 (deviations ledger, Instance 10). The ledger's instance count
+  runs one ahead of the second-window heal count, because instance 4 (2026-08-19) was remediated by
+  hand and wrote no log line. Read the ledger for attribution; read this file for the count.)*
 
 - [ ] **G6. Unmask and restart the dogfood units** — the other half of step 0.6's write freeze.
   Run this **after F4/F5** have redeployed, so the first run after the close serves current bytes.
