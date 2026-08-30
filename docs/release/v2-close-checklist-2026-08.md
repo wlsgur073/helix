@@ -1835,6 +1835,35 @@ behaviour, not a failed close.** Read this block before running `npm test` on cl
   `packaging.test.ts:74` with `bin/helix-mcp.mjs is stale — run npm run build and commit bin/`.
   **This test is what proves the rebuild reproduced** — in either direction.
 
+  > ### MEASURED 2026-08-27 — THE PREDICTOR ABOVE IS INVERTED. Use the corrected line below.
+  >
+  > The block above is left byte-identical because what it predicts is the finding. On 2026-08-27,
+  > `git diff --quiet $CANDIDATE HEAD -- bin/` succeeded and printed `E1 GREEN expected` — `bin/`
+  > has not moved since the candidate and cannot, inside the window — while the test itself was
+  > RED: `Tests 1 failed | 6 passed (7)`, the failing case at `packaging.test.ts:70:81` with `bin/ is
+  > stale — run npm run build and commit bin/` and all five bundles listed as stale. The test
+  > rebuilds `src/` and compares the REBUILD against `bin/`; the predictor compares `bin/` against
+  > the candidate. Those agree only while `src/` has not moved, and it has — 37 post-candidate
+  > `src/` commits, 21 files, +1142/−217, and `package-lock.json` too. So this predictor says GREEN
+  > for the whole window whatever the test does, which is the direction that sends an operator
+  > hunting for a cause that is on this sheet.
+  >
+  > ```bash
+  > git diff --quiet $CANDIDATE HEAD -- src/ build.mjs package-lock.json && echo "E1 GREEN expected" || echo "E1 RED expected"
+  > ```
+  >
+  > *(observed 2026-08-27: `E1 RED expected`, agreeing with the test.)* The three paths are the
+  > rebuild's inputs — the source, the bundler script, and the lockfile that decides the dependency
+  > bytes (`62a3c67` pinned `fast-uri` 3.1.5 through it). This line errs only in the harmless
+  > direction: a comment-only `src/` commit makes it say RED while `legalComments: 'none'` keeps the
+  > test GREEN — the `5797346` case the paragraph above describes — and a green E1 needs no
+  > explanation. It predicts a test's colour and produces nothing the chain consumes, so it is a
+  > sheet correction and not method tooling. The rehearsal note above is corrected the same day:
+  > the failing case now sits at `packaging.test.ts:70` (the rebuild-and-compare moved to
+  > `test/helpers/bundle-freshness.ts:32-44`, `staleBundles`, imported at `:5`), and its message is
+  > `bin/ is stale — run npm run build and commit bin/`, listing every stale bundle, not
+  > `bin/helix-mcp.mjs is stale …`.
+
 - [ ] **E2. `test/output-vocabulary.test.ts` — flips red AT `txClose`.**
   `expected = Date.now() > freezeWindowClosesAt() ? {} : ALLOW`, with
   `ALLOW = { 'docs/release/o67-class-rule-2026-07.md': 3 }` and the instant read from the signed
@@ -1902,10 +1931,21 @@ behaviour, not a failed close.** Read this block before running `npm test` on cl
   rebuild is what clears them.** So the operative test on close day is not "are there six" but:
   *does every failure trace to bundle-versus-source?* One that does not is real.
 
+  **Re-measured 2026-08-27 at `eddf313`, on the development tree:** identical totals — `Test Files
+  5 failed | 185 passed | 2 skipped (192)` / `Tests 6 failed | 2479 passed | 2 skipped (2487)` — and
+  the same six by name; `inspect-asof` did not flake; `/tmp/helix-testrun-*` counted 0 before and 0
+  after. One residue the suite leaves BY DESIGN, which this sheet had not named:
+  `/tmp/helix-demote-probe/probe.txt` (35 bytes, created by `test/memory/compaction.test.ts:401`,
+  never swept — boot-wiped).
+
   **E1 is conditional** — it appears only if `git diff --quiet $CANDIDATE HEAD -- bin/` FAILS (see
   E1; measured 2026-08-25 that diff is still empty, so E1 is green and #6 above is the source-side
   form of the same fact). E1 disagreeing with the `git diff` in either direction is a real failure,
   and would mean the rebuild is not reproducing what the committed bundles contain.
+  *(Corrected 2026-08-27: the paragraph above repeats E1's inverted predictor. #6 IS E1's case —
+  one test, `packaging.test.ts:70` — and on 2026-08-25 and 2026-08-27 it was RED with that `bin/`
+  diff EMPTY, so "E1 is green" was false on the day it was written. Read E1's corrected predictor;
+  the operative test is unchanged — every failure must trace to bundle-versus-source.)*
 
   **D2's effect on the set:** D2 removes the 3 citations, so `test/output-vocabulary.test.ts` is
   already green again by the time you get here on this sheet's order. Running Block E before D2 adds
@@ -1924,6 +1964,17 @@ window's 28 days are real-use verification of exactly those bytes. Measured 2026
 block now carries only whatever source work accrued INSIDE the second window, and if that count is
 still 0 the rebuild is a no-op that should reproduce `bin/` byte-for-byte.
 
+**Re-measured 2026-08-27: the count is 37, and the rebuild is NOT a no-op.** `git log --oneline
+$CANDIDATE..HEAD -- src/ | wc -l` → **37**; `git diff --stat` → 21 files, +1142/−217;
+`package-lock.json` has moved as well; `bin/` has not. F1's build was rehearsed through its seam —
+`npm run typecheck` (exit 0), then `HELIX_BUILD_OUT=<scratch> npm run build` (exit 0; `build.mjs`
+reads that variable as its only output root) — and all five bundles it produced DIFFER from the
+committed `bin/` (`cmp`), while the committed `bin/` stayed byte-identical (`sha256sum -c` OK,
+porcelain empty). Close day's F1 will rewrite all five files; F2 is what proves the rewrite
+reproduces from the source it shipped. `npm ci` and `npm test` were not rehearsed in the
+development tree: the first rewrites its `node_modules`, which a rehearsal inside the window may not
+do, and the second is E4's own full run, taken once above.
+
 Until this block runs, any second-window source fix is **FIXED IN SOURCE, OPEN IN DEPLOYMENT**.
 
 Do not start Block F before the close receipt exists (D1) — a rebuilt `bin/` reaches the running
@@ -1938,7 +1989,9 @@ runtime through the marketplace clone, which is exactly what the window forbade.
   **`npm test`, not the packaging test alone.** The first window's draft gated this step on
   packaging-freshness only, which answers "does `bin/` match `src/`" and nothing about whether the
   code works; the suite is what stands between an accumulated source backlog and the live runtime.
-  Measured 2026-08-14 on the pre-window rebuild: 2217 pass, 0 fail. A failure here stops the
+  Measured 2026-08-14 on the pre-window rebuild: 2215 pass, 0 fail *(corrected 2026-08-27 — this
+  line said 2217; the deviations ledger's `D-2026-08-13-in-window-tooling` entry and the close report
+  both record 2215 for that gate, and this sheet was the lone dissenter)*. A failure here stops the
   redeploy — the close receipt is already written by then, so the measurement is safe either way,
   and shipping is the part that waits.
 
@@ -1952,6 +2005,11 @@ runtime through the marketplace clone, which is exactly what the window forbade.
 
   Success: **7 passed** (E1 clears). Refusal: still failing at `:74` → the bundle does not
   reproduce; do not deploy it.
+  *(Corrected 2026-08-27: the case is at `packaging.test.ts:70` now and its message names every
+  stale bundle — see E1. Success branch rehearsed 2026-08-27 inside a candidate checkout with its
+  own offline-installed `node_modules`: `Tests 7 passed (7)` in 515 ms, the freshness helper
+  building into its own temp dir and `bin/` untouched — the branch where candidate `src/` equals
+  candidate `bin/` by construction, which is the state F1 is meant to restore for HEAD.)*
 
 - [ ] **F3. Commit `bin/` AND PUSH IT**, together with the source it was built from (owner approval
   required per the repo's git agreement — the controller commits, not the run-sheet). The push is
