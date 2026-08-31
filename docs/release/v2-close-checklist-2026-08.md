@@ -488,9 +488,24 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
   0. A shell that never sourced the loader therefore produces the success line while checking
   nothing. The loop is left byte-identical, per the 2026-08-25 correction; read stderr, and treat a
   reading taken without the loader's echo line in the same transcript segment as no reading at all.
-  *(Whether to add a separate guard line before the loop — the `PASTE_`-guard class C5 and C7 use —
-  is left to the owner: a guard changes what the operator must type, and this sheet's rule is that a
-  command change passes the tooling judgment first.)*
+  *(Resolved 2026-08-31 — the tooling judgment passed, and the owner adopted it: a guard that compares one
+  variable with a literal and prints a sentence produces nothing the chain consumes, decides no
+  acceptance and resolves no method choice — the ground E1's predictor line stands on, and the class C8's
+  literal preflight and D1's bare `STOP` guard already belong to.)* **Paste this block FIRST, in the same
+  shell, before the loop above** — the loop's bytes are unchanged; the guard is its own block:
+
+  ```bash
+  [[ "$CANDIDATE" == 94dd136925253be74c58df92392044c550aa6ec2 ]] || echo "STOP: CANDIDATE is '${CANDIDATE:-unset}' — source the loader block (top of sheet) in THIS shell"
+  ```
+
+  A `STOP` line invalidates the reading that follows even though the loop still prints its success line:
+  the guard detects, it does not prevent (its own exit status is 0 either way, and a bare `exit` in a
+  pasted block would end the transcript shell). The literal is the SECOND window's candidate and moves
+  with any re-freeze. *(guard line rehearsed 2026-08-30, read-only, three cases, against C11's last line; the loop with the
+  guard prepended measured in the unset case)* → `$CANDIDATE` unset: `STOP: CANDIDATE is 'unset' — …`,
+  and the loop then prints its usual `byte-identity check done` over the index blob; a STALE value
+  (`27b4373`, the void window's candidate): `STOP: CANDIDATE is '27b4373' — …` — the case a mere
+  non-empty test would pass silently; the correct value: no `STOP`.
 
   **Run this check TWICE and paste both readings — here, and again immediately before C8.** The
   licence it issues is point-in-time, not standing: `~/dev/helix` is written by a second clone, and
@@ -2113,6 +2128,37 @@ $CANDIDATE:bin/helix-mcp.mjs`, degrades silently when `$CANDIDATE` is unset** �
 :bin/helix-mcp.mjs`, the INDEX blob, and today that prints the SAME `075fc39e…`, so a shell that
 never sourced the loader produces an indistinguishable success. Source the loader in the transcript
 shell first, and keep its echo line in the same transcript segment as this block's output.
+
+**Guard, added 2026-08-31 (the same tooling judgment as at 0.5) — paste it FIRST, in the same shell, before
+the block above; the block's bytes are unchanged:**
+
+```bash
+[[ "$CANDIDATE" == 94dd136925253be74c58df92392044c550aa6ec2 ]] || echo "STOP: CANDIDATE is '${CANDIDATE:-unset}' — source the loader block (top of sheet) in THIS shell"
+```
+
+*(rehearsed 2026-08-30, read-only, against this step's last line)* → `$CANDIDATE` unset: `STOP: CANDIDATE is
+'unset' — …`, then `075fc39e…` — the index blob, equal to the candidate today; a STALE value (`27b4373`):
+`STOP: CANDIDATE is '27b4373' — …`, then **`ef8a653b…`** — the void window's bundle, a plausible WRONG
+hash that nothing else on this LINE flags (the step's three-way equality would catch it one line later); the correct value: no `STOP`, then `075fc39e…`. Unlike
+0.5 there is no stderr signal at all here (measured: 0 bytes in every case), so the `STOP` line and the
+loader's echo are the only two channels on this line.
+
+**Record beside this observation, close day (added 2026-08-31; ruled `R-2026-08-30`, Question 3):** the
+host CLI is unpinned environment; it changed on disk at least seven times inside this window (eight
+versions across the two windows), and three
+installs (2.1.246, 2.1.247, 2.1.251) landed within 66 s of a dogfood run's `Starting` line despite
+`DISABLE_AUTOUPDATER=1` (a correlation — the installing process was not traced), so the binary the
+measurement ran under must be named rather than assumed. Read-only, no CLI launch — `type -P`, not
+`command -v`, because the transcript shell sources `~/.bashrc`, whose `alias claude=…` makes
+`command -v` print the alias instead of a path (measured 2026-08-31):
+
+```bash
+B=$(readlink -f "$(type -P claude)"); echo "$B"; sha256sum "$B"
+```
+
+→ the last path segment names the version (`2.1.251` on 2026-08-30) and the checksum is the binary's;
+record the version tail and the checksum with C11's values in the report's runtime-identity bullet —
+never the absolute path, which the tracked report rejects.
 
 - [ ] Success: **every** `installed_plugins.json` entry's `gitCommitSha` equals the candidate — not
   just the first — and the marketplace clone's HEAD equals it too; and the two bundle hashes equal
