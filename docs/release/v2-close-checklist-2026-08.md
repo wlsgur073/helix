@@ -1038,6 +1038,20 @@ cd ~/close-run/snapshot && find . -type f | sort | xargs sha256sum | tee ~/close
   would place `./proj/.helix/.owner` after `./proj/.helix/config.json` and compose a different hash
   over identical bytes. Whether to pin `LC_ALL=C` in the block is the owner's call — it is a command
   change, and the value it protects is §9 element 2's anchor.
+  *(Resolved 2026-08-31 — NOT pinned; the block stays byte-identical.)* Measured 2026-08-30: `sort` under
+  `C`, `C.UTF-8` and `POSIX` is identical on this box and `LC_ALL=C sort` in the pipeline composes the
+  same hex, so the pin would change nothing here; and `localedef` plus the `en_US` locale source ARE
+  installed, so a punctuation-ignoring collation can be built without root and does reorder the listing
+  (`config.json` before `.owner`, a different hex over identical bytes) — which is why the property is
+  recorded ON THE ARTIFACT rather than inferred from `locale -a`. The report's element-2 bullet now states:
+  the composed value is `sha256sum` of the retained `snapshot-hashes.txt` exactly as written (re-sorting
+  the listing yields a DIFFERENT value, because its lines begin with the digest — the same trap that made
+  a whole-line `sort -c` report a false disorder in the 2026-08-27 rehearsal); the path column is bytewise-ordered, checkable post hoc with
+  `cut -c67- snapshot-hashes.txt` piped into `LC_ALL=C sort -c` (exit 0); per-file verification is
+  order-free. Chronology, for the tooling question a strict reader asks: this composition was authored
+  2026-08-13T13:18:09Z (session transcript), seventeen hours before the second window's `txAfter`, and
+  entered git with the sheet's add commit `21b47b4`; it is a hand-run evidence line, not one of the
+  programs of the measured chain — ruled NOT A RESET 2026-08-31, deviations ledger `R-2026-08-30`.
 
 ### C2. Manifest — ledger-only, both bounds required
 
