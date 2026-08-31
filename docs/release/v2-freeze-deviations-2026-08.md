@@ -1703,3 +1703,48 @@ The practice is stated, not changed: the host CLI is unpinned environment, consi
 of the five earlier versions. No absence of behavioural effect is claimed; the close-day CLI path, version
 and binary checksum are recorded beside C11's observation, and F4 is corrected for the install-time
 marketplace refresh.
+
+## Abort A-2026-08-31 — the second window is ENDED by owner decision, eleven days before its derived close
+
+**The instrument.** On 2026-08-31 at 09:59Z (18:59 KST) the owner instructed that the close be brought
+forward and the remaining close-day work executed immediately. Under this pilot's own mechanics a close
+cannot be brought forward: `txClose` is derived from the candidate commit's authored time
+(`D-2026-08-13`, remediation note) and every pinned tool reads it from the receipt, so the decision is
+executed as what it is — an **ABORT of the second window**, effective at
+**T_abort = 2026-08-31T10:02:21.000Z**, recorded here before any consequent act. The freeze receipt is not
+edited (it is immutable evidence, this ledger's first paragraph); this entry, not the receipt's
+`txClose`, marks the window's actual end.
+
+**What was put to the owner first, so the choice is on the record as informed.** Three forms of
+"run it now" with their consequences: a peek-run over window records is barred by §8's own text
+("running the pilot runner over window records") and by the `R-2026-08-18` precedent; an official
+early close is mechanically unavailable without a re-freeze, which starts a third window rather than
+shortening this one; an abort is available and honest. Also stated: the gate's near-certain result
+either way (eligible probes 0 against a floor of 2, measured 2026-08-18), that the only path to a
+different result was the remaining eleven days of accrual, and the recommendation to wait. The owner
+chose to end the window. **No defect in the frozen method is asserted**; the ground is the owner's
+judgment that the remaining calendar buys nothing this development exercise needs.
+
+**What ends with the window.** The §9a claim — that the window ran as declared to its derived close —
+is NOT available and will not be made; the close report becomes an ABORT RECORD. The "28 days of
+real-use verification" claim becomes seventeen days. The accrual clock stops at day 17 of 28. And the
+independence caveat is stated rather than implied: the 2026-08-18 eligible-count inspection preceded
+this decision, and the record cannot prove the decision independent of it — which is exactly why no
+close claim survives an abort. Recorded so nobody later reads this entry as a close.
+
+**What survives, unchanged.** Every adjudication this ledger carries (the first window's reset, the
+NOT-A-RESET dispositions, `R-2026-08-30` and its corrigenda); the rehearsal-verified run sheet and
+its observed outputs; the pinned tools and their verification; the deployed candidate bytes with their
+seventeen days of real use; and the corpus itself. A future window would start from a fresh candidate
+and its own derived close, and loses nothing recorded here.
+
+**Execution order from here, recorded before execution.** (1) This entry is committed and pushed as
+the anchor. (2) The measurement runs while the frozen deployment still exists: the C1 snapshot BY HAND
+with every Claude session closed, its corpus ending at T_abort; then C2–C10, C8's human pass, and
+C11's runtime-pin observation against it; the numbers are DEVELOPMENT EVIDENCE, reported in the abort
+record. (3) Close-out follows the run sheet's own order adapted to an abort — D, E, F (rebuild,
+redeploy), G (guard teardown, flags restored), H (sweep; the report rewritten as an abort record);
+step 0.6 and G6 are SKIPPED for cause: the next timer elapse is 2026-09-01 00:00Z (09:00 KST), hours
+after the snapshot, so there is no run to suppress — the 0.6 lesson (a reason must be measured) is
+honoured by naming the elapse. (4) The owner in person: C1 (and the Q4 backup, same precondition),
+C8's adjudication, F3's push, F6's new CLI process, and every commit, per the standing approval rule.
