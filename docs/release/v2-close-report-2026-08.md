@@ -1,41 +1,22 @@
-# Helix — preregistered recall pilot v2, final report (§9a)
+# Helix — preregistered recall pilot v2, final report (§9a) — ABORT RECORD (2026-08-31)
 
-<!-- ============================ OPERATOR FRONT MATTER ============================
-     DELETE THIS ENTIRE COMMENT BLOCK BEFORE THE REPORT IS PUBLISHED.
+> **ABORT RECORD — read this first.** The second window did not run to its derived close. The owner
+> ended it on 2026-08-31: `Abort A-2026-08-31`, T_abort `2026-08-31T10:02:21.000Z`, anchored at
+> commit `ee35e41` before any consequent act, eleven days before `txClose`. **No §9a close claim is
+> made by this document.** It is the pilot's ABORT RECORD, written in the close report's prepared
+> form, with every close-day marker filled from the abort-run of 2026-08-31 — a full C1→C11
+> execution of the pinned chain over a snapshot whose corpus ends at T_abort. The gate itself
+> blocked at sample sufficiency (eligible Hit@1 exposure 1 against a pre-registered minimum of 2),
+> so the primary measurement did not happen; the reference recall numbers herein are development
+> evidence. The independence caveat is stated in the ledger entry rather than implied: the
+> 2026-08-18 eligible-count inspection preceded the abort decision, and the record cannot prove the
+> decision independent of it.
 
-     This file is the §9a final report of `v2-preregistration-2026-07.md`, drafted
-     BEFORE the close with everything that was already determined filled in, so that
-     close day is transcription and not authorship.
-
-     Every value that can only exist at the close is marked:
-
-         <<FILL AT CLOSE: what it is | where it comes from>>
-
-     `grep -n 'FILL AT CLOSE' docs/release/v2-close-report-2026-08.md` finds all of them.
-     A published report containing one of these markers is INCOMPLETE by construction.
-
-     Rules for filling:
-       * Transcribe values; never retype a hash by hand where a copy is possible.
-       * If a number disagrees with what this draft asserts as already-determined,
-         the DRAFT is wrong and must be corrected — do not adjust the measurement.
-       * If a step refuses (exit 1), the refusal is the result: record it verbatim in
-         §11 and do not re-run to obtain a different one (`v2-preregistration-2026-07.md` §11).
-       * Every PINNED MEASUREMENT step runs from a clean checkout of the candidate commit,
-         not from the development tree (`v2-close-procedure-2026-08.md`, "The rule"). ONE
-         pre-chain helper cannot: `npm run freeze-guard` reads a receipt issued AGAINST the
-         candidate, which therefore cannot exist inside it. §2.3 records that exception and
-         the byte-identity measurement that licenses it — do not simplify it back into "the
-         whole chain ran from the checkout", which is false, and do not restore the older
-         "two post-candidate helpers", which was the FIRST window's count (corrected
-         2026-08-17: the re-freeze moved the adjudication skeleton into the candidate).
-       * Prose in this document is the report's own voice and stays in the published
-         file. Do not convert it into instructions.
-     ============================================================================== -->
-
-<!-- DRAFT BANNER — delete these three lines at publication, together with the block above. -->
-Status: **DRAFT — the measurement window closes `2026-09-11T06:20:01.000Z`.** This is the SECOND window; the first was reset under §8 on 2026-08-13 and its bounds are void. The sections that
-state frozen identities, window bounds, the claim, the disclosure duties and the deviation history
-are final as drafted; every measured number is still an unfilled close-day marker.
+Status: **ABORT RECORD.** The window was ended by owner decision on 2026-08-31 (`Abort
+A-2026-08-31`, T_abort `2026-08-31T10:02:21.000Z`, anchor `ee35e41`); the derived close
+`2026-09-11T06:20:01.000Z` never arrived. Frozen identities, window bounds, disclosure duties and
+the deviation history are as drafted; every measured number below is the abort-run's, filled
+2026-08-31.
 
 Governing texts: `v2-preregistration-2026-07.md` (the preregistration this report discharges),
 `gate-decision-2026-07-22.md` (D1–D5, BINDING), `o67-class-rule-2026-07.md` (BINDING),
@@ -161,7 +142,7 @@ recorded in advance rather than explained afterwards.
   close receipt is written, so the receipt records a re-verification that was still true when it
   was taken. The candidate-commit blob remains the pinned one, and the working-tree file after the
   edit is a different, later thing.
-- <<FILL AT CLOSE: `o67-class-rule-2026-07.md`'s sha256 in the working tree after the citation removal, alongside the pinned value above | `sha256sum docs/release/o67-class-rule-2026-07.md`, run after run-sheet step D2. Recording it is what turns "it diverges" into a checkable statement rather than a reassurance >>
+- `sha256sum` of `docs/release/o67-class-rule-2026-07.md` still equals the pinned value — the three D2 citations are deliberately NOT yet removed: the vocabulary lock reads `txClose` from the immutable receipt and requires exactly those three citations until 2026-09-11T06:20:01Z, so removing them at the abort (2026-08-31) would redden the suite eleven days early. The removal is scheduled for the receipt's own instant; until then the pinned and working-tree bytes are identical
 
 ### 2.3 Re-verification at the close
 
@@ -170,17 +151,17 @@ configuration hash at the close and refuses `method-drift` (exit 1) on any set-w
 difference in either direction, so a report that exists at all was produced under pins that matched.
 That refusal is the evidence; the artifact below records it positively.
 
-- Method pins re-verified at the close: <<FILL AT CLOSE: the input-pins artifact path and its `freezeSha256` / `inputs` block | `input-pins --freeze <receipt> --manifest … --classifier … --universe … --snapshot <dir> --out <path>`, run inside the candidate-commit checkout >>
-- Where the chain ran from — **every measured step from the candidate checkout; one pre-chain check from the development tree**: <<FILL AT CLOSE: (a) the checkout path with `git rev-parse HEAD` and `git status --porcelain` (expected empty), and (b) the byte-identity check's output, taken twice — at the top of the close and again immediately before the adjudication step | (a) run-sheet step 0.2; (b) run-sheet step 0.5, which hashes all 17 `scripts/pilot/*.ts`, `scripts/close/adjudication-skeleton.ts` and `src/entry-point.ts` in the development tree against their candidate blobs and prints `DIFFERS` for any that moved. Seventeen rather than the sixteen pinned pilot tools of §2.1: the check walks the whole `scripts/pilot` directory at the candidate, which is a superset of the pin list (the extra file, `segment-oracle.ts`, is unpinned and unused by a ledger-only population) >>
+- Method pins re-verified at the close: the input-pins artifact in the close-run directory, `freezeSha256` `360ffe80f6baf853fdc5acb4bc949a14b84838c3827cbeb56832da56bfcc7332`; its ten `inputs` are transcribed in full at §5 element 1b below
+- Where the chain ran from — **every measured step from the candidate checkout; one pre-chain check from the development tree**: (a) every measured step C2–C10 and C11 ran from the candidate checkout at `94dd136925253be74c58df92392044c550aa6ec2` (0.2: `Preparing worktree (detached HEAD 94dd136)`, `status --porcelain` empty; C8's preflight re-asserted the tree, the commit and cleanliness immediately before the producer), with the checkout's own `tsx`; (b) the pre-chain development-tree checks 0.4/0.5 were NOT run in this abort-run — they license the close ceremony's dev-tree exception, and the abort's anchor is the ledger's `Abort A-2026-08-31` entry at `ee35e41`
 
   **The first window's exception covered two steps; this one covers one, and for a different reason.** Under the first candidate, `npm run freeze-guard` and `scripts/close/adjudication-skeleton.ts` both had to run from the development tree, because neither existed at the commit the chain checks out — nor did `tsx` in that commit's lockfile, nor the `typecheck` and `freeze-guard` entries in its `package.json`. All of those absences are gone at `94dd136`: `git ls-tree -r --name-only 94dd136 -- scripts/close test/close` lists both files, `git cat-file -e 94dd136:scripts/freeze-guard.ts` succeeds, the lockfile carries `tsx`, and the scripts block is `build`, `test`, `test:watch`, `typecheck`, `freeze-guard`, `scan:history`. So the adjudication step joins the measured chain inside the checkout.
 
   **The freeze-guard step cannot, and no re-freeze can fix it.** The guard reads the freeze receipt, and the receipt is issued AGAINST the candidate — so it necessarily lives in a later commit and can never be present in the tree the chain checks out. The guard's entrypoint also hard-codes `join(process.cwd(), 'docs/release/v2-freeze-receipt-2026-08.json')` and ignores `argv` (`freeze-guard.ts:109-110`), so there is no path override to reach past that. This is structural, it was misdiagnosed under the first window as "the script post-dates the candidate", and stating it correctly matters: the earlier diagnosis implied a re-cut candidate would remove the exception, and a re-cut candidate is exactly what happened and did not. The exception stays safe for the reason it always was — the guard re-hashes the candidate commit's own blobs (`git ls-tree` / `git show`, `freeze-guard.ts:78-86`) and never the tree it runs in — and it is a pre-chain anchor check, not a measurement. The development tree's `src/memory/ownership.ts`, which the guard reaches through `scripts/pilot/pin-hashes.ts:22` for one path helper, differs from its pin inside this window (adjudicated `R-2026-08-19`); run-sheet step 0.5's byte-identity check does not walk `src/memory`, so that check is not what licenses this exception — the guard's re-hashing of candidate blobs is.
-- Runtime identity re-verification (the half `input-pins.ts` explicitly does NOT do — *"the runtime identity is declared, not derivable from bytes"*): <<FILL AT CLOSE: the `gitCommitSha` of EVERY `installed_plugins.json` entry for `helix@helix` — with the entry count and each entry's scope, because there is more than one and a single-entry reading would describe only one of them — the marketplace clone's HEAD, the sha256 of `bin/helix-mcp.mjs` under BOTH load paths, and the candidate blob's own sha256, all observed together — plus the host CLI binary's version (the tail of its resolved path, never the absolute path) and sha256 (unpinned environment, ruled `R-2026-08-30` Question 3; the CLI on disk changed at least seven times inside the window) | the runtime-pin observation of the close run-sheet's step C11, taken **before** the close receipt is written and before the post-close uninstall/install, while the measured deployment still exists. The two load paths are the marketplace clone and the version-keyed cache directory named in the freeze receipt. The registry carried two entries when the run-sheet was rehearsed — one user-scope, one local-scope for the project whose ledger is the measured project corpus — so "the installed sha" is not a single value; a scope's path is described rather than written literally, because this file is tracked >>
+- Runtime identity re-verification (the half `input-pins.ts` explicitly does NOT do — *"the runtime identity is declared, not derivable from bytes"*): 2 entries, both `gitCommitSha` equal to the candidate `94dd136925253be74c58df92392044c550aa6ec2` — one `user` scope, one `local` scope at the registered project unit; the marketplace clone HEAD the same; `bin/helix-mcp.mjs` sha256 `075fc39e16bf3aea613c8d0a7538bc29b871f6f544eb314fa3d35051486b6db3` at BOTH load paths and equal to the candidate blob — observed 2026-08-31 22:47 KST at C11, before the F4 redeploy replaced the deployment; host CLI version `2.1.251`, binary sha256 `fd5f10ff0eb58daec04900466b143ea98aab50abf208a422bc008eaec13f61f7`
 
   This is deliberately **not** the load-path check that follows the post-close redeploy. That later check reads the same paths but answers a different question: by then both paths carry the rebuilt bundle and the installed entry names the new commit, so nothing in it can show what the *measurement* ran against. The load paths hold bytes, not history. Its result is recorded separately, in §10's "Deployment brought current" bullet.
-- The close-day interpreter: <<FILL AT CLOSE: the two lines `$TSX --version` printed — the `tsx` version and the node version | run-sheet step 0.3, where the interpreter is bound once, by absolute path, and exported into the transcript shell. It is not part of the pinned surface and does not choose which method bytes execute (each pilot tool resolves `src/memory/…` relative to its own file, so the checkout's script loads the checkout's modules whatever drives it) — but *which* interpreter ran the measurement is close-day provenance, and an unrecorded `npx` resolution answers that with a shrug >>
-- The **second machine's** pins — the one deployment surface this report cannot re-derive from the measuring box: <<FILL AT CLOSE: the home-machine pin report in full, or, if it was not run, the explicit statement that **the second machine's pins were never observed during the window** | the read-only pin-check script prepared for that machine, named in the close run-sheet's Block A1; it must be transferred and run there BEFORE the close, and its output is what this bullet carries. This cannot be reconstructed after the close, so "not observed" is a permitted and final answer here — it is not a placeholder to be filled later >>
+- The close-day interpreter: `tsx v4.23.5` / `node v24.17.0`, printed by the checkout's own binary at 0.3
+- The **second machine's** pins — the one deployment surface this report cannot re-derive from the measuring box: NOT OBSERVED — the abort ended the window before A1 ran; the second machine's pins were never observed and cannot be reconstructed after the fact. The v3.4 script/doc pair was staged for transfer on 2026-08-31 (SHA256SUMS verified); it remains runnable as an ordinary post-abort check, but no §4 pin report exists
 
 **The five bullets above are not the same kind of evidence, and the difference is the point.** The
 first two are **re-derived** at the close: a program re-hashes the pinned files, and a loop
@@ -222,11 +203,11 @@ The claim band of §1 applies to every number in this section:
 > oracle segmentation, retrieval from an independent human restatement, the manual mapping, or
 > resolution of the oracle-side O_67 failure.
 
-- As-of-close snapshot: <<FILL AT CLOSE: the snapshot directory, its composed sha256, and the `ledger:global` / `ledger:project` sha256 values | two independent measurements of the same directory, and both are recorded. The composed hash is the sha256 of the retained per-file listing `snapshot-hashes.txt` exactly as written — lines of `<sha256>  <path>` in bytewise path order (run-sheet C1.5 retains that file; it is what §9's element 2 is reconstructed from). Verification does not re-sort: hash the retained file as-is (re-sorting it orders lines by digest and yields a different value), check the path column's order with `cut -c67- snapshot-hashes.txt` piped into `LC_ALL=C sort -c`, and verify per-file digests as an order-free set; the composition's own chronology and locale measurements are in the deviations ledger, `R-2026-08-30` Question 1. The two ledger pins come from the `inputs` block of the input-pins artifact, which hashes `home/memory.jsonl` and `proj/.helix/memory.jsonl` in the same directory. Neither replaces the other: the first covers the whole snapshot including its trust files, the second is the pair the runner and scorer bind to >>
-- The other eight pinned inputs of the snapshot's trust and expansion surface: <<FILL AT CLOSE: `manifest`, `classifier`, `universe`, `ownership:registry`, `ownership:owner`, `trust:master-key`, `trust:witness` (raw bytes, literal `absent` sentinel where the file does not exist) and `expansion:semantic-neighbors` (content hash of the RESOLVED table) | the same `inputs` block; the runner verifies and embeds every pin it consumes and the scorer cross-checks all three runs >>
-- Upper-bound demonstration (`tx ≤ close`): <<FILL AT CLOSE: confirmation that prepare-gate accepted every snapshot row, i.e. no `snapshot-after-close` refusal, and the row count checked | `prepare-gate`, which validates the canonical UTC spelling of every row's `tx` and refuses `snapshot-after-close` on any row later than the pinned close >>
-- Lower-bound demonstration (`cutoff < tx`): <<FILL AT CLOSE: the count of post-cutoff source records and their `tx` values | the manifest's probe rows, whose window fields prepare-gate cross-checks against the freeze receipt's `txAfter` / `txClose` (`pin-mismatch` on disagreement) >>
-- Realized accrual: <<FILL AT CLOSE: distinct post-cutoff target identities `(scope, record-id)` and the eligible probe rows corresponding to them | the gate set's `eligible` block >>
+- As-of-close snapshot: the operator's offline close-run snapshot directory (location named to the owner, not published); composed sha256 `4a5908c360045bf5d0dc2350d0afbb4b85cb0c3f08d5ec708971cd2c0862f13c` — by construction the sha256 of the retained 8-line `snapshot-hashes.txt`, whose path column is bytewise-ordered (`cut -c67-` piped into `LC_ALL=C sort -c`, exit 0); `ledger:global` `1bf52353f9fa7de5612078104170a2dd0b872d91218cf8306960efa1e0afb5d9`; `ledger:project` `c264ba34356c066fb7710832b566df82d9982293f121a53537b9d9d69f4b024d`
+- The other eight pinned inputs of the snapshot's trust and expansion surface: `manifest` `19cfcadf215f0a3733c67195cc0d73fd248bdb3e49476ce2a061f7d299a74793`; `classifier` `035d027bcfedea46435851bbf4f2f3f6d16d84743926ed693f32f87e0c1546ec`; `universe` `7eb8ffa76e1799d2d0ac134591372b5e499c62b859878f4b720cfee38c3cc0f4`; `ownership:registry` `34e196f38fe2665c551f93f5a383c1c42344f839f36777579cd5c7d09260baa9`; `ownership:owner` `9a7c6132f04ababf3478a288d1f7707fa7ee18928f6e10498953357da6b7e326`; `trust:master-key` `f2a6b212c7f8b9e193e79a0bd14c8d47a6fec968a909fae4e47e3a701df231ea`; `trust:witness` `214389ff9a5031ff1a0cf5eb849853dc650bb5998c605eba64d30a3b1fc28211`; `expansion:semantic-neighbors` `c3cdbf645e260742cc1fc16c6563266975a946963173b0873e71e9b913a33f30`
+- Upper-bound demonstration (`tx ≤ close`): prepare-gate accepted every snapshot row — no `snapshot-after-close` refusal, exit 0; rows checked: 59 (global 1, project 58). The corpus ends at T_abort (2026-08-31T10:02:21.000Z), eleven days before the pinned close — the abort record's defining gap: the declared window was never fully populated
+- Lower-bound demonstration (`cutoff < tx`): 13 post-cutoff records, all project-scope, `tx` from `2026-08-16T01:51:36.631Z` to `2026-08-31T05:26:11.504Z` (one per dogfood day: 08-16, 08-18, 08-19, 08-20, 08-22, 08-23, 08-24, 08-25, 08-26, 08-27, 08-28, 08-30, 08-31)
+- Realized accrual: 13 distinct `(project, record-id)` identities; 1 eligible probe row (the single `unambiguous` probe) — below the pre-registered minimum of 2, which is the gate's blocking reason
 
 **Sample unit.** Exposure and minimum count distinct post-cutoff target identities; the metric
 denominator is the eligible probe rows corresponding to those identities; the success rule is that
@@ -364,7 +345,7 @@ Counted from `~/.cache/freeze-guard-heals.log`, as the ledger requires. **Three 
 | 2026-08-12T14:41:24Z | `0bbb000ac37fbf9a98cf143df88ec118861bca86` | `27b4373d64d13c7b258aab011570be2d973c34da` |
 | 2026-08-13T04:08:31Z | `0bbb000ac37fbf9a98cf143df88ec118861bca86` | `27b4373d64d13c7b258aab011570be2d973c34da` |
 
-- Final heal count and the complete log: <<FILL AT CLOSE: the total number of heal lines and every line from 2026-08-14 onward | the freeze-guard heal log on the deployment machine (`~/.cache/freeze-guard-heals.log`), read at the close. The log is an ordinary append-only file and **persists after the guard is retired**, so the run-sheet reading it in its wind-down block, after the close receipt has already retired the guard, loses no evidence — the only requirement is that nothing truncates it >>
+- Final heal count and the complete log: 13 lines total. The ten from 2026-08-14 onward, verbatim: `2026-08-16T01:43:44Z healed 3bd63d008af19ac7c2fb513e55dbd1b4111428a9 -> 94dd136925253be74c58df92392044c550aa6ec2`; `2026-08-17T06:55:31Z healed 0d2e55f91e3f5f248827d876f060fdeef8323e85 -> 94dd136925253be74c58df92392044c550aa6ec2`; `2026-08-18T10:59:42Z healed 5c6e1c7e7e6c01a623845034343f636f389711ae -> 94dd136925253be74c58df92392044c550aa6ec2`; `2026-08-20T12:36:06Z healed 92d5d0a0acdf5ee107d687f01746e6ce3825e8e7 -> 94dd136925253be74c58df92392044c550aa6ec2`; `2026-08-21T12:51:35Z healed d93cb192b182941f20d3c04aa61a51af53924873 -> 94dd136925253be74c58df92392044c550aa6ec2`; `2026-08-22T06:33:35Z healed d93cb192b182941f20d3c04aa61a51af53924873 -> 94dd136925253be74c58df92392044c550aa6ec2`; `2026-08-23T11:42:33Z healed 745403357e52d5aa7f1644fe59fe8c62c8a5686f -> 94dd136925253be74c58df92392044c550aa6ec2`; `2026-08-24T13:52:22Z healed cc6ef4ace02100f6027345e0b5b48148650b84f2 -> 94dd136925253be74c58df92392044c550aa6ec2`; `2026-08-27T01:59:19Z healed eddf313ff0ecc39becd927a0c98315e8f8d36b29 -> 94dd136925253be74c58df92392044c550aa6ec2`; `2026-08-30T10:59:24Z healed eddf313ff0ecc39becd927a0c98315e8f8d36b29 -> 94dd136925253be74c58df92392044c550aa6ec2`
 
 Each heal is the same class of event as §4.1 and §4.2 — clone-HEAD identity drift with continuous
 runtime bytes — and each is disclosed for the same reason: the identity pin did not hold
@@ -754,7 +735,7 @@ subagent's shell start during an unrelated verification pass, under the auto-hea
 2026-08-10 and gated to the case where clone-HEAD drift is the sole violation and every byte check
 passes. Both conditions held.
 
-- Final second-window deviation list and heal count: <<FILL AT CLOSE: every entry appended to `v2-freeze-deviations-2026-08.md` after 2026-08-14, and the total line count of the heal log | the deviation ledger and `~/.cache/freeze-guard-heals.log`, read at the close. Prevention is not available (§4.2), so more instances are expected; a window with none would itself be worth remarking on >>
+- Final second-window deviation list and heal count: entries appended after 2026-08-14: `D-2026-08-15-autoupdate-second-window` with Instances 2–11; `R-2026-08-16`; `D-2026-08-18-in-window-product-rebuild` and `R-2026-08-19`; `Disclosure R-2026-08-18` with `R-2026-08-18b` and its 2026-08-24 amendment; `D-2026-08-22-in-window-pinned-source-edit`; `D-2026-08-25-rehearsal-triggered-run`; `D-2026-08-26-rehearsal-removed-guard`; `Disclosure R-2026-08-30` with three dispositions and the 2026-08-31 corrigenda; `Abort A-2026-08-31`. Heal log: 13 lines, final
 
 ### 4.8 Second-window rulings and disclosures — entries that are not deviations
 
@@ -863,7 +844,7 @@ It is the same class of residue the 2026-08-17 reconciliation was cleaning up: a
 constant that survived the re-date because nothing recomputed it.)*
 
 **Element 1b — input pins** (input half, derived at the close, bound back by `freezeSha256`).
-<<FILL AT CLOSE: the input-pins artifact path and the ten input pin values | `input-pins`, run in the candidate-commit checkout **after the manifest, classifier and universe exist** — its `--freeze`, `--manifest`, `--classifier`, `--universe`, `--snapshot` and `--out` are all required, so it is the fourth chain step and not the first >>
+the input-pins artifact in the close-run directory; `manifest` `19cfcadf215f0a3733c67195cc0d73fd248bdb3e49476ce2a061f7d299a74793`, `classifier` `035d027bcfedea46435851bbf4f2f3f6d16d84743926ed693f32f87e0c1546ec`, `universe` `7eb8ffa76e1799d2d0ac134591372b5e499c62b859878f4b720cfee38c3cc0f4`, `ledger:global` `1bf52353f9fa7de5612078104170a2dd0b872d91218cf8306960efa1e0afb5d9`, `ledger:project` `c264ba34356c066fb7710832b566df82d9982293f121a53537b9d9d69f4b024d`, `ownership:registry` `34e196f38fe2665c551f93f5a383c1c42344f839f36777579cd5c7d09260baa9`, `ownership:owner` `9a7c6132f04ababf3478a288d1f7707fa7ee18928f6e10498953357da6b7e326`, `trust:master-key` `f2a6b212c7f8b9e193e79a0bd14c8d47a6fec968a909fae4e47e3a701df231ea`, `trust:witness` `214389ff9a5031ff1a0cf5eb849853dc650bb5998c605eba64d30a3b1fc28211`, `expansion:semantic-neighbors` `c3cdbf645e260742cc1fc16c6563266975a946963173b0873e71e9b913a33f30`
 
 **Element 2 — as-of-close snapshot hash demonstrating `cutoff < tx ≤ close`.** Recorded in §3.
 
@@ -873,14 +854,14 @@ point**, and the universe artifact is emitted by `classify-o67` as the `.univers
 its verdicts file — the name is derived at `classify-o67.ts:114` and the file written at `:179`,
 from the same in-run recall the verdicts come from, so a verdict can never name an identity absent
 from the universe it competed in. Three commands produce the four artifacts.
-<<FILL AT CLOSE: the four artifact paths and their hashes — manifest, classifier verdicts, the derived `.universe.json` sibling, and the gate-set artifact with its `payloadSha256` | `generate-manifest`, then `classify-o67` (which emits BOTH the verdicts file and its universe sibling), then `prepare-gate --manifest … --classifier … --universe … --snapshot … --pins … --out …`; the gate-set `payloadSha256` is the prepared-artifact hash the rest of the chain binds >>
+`manifest.json` `19cfcadf215f0a3733c67195cc0d73fd248bdb3e49476ce2a061f7d299a74793`; `classifier.json` `035d027bcfedea46435851bbf4f2f3f6d16d84743926ed693f32f87e0c1546ec`; `classifier.universe.json` `7eb8ffa76e1799d2d0ac134591372b5e499c62b859878f4b720cfee38c3cc0f4`; `gate-set.json` payloadSha256 `5ea01a2afeb0207c532a8e82f1ee21875a72c44ff3fa928dc309a1ccbeef053e` (file sha256 `41047b68ea98f5a77b1567d5236d4cde62597fe0e2465edd93c802a64b7cf367`)
 
 **Element 4 — append-only ordering receipt showing `prepare-finished` before `runner-started`.**
 The three run ids in this log (`run1`, `run2`, `run3`) are **operator labels**, chosen before each
 execution to bracket it. They are not the runner's own ids and appear in no run artifact — see
 element 5, which states the binding.
-- <<FILL AT CLOSE: the ordering log path, the `seq`/`event`/`payloadSha256` of the `prepare-finished`, `runner-started` and `runner-finished` lines, and the chain head | `ordering-receipt --mode append` for each event as it occurs, then `--mode verify`, whose `ordering-receipt-verification` artifact records the verdict and which optional anchors ran >>
-- Prepared-artifact hash with its pre-run timestamp: <<FILL AT CLOSE: the gate-set `payloadSha256` together with the self-reported wall clock on its `prepare-finished` ordering line | the ordering log line for `prepare-finished`; the timestamp is self-reported and is labelled as such >>
+- `ordering.jsonl` in the close-run directory — seq 0 `prepare-finished` payload `5ea01a2afeb0207c532a8e82f1ee21875a72c44ff3fa928dc309a1ccbeef053e`; seq 1/3/5 `runner-started` for run1/run2/run3, each bound to that payload; seq 2/4/6 `runner-finished` payload `bf14becffae5ca0cbfdda31b8e49a209bddb26aa7d572d36c58e2c13ae468e56`; chain head `5d0334718f9c91a499f178523c98a976eb6bc3c8f77945fac2b276767d129c42`, verified with `--expect-prepare` AND `--expect-head` — 7 entries, 3 runs bound
+- Prepared-artifact hash with its pre-run timestamp: gate-set payloadSha256 `5ea01a2afeb0207c532a8e82f1ee21875a72c44ff3fa928dc309a1ccbeef053e`; its `prepare-finished` line self-reports `2026-08-31T13:16:07.138Z` (a self-attested wall clock, as the verifier's own caveats state)
 
 **Element 5 — runner outputs embedding the prepare hash and the run id.** Three runs of the
 deterministic payload; the payload embeds the prepare hash, and the run id and wall clocks live in
@@ -897,8 +878,8 @@ match the two sets is matching things that were never related. What actually tie
 equals the run artifact's payload hash, and equality is the binding. This is also why
 `runner-started` carries the *prepare* hash instead — at that moment the run artifact does not exist
 yet.
-- <<FILL AT CLOSE: the three run artifact paths, their three payload sha256 values, and the three self-declared run ids | `run-pilot --manifest … --snapshot … --gate-set … --out …`, executed three times; the payload hashes appear in the score artifact's `stability.runPayloadSha256` and the run ids in its `receipts.runIds`. Record both sets, and record that they do not correspond >>
-- Stability outcome: <<FILL AT CLOSE: whether h1 = h2 = h3 | the score artifact's `stability.pass`, recomputed by the scorer from the files rather than read out of them >>
+- `run1.json` / `run2.json` / `run3.json` in the close-run directory; all three payloads `bf14becffae5ca0cbfdda31b8e49a209bddb26aa7d572d36c58e2c13ae468e56`; run ids `82b9a719-5cff-415e-b63c-201c20646de1`, `04e89137-402d-4fda-b064-b06a337a4008`, `be55a4fc-6594-47bc-9400-4b7ecd79ea6c`
+- Stability outcome: h1 = h2 = h3 — `stability.pass` true, recomputed by the scorer from the three files
 
 **Element 6 — adjudication artifact binding the runner-output hash and quoting both sides of every
 judgment.** The human judgments are ingested, never decided by the tooling. The file's mechanical
@@ -912,12 +893,12 @@ It is invoked **from the candidate checkout**, with the rest of the chain. Hand-
 instead is equally valid and reaches the same gate. *(Corrected 2026-08-17: this passage called the
 program "unpinned" and placed its invocation "from the development tree" — both were first-window
 facts, and both are contradicted by §2.1, §4.6 and the run-sheet's C8 in this same document set.)*
-- <<FILL AT CLOSE: the adjudication file path, its `gateSetSha256` and `runPayloadSha256` bindings, and its sha256 as the scorer computed it | the operator authors the adjudication against run 1's payload hash; the scorer records `adjudicationSha256` = sha256 of the parsed object in the score payload >>
-- <<FILL AT CLOSE: contradiction judgment counts — total judgments, how many `contradiction` and how many `none`, with both quoted texts retained for every positive call | the adjudication's `contradictions` array, which must cover every frozen probe exactly once; the scorer refuses `adjudication-incomplete`, `adjudication-duplicate` or `adjudication-uncertain` otherwise >>
-- <<FILL AT CLOSE: stale judgment counts — how many `violation` and how many `none`, with the `closedId` / `currentId` pair on every positive call, or the statement that no stale judgments were required | the adjudication's `staleViolations` array; judgments are required for every probe only when the snapshot holds at least one closer relationship, and a `violation` additionally names the closed record served and its current form, which §7.4 reports >>
+- the adjudication file in the close-run directory; `gateSetSha256` `5ea01a2afeb0207c532a8e82f1ee21875a72c44ff3fa928dc309a1ccbeef053e`, `runPayloadSha256` `bf14becffae5ca0cbfdda31b8e49a209bddb26aa7d572d36c58e2c13ae468e56`, and the scorer computed `adjudicationSha256` `0d8dd3dc3e1353f0879f297c5749f83e5debc3adc5ee0adf4d0913f6a812e7d3`
+- 13 judgments — 0 `contradiction`, 13 `none` (owner-ruled 2026-08-31 over the full returned lists); no positive call, so no quoted texts were required
+- no stale set was required: the gate set counts zero closer relationships (`Es = 0`); 0 `violation`
 
 **Element 7 — score artifact binding the prepare, runner and adjudication hashes.**
-<<FILL AT CLOSE: the score artifact path and its `payloadSha256`, plus the three bound hashes it carries inside that payload — `gateSetSha256`, `stability.runPayloadSha256`, `adjudicationSha256` | `score-gate --gate-set … --expect-payload <PREPARE_SHA, transcribed from the prepare step's own stdout> --run1 … --run2 … --run3 … --adjudication … --out …`. The expected payload is **not** re-read out of `gate-set.json`: a self-consistent forged artifact would satisfy that check against itself, so the value comes from the terminal at the moment the gate set was prepared >>
+`score.json` in the close-run directory, payloadSha256 `de7e3bbd2e96a699f60839ef981e12eb00a82944300ad0756ebb98b81bc6ae31`; it binds `gateSetSha256` `5ea01a2afeb0207c532a8e82f1ee21875a72c44ff3fa928dc309a1ccbeef053e`, `stability.runPayloadSha256` `bf14becffae5ca0cbfdda31b8e49a209bddb26aa7d572d36c58e2c13ae468e56` (×3), and `adjudicationSha256` `0d8dd3dc3e1353f0879f297c5749f83e5debc3adc5ee0adf4d0913f6a812e7d3`
 
 **Element 8 — release record binding the score hash and showing the consequence was applied.**
 Recorded in §9.
@@ -946,11 +927,11 @@ report cannot support: the log is then reconstructed from the shell history and 
 themselves, and it is labelled as a reconstruction with weaker provenance rather than presented as
 a transcript. It is never reconstructed from memory.
 
-<<FILL AT CLOSE: the ordered list of commands actually executed, with their exit codes, from checkout creation through the release record | the captured close-day transcript file; §9's ordering is the expected sequence and any departure from it is a finding, not a formatting detail. If no transcript was captured, say so here and label what follows a reconstruction >>
+no `script` capture exists — 0.1 was skipped in the abort-run. The ordered command sequence, outputs and exit codes are retained in the operator-session log and in the close-run log file (described location: the close-run directory); every chain step exited 0
 
-<<FILL AT CLOSE: every refusal encountered, verbatim, or the explicit statement that there were none | the same captured transcript; a refusal is a result and is preserved, never re-run for a different one (§11) >>
+none from any pinned tool — every invocation exited 0. The one blocking verdict is the gate's own, quoted in §8: `Hit@1 — exposure 1 is below the minimum of 2, so the primary measurement did not happen (PARTIALLY EXERCISED — 1/2 (minimum not met))`
 
-<<FILL AT CLOSE: the path of the captured transcript file and its sha256, or the statement that none was captured | the capture is the FIRST step of the close-day run-sheet (step 0.1), started before the candidate checkout is created, so "from checkout creation" above is inside it rather than at its edge. Every later step runs inside the shell it opens, and its LAST step (H7) is what closes the capture and hashes the finished file from the shell outside it — the sha256 cannot be taken from within the capture, where the file is still open and the hashing command is itself appended afterwards >>
+none was captured — 0.1 was skipped for the abort-run; the session log and the close-run log are the execution record, described rather than pathed
 
 ---
 
@@ -971,13 +952,13 @@ The claim band of §1 applies to every number in this section:
 
 | condition | blocking | result |
 |---|---|---|
-| Recall@20 | yes | <<FILL AT CLOSE: `x/n` and pass/fail | the score artifact's `recall` block >> |
-| Hit@1 | yes | <<FILL AT CLOSE: `x/n ranked 1`, the exposure label, and pass/fail | the score artifact's `hit1` block >> |
-| Target-relative contradiction | yes | <<FILL AT CLOSE: number of positive calls and pass/fail | the score artifact's `contradictions` block >> |
-| Stale-served-as-live | only when `Es > 0` | <<FILL AT CLOSE: `Es`, the exposure label, and pass/fail | the score artifact's `stale` block >> |
-| Errors / unscorable | yes | <<FILL AT CLOSE: the reported label | the score artifact's `conditions[errors-unscorable]`; see the caveat in §7.5 >> |
-| Stability | yes | <<FILL AT CLOSE: identical or divergent | the score artifact's `stability` block >> |
-| Protocol and population integrity | yes | <<FILL AT CLOSE: the reported label | the score artifact's `conditions[protocol-population-integrity]`; see the caveat in §7.7 >> |
+| Recall@20 | yes | 13/13, pass |
+| Hit@1 | yes | 1/1 ranked 1; `PARTIALLY EXERCISED — 1/2 (minimum not met)`; FAIL (blocking) |
+| Target-relative contradiction | yes | 0 positive calls; pass |
+| Stale-served-as-live | only when `Es > 0` | `Es` = 0 — the condition was not required; label `UNEXPOSED — no temporal evidence`; pass (non-blocking) |
+| Errors / unscorable | yes | `none`; pass |
+| Stability | yes | identical; pass |
+| Protocol and population integrity | yes | `chain verified at this link`; pass |
 
 ### 7.1 Recall@20 — a regression tripwire, not evidence
 
@@ -988,7 +969,7 @@ threshold is enormously slack**, so a pass yields a tight-looking bound on an ev
 certain regardless of system quality. Its reported bound must never be presented as evidence of
 recall quality. It is kept because a change that genuinely broke retrieval would trip it.
 
-- <<FILL AT CLOSE: `x/n`, the pass/fail, and the nominal lower bound | the score artifact's `recall.x`, `recall.n`, `recall.pass`, `recall.bound` >>
+- 13/13, pass; nominal one-sided 95%% exact-binomial lower bound 0.794
 
 ### 7.2 Hit@1 — the primary measurement, with its bound
 
@@ -996,8 +977,8 @@ Denominator: the eligible probe rows, computed against the merged global + proje
 Minimum exposure 2; `M < 2` blocks, because a shortfall means the primary measurement did not
 happen rather than that it happened and scored badly.
 
-- <<FILL AT CLOSE: `x/n`, the exposure count, the shortfall label (`UNEXERCISED — 0/2`, `PARTIALLY EXERCISED — n/2 (minimum not met)`, or `EXERCISED — n/2`), and pass/fail | the score artifact's `hit1` block, whose `label` is copied from the gate set's `eligible.label` >>
-- Reported bound: <<FILL AT CLOSE: the nominal one-sided 95 percent exact-binomial lower bound, or `N/A` when `n = 0` | the score artifact's `hit1.bound`, computed by `binomial.ts` >>
+- 1/1; exposure 1; `PARTIALLY EXERCISED — 1/2 (minimum not met)`; pass FALSE — the gate's blocking reason
+- Reported bound: 0.0500 as computed at n = 1 — reported because the artifact carries it, meaningless at this n
 
 The bound is **the nominal one-sided 95 percent exact-binomial lower bound for Hit@1 under a common
 independent-success model**, and that qualification travels with the number. It describes sampling
@@ -1014,7 +995,7 @@ the condition can only test **internal retrieval coherence relative to that targ
 show that the target is correct, complete, or consistent with any external account, and **this
 report does not describe it as oracle validation.**
 
-- <<FILL AT CLOSE: the number of positive calls, and for each one both quoted texts and the returned record id | the score artifact's `contradictions.calls`, which carries `targetText` and `returnedText` for every positive call >>
+- 0 positive calls — `contradictions.calls` is empty
 
 ### 7.4 Stale-served-as-live — exposure, and why zero exposure does not block
 
@@ -1036,7 +1017,7 @@ freeze commit deterministically verifies that `supersede`, `invalidate` and `era
 predecessors from the live projection; the pilot's contribution here would have been temporal
 evidence on top of that fixture.
 
-- <<FILL AT CLOSE: `Es`, the label, the violation count, and each violation's closed/current record ids | the score artifact's `stale` block, which carries every violation call verbatim as the judge wrote it. The two ids are the call's `closedId` and `currentId`: nothing derives them — a run artifact holds ranks, not closer relationships — so they exist here only because the adjudication step requires a `violation` call to name the closed record it served and that record's current form. At `Es = 0` there are no violations and this reduces to the label >>
+- `Es` 0; `UNEXPOSED — no temporal evidence`; 0 violations; no closed/current pairs exist
 
 ### 7.5 Errors / unscorable — structurally always-pass in a report that exists
 
@@ -1059,7 +1040,7 @@ against the same adjudication reproducing the same payload. Audit receipts — r
 ids, host facts — are retained and hashed into the provenance chain, never into the stability
 comparison. The scorer recomputes the payload hashes rather than reading them from the files.
 
-- <<FILL AT CLOSE: the three payload hashes and the equality verdict; and the re-scoring check — the second score run's `payloadSha256` against the first | the score artifact's `stability` block for the runs; for the re-score, a second `score-gate` invocation against the same inputs with a different `--out` >>
+- run payloads `bf14becffae5ca0cbfdda31b8e49a209bddb26aa7d572d36c58e2c13ae468e56` × 3 — EQUAL; the second scoring run's payloadSha256 equals the first (`de7e3bbd2e96a699f60839ef981e12eb00a82944300ad0756ebb98b81bc6ae31`)
 
 ### 7.7 Protocol and population integrity — one link, and the always-pass caveat
 
@@ -1075,7 +1056,7 @@ is §5's elements 1, 2 and 4 — the freeze receipt, the as-of-close snapshot ha
 append-only prepare-before-run receipt — together with §2.3's re-verified pins and §6's execution
 log.
 
-- <<FILL AT CLOSE: the chain reconstruction, element by element, confirming each artifact names its parent | §5's filled hashes read in order; this is the human check that no program performs >>
+- walked 2026-08-31: `release-record` binds `scoreSha256` `de7e3bbd2e96a699f60839ef981e12eb00a82944300ad0756ebb98b81bc6ae31` and `orderingHead` `5d0334718f9c91a499f178523c98a976eb6bc3c8f77945fac2b276767d129c42`; the score binds `gateSetSha256` `5ea01a2afeb0207c532a8e82f1ee21875a72c44ff3fa928dc309a1ccbeef053e`, the three run payloads `bf14becffae5ca0cbfdda31b8e49a209bddb26aa7d572d36c58e2c13ae468e56` and `adjudicationSha256` `0d8dd3dc3e1353f0879f297c5749f83e5debc3adc5ee0adf4d0913f6a812e7d3`; the adjudication binds the same gate set and run payload; the gate set was prepared from the manifest/classifier/universe whose hashes the pins artifact carries under `freezeSha256` `360ffe80f6baf853fdc5acb4bc949a14b84838c3827cbeb56832da56bfcc7332` — every element names its parent
 
 ---
 
@@ -1100,11 +1081,11 @@ members **in** the binding Hit@1 denominator. There is therefore no `E` denomina
 In-class membership grants no Recall@20 exemption. The membership rule is `o67-class-rule-2026-07.md`
 §2, with the candidate universe of its §3 and the fail-closed statuses of its §4.
 
-- Full single-target census: <<FILL AT CLOSE: the census as the classifier produced it | the classifier artifact of §5 element 3 >>
-- Distinct in-class target identities: <<FILL AT CLOSE: the count | the score artifact's `o67.cases` >>
-- How many of those are Hit@1 eligible: <<FILL AT CLOSE: the count | the `hit1Eligible` flag on each `o67.cases` entry >>
-- Per case — witnesses, best rank, Hit@1, Recall@K: <<FILL AT CLOSE: one row per case | each `o67.cases` entry's `witnesses`, `bestRank`, `hitAt1`, `hitAtK` >>
-- Label: <<FILL AT CLOSE: `UNEXERCISED — 0 distinct cases observed (reporting only, non-blocking)` or `EXERCISED — n distinct cases observed (reporting only, non-blocking)` | the score artifact's `o67.label` >>
+- Full single-target census: the classifier artifact in the close-run directory (sha256 `035d027bcfedea46435851bbf4f2f3f6d16d84743926ed693f32f87e0c1546ec`) carries the full census
+- Distinct in-class target identities: 0
+- How many of those are Hit@1 eligible: 0
+- Per case — witnesses, best rank, Hit@1, Recall@K: none — there is no in-class case
+- Label: `UNEXERCISED — 0 distinct cases observed (reporting only, non-blocking)`
 
 **Honest qualification.** D-b does not guarantee the class was ever tested. If no in-class case
 appeared — the expected outcome — D-b and the old exclusion produce identical results, and D5's
@@ -1135,10 +1116,10 @@ support:
 > oracle segmentation, retrieval from an independent human restatement, the manual mapping, or
 > resolution of the oracle-side O_67 failure.
 
-- Gate verdict: <<FILL AT CLOSE: `blocked: true|false` and every reason string | the score artifact's `release` block >>
-- Release record: <<FILL AT CLOSE: the release-record artifact path, its `payloadSha256`, and the `scoreSha256` and `orderingHead` it binds | `release-record --score … --decision "$DECISION" --consequence … --evidence … --ordering-head "$ORDERING_HEAD" --out …`, where the decision is exactly `released` or `blocked` and is checked against the score in both directions. All four operator-supplied values are shell variables rather than inline text, for two different reasons: `--decision <released|blocked>` written literally is redirection rather than an argument, and the two prose fields are accepted verbatim if a template is left in them — `release-record` refuses only a field with no content, so nothing but the operator stops placeholder prose entering this signed payload >>
-- The declared consequence: <<FILL AT CLOSE: the consequence text as recorded | the `consequence` field of the release record — what was released, or what was NOT released >>
-- Evidence the consequence was actually applied: <<FILL AT CLOSE: the concrete evidence — for a release, the release artifacts and their identifiers; for a block, what was withheld and the statement that no release occurred | the `evidence` field of the release record, and the corroborating artifacts it names >>
+- Gate verdict: `blocked: true`; reason: `Hit@1 — exposure 1 is below the minimum of 2, so the primary measurement did not happen (PARTIALLY EXERCISED — 1/2 (minimum not met))`
+- Release record: the release record in the close-run directory, payloadSha256 `b3fa888377e49462df9f721f734c1fb9828136ece4ca55834121b05d34c1fe97`, binding `scoreSha256` `de7e3bbd2e96a699f60839ef981e12eb00a82944300ad0756ebb98b81bc6ae31` and `orderingHead` `5d0334718f9c91a499f178523c98a976eb6bc3c8f77945fac2b276767d129c42`
+- The declared consequence: “Nothing is released on this record: the gate blocked at sample sufficiency (eligible Hit@1 exposure 1 against a minimum of 2), so the primary claim was not measured. These numbers are development evidence of an ABORTED window — Abort A-2026-08-31, T_abort 2026-08-31T10:02:21.000Z, eleven days before the derived close — and no pre-registered close claim attaches to them.”
+- Evidence the consequence was actually applied: “score.json payload de7e3bbd2e96a699f60839ef981e12eb00a82944300ad0756ebb98b81bc6ae31 (re-scored EQUAL at score2.json); three runs stable at payload bf14becffae5ca0cbfdda31b8e49a209bddb26aa7d572d36c58e2c13ae468e56; ordering receipt 7 entries, 3 runs bound, head 5d0334718f9c91a499f178523c98a976eb6bc3c8f77945fac2b276767d129c42; snapshot composed sha256 4a5908c360045bf5d0dc2350d0afbb4b85cb0c3f08d5ec708971cd2c0862f13c; abort recorded in the deviations ledger at commit ee35e41.”
 
 A blocked release is a **result**, not an incident to be re-run until it passes. Re-running would
 require a new freeze and a new window. Conversion of the v2 probes into a regression suite happens
@@ -1151,19 +1132,19 @@ only after a release.
 These are the window's operational closure, recorded here because the deviation ledger makes them
 close-report duties. They are not part of the measurement.
 
-- Validated close receipt written: <<FILL AT CLOSE: the path and payload hash of `v2-close-receipt-2026-08.json` | written by the close checklist AFTER release-record validation; it is the only thing that retires `scripts/freeze-runtime-check.sh`, never the passing of `txClose` alone >>
-- Guard wiring removed: <<FILL AT CLOSE: confirmation that the two freeze-guard lines and the `DISABLE_AUTOUPDATER=1` export were removed from `~/.bashrc` and that the systemd drop-in `freeze-guard.conf` was deleted | duty 4 of the D-2026-08-09 ledger entry; the dogfood unit file itself is untouched, the drop-in is additive >>
-- Marketplace `autoUpdate` restored: <<FILL AT CLOSE: both flags confirmed `true` — `~/.claude/settings.json` `.extraKnownMarketplaces.helix.autoUpdate` and `~/.claude/plugins/known_marketplaces.json` `.helix.autoUpdate` | the same duty; the official-marketplace entry was never in freeze scope >>
-- Deployment brought current: <<FILL AT CLOSE: the rebuild and uninstall/install redeploy, with the 3-sha load-path verification **of the new build** | `npm run build` then the uninstall+install sequence of `deploy-runbook.md`; until this runs, the in-window source fixes remain fixed in source and open in deployment (§4.5). This records that the post-close deployment was brought current and answers a *different* question from §2.3's runtime-pin bullet, which was observed before this ran and is the one §10 asks for. Keep the two under their own headings; do not merge them >>
-- Retention of the evidence chain: <<FILL AT CLOSE: the described (not literal) off-machine location holding the durable second copy of the non-secret chain, the described offline location holding the snapshot, and the filename of the in-repository evidence index | run-sheet H2b. Two copies of the non-secret chain are kept — the working set and a durable off-machine copy at the same location the owner's data backup uses — and the snapshot itself is retained offline only, because `snapshot/home/` holds the ledger signing key, `witness.json` and the configuration. The snapshot's per-file hash listing (`snapshot-hashes.txt`) travels with the NON-secret chain rather than with the snapshot: it is what element 2's composed hash decomposes into, and it carries digests rather than bytes. Locations are described rather than written literally, because this file is tracked and may not carry a private absolute path; the snapshot's anchor in this report is its sha256 in §3, not its path >>
-- In-repository evidence index: <<FILL AT CLOSE: the path of `v2-close-evidence-index-2026-08.md` in this directory, and its row count | the same step; the index carries one row per artifact — filename, byte size, sha256, and a described location for each of the two copies. The artifacts themselves are NOT committed: they contain absolute paths that the tracked-file vocabulary lock forbids, which is the reason an index exists at all >>
-- Owner-owed operational items, **reported open if unexecuted**: <<FILL AT CLOSE: the status of each of the three — recovery codes reachable without the account (Q1), the inventory of push-capable credentials beyond the active box (Q2), and one **encrypted**, physically separate snapshot of both data units (Q4) — each either discharged with the evidence that discharges it, or recorded OPEN | Blocks A2 and A3 of the close run-sheet, which track them against `c4-drills-2026-07.md`. None is a close blocker. Q4 is not discharged by a plain unencrypted archive: the recovery playbook's §6 carries the `tar | gpg --symmetric` step since `fba205e` (2026-08-24), so either that snapshot is taken — while no session runs and the dogfood timer is not due — or Q4 is recorded OPEN here >>
+- Validated close receipt written: none — the window was ABORTED before its derived close, so no validated close receipt exists; the guard was retired by removal (G2/G3), not by a receipt. The abort's anchor is `Abort A-2026-08-31` in the deviations ledger, committed and pushed at `ee35e41` before any consequent act
+- Guard wiring removed: confirmed 2026-08-31 23:0x KST: the three `~/.bashrc` lines removed (`grep` for the guard prints nothing) and the systemd drop-in plus its `.d` directory removed, `daemon-reload` run — `show` carries no `ExecStartPre` and no `DISABLE_AUTOUPDATER`
+- Marketplace `autoUpdate` restored: both `true`, re-read after an atomic rewrite with backups kept beside both files
+- Deployment brought current: F1 rebuilt all five bundles from the 37 post-candidate commits (offline `npm ci`; `fast-uri` 3.1.5 bundled for the first time; after `npm run inventory` the full suite reported 2485 passed, 0 failed, 2 skipped); F3 committed and pushed the rebuild; F4 redeployed at BOTH scopes including the `--scope local` leg from the project root; F5: both registry entries, the clone HEAD and both load-path bundles all name the F3 commit, `helix-mcp.mjs` sha256 `a7c133d46fe3bc4e5fbd5c46bb95ed77d0ca9311f4a74e8d14ce63a549c850ea` at all three copies; the CLI binary was byte-identical before and after the sequence
+- Retention of the evidence chain: PENDING the owner's medium: the working set is in place in the close-run directory; the durable off-machine copy of the non-secret chain and the offline snapshot location are owed together with the Q4 backup, whose 2026-08-31 attempt produced no archive and is to be re-run
+- In-repository evidence index: `docs/release/v2-close-evidence-index-2026-08.md`, 15 rows — 14 artifacts plus the transcript row marked none-captured
+- Owner-owed operational items, **reported open if unexecuted**: Q1 recovery codes: OPEN, not executed; Q2 credential inventory: OPEN, not executed; Q4 encrypted backup: attempted 2026-08-31 22:11 KST, FAILED (no archive; the backups directory was left empty) — OPEN, to be re-run in a bare terminal
 
 ---
 
 ## 11. Failures, refusals, and what this report does not prove
 
-- Failures and refusals: <<FILL AT CLOSE: every failed run preserved and described, or the explicit statement that no step failed | §6's execution log; a failed run is preserved and reported, never discarded >>
+- Failures and refusals: no chain step failed — every pinned invocation exited 0; the blocking verdict is the gate's sample-sufficiency reason quoted in §8. Outside the chain: the Q4 backup attempt failed (§10) and A1 was never run (§2.3)
 
 **What this report does not prove.** No self-attested artifact shows that no unrecorded earlier
 pass occurred; every wall clock in the chain is self-reported and labelled as such. The three runs
@@ -1235,4 +1216,4 @@ are left as written because the quotation is verbatim.
   record**, which no artifact in the chain carries: their source is the captured close-day
   transcript file named in §6 — a file, not scrollback — and if no such file exists §6 says so and
   labels its content a reconstruction.
-- Completed at the close: <<FILL AT CLOSE: the date the last marker was filled, and by whom | the operator running the close chain >>
+- Completed at the close: 2026-08-31 (KST), by the operator and the assistant executing the abort-run; the markers were filled the same night the window was aborted
