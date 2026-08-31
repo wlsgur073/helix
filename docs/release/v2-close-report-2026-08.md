@@ -1136,15 +1136,15 @@ close-report duties. They are not part of the measurement.
 - Guard wiring removed: confirmed 2026-08-31 23:0x KST: the three `~/.bashrc` lines removed (`grep` for the guard prints nothing) and the systemd drop-in plus its `.d` directory removed, `daemon-reload` run — `show` carries no `ExecStartPre` and no `DISABLE_AUTOUPDATER`
 - Marketplace `autoUpdate` restored: both `true`, re-read after an atomic rewrite with backups kept beside both files
 - Deployment brought current: F1 rebuilt all five bundles from the 37 post-candidate commits (offline `npm ci`; `fast-uri` 3.1.5 bundled for the first time; after `npm run inventory` the full suite reported 2485 passed, 0 failed, 2 skipped); F3 committed and pushed the rebuild; F4 redeployed at BOTH scopes including the `--scope local` leg from the project root; F5: both registry entries, the clone HEAD and both load-path bundles all name the F3 commit, `helix-mcp.mjs` sha256 `a7c133d46fe3bc4e5fbd5c46bb95ed77d0ca9311f4a74e8d14ce63a549c850ea` at all three copies; the CLI binary was byte-identical before and after the sequence
-- Retention of the evidence chain: PENDING the owner's medium: the working set is in place in the close-run directory; the durable off-machine copy of the non-secret chain and the offline snapshot location are owed together with the Q4 backup, whose 2026-08-31 attempt produced no archive and is to be re-run
+- Retention of the evidence chain: the working set is in place in the close-run directory, and the Q4 archive exists and is verified (below); the durable off-machine copy of the non-secret chain, the offline snapshot location, and the archive's own separate-medium copy remain the owner's physical acts, PENDING as of this record
 - In-repository evidence index: `docs/release/v2-close-evidence-index-2026-08.md`, 15 rows — 14 artifacts plus the transcript row marked none-captured
-- Owner-owed operational items, **reported open if unexecuted**: Q1 recovery codes: OPEN, not executed; Q2 credential inventory: OPEN, not executed; Q4 encrypted backup: attempted 2026-08-31 22:11 KST, FAILED (no archive; the backups directory was left empty) — OPEN, to be re-run in a bare terminal
+- Owner-owed operational items, **reported open if unexecuted**: Q1 recovery codes: OPEN, not executed; Q2 credential inventory: OPEN, not executed; Q4 encrypted backup: PRODUCED AND VERIFIED 2026-08-31 23:00 KST after one failed attempt at 22:11 (pinentry could not reach the terminal; the loopback prompt resolved it) — 101,632 bytes, AES256 symmetric, archive sha256 `8171a536fba3792e0e7996ad06165dcd2565ea0c1ff6867c8affa88eedeb5bd6`, `ledger-mac-master.key` listed with mode `-rw-------` under decryption, no plaintext archive anywhere; the separate-medium copy and the off-box passphrase note remain OPEN, the owner's physical acts
 
 ---
 
 ## 11. Failures, refusals, and what this report does not prove
 
-- Failures and refusals: no chain step failed — every pinned invocation exited 0; the blocking verdict is the gate's sample-sufficiency reason quoted in §8. Outside the chain: the Q4 backup attempt failed (§10) and A1 was never run (§2.3)
+- Failures and refusals: no chain step failed — every pinned invocation exited 0; the blocking verdict is the gate's sample-sufficiency reason quoted in §8. Outside the chain: the Q4 backup's first attempt failed on a pinentry/terminal fault and succeeded the same night (§10); A1 was never run (§2.3)
 
 **What this report does not prove.** No self-attested artifact shows that no unrecorded earlier
 pass occurred; every wall clock in the chain is self-reported and labelled as such. The three runs
