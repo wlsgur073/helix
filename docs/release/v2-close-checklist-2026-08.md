@@ -343,9 +343,13 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
   line and `node_modules/@esbuild/linux-x64/bin/esbuild` present; `git status --porcelain` stayed
   empty; `node_modules/.bin/tsx` → `../tsx/dist/cli.mjs`; `export TSX=<checkout>/node_modules/.bin/tsx;
   $TSX --version && node --version` → **`tsx v4.23.5` / `node v24.17.0`** — the expected pair, now
-  observed from the checkout's own binary. `--offline` was the rehearsal's one substitution (the
-  freeze forbids a network fetch), and it shows the cache holds every tarball the lockfile names; on
-  close day the block runs as written.
+  observed from the checkout's own binary. `--offline` was the rehearsal's one substitution (a
+  rehearsal-isolation choice), and it shows the cache held every tarball `npm ci` needs on this platform from the CANDIDATE lockfile; on
+  close day the block runs as written. *(Corrected 2026-08-31: this sentence said "the freeze forbids a
+  network fetch". Searched, it does not — `CLAUDE.md`'s freeze section, the pre-registration, the receipt
+  and the amendment carry no network clause; the prohibition was the rehearsal audit's own rule. The
+  development tree's lockfile needs one tarball beyond the candidate's, `fast-uri` 3.1.5, cached under
+  owner approval on 2026-08-31 — see F1.)*
   **Record both lines in the report: they are the close-day interpreter** — report §2.3 carries a
   marker for exactly this pair. Every `$TSX` below is this binary. Do not substitute `npx tsx`:
   there is no global `tsx` on this box (`which tsx` → empty), so `npx` would resolve an **unpinned**
@@ -2419,7 +2423,14 @@ committed `bin/` (`cmp`), while the committed `bin/` stayed byte-identical (`sha
 porcelain empty). Close day's F1 will rewrite all five files; F2 is what proves the rewrite
 reproduces from the source it shipped. `npm ci` and `npm test` were not rehearsed in the
 development tree: the first rewrites its `node_modules`, which a rehearsal inside the window may not
-do, and the second is E4's own full run, taken once above.
+do, and the second is E4's own full run, taken once above. *(Added 2026-08-31: that seam build ran
+against the development tree's EXISTING `node_modules`, whose `fast-uri` is 3.1.2 (mtime 2026-08-04)
+while the lockfile has said 3.1.5 since `62a3c67`; `fast-uri` is bundled into `bin/helix-mcp.mjs`
+(three files), so close day's `npm ci` puts 3.1.5 into the rebuild and `helix-mcp.mjs` is expected to differ from
+the 2026-08-27 seam build — an inference, no 3.1.5 build exists yet; among the bundled files only `index.js` differs
+between the two versions, and the other four bundles carry no fast-uri. CI is configured to run `npm ci` + `npm test`
+on the lockfile's 3.1.5 at every push since 2026-08-21, and the completed 2026-08-30 run on `f12878d`
+failed on exactly E4's six cases by name, `6 failed | 2479 passed | 2 skipped`.)*
 
 Until this block runs, any second-window source fix is **FIXED IN SOURCE, OPEN IN DEPLOYMENT**.
 
@@ -2431,6 +2442,31 @@ runtime through the marketplace clone, which is exactly what the window forbade.
   ```bash
   cd ~/dev/helix && npm ci && npm run typecheck && npm run build && npm test
   ```
+
+  *(Corrected 2026-08-31 — the original block above stays byte-identical.)* The one tarball the lockfile
+  needs that `~/.npm` lacked, `fast-uri-3.1.5.tgz`, was cached under owner approval (`npm cache add
+  fast-uri@3.1.5 --no-audit --no-fund --no-update-notifier` — the consultation's one registry fetch;
+  npm's cache index shows other in-window registry traffic, including a 13-packument refresh of this
+  lockfile's own names at the freeze-execution minute of 2026-08-14, but no other TARBALL fetch for this
+  lockfile); a scratch clone of `094a6f4` then installed with
+  `npm ci --offline --no-audit --no-fund --no-update-notifier` → `added 144 packages in 2s`, exit 0, `node_modules/fast-uri`
+  3.1.5, the development tree untouched. Run F1 in this form, which needs no registry and posts nothing
+  (the original's default `audit=true` sends the dependency list to the registry's advisory endpoint, and
+  npm's update notifier fetches npm's own manifest uncached, which `--offline` does not stop):
+
+  ```bash
+  cd ~/dev/helix && npm ci --offline --no-audit --no-fund --no-update-notifier && npm run typecheck && npm run build && npm test
+  ```
+
+  If `--offline` refuses with `ENOTCACHED`, either the cache lost a tarball after 2026-08-31 or the
+  lockfile changed: drop `--offline` (the registry is then the dependency the original always had) and
+  record the tarball it named. Never
+  pass `--logs-max=0` to any npm command — npm's log rotation then deletes every file in `~/.npm/_logs`
+  (measured 2026-08-30). Expected suite result: **five of E4's six clear** once F1 rebuilds `bin/` in place; the sixth,
+  `test/inventory/inventory-drift.test.ts` › *matches the committed snapshot exactly*, compares the live
+  surface with the COMMITTED `data/inventory/surface.json` and stays red until `npm run inventory`
+  regenerates that file from the rebuilt bundle — run it, run `npm test` again, and commit the snapshot
+  with the rebuild in F3. Any other red is real.
 
   **`npm test`, not the packaging test alone.** The first window's draft gated this step on
   packaging-freshness only, which answers "does `bin/` match `src/`" and nothing about whether the
