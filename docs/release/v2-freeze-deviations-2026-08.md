@@ -691,7 +691,8 @@ the variable reached `claude -p` and did not prevent the native installer's self
 correlation, not a traced mechanism. The CLI version is not a freeze surface (`payload.runtime` pins the
 commit and the two load paths, which C11 re-verifies), and this ledger has treated the host CLI as
 environment throughout — 2.1.226, 2.1.233, 2.1.239, 2.1.241, 2.1.247 and now 2.1.251 are each recorded
-at the instance that observed them and none was put to §8; that practice is stated here so a reader
+at the instance that observed them (2.1.235 in the certification run sheet; 2.1.246 above, by its file
+date) and none was put to §8; that practice is stated here so a reader
 sees it was chosen rather than overlooked. But two of the three marketplace pulls of the last five days followed a CLI
 self-update by four to six minutes, and close-day step F4's `install` now refreshes the marketplace on its
 own (CLI 2.1.251, read from the binary) — see `R-2026-08-30` below.
@@ -1614,9 +1615,11 @@ instructions placed in a global file would still be a driver-prompt change." If 
 instead, the anchor instant is the last edit, 2026-08-17T13:16:49Z.
 
 **Question 3 — the host CLI self-updates inside the window.** Claude Code CLI versions 2.1.226, 2.1.233,
-2.1.239, 2.1.241, 2.1.247 and 2.1.251 were observed across the windows, each recorded at the instance
-that observed it (instances 1, 2, 5, 8, 10 and 11) and none put to §8. The three second-window installs
-landed within 66 s of a dogfood run's `Starting` line (2.1.246 at 2026-08-26 13:08:00Z, 2.1.247 at
+2.1.235, 2.1.239, 2.1.241, 2.1.246, 2.1.247 and 2.1.251 were observed across the windows — six recorded
+at the instance that observed it (instances 1, 2, 7, 8, 10 and 11 — 2.1.239 sits at instance 7, not 5
+as the uncorrected list implied), 2.1.235 in the certification run sheet, 2.1.246 by its file date
+*(list corrected 2026-08-31; it named six)* — and none put to §8. The
+three installs still on disk (the installer prunes older versions) landed within 66 s of a dogfood run's `Starting` line (2.1.246 at 2026-08-26 13:08:00Z, 2.1.247 at
 2026-08-27 01:59:24Z, 2.1.251 at 2026-08-30 10:34:04Z) although the unit's drop-in sets
 `DISABLE_AUTOUPDATER=1` and the run script does not unset it — a measured correlation, not proof that the
 dogfood process caused the installs. The host CLI is unpinned environment: the receipt's `payload.runtime`
@@ -1625,10 +1628,20 @@ failed:* "a CLI version change is a §8 system change" — it would have reset t
 in-window update, and the six recorded transitions form a settled practice. **Recommended disposition:
 NOT A RESET**, stated as practice rather than left implicit; and the claim is NOT that the updates had no
 behavioural effect — in CLI 2.1.251 `claude plugin install <plugin>@<marketplace>` refreshes the
-marketplace before installing (read from the binary; skipped only when refreshed under 30 s earlier), so
+marketplace before installing (read from the binary, whose changelog dates the change to 2.1.232; skipped
+when refreshed under 30 s earlier), so
 close-day step F4's third command pulls the live clone whether or not the middle command is typed, and the
 sheet's F4 is corrected for it. The close-day CLI path, version and binary checksum are to be recorded
 beside C11's observation.
+
+**Recorded with this entry — the owner's reading of the freeze's named-command ban (2026-08-31).**
+`CLAUDE.md`'s freeze section says "Do NOT run `claude plugin marketplace update` during the window". Put
+to the owner with the measured fact that CLI 2.1.251's `plugin install` performs the same refresh, the
+owner adopted the reading by EFFECT: before D1 writes the close receipt, no command that refreshes or
+rewrites the live helix marketplace, registry, cache or load paths — `install` included — and a command
+confined to a fresh `CLAUDE_CONFIG_DIR` does not reach the ban. No throwaway-dir rehearsal is run inside
+the window; the reasons are measured at run-sheet step F4. Recorded here because the run sheet is tracked
+and the only other copies of the ruling are the gitignored `CLAUDE.md` and the session transcript.
 
 **Why-log — the peer reconciliation behind this entry and the five owner-flag recommendations.** Symmetric
 compare mode, one neutral question, this side's answer published before the call so the two were provably
@@ -1661,7 +1674,9 @@ two answers point by point.
   --no-fund` once the single missing tarball is cached; never `--logs-max=0`; the report's §4.8 opening
   ("Two ledger entries") becomes count-free; the deploy runbook is corrected together with F4.
 - *Corrections this side made to its own first draft, measured:* "three prior executions of F4" → two
-  verified (2026-07-24, 2026-08-14); "a throwaway config dir cannot pull the live clone" → unmeasured;
+  verified (2026-07-24, 2026-08-14) — re-counted 2026-08-31 by the verification pass over the sheet
+  corrections: four exact-order executions are on record (2026-07-22, 07-24, 08-02, 08-14); only the last
+  has its order in a tracked document, the other three are in the operator's notes; "a throwaway config dir cannot pull the live clone" → unmeasured;
   "twelve tarballs missing from the npm cache" → one (`fast-uri` 3.1.5; `npm cache ls` is not a
   tarball-presence test); "no test has run on fast-uri 3.1.5" → CI has run the full suite on the lockfile's
   3.1.5 on every push since 2026-08-21, and the 2026-08-30 run failed on exactly the six known in-window
