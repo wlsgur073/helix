@@ -258,7 +258,7 @@ including the reflog extracts and the file-history verdicts, is
 
 Second-window entries are §4.7 and §4.8, and the ledger now carries THREE classes of entry —
 `Deviation`, `Ruling` and `Disclosure`. All three are §9a content. Do not list only the ones headed
-`Deviation`: §4.7's marker asks for *every* entry appended after 2026-08-14, and two of them are not
+`Deviation`: §4.7's marker asks for *every* entry appended after 2026-08-14, and not all of them are
 deviations.
 
 ### 4.0 The first window's reset — D-2026-08-13-in-window-tooling
@@ -679,7 +679,8 @@ chain runs no program that post-dates this freeze.
 **Corrected 2026-08-18.** This paragraph previously ended "and no second §8 ruling is owed". One
 was: on 2026-08-18 an in-window recomputation of two frozen rules raised the same clause, and it is
 disposed of as NOT A RESET in `Disclosure R-2026-08-18` of the deviation ledger, together with the
-conduct findings the disposition does not clear and a second, still-unadjudicated instance. The
+conduct findings the disposition does not clear and a second instance, adjudicated the same day at
+`R-2026-08-18b`. The
 error was one of scope, and the paragraph's own next sentence already warned about it: the evidence
 here is producer-scoped and was never a survey of everything authored during the window. §4.8 lists
 the entry.
@@ -757,8 +758,10 @@ passes. Both conditions held.
 
 ### 4.8 Second-window rulings and disclosures — entries that are not deviations
 
-Two ledger entries inside this window record decisions and acts rather than incidents. Both are
-required §9a content and neither is a deviation.
+The ledger entries below record decisions and acts inside this window rather than incidents. Each is
+required §9a content and none is headed `Deviation` (Deviations are cited below as precedent or
+cross-reference; the one whose class was decided in the same consultation is named at the end); the list is read from the ledger at close (the fill
+marker in §4.7 above), not counted here.
 
 **`Ruling R-2026-08-16`** — two in-window edit classes put to the owner with the Reset clause quoted
 verbatim, and ruled NOT a reset: splitting `npm run typecheck` into its own CI job, and a
@@ -798,6 +801,20 @@ else. An in-window reading of the same quantity is disclosed because §8's Reset
 independence bullet in `pilot-amendment-1.md` both bear on the act of taking it — not because it
 substitutes for the measurement. If those two ever disagree at the close, that disagreement is
 itself a finding, and it is the close-day value that governs.
+
+**`Disclosure R-2026-08-30`, and its three dispositions** — three §8 questions surfaced while the five
+owner-flagged items of the 2026-08-27 rehearsal audit were worked, each recorded with the reading the
+record supports and the reading that was tested and failed, and each ruled **NOT A RESET** on
+2026-08-31: run-sheet C1.5's snapshot-hash composition (authored 2026-08-13T13:18:09Z, before `txAfter`;
+a hand-run evidence line, not a program of the measured chain); the in-window edit of the operator's
+global `CLAUDE.md` (environment under a functional, path-independent ruling — the workload driver's
+prompt, schedule and project instructions are unchanged, the corpus rows stayed English, and the
+generator's own auto-memory changes every run by design); and the host CLI's self-updates (unpinned
+environment, as for the earlier versions, with no claim of zero behavioural effect). The entry
+carries the why-log of a three-round peer reconciliation in which four reset readings were retracted on
+the record's evidence and, on one of them, the peer's Deviation class was adopted — `D-2026-08-26-rehearsal-removed-guard`,
+the G3 rehearsal's sub-second removal of the freeze guard's drop-in, recorded as a Deviation of a control
+with continuous runtime bytes and ruled NOT A RESET 2026-08-31 (§4.7's fill marker covers it).
 
 - **Owner disposition on `R-2026-08-18`: NOT A RESET, ruled 2026-08-18, changing no window
   identity.** The ledger states it in terms: the six passes reimplemented two frozen RULES but built
