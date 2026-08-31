@@ -3640,7 +3640,12 @@ var require_fast_uri = __commonJS({
     }
     function resolve2(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
-      const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
+      const { parsed: baseParsed, malformedAuthorityOrPort: baseMalformed } = parseWithStatus(baseURI, schemelessOptions);
+      const { parsed: relativeParsed, malformedAuthorityOrPort: relativeMalformed } = parseWithStatus(relativeURI, schemelessOptions);
+      if (baseMalformed || relativeMalformed) {
+        throw new Error(baseParsed.error || relativeParsed.error || "URI is malformed.");
+      }
+      const resolved = resolveComponent(baseParsed, relativeParsed, schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
@@ -3765,6 +3770,8 @@ var require_fast_uri = __commonJS({
       return uriTokens.join("");
     }
     var URI_PARSE = /^(?:([^#/:?]+):)?(?:\/\/((?:([^#/?@]*)@)?(\[[^#/?\]]+\]|[^#/:?]*)(?::(\d*))?))?([^#?]*)(?:\?([^#]*))?(?:#((?:.|[\n\r])*))?/u;
+    var AUTHORITY_PREFIX = /^(?:[^#/:?]+:)?\/\/([^/?#]*)/;
+    var AUTHORITY_INTRODUCER_REGION = /^(?:[^#/:?]+:)?([/\\\t\n\r]*)/;
     function getParseError(parsed, matches) {
       if (matches[2] !== void 0 && parsed.path && parsed.path[0] !== "/") {
         return 'URI path must start with "/" when authority is present.';
@@ -3792,6 +3799,25 @@ var require_fast_uri = __commonJS({
           uri = options.scheme + ":" + uri;
         } else {
           uri = "//" + uri;
+        }
+      }
+      const authorityMatch = uri.match(AUTHORITY_PREFIX);
+      if (authorityMatch !== null && authorityMatch[1].indexOf("\\") !== -1) {
+        parsed.error = "URI authority must not contain a literal backslash.";
+        malformedAuthorityOrPort = true;
+      }
+      const introducerMatch = uri.match(AUTHORITY_INTRODUCER_REGION);
+      if (introducerMatch !== null) {
+        const region = introducerMatch[1];
+        const normalizedRegion = region.replace(/[\t\n\r]/g, "");
+        if (normalizedRegion.length >= 2) {
+          if (normalizedRegion.slice(0, 2) !== "//") {
+            parsed.error = parsed.error || "URI authority must not contain a literal backslash.";
+            malformedAuthorityOrPort = true;
+          } else if (region.length !== normalizedRegion.length) {
+            parsed.error = parsed.error || "URI authority introducer must not contain whitespace.";
+            malformedAuthorityOrPort = true;
+          }
         }
       }
       const matches = uri.match(URI_PARSE);
@@ -3837,7 +3863,7 @@ var require_fast_uri = __commonJS({
         if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport)) {
           if (parsed.host && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host)) {
             try {
-              parsed.host = URL.domainToASCII(parsed.host.toLowerCase());
+              parsed.host = new URL("http://" + parsed.host).hostname;
             } catch (e) {
               parsed.error = parsed.error || "Host's domain name can not be converted to ASCII: " + e;
             }
@@ -13382,11 +13408,23 @@ import { dirname, basename, join } from "node:path";
 // src/memory/lock-liveness.ts
 import { readFileSync, readlinkSync } from "node:fs";
 import { threadId } from "node:worker_threads";
+import { uptime as osUptime } from "node:os";
 function parseAfterLastParen(stat) {
   const i = stat.lastIndexOf(")");
   if (i < 0) return null;
   return stat.slice(i + 2).split(" ");
 }
+var UPTIME_WITNESS_PLATFORMS = /* @__PURE__ */ new Set(["linux", "win32"]);
+var rawUptimeSec = () => {
+  try {
+    const u = osUptime();
+    return Number.isFinite(u) ? u : null;
+  } catch {
+    return null;
+  }
+};
+var gateUptime = (platform, raw) => raw !== null && UPTIME_WITNESS_PLATFORMS.has(platform) ? raw : null;
+var gatedUptimeSec = () => gateUptime(process.platform, rawUptimeSec());
 var realProbe = {
   kill0(pid) {
     try {
@@ -13425,32 +13463,39 @@ var realProbe = {
       return null;
     }
   },
+  uptimeSec() {
+    return gatedUptimeSec();
+  },
   bootInstantMs() {
-    try {
-      return Date.now() - Number(readFileSync("/proc/uptime", "utf8").split(" ")[0]) * 1e3;
-    } catch {
-      return null;
-    }
+    const u = gatedUptimeSec();
+    return u === null ? null : Date.now() - u * 1e3;
   }
 };
 function selfIdentity(token, probe = realProbe) {
-  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform };
+  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform, uptimeSec: probe.uptimeSec() };
 }
 var isStringOrNull = (x) => x === null || typeof x === "string";
+var isFiniteNumberOrAbsent = (x) => x === void 0 || x === null || typeof x === "number" && Number.isFinite(x);
 function tryParsePayload(raw) {
   try {
     const p = JSON.parse(raw);
     if (p === null || typeof p !== "object" || p.v !== 1) return null;
     if (typeof p.token !== "string" || typeof p.pid !== "number" || typeof p.threadId !== "number" || typeof p.platform !== "string") return null;
     if (!isStringOrNull(p.startTicks) || !isStringOrNull(p.bootId) || !isStringOrNull(p.pidNs)) return null;
-    return p;
+    if (!isFiniteNumberOrAbsent(p.uptimeSec)) return null;
+    return { ...p, uptimeSec: p.uptimeSec ?? null };
   } catch {
     return null;
   }
 }
+var usableUptimeWitness = (recorded, self) => recorded.platform === self.platform && UPTIME_WITNESS_PLATFORMS.has(recorded.platform) && typeof recorded.uptimeSec === "number" && Number.isFinite(recorded.uptimeSec) && recorded.pidNs === self.pidNs;
 function classifyHolder(recorded, self, probe) {
   if (recorded.platform !== self.platform) return "alive-unknown";
   if (recorded.bootId !== null && self.bootId !== null && recorded.bootId !== self.bootId) return "dead";
+  if (usableUptimeWitness(recorded, self)) {
+    const now = probe.uptimeSec();
+    if (now !== null && Number.isFinite(now) && now >= 0 && now < recorded.uptimeSec) return "dead";
+  }
   if (recorded.bootId === null !== (self.bootId === null)) return "alive-unknown";
   if (recorded.pidNs !== self.pidNs) return "alive-unknown";
   if (!Number.isSafeInteger(recorded.pid) || recorded.pid <= 0) return "alive-unknown";
@@ -13498,8 +13543,6 @@ function acquireFileLock(target, opts = {}) {
   const lockPath = canon + ".lock";
   const token = randomBytes(16).toString("hex");
   const self = selfIdentity(token, probe);
-  const payloadText = JSON.stringify(self);
-  if (tryParsePayload(payloadText) === null) throw new Error("withFileLock: internal \u2014 payload failed its own well-formedness check");
   const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const startedAt = performance2.now();
   const elapsedMs = () => Math.round(performance2.now() - startedAt);
@@ -13507,6 +13550,8 @@ function acquireFileLock(target, opts = {}) {
   let lastHolder = null;
   for (; ; ) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString("hex")}.tmp`;
+    const payloadText = JSON.stringify({ ...self, uptimeSec: probe.uptimeSec() });
+    if (tryParsePayload(payloadText) === null) throw new Error("withFileLock: internal \u2014 payload failed its own well-formedness check");
     try {
       writeFileSync(srcTmp, payloadText, { flag: "wx", mode: 384 });
       try {
@@ -14174,7 +14219,10 @@ import { dirname as dirname6, join as join6 } from "node:path";
 // src/memory/ownership.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync3, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
-import { join as join5, resolve, dirname as dirname5 } from "node:path";
+import { join as join5, resolve, dirname as dirname5, isAbsolute } from "node:path";
+function isReviewableRoot(projectRoot2) {
+  return isAbsolute(projectRoot2);
+}
 function canonicalRoot(projectRoot2) {
   try {
     return canonical(projectRoot2);
@@ -14282,8 +14330,13 @@ function atomicWriteOwner(projectRoot2, stamp) {
   atomicWriteFile(ownerFile(projectRoot2), stamp, 384);
 }
 function readOwner(projectRoot2) {
+  const path = ownerFile(projectRoot2);
   try {
-    return readFileSync4(ownerFile(projectRoot2), "utf8").trim();
+    if (lstatSync3(dirname5(path)).isSymbolicLink()) return null;
+    const st = lstatSync3(path);
+    if (!st.isFile()) return null;
+    if (st.nlink > 1) return null;
+    return readFileSync4(path, "utf8").trim();
   } catch {
     return null;
   }
@@ -15416,6 +15469,16 @@ function keyVectorEqual(a, b) {
   return true;
 }
 
+// src/limits.ts
+var MAX_COMMIT_CONTENT_CHARS = 16384;
+var MAX_DV_QUESTION_CHARS = 65536;
+var MAX_DV_ANSWER_CHARS = 65536;
+var MAX_RECHECK_PATH_CHARS = 4096;
+var MAX_RECHECK_PATTERN_CHARS = 2048;
+var RECALL_MAX_ITEMS_CAP = 200;
+var RECALL_MAX_CHARS_CAP = 1e4;
+var RESPONSE_MAX_CHARS = 262144;
+
 // src/memory/store.ts
 var MemoryStore = class {
   constructor(global, opts) {
@@ -15516,6 +15579,9 @@ var MemoryStore = class {
     return projection;
   }
   commit(input) {
+    if (input.content.length > MAX_COMMIT_CONTENT_CHARS) {
+      throw new Error(`helix: content exceeds the ${MAX_COMMIT_CONTENT_CHARS}-char commit cap (got ${input.content.length}); split the fact or store a pointer`);
+    }
     if (input.content.trim() === "") throw new Error("commit: content must be non-empty");
     const source = input.source;
     if (!canCommit({ provenance: { source, sessionId: this.session() } })) {
@@ -16048,6 +16114,8 @@ var MemoryStore = class {
    *  store directly must clear the same gate. Returns the canonical scope for the audit row. */
   adopt(expectedRoot) {
     const p = this.opts.project;
+    if (!isReviewableRoot(expectedRoot))
+      throw new Error("adopt: projectRoot must be an absolute path \u2014 a relative or empty root resolves to wherever the server is running, so the approval prompt has no target to show");
     if (!p) throw new Error("adopt: no project scope is active");
     const active = canonicalRoot(p.root);
     if (canonicalRoot(expectedRoot) !== active)
@@ -16254,6 +16322,16 @@ function looksLikeOurs(name, path) {
   } catch {
     return false;
   }
+}
+function collidingTrustFiles(home2, stray2) {
+  return stray2.filter((name) => {
+    try {
+      lstatSync4(join7(home2, name));
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 function strayTrustFiles(home2, globalLedger2) {
   const ledgerDir = dirname10(globalLedger2);
@@ -24457,10 +24535,18 @@ var DEFAULT_CONFIG = {
   // Local metrics sensor ON by default ("local logs always, export opt-in"); content-free records.
   metrics: { enabled: true }
 };
-function readJson(path) {
+function readJson(path, onUnusable) {
+  let text;
   try {
-    return JSON.parse(readFileSync10(path, "utf8"));
-  } catch {
+    text = readFileSync10(path, "utf8");
+  } catch (e) {
+    if (e.code !== "ENOENT") onUnusable(e.message);
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    onUnusable(e.message);
     return null;
   }
 }
@@ -24474,8 +24560,12 @@ function loadConfig(opts = {}) {
       (opts.warn ?? ((m) => process.stderr.write(m + "\n")))(msg);
     }
   };
+  const unreadable = [];
   for (const path of opts.projectPath ? [globalPath, opts.projectPath] : [globalPath]) {
-    const raw = readJson(path);
+    const raw = readJson(path, (reason) => {
+      unreadable.push(path);
+      warn(`helix: ${path} exists but could not be read (${q(reason)}) -> every setting in it is ignored; using defaults`);
+    });
     const dv = raw?.dualVerify;
     if (dv) {
       if (typeof dv.enabled === "boolean") merged.dualVerify.enabled = dv.enabled;
@@ -24507,8 +24597,8 @@ function loadConfig(opts = {}) {
             warn(`helix: ignoring unknown dualVerify.egressPolicy key ${q(key)}`);
             continue;
           }
-          if (val === "allow") merged.dualVerify.egressPolicy[key] = "allow";
-          else if (val !== "block") warn(`helix: invalid dualVerify.egressPolicy.${key} ${q(val)} -> block`);
+          if (val === "allow" || val === "block") merged.dualVerify.egressPolicy[key] = val;
+          else warn(`helix: invalid dualVerify.egressPolicy.${key} ${q(val)} -> keeping ${merged.dualVerify.egressPolicy[key]}`);
         }
       }
       if (dv.memoryEgress !== void 0) {
@@ -24521,6 +24611,7 @@ function loadConfig(opts = {}) {
       merged.metrics.enabled = m.enabled;
     }
   }
+  if (unreadable.length > 0) merged.unreadable = unreadable;
   return merged;
 }
 function mergeCompaction(raw) {
@@ -24536,7 +24627,8 @@ function mergeCompaction(raw) {
   return c;
 }
 function compactionConfigFromGlobal(home2) {
-  return mergeCompaction(readJson(join8(home2, "config.json"))?.compaction);
+  return mergeCompaction(readJson(join8(home2, "config.json"), () => {
+  })?.compaction);
 }
 
 // src/verify/agreement-map.ts
@@ -24558,6 +24650,19 @@ var NEGATOR_ALTERNATIVES = String.raw`\bnot\b|n['’ʼ]t\b|\bno\b|\bnever\b|\bca
 var NEGATOR_RE = new RegExp(NEGATOR_ALTERNATIVES, "i");
 var UN_FORM_RE = new RegExp(String.raw`\bun-|\b(?:${UNPREFIXED_NEGATIONS.join("|")})\b`, "i");
 var COLLAPSE_GAP = String.raw`[\s*_~\u0060]+`;
+var FIGURE_RE = /\d+(?:[.,:]\d+)*\s*[\p{L}%]{0,8}/gu;
+function figuresOf(s) {
+  return (s.match(FIGURE_RE) ?? []).map((f) => f.toLowerCase().replace(/\s+/g, " ").trim());
+}
+function cites(figures) {
+  return figures.length === 0 ? "no figure" : figures.join(", ");
+}
+function sameFigures(a, b) {
+  if (a.length !== b.length) return false;
+  const x = [...a].sort();
+  const y = [...b].sort();
+  return x.every((v, k) => v === y[k]);
+}
 var CANCELLING_PAIR_RE = new RegExp(
   String.raw`(?:${NEGATOR_ALTERNATIVES})${COLLAPSE_GAP}(?:un-|\b(?:${UNPREFIXED_NEGATIONS.join("|")})\b)`,
   "gi"
@@ -24573,26 +24678,50 @@ function buildAgreementMap(helixAnswer, codexAnswer) {
   const codexTok = codex.map(tokenSet);
   const helixPolarity = helix.map(negationPolarity);
   const codexPolarity = codex.map(negationPolarity);
-  let anyCandidate = false;
-  const agreesWithPool = (tok, polarity, poolTok, poolPolarity) => {
-    let agree = false;
-    for (let j = 0; j < poolTok.length; j++) {
-      if (jaccard(tok, poolTok[j]) >= SENTENCE_SIM) {
-        anyCandidate = true;
-        if (polarity === poolPolarity[j]) agree = true;
-      }
+  const candidates = [];
+  for (let i = 0; i < helix.length; i++) {
+    for (let j = 0; j < codex.length; j++) {
+      const sim = jaccard(helixTok[i], codexTok[j]);
+      if (sim >= SENTENCE_SIM) candidates.push({ i, j, sim });
     }
-    return agree;
-  };
-  const helixAgrees = helix.map((_, i) => agreesWithPool(helixTok[i], helixPolarity[i], codexTok, codexPolarity));
-  const codexAgrees = codex.map((_, j) => agreesWithPool(codexTok[j], codexPolarity[j], helixTok, helixPolarity));
-  const agreements = helix.filter((_, i) => helixAgrees[i]);
-  const divergences = [
-    ...helix.filter((_, i) => !helixAgrees[i]),
-    ...codex.filter((_, j) => !codexAgrees[j])
+  }
+  const anyCandidate = candidates.length > 0;
+  candidates.sort((a, b) => b.sim - a.sim || a.i - b.i || a.j - b.j);
+  const partnerOfHelix = new Array(helix.length).fill(-1);
+  const partnerOfCodex = new Array(codex.length).fill(-1);
+  for (const c of candidates) {
+    if (partnerOfHelix[c.i] !== -1 || partnerOfCodex[c.j] !== -1) continue;
+    partnerOfHelix[c.i] = c.j;
+    partnerOfCodex[c.j] = c.i;
+  }
+  const helixStatus = new Array(helix.length).fill("divergent");
+  const codexStatus = new Array(codex.length).fill("divergent");
+  const figureNotes = [];
+  for (let i = 0; i < helix.length; i++) {
+    const j = partnerOfHelix[i];
+    if (j < 0) continue;
+    if (helixPolarity[i] !== codexPolarity[j]) continue;
+    const helixFigures = figuresOf(helix[i]);
+    const codexFigures = figuresOf(codex[j]);
+    if (sameFigures(helixFigures, codexFigures)) {
+      helixStatus[i] = "agreed";
+      codexStatus[j] = "agreed";
+      continue;
+    }
+    helixStatus[i] = "figures-differ";
+    codexStatus[j] = "figures-differ";
+    figureNotes.push(
+      `figures differ \u2014 "${helix[i]}" cites ${cites(helixFigures)}; "${codex[j]}" cites ${cites(codexFigures)}`
+    );
+  }
+  const agreements = helix.filter((_, i) => helixStatus[i] === "agreed");
+  const trueDivergences = [
+    ...helix.filter((_, i) => helixStatus[i] === "divergent"),
+    ...codex.filter((_, j) => codexStatus[j] === "divergent")
   ];
-  const verdict = !anyCandidate ? "indeterminate" : divergences.length === 0 ? "agree" : "diverge";
-  return { verdict, agreements, divergences };
+  const divergences = [...trueDivergences, ...figureNotes];
+  const verdict = !anyCandidate ? "indeterminate" : trueDivergences.length > 0 ? "diverge" : figureNotes.length > 0 ? "indeterminate" : "agree";
+  return { verdict, agreements, divergences, withheldPairs: figureNotes.length };
 }
 
 // src/memory/pii-scan.ts
@@ -24757,6 +24886,7 @@ function classifyEgress(input) {
       legs: [],
       piiKinds: [],
       echoMemoryIds: [],
+      echoExemptIds: [],
       decidedBy: "scan_limit",
       reason: `blocked: payload exceeds the egress scan limit (${MAX_FORM_SCAN} chars)`,
       blockedLegs: [],
@@ -24773,6 +24903,7 @@ function classifyEgress(input) {
         legs: [],
         piiKinds: [],
         echoMemoryIds: [],
+        echoExemptIds: [],
         decidedBy: "scan_limit",
         reason: `blocked: ledger exceeds the egress scan limit (${MAX_LEDGER_SCAN} chars)`,
         blockedLegs: [],
@@ -24796,14 +24927,23 @@ function classifyEgress(input) {
   const bulkLowPii = lowPiiCount >= BULK_PII_N;
   const echo = input.ledger === null ? { memoryIds: [] } : detectEcho(forms, input.ledger);
   const echoMemoryIds = echo.memoryIds;
-  const echoHit = echoMemoryIds.length > 0;
+  const proven = /* @__PURE__ */ new Set();
+  if (input.quoted && input.quoted.length > 0 && input.ledger !== null) {
+    const digestById = new Map(input.ledger.map((i) => [i.id, i.contentDigest]));
+    for (const q2 of input.quoted) {
+      if (digestById.get(q2.id) === q2.contentDigest) proven.add(q2.id);
+    }
+  }
+  const echoExemptIds = proven.size === 0 ? [] : echoMemoryIds.filter((id) => proven.has(id));
+  const echoEffectiveIds = proven.size === 0 ? echoMemoryIds : echoMemoryIds.filter((id) => !proven.has(id));
+  const echoHit = echoEffectiveIds.length > 0;
   const piiHit = piiKinds.length > 0;
   const legs = [];
   if (secretHit) legs.push("secret");
   if (piiHit) legs.push("pii");
   if (echoHit) legs.push("memory_echo");
   const gated = [
-    { hit: echoHit, key: "memoryEcho", label: `memory-echo (${echoMemoryIds.length} items)` },
+    { hit: echoHit, key: "memoryEcho", label: `memory-echo (${echoEffectiveIds.length} items${echoExemptIds.length > 0 ? `, ${echoExemptIds.length} quoted` : ""})` },
     { hit: highPii, key: "piiHigh", label: `high-severity PII (${highKinds.length} kinds)` },
     { hit: secretHeuristic, key: "secretHeuristic", label: "secret keyword-assignment (low-confidence)" },
     { hit: secretEntropy, key: "secretEntropy", label: "high-entropy token (low-confidence)" },
@@ -24827,24 +24967,25 @@ function classifyEgress(input) {
   const auditOnlyLegs = AUDIT_LEG_ORDER.filter((l) => legs.includes(l) && !gatedCoarse.has(l));
   const outcome = { blockedLegs, releasedLegs, auditOnlyLegs };
   if (secretNamed) {
-    return { decision: "blocked", legs, piiKinds, echoMemoryIds, decidedBy: "named", reason: "blocked: secret token (override-proof)", ...outcome };
+    return { decision: "blocked", legs, piiKinds, echoMemoryIds, echoExemptIds, decidedBy: "named", reason: "blocked: secret token (override-proof)", ...outcome };
   }
   if (blocking.length > 0) {
     const d = blocking[0];
-    return { decision: "blocked", legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `blocked: ${d.label}`, ...outcome };
+    return { decision: "blocked", legs, piiKinds, echoMemoryIds, echoExemptIds, decidedBy: d.key, reason: `blocked: ${d.label}`, ...outcome };
   }
   if (applicable.length > 0) {
     const d = applicable[0];
-    return { decision: "allowed_override", legs, piiKinds, echoMemoryIds, decidedBy: d.key, reason: `allowed_override: ${d.label}`, ...outcome };
+    return { decision: "allowed_override", legs, piiKinds, echoMemoryIds, echoExemptIds, decidedBy: d.key, reason: `allowed_override: ${d.label}`, ...outcome };
   }
   if (piiHit) {
-    return { decision: "pass", legs, piiKinds, echoMemoryIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)`, ...outcome };
+    return { decision: "pass", legs, piiKinds, echoMemoryIds, echoExemptIds, reason: `pass: low-severity PII (${lowPiiCount} hits, audit-only)`, ...outcome };
   }
   return {
     decision: "pass",
     legs,
     piiKinds,
     echoMemoryIds,
+    echoExemptIds,
     reason: secretHit ? "pass: exempt entropy (hex or word-chain, audit-only)" : "pass: no egress legs",
     ...outcome
   };
@@ -24874,29 +25015,39 @@ function buildCritiquePrompt(question, helixAnswer) {
   ].join("\n");
 }
 async function dualVerify(params, deps) {
+  const evaluated = [];
+  const stoppedAt = (at) => ({ evaluated: [...evaluated], stoppedAt: at });
+  evaluated.push("enabled");
   if (!deps.config.dualVerify.enabled) {
-    return { ran: false, attempted: false, outcome: "skipped", reason: "dual-verify is disabled in config" };
+    return { ran: false, attempted: false, outcome: "skipped", reason: "dual-verify is disabled in config", gates: stoppedAt("enabled") };
   }
+  evaluated.push("stakesFloor");
   const floor = deps.config.dualVerify.stakesFloor;
-  if (params.stakes && STAKES_RANK[params.stakes] < STAKES_RANK[floor]) {
-    return { ran: false, attempted: false, outcome: "skipped", reason: `stakes '${params.stakes}' below configured floor '${floor}' \u2014 lowest accepted: '${floor}' (dualVerify.stakesFloor in ~/.helix/config.json)` };
+  const declared = params.stakes ?? "low";
+  if (STAKES_RANK[declared] < STAKES_RANK[floor]) {
+    const what = params.stakes ? `stakes '${params.stakes}' below configured floor '${floor}'` : `stakes not declared (treated as '${declared}'), below configured floor '${floor}'`;
+    return { ran: false, attempted: false, outcome: "skipped", reason: `${what} \u2014 lowest accepted: '${floor}' (dualVerify.stakesFloor in ~/.helix/config.json)`, gates: stoppedAt("stakesFloor") };
   }
   const mode = deps.config.dualVerify.mode;
   const prompt = mode === "critique" ? buildCritiquePrompt(params.question, params.helixAnswer) : normalizeUntrusted(params.question);
+  evaluated.push("egress");
   const ledger = deps.echo.mode === "enforce" ? deps.echo.ledgerTexts() : null;
   const verdict = classifyEgress({
     texts: [params.question, params.helixAnswer],
     outbound: prompt,
     ledger,
-    policy: deps.config.dualVerify.egressPolicy
+    policy: deps.config.dualVerify.egressPolicy,
+    quoted: params.quotedMemory
   });
   if (verdict.decision === "blocked") {
-    return { ran: false, attempted: false, outcome: "refused", reason: verdict.reason, egress: verdict };
+    return { ran: false, attempted: false, outcome: "refused", reason: verdict.reason, egress: verdict, gates: stoppedAt("egress") };
   }
+  evaluated.push("available");
   const avail = await deps.checkAvailable();
   if (!avail.available) {
-    return { ran: false, attempted: false, outcome: "unavailable", reason: avail.reason ?? "codex unavailable", egress: verdict };
+    return { ran: false, attempted: false, outcome: "unavailable", reason: avail.reason ?? "codex unavailable", egress: verdict, gates: stoppedAt("available") };
   }
+  evaluated.push("runner");
   const res = await deps.runner(prompt, {
     model: deps.config.dualVerify.model,
     effort: deps.config.dualVerify.effort,
@@ -24904,7 +25055,7 @@ async function dualVerify(params, deps) {
     signal: params.signal
   });
   if (!res.ok) {
-    return { ran: false, attempted: true, outcome: "error", reason: `codex run failed: ${res.error}`, egress: verdict };
+    return { ran: false, attempted: true, outcome: "error", reason: `codex run failed: ${res.error}`, egress: verdict, gates: stoppedAt("runner") };
   }
   if (mode === "critique") {
     return { ran: true, attempted: true, outcome: "sent", promptSent: prompt, mode, codexAnswer: res.answer, critique: res.answer, egress: verdict };
@@ -24984,13 +25135,30 @@ function witnessNotesText(notes) {
 
 ${n}`).join("");
 }
+function capRendered(total, render, budget) {
+  const full = render(total);
+  if (full.length <= budget) return { text: full, omitted: 0 };
+  const noteFor = (n) => `
+
+(${n} item(s) omitted (response cap))`;
+  let lo = 0, hi = total - 1, best = -1;
+  while (lo <= hi) {
+    const mid = lo + hi >> 1;
+    if (render(mid).length + noteFor(total - mid).length <= budget) {
+      best = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  const kept = Math.max(best, 0);
+  const omitted = total - kept;
+  return { text: omitted > 0 ? render(kept) + noteFor(omitted) : render(kept), omitted };
+}
 function handleCommit(store2, args) {
   const rec = store2.commit(args);
   return ok(`committed ${JSON.stringify({ id: rec.id, state: rec.state, classification: rec.classification })}`);
 }
 function handleRecall(store2, args) {
-  const { items, framed, integrityAvailable, projectDisposition, witnessNotes } = store2.recall(args.query, { maxItems: args.maxItems });
-  const framedOut = args.maxChars !== void 0 ? frameAsData(items.map(({ record: record2, scope }) => ({ record: record2, scope })), newNonce(), args.maxChars) : framed;
+  const { items, integrityAvailable, projectDisposition, witnessNotes } = store2.recall(args.query, { maxItems: args.maxItems });
   const flags = items.filter((i) => i.needsReverify).map((i) => safeId(i.record.id));
   const reverifyNote = flags.length ? `
 
@@ -25004,7 +25172,14 @@ function handleRecall(store2, args) {
   const conflictNote = conflictIds.length ? `
 
 (integrity conflict \u2014 equal-generation verify mismatch or duplicate fact id: ${conflictIds.join(", ")})` : "";
-  return ok(framedOut + reverifyNote + egressNote + integrityNote + conflictNote + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
+  const trailingNotes = reverifyNote + egressNote + integrityNote + conflictNote + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes);
+  const scoped = items.map(({ record: record2, scope }) => ({ record: record2, scope }));
+  const { text: framedOut } = capRendered(
+    scoped.length,
+    (n) => frameAsData(scoped.slice(0, n), newNonce(), args.maxChars),
+    RESPONSE_MAX_CHARS - trailingNotes.length
+  );
+  return ok(framedOut + trailingNotes);
 }
 function handleInspect(store2, args) {
   const iso = (s) => isIsoInstant(s) ? s : "??";
@@ -25014,15 +25189,6 @@ function handleInspect(store2, args) {
     const { facts, keyAvailable, truncated, projectDisposition: projectDisposition2, witnessNotes: witnessNotes2 } = store2.asOfView(args.asOf);
     const asOfNotes = asOfWitnessNotes(witnessNotes2);
     if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + unadoptedNote(projectDisposition2) + witnessNotesText(asOfNotes));
-    const lines = [];
-    for (const f of facts) {
-      lines.push({ text: `${presentId(f.record.id)} ${f.record.content}`, mark: `DATA[${f.grade}:${f.scope}]| ` });
-      for (const e of f.evidence) {
-        const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? "Y" : "N"} applicable=${e.applicable ? "Y" : "N"}${e.winner ? " WINNER" : ""}`;
-        lines.push({ text: `${presentId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
-      }
-    }
-    const frame = makeDataFrame({ label: `MEMORY AS OF ${args.asOf}`, nonce: newNonce(), lines });
     const notes = ["\n\n(as-of snapshot \u2014 membership and timing are declared, not authenticated; only auth=Y verify timing is MAC-bound)"];
     if (!keyAvailable) notes.push("\n\n(integrity verification unavailable \u2014 trust grades shown are unverified)");
     if (facts.some((f) => f.integrity === "compromised")) notes.push(`
@@ -25034,20 +25200,25 @@ function handleInspect(store2, args) {
     for (const n of asOfNotes) notes.push(`
 
 ${n}`);
-    return ok(frame + notes.join(""));
+    const trailingNotes2 = notes.join("");
+    const buildLines = (n) => facts.slice(0, n).flatMap((f) => {
+      const out = [{ text: `${presentId(f.record.id)} ${f.record.content}`, mark: `DATA[${f.grade}:${f.scope}]| ` }];
+      for (const e of f.evidence) {
+        const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? "Y" : "N"} applicable=${e.applicable ? "Y" : "N"}${e.winner ? " WINNER" : ""}`;
+        out.push({ text: `${presentId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
+      }
+      return out;
+    });
+    const { text: frame2 } = capRendered(
+      facts.length,
+      (n) => makeDataFrame({ label: `MEMORY AS OF ${args.asOf}`, nonce: newNonce(), lines: buildLines(n) }),
+      RESPONSE_MAX_CHARS - trailingNotes2.length
+    );
+    return ok(frame2 + trailingNotes2);
   }
   if (args.history) {
     const { rows: rows2, anomalies, truncated, integrityAvailable, projectDisposition: projectDisposition2, witnessNotes: witnessNotes2 } = store2.historyView();
     if (rows2.length === 0) return ok("(memory is empty)" + unadoptedNote(projectDisposition2) + witnessNotesText(witnessNotes2));
-    const frame = makeDataFrame({
-      label: "MEMORY HISTORY",
-      nonce: newNonce(),
-      lines: rows2.map((r) => {
-        const verb = r.closedBy ? r.closedBy.kind : r.record.state;
-        const interval = `${iso(r.record.tx)}..${r.txTo === null ? "" : iso(r.txTo)}`;
-        return { text: `${presentId(r.record.id)} ${r.record.content}`, mark: `DATA[${verb}:${r.scope}:${interval}]| ` };
-      })
-    });
     const notes = [];
     if (!integrityAvailable) notes.push("\n\n(integrity verification unavailable \u2014 trust grades shown are unverified)");
     if (anomalies.size > 0) notes.push(`
@@ -25058,42 +25229,62 @@ ${n}`);
     for (const n of witnessNotes2) notes.push(`
 
 ${n}`);
-    return ok(frame + notes.join(""));
+    const trailingNotes2 = notes.join("");
+    const { text: frame2 } = capRendered(
+      rows2.length,
+      (n) => makeDataFrame({
+        label: "MEMORY HISTORY",
+        nonce: newNonce(),
+        lines: rows2.slice(0, n).map((r) => {
+          const verb = r.closedBy ? r.closedBy.kind : r.record.state;
+          const interval = `${iso(r.record.tx)}..${r.txTo === null ? "" : iso(r.txTo)}`;
+          return { text: `${presentId(r.record.id)} ${r.record.content}`, mark: `DATA[${verb}:${r.scope}:${interval}]| ` };
+        })
+      }),
+      RESPONSE_MAX_CHARS - trailingNotes2.length
+    );
+    return ok(frame2 + trailingNotes2);
   }
   const { records: rows, projectDisposition, witnessNotes } = store2.currentView();
   if (rows.length === 0) return ok("(memory is empty)" + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
-  return ok(makeDataFrame({
-    label: "CURRENT MEMORY",
-    nonce: newNonce(),
-    lines: rows.map(({ record: record2, scope, contentDigest }) => ({
-      // The mark is the SAME known-enum `DATA[state:scope]| ` label recall/SessionStart use (mirrored
-      // byte-for-byte, not reinvented). The SANITIZED id is prepended to the datamarked content so
-      // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
-      // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
-      //
-      // The digest rides along for VERIFIED rows only. Superseding one now requires echoing it back as
-      // `supersedesDigest` (proof of read), so without it here the tool surface could never replace a
-      // verified fact at all. Verified-only keeps 64 hex characters off every other row: it is emitted
-      // exactly where it is needed, and it discloses nothing — a reader holding this line already holds
-      // the content it digests.
-      text: record2.state === "Verified" && contentDigest !== void 0 ? `${presentId(record2.id)} ${record2.content}
+  const trailingNotes = unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes);
+  const { text: frame } = capRendered(
+    rows.length,
+    (n) => makeDataFrame({
+      label: "CURRENT MEMORY",
+      nonce: newNonce(),
+      lines: rows.slice(0, n).map(({ record: record2, scope, contentDigest }) => ({
+        // The mark is the SAME known-enum `DATA[state:scope]| ` label recall/SessionStart use (mirrored
+        // byte-for-byte, not reinvented). The SANITIZED id is prepended to the datamarked content so
+        // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
+        // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
+        //
+        // The digest rides along for VERIFIED rows only. Superseding one now requires echoing it back as
+        // `supersedesDigest` (proof of read), so without it here the tool surface could never replace a
+        // verified fact at all. Verified-only keeps 64 hex characters off every other row: it is emitted
+        // exactly where it is needed, and it discloses nothing — a reader holding this line already holds
+        // the content it digests.
+        text: record2.state === "Verified" && contentDigest !== void 0 ? `${presentId(record2.id)} ${record2.content}
     supersedesDigest=${contentDigest}` : `${presentId(record2.id)} ${record2.content}`,
-      mark: `DATA[${record2.state}:${scope}]| `
-    }))
-  }) + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
+        mark: `DATA[${record2.state}:${scope}]| `
+      }))
+    }),
+    RESPONSE_MAX_CHARS - trailingNotes.length
+  );
+  return ok(frame + trailingNotes);
 }
 function handleErase(store2, args, deps) {
   assertValidId(args.id);
   store2.erase(args.id);
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   appendAudit(deps.auditPath, { kind: "erase", ts, id: args.id, soft: true });
-  return ok(`erased ${args.id}`);
+  return ok(`erased ${JSON.stringify({ id: args.id })}`);
 }
 function handleAdopt(store2, args, deps) {
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   const scope = store2.adopt(args.projectRoot);
   appendAudit(deps.auditPath, { kind: "adopt", ts, scope });
-  return ok(`adopted ${scope}: this project ledger is now trusted by this Helix install`);
+  return ok(`adopted ${JSON.stringify({ projectRoot: scope, note: "this project ledger is now trusted by this Helix install" })}`);
 }
 function handleRecheck(store2, args, deps) {
   assertValidId(args.id);
@@ -25102,7 +25293,7 @@ function handleRecheck(store2, args, deps) {
     const { outcome, result } = store2.recheck(args.id, args.check);
     const resultState = result.kind === "state" ? result.state : result.kind;
     appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "reality-check", checkKind: args.check.kind, outcome, resultState, bound: true });
-    return ok(`recheck ${args.id}: ${resultState}`);
+    return ok(`recheck ${JSON.stringify({ id: args.id, state: resultState })}`);
   } catch (e) {
     appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "reality-check", checkKind: args.check.kind, resultState: "rejected", bound: false });
     throw e;
@@ -25118,7 +25309,7 @@ function handleConfirm(store2, args, deps) {
     throw e;
   }
   appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "user", resultState: "Verified" });
-  return ok(`confirmed ${args.id}: Verified`);
+  return ok(`confirmed ${JSON.stringify({ id: args.id, state: "Verified" })}`);
 }
 function codexLogCount(path) {
   try {
@@ -25140,7 +25331,7 @@ async function handleCodexStatus(deps) {
   const connection = s.available ? "logged in" : "not logged in \u2014 run `codex login`";
   const auth = AUTH_MODE_LABEL[s.authMode];
   const dualVerify2 = dv.enabled ? `enabled, mode=${dv.mode}` : "disabled";
-  const contentLog = dv.logContent ? `ON \u2014 ${deps.codexLogPath} (${codexLogCount(deps.codexLogPath)} entries)` : "OFF \u2014 set dualVerify.logContent=true to record prompts+responses";
+  const contentLog = dv.logContent ? `ON \u2014 ${JSON.stringify(deps.codexLogPath)} (${codexLogCount(deps.codexLogPath)} entries)` : "OFF \u2014 set dualVerify.logContent=true to record prompts+responses";
   let model;
   if (dv.model !== null) {
     model = `${dv.model} (helix override)`;
@@ -25151,6 +25342,16 @@ async function handleCodexStatus(deps) {
   const effort = dv.effort !== null ? `${dv.effort} (helix override)` : "inherited from codex config";
   const lines = [
     "Helix <-> Codex",
+    // FIRST, above every value it invalidates. A config that failed to parse renders byte-for-byte
+    // like one that deliberately turned dual-verify off, and this free tool is the surface an
+    // operator reads to answer "what is dual-verify actually doing" — so without this line their
+    // only way to notice a discarded file is to remember what they wrote in it. loadConfig also
+    // warns on stderr, but stderr is a debug channel nobody watches; this is the observable one.
+    // M2: `p` is an unreadable config PATH — environment/caller-controlled (HELIX_HOME, an XDG
+    // override, a symlink target) — same quarantine as erase's id above.
+    ...(deps.config.unreadable ?? []).map(
+      (p) => `! ${JSON.stringify(p)} could not be read \u2014 everything it sets is ignored; the values below are DEFAULTS`
+    ),
     `- codex CLI:      ${cli}`,
     `- connection:     ${connection}`,
     `- auth mode:      ${auth}`,
@@ -25170,6 +25371,10 @@ async function handleCodexStatus(deps) {
       "        quota is spent. Raise dualVerify.timeoutMs."
     );
   }
+  const legs = Object.entries(dv.egressPolicy);
+  const changed = legs.filter(([k, v]) => v !== DEFAULT_CONFIG.dualVerify.egressPolicy[k]).map(([k]) => k);
+  lines.push(`- egress legs:    ${legs.map(([k, v]) => `${k}=${v}`).join(" ")}`);
+  if (changed.length > 0) lines.push(`  changed from default: ${changed.join(", ")}`);
   lines.push(`- content log:    ${contentLog}`);
   return ok(lines.join("\n"));
 }
@@ -25190,6 +25395,17 @@ function deciderLeg(v) {
     default:
       return void 0;
   }
+}
+function echoedMemoriesLine(v) {
+  if (!v || v.decidedBy !== "memoryEcho" || v.echoMemoryIds.length === 0) return "";
+  const exempt = new Set(v.echoExemptIds);
+  const remaining = v.echoMemoryIds.filter((id) => !exempt.has(id));
+  if (remaining.length === 0) return "";
+  return `echoed memories (not sent): ${remaining.map((id) => JSON.stringify(presentId(id))).join(", ")} \u2014 reword without their wording to proceed`;
+}
+function guardLine(g) {
+  if (!g) return "";
+  return `guards: ${g.evaluated.join(", ")} \u2014 stopped at ${g.stoppedAt}`;
 }
 function egressLine(v) {
   if (!v) return "egress: unavailable (internal)";
@@ -25222,7 +25438,11 @@ async function handleDualVerify(args, deps, signal) {
     // detectEcho), not a caller-supplied argument -- bound, don't reject (see presentId's docstring
     // for why this site can't use assertValidId's reject-outright rule; fix round 2 Minor: this
     // comment was previously pasted twice verbatim here).
-    echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds.map(presentId) : void 0
+    echoMemoryIds: egress && egress.echoMemoryIds.length ? egress.echoMemoryIds.map(presentId) : void 0,
+    // H7: the guard that ended the call, as an enum -- so a later reader of this ledger does not have
+    // to infer the gate order from refusal WORDING, which is how the dogfood channel spent three weeks
+    // arriving at the reverse of it. Absent on a call that ran: passing every gate is what running is.
+    stoppedGate: result.gates?.stoppedAt
   });
   if (deps.config.dualVerify.logContent) {
     const sent = result.outcome === "sent";
@@ -25249,7 +25469,11 @@ async function handleDualVerify(args, deps, signal) {
       );
       return ok(lines.join("\n"));
     }
-    return ok(`dual-verify did not run: ${result.reason}. (No Codex answer \u2014 nothing fabricated.)`);
+    return ok([
+      `dual-verify did not run: ${result.reason}. (No Codex answer \u2014 nothing fabricated.)`,
+      guardLine(result.gates),
+      echoedMemoriesLine(result.egress)
+    ].filter(Boolean).join("\n"));
   }
   const nonce = (deps.genNonce ?? newNonce)();
   if (result.mode === "critique") {
@@ -25266,11 +25490,19 @@ async function handleDualVerify(args, deps, signal) {
   }
   const a = result.agreement;
   const indeterminate = a.verdict === "indeterminate";
+  const zeroPair = indeterminate && a.withheldPairs === 0;
   return ok([
     egressLine(result.egress),
     frameOpen("DUAL-VERIFY", nonce),
     DATA_SEMANTICS,
     `verdict: ${a.verdict} (mode: ${result.mode})`,
+    // H1 relabel (review 2026-08-18, owner decision 2026-08-21): 'agree' is a statement about token
+    // sets and negation polarity, not about meaning — a role swap with an identical token set still
+    // renders it (agreement-map.ts, open hole 2). The review asked that 'agree' never be PRESENTED as
+    // semantic verification; the limit was disclosed in the aligner's header and the CHANGELOG, but
+    // not where the caller reads the verdict. Fixed text derived from the verdict alone, so it sits
+    // beside the verdict un-datamarked, the same way the 'indeterminate' guidance below does.
+    ...a.verdict === "agree" ? ["\u2014 lexical agreement only: matched claims share tokens and polarity; not a semantic check, so read both answers before relying on it"] : [],
     // Zero-pair abstention guidance: a trusted derivation (fixed text, no untrusted bytes), so it
     // sits un-datamarked beside the verdict line. 'indeterminate' must never read as a divergence
     // finding — the caller's move is to read both answers. The 'no claim pairs found by aligner'
@@ -25280,12 +25512,14 @@ async function handleDualVerify(args, deps, signal) {
     // classified all of them as divergent. That reads 'diverge', not 'indeterminate', and must
     // say so — "no claim pairs found" would be a false statement about a comparison that found
     // only disagreement (see agreement-map.ts's anyCandidate flag, which draws this distinction).
-    ...indeterminate ? ["\u2014 could not match claims (form mismatch or total disagreement); read both answers"] : [],
+    ...indeterminate ? [zeroPair ? "\u2014 could not match claims (form mismatch or total disagreement); read both answers" : "\u2014 a matched claim pair differs in the figures inside it; read both answers"] : [],
     "--- EXTERNAL CODEX OUTPUT (data) ---",
     datamark(result.codexAnswer ?? "", "DATA| "),
     "--- end codex output ---",
-    indeterminate ? "no claim pairs found by aligner" : a.agreements.length ? "agreements:\n" + a.agreements.map((s) => datamark(s, "DATA| ")).join("\n") : "no agreements \u2014 every claim pair the aligner found is discordant",
-    a.divergences.length ? (indeterminate ? "unmatched claims:\n" : "divergences:\n") + a.divergences.map((d) => datamark(d, "DATA| ")).join("\n") : indeterminate ? "no unmatched claims" : "no divergences",
+    // Agreements first, and independent of the verdict: an agreeing pair can coexist with a withheld
+    // one under 'indeterminate', and suppressing it there is how the caller lost a real finding.
+    a.agreements.length ? "agreements:\n" + a.agreements.map((s) => datamark(s, "DATA| ")).join("\n") : zeroPair ? "no claim pairs found by aligner" : a.withheldPairs > 0 ? "no agreements \u2014 every claim pair the aligner found is discordant or withheld" : "no agreements \u2014 every claim pair the aligner found is discordant",
+    a.divergences.length ? (indeterminate ? zeroPair ? "unmatched claims:\n" : "withheld claim pairs:\n" : a.withheldPairs > 0 ? "divergences and withheld claim pairs:\n" : "divergences:\n") + a.divergences.map((d) => datamark(d, "DATA| ")).join("\n") : indeterminate ? "no unmatched claims" : "no divergences",
     frameClose(nonce)
   ].join("\n"));
 }
@@ -25757,6 +25991,9 @@ function createMetricsSink(path, enabled, deps = {}) {
 var ID_SCHEMA = external_exports.string().refine(isValidId, {
   message: `id must be 1-${MAX_ID_CHARS} printable, non-control characters`
 });
+var PROJECT_ROOT_SCHEMA = external_exports.string().refine(isReviewableRoot, {
+  message: "projectRoot must be an absolute path, so the approval prompt can show which ledger is being trusted"
+});
 function buildServer(store2, dualDeps, metrics2) {
   const m = metrics2 ?? noopMetricsSink;
   const server2 = new McpServer({ name: "helix", version: "0.1.0" });
@@ -25765,7 +26002,11 @@ function buildServer(store2, dualDeps, metrics2) {
     config: loadConfig({ globalPath: join11(home2, "config.json") }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
-    echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
+    // inspect()'s own projection sets contentDigest unconditionally (store.ts:767), but the field is
+    // optional on ScopedRecord for pairings built outside that projection. The fallback computes the
+    // same pure function `inspect()` already applies rather than fabricating a value, so a record that
+    // ever arrives without one is still matchable instead of silently unquotable.
+    echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map(({ record: record2, contentDigest }) => ({ id: record2.id, content: record2.content, contentDigest: contentDigest ?? digestContent(record2.content) })) },
     auditPath: join11(home2, "audit.jsonl"),
     codexLogPath: join11(home2, "codex-log.jsonl")
   };
@@ -25779,7 +26020,11 @@ function buildServer(store2, dualDeps, metrics2) {
     title: "Commit memory",
     description: "Store a fact in Helix memory (secret-scanned; provenance recorded). Pass supersedes=<id> to update (replace) an existing item instead of adding a duplicate.",
     inputSchema: {
-      content: external_exports.string(),
+      // H3: the character bound is declared here as well as enforced in the store, so an oversized
+      // commit is refused by schema validation before the handler (and its secret scan) ever runs —
+      // the same bounded-input discipline MAX_QUERY_CHARS gets on recall above. The store keeps the
+      // authoritative check for callers that do not come through MCP (hooks, CLI, tests).
+      content: external_exports.string().max(MAX_COMMIT_CONTENT_CHARS).describe(`The fact to store (max ${MAX_COMMIT_CONTENT_CHARS} characters; split the fact or store a pointer if it is longer).`),
       source: external_exports.enum(["user", "user-relayed", "agent-inference", "agent-test-verified"]).describe(
         "Provenance (required). 'user' = a fact the user stated as their own knowledge/preference/instruction. 'user-relayed' = content the user pasted/forwarded from a third party (web page, email, README, tool output) \u2014 use this whenever the user is relaying, not authoring. 'agent-inference' = a conclusion you derived this session, not yet confirmed against reality. 'agent-test-verified' = a conclusion you derived AND mechanically verified this session (e.g. by running tests); still non-authoritative \u2014 it does not elevate trust."
       ),
@@ -25801,10 +26046,14 @@ function buildServer(store2, dualDeps, metrics2) {
     // bounds distinct TERMS, which needs the tokenizer) for callers that do not come through MCP.
     inputSchema: {
       query: external_exports.string().max(MAX_QUERY_CHARS),
-      maxItems: external_exports.number().int().positive().optional(),
+      // M1 (2026-08-18 review): maxItems/maxChars accepted ANY positive integer — a caller could ask
+      // for far more items, or a far larger per-item cap, than the response will ever actually
+      // deliver (the handler's own RESPONSE_MAX_CHARS total bound drops the excess anyway). Capping
+      // the inputs here too is a client-facing rejection instead of a silently-shrunk result.
+      maxItems: external_exports.number().int().positive().max(RECALL_MAX_ITEMS_CAP).optional(),
       // H5: count bounds are not size bounds — long prose items made a 30-item recall render
       // 74.6 KB. Per-item character cap; truncation is marked with an ellipsis.
-      maxChars: external_exports.number().int().positive().optional().describe("Per-item character cap for rendered content (truncated with \u2026). Use when the caller can only read a bounded result.")
+      maxChars: external_exports.number().int().positive().max(RECALL_MAX_CHARS_CAP).optional().describe("Per-item character cap for rendered content (truncated with \u2026). Use when the caller can only read a bounded result.")
     }
   }, async (args) => m.runOp("helix_memory_recall", () => handleRecall(store2, args)));
   server2.registerTool("helix_memory_inspect", {
@@ -25822,7 +26071,13 @@ function buildServer(store2, dualDeps, metrics2) {
     description: "Run a content-bound mechanical reality-check on a memory item. A pass yields the Corroborated trust state (machine-checked, NOT human-verified \u2014 it can NEVER reach Verified). The check is file-contains and BOTH path and pattern MUST appear in the item content, or the call is rejected (prevents laundering an unrelated passing check into trust). Use for objective, checkable facts.",
     inputSchema: {
       id: ID_SCHEMA,
-      check: external_exports.object({ kind: external_exports.literal("file-contains"), path: external_exports.string(), pattern: external_exports.string() })
+      // H3: same bounded-input discipline as commit's content above -- an oversized path/pattern is
+      // refused by schema validation before the handler (and its file read / checkBinding scan) runs.
+      check: external_exports.object({
+        kind: external_exports.literal("file-contains"),
+        path: external_exports.string().max(MAX_RECHECK_PATH_CHARS).describe(`File path to check (max ${MAX_RECHECK_PATH_CHARS} characters).`),
+        pattern: external_exports.string().max(MAX_RECHECK_PATTERN_CHARS).describe(`Substring the file must contain (max ${MAX_RECHECK_PATTERN_CHARS} characters).`)
+      })
     }
   }, async (args) => m.runOp("helix_memory_recheck", () => handleRecheck(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   server2.registerTool("helix_memory_confirm", {
@@ -25835,8 +26090,12 @@ function buildServer(store2, dualDeps, metrics2) {
     title: "Dual-verify with Codex",
     description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor.",
     inputSchema: {
-      question: external_exports.string(),
-      helixAnswer: external_exports.string(),
+      // H3: same bounded-input discipline as commit's content above -- an oversized question/answer
+      // is refused by schema validation before the handler (and the JSON-parse allocation it would
+      // otherwise pay for) runs. classifyEgress's downstream 200,000-char joint scan limit (see
+      // limits.ts) is a separate, later gate; these caps exist to reject early, not to duplicate it.
+      question: external_exports.string().max(MAX_DV_QUESTION_CHARS).describe(`The question being verified (max ${MAX_DV_QUESTION_CHARS} characters).`),
+      helixAnswer: external_exports.string().max(MAX_DV_ANSWER_CHARS).describe(`Your answer to cross-validate (max ${MAX_DV_ANSWER_CHARS} characters).`),
       stakes: external_exports.enum(["low", "medium", "high", "xhigh"]).optional()
     }
   }, async (args, extra) => {
@@ -25856,7 +26115,7 @@ function buildServer(store2, dualDeps, metrics2) {
   server2.registerTool("helix_memory_adopt", {
     title: "Adopt project memory",
     description: "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean; a root that is not the active scope is refused and adopts nothing. This moves a trust boundary \u2014 everything in that ledger becomes recallable \u2014 so the user, not Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.",
-    inputSchema: { projectRoot: external_exports.string() }
+    inputSchema: { projectRoot: PROJECT_ROOT_SCHEMA }
   }, async (args) => m.runOp("helix_memory_adopt", () => handleAdopt(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   return Object.assign(server2, {
     // Bounded by construction: resolves once every tracked call has settled OR budgetMs elapses,
@@ -25925,6 +26184,13 @@ var metrics = createMetricsSink(join12(home, "metrics.jsonl"), config2.metrics.e
 var stray = strayTrustFiles(home, globalLedger);
 if (stray.length > 0) {
   const ledgerDir = dirname14(globalLedger);
+  const collide = collidingTrustFiles(home, stray);
+  const wouldOverwrite = `     HELIX_HOME ALREADY HAS ${collide.join(", ")} - moving the stray copies
+     over ${collide.length === 1 ? "it" : "them"} REPLACES this install's own trust store, and every elevated grade
+     on HELIX_HOME's own ledger is lost with it - the same loss this check exists to
+     prevent, in the other direction. Move HELIX_HOME's copies aside first and decide
+     which store you are keeping; deleting the stray copies instead is unaffected.
+`;
   const loss = assessGradeLoss(home, globalLedger);
   if (!loss.loses) {
     process.stderr.write(
@@ -25939,7 +26205,7 @@ They are most likely an inert leftover, from before the trust store's location w
 HELIX_HOME or from a repo-writing adversary. If they still hold state you need, move
 ${stray.join(", ")} into HELIX_HOME by hand; otherwise it is safe to delete them from the
 ledger directory - this note will keep appearing until they are gone.
-`
+` + (collide.length > 0 ? wouldOverwrite : "")
     );
   } else {
     const causes = [];
@@ -25979,9 +26245,13 @@ ledger directory - this note will keep appearing until they are gone.
   ledger directory        : ${ledgerDir}
   HELIX_HOME              : ${home}
 ${causes.join("")}Two ways out, both deliberate:
-  1. Move ${stray.join(", ")} from the ledger directory into HELIX_HOME, keeping the ledger where it
-     is - the only remedy proven lossless (docs/issues/repros/f1-manual-remedy.ts).
-  2. Discard the old trust state (delete those files) and accept the loss deliberately with the
+  1. Move ${stray.join(", ")} from the ledger directory into HELIX_HOME, keeping the ledger
+     where it is.
+` + // The claim used to be flat: "the only remedy proven lossless". It was proven for the case the
+      // repro actually built - a home with no file of those names - and is FALSE for the collision,
+      // which is the common case here. The claim is now scoped to the case it holds in.
+      (collide.length > 0 ? wouldOverwrite : `     Lossless here: HELIX_HOME has no file of those names to overwrite.
+`) + `  2. Discard the old trust state (delete those files) and accept the loss deliberately with the
      re-baseline ceremony: node bin/helix-rebaseline.mjs --scope global
 `
     );
@@ -26011,7 +26281,11 @@ var server = buildServer(store, {
   config: config2,
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
-  echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2 }) => ({ id: record2.id, content: record2.content })) },
+  // inspect()'s own projection sets contentDigest unconditionally (store.ts:767), but the field is
+  // optional on ScopedRecord for pairings built outside that projection. The fallback computes the
+  // same pure function `inspect()` already applies rather than fabricating a value, so a record that
+  // ever arrives without one is still matchable instead of silently unquotable.
+  echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2, contentDigest }) => ({ id: record2.id, content: record2.content, contentDigest: contentDigest ?? digestContent(record2.content) })) },
   auditPath: join12(home, "audit.jsonl"),
   codexLogPath: join12(home, "codex-log.jsonl")
 }, metrics);

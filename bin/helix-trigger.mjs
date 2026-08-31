@@ -53,7 +53,7 @@ function writeAll(fs, fd, data) {
 
 // src/memory/ownership.ts
 import { existsSync, mkdirSync, readFileSync as readFileSync2, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync2, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
-import { join as join2, resolve, dirname as dirname2 } from "node:path";
+import { join as join2, resolve, dirname as dirname2, isAbsolute } from "node:path";
 
 // src/memory/lock.ts
 import { readFileSync, writeFileSync, unlinkSync as unlinkSync2, linkSync as linkSync2, lstatSync, realpathSync, rmSync, readdirSync as readdirSync2 } from "node:fs";
@@ -123,8 +123,13 @@ function readRegistry(home) {
   return r.kind === "ok" ? r.reg : {};
 }
 function readOwner(projectRoot) {
+  const path = ownerFile(projectRoot);
   try {
-    return readFileSync2(ownerFile(projectRoot), "utf8").trim();
+    if (lstatSync2(dirname2(path)).isSymbolicLink()) return null;
+    const st = lstatSync2(path);
+    if (!st.isFile()) return null;
+    if (st.nlink > 1) return null;
+    return readFileSync2(path, "utf8").trim();
   } catch {
     return null;
   }
@@ -149,15 +154,24 @@ function aliasesGlobalLedger(projectLedger, globalLedger) {
 // src/config.ts
 import { readFileSync as readFileSync3 } from "node:fs";
 import { join as join3 } from "node:path";
-function readJson(path) {
+function readJson(path, onUnusable) {
+  let text;
   try {
-    return JSON.parse(readFileSync3(path, "utf8"));
-  } catch {
+    text = readFileSync3(path, "utf8");
+  } catch (e) {
+    if (e.code !== "ENOENT") onUnusable(e.message);
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    onUnusable(e.message);
     return null;
   }
 }
 function metricsEnabledFromGlobalConfig(home) {
-  const raw = readJson(join3(home, "config.json"));
+  const raw = readJson(join3(home, "config.json"), () => {
+  });
   const m = raw?.metrics;
   return m && typeof m === "object" && typeof m.enabled === "boolean" ? m.enabled : true;
 }

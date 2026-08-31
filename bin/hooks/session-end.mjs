@@ -3,7 +3,23 @@ import { appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname as dirname2, join as join2 } from "node:path";
 
+// src/limits.ts
+var HOOK_STDIN_MAX_BYTES = 1048576;
+var MAX_SESSION_ID_CHARS = 128;
+var MAX_SESSION_REASON_CHARS = 256;
+
 // src/hooks/session-record.ts
+async function readStdinCapped(stream, maxBytes) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of stream) {
+    const buf = chunk;
+    total += buf.length;
+    if (total > maxBytes) return null;
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
 function buildSessionEndRecord(stdinText, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
   try {
     const j = JSON.parse(stdinText);
@@ -11,7 +27,12 @@ function buildSessionEndRecord(stdinText, now = () => (/* @__PURE__ */ new Date(
     const sessionId = typeof j.session_id === "string" && j.session_id !== "" ? j.session_id : "unknown";
     const reasonRaw = j.reason ?? j.end_reason;
     const reason = typeof reasonRaw === "string" && reasonRaw !== "" ? reasonRaw : "unknown";
-    return { kind: "session-end", sessionId, reason, ts: now() };
+    return {
+      kind: "session-end",
+      sessionId: sessionId.slice(0, MAX_SESSION_ID_CHARS),
+      reason: reason.slice(0, MAX_SESSION_REASON_CHARS),
+      ts: now()
+    };
   } catch {
     return null;
   }
@@ -54,13 +75,9 @@ function ensureHelixDir(dir) {
 }
 
 // src/hooks/session-end.ts
-async function readStdin() {
-  const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(chunk);
-  return Buffer.concat(chunks).toString("utf8");
-}
 try {
-  const record = buildSessionEndRecord(await readStdin());
+  const stdinText = await readStdinCapped(process.stdin, HOOK_STDIN_MAX_BYTES);
+  const record = stdinText === null ? null : buildSessionEndRecord(stdinText);
   if (record) {
     const home = process.env.HELIX_HOME ?? join2(homedir(), ".helix");
     const path = process.env.HELIX_SESSIONS ?? join2(home, "sessions.jsonl");

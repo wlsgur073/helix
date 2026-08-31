@@ -16,10 +16,14 @@
         "type": "object",
         "properties": {
           "question": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 65536,
+            "description": "The question being verified (max 65536 characters)."
           },
           "helixAnswer": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 65536,
+            "description": "Your answer to cross-validate (max 65536 characters)."
           },
           "stakes": {
             "type": "string",
@@ -63,7 +67,9 @@
         "type": "object",
         "properties": {
           "content": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 16384,
+            "description": "The fact to store (max 16384 characters; split the fact or store a pointer if it is longer)."
           },
           "source": {
             "type": "string",
@@ -178,11 +184,13 @@
           },
           "maxItems": {
             "type": "integer",
-            "exclusiveMinimum": 0
+            "exclusiveMinimum": 0,
+            "maximum": 200
           },
           "maxChars": {
             "type": "integer",
             "exclusiveMinimum": 0,
+            "maximum": 10000,
             "description": "Per-item character cap for rendered content (truncated with …). Use when the caller can only read a bounded result."
           }
         },
@@ -210,10 +218,14 @@
                 "const": "file-contains"
               },
               "path": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 4096,
+                "description": "File path to check (max 4096 characters)."
               },
               "pattern": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 2048,
+                "description": "Substring the file must contain (max 2048 characters)."
               }
             },
             "required": [

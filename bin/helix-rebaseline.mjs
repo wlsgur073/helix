@@ -1,7 +1,7 @@
 // scripts/rebaseline-cli.ts
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
-import { isAbsolute, dirname as dirname8, join as join7 } from "node:path";
+import { isAbsolute as isAbsolute2, dirname as dirname8, join as join7 } from "node:path";
 import { mkdirSync as mkdirSync5 } from "node:fs";
 
 // src/memory/lock.ts
@@ -13,11 +13,23 @@ import { dirname, basename, join } from "node:path";
 // src/memory/lock-liveness.ts
 import { readFileSync, readlinkSync } from "node:fs";
 import { threadId } from "node:worker_threads";
+import { uptime as osUptime } from "node:os";
 function parseAfterLastParen(stat) {
   const i = stat.lastIndexOf(")");
   if (i < 0) return null;
   return stat.slice(i + 2).split(" ");
 }
+var UPTIME_WITNESS_PLATFORMS = /* @__PURE__ */ new Set(["linux", "win32"]);
+var rawUptimeSec = () => {
+  try {
+    const u = osUptime();
+    return Number.isFinite(u) ? u : null;
+  } catch {
+    return null;
+  }
+};
+var gateUptime = (platform, raw) => raw !== null && UPTIME_WITNESS_PLATFORMS.has(platform) ? raw : null;
+var gatedUptimeSec = () => gateUptime(process.platform, rawUptimeSec());
 var realProbe = {
   kill0(pid) {
     try {
@@ -56,32 +68,39 @@ var realProbe = {
       return null;
     }
   },
+  uptimeSec() {
+    return gatedUptimeSec();
+  },
   bootInstantMs() {
-    try {
-      return Date.now() - Number(readFileSync("/proc/uptime", "utf8").split(" ")[0]) * 1e3;
-    } catch {
-      return null;
-    }
+    const u = gatedUptimeSec();
+    return u === null ? null : Date.now() - u * 1e3;
   }
 };
 function selfIdentity(token, probe = realProbe) {
-  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform };
+  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform, uptimeSec: probe.uptimeSec() };
 }
 var isStringOrNull = (x) => x === null || typeof x === "string";
+var isFiniteNumberOrAbsent = (x) => x === void 0 || x === null || typeof x === "number" && Number.isFinite(x);
 function tryParsePayload(raw) {
   try {
     const p = JSON.parse(raw);
     if (p === null || typeof p !== "object" || p.v !== 1) return null;
     if (typeof p.token !== "string" || typeof p.pid !== "number" || typeof p.threadId !== "number" || typeof p.platform !== "string") return null;
     if (!isStringOrNull(p.startTicks) || !isStringOrNull(p.bootId) || !isStringOrNull(p.pidNs)) return null;
-    return p;
+    if (!isFiniteNumberOrAbsent(p.uptimeSec)) return null;
+    return { ...p, uptimeSec: p.uptimeSec ?? null };
   } catch {
     return null;
   }
 }
+var usableUptimeWitness = (recorded, self) => recorded.platform === self.platform && UPTIME_WITNESS_PLATFORMS.has(recorded.platform) && typeof recorded.uptimeSec === "number" && Number.isFinite(recorded.uptimeSec) && recorded.pidNs === self.pidNs;
 function classifyHolder(recorded, self, probe) {
   if (recorded.platform !== self.platform) return "alive-unknown";
   if (recorded.bootId !== null && self.bootId !== null && recorded.bootId !== self.bootId) return "dead";
+  if (usableUptimeWitness(recorded, self)) {
+    const now = probe.uptimeSec();
+    if (now !== null && Number.isFinite(now) && now >= 0 && now < recorded.uptimeSec) return "dead";
+  }
   if (recorded.bootId === null !== (self.bootId === null)) return "alive-unknown";
   if (recorded.pidNs !== self.pidNs) return "alive-unknown";
   if (!Number.isSafeInteger(recorded.pid) || recorded.pid <= 0) return "alive-unknown";
@@ -129,8 +148,6 @@ function acquireFileLock(target, opts = {}) {
   const lockPath = canon + ".lock";
   const token = randomBytes(16).toString("hex");
   const self = selfIdentity(token, probe);
-  const payloadText = JSON.stringify(self);
-  if (tryParsePayload(payloadText) === null) throw new Error("withFileLock: internal \u2014 payload failed its own well-formedness check");
   const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const startedAt = performance.now();
   const elapsedMs = () => Math.round(performance.now() - startedAt);
@@ -138,6 +155,8 @@ function acquireFileLock(target, opts = {}) {
   let lastHolder = null;
   for (; ; ) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString("hex")}.tmp`;
+    const payloadText = JSON.stringify({ ...self, uptimeSec: probe.uptimeSec() });
+    if (tryParsePayload(payloadText) === null) throw new Error("withFileLock: internal \u2014 payload failed its own well-formedness check");
     try {
       writeFileSync(srcTmp, payloadText, { flag: "wx", mode: 384 });
       try {
@@ -512,7 +531,7 @@ import { readFileSync as readFileSync4 } from "node:fs";
 import { dirname as dirname6, join as join6 } from "node:path";
 
 // src/memory/ownership.ts
-import { join as join5, resolve, dirname as dirname5 } from "node:path";
+import { join as join5, resolve, dirname as dirname5, isAbsolute } from "node:path";
 function canonicalRoot(projectRoot) {
   try {
     return canonical(projectRoot);
@@ -797,7 +816,7 @@ function parseScope(argv) {
   if (argv.length !== 2 || argv[0] !== "--scope") return null;
   const scope = argv[1];
   if (!scope) return null;
-  if (scope !== "global" && !isAbsolute(scope)) return null;
+  if (scope !== "global" && !isAbsolute2(scope)) return null;
   return scope;
 }
 function resolveHome(env) {

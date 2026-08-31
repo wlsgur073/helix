@@ -23,7 +23,7 @@ import { dirname as dirname6, join as join6 } from "node:path";
 // src/memory/ownership.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3, renameSync, unlinkSync as unlinkSync2, lstatSync as lstatSync3, openSync, writeSync, fsyncSync, closeSync } from "node:fs";
-import { join as join3, resolve, dirname as dirname3 } from "node:path";
+import { join as join3, resolve, dirname as dirname3, isAbsolute } from "node:path";
 
 // src/memory/lock.ts
 import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync as realpathSync2, rmSync, readdirSync } from "node:fs";
@@ -34,11 +34,23 @@ import { dirname, basename, join } from "node:path";
 // src/memory/lock-liveness.ts
 import { readFileSync, readlinkSync } from "node:fs";
 import { threadId } from "node:worker_threads";
+import { uptime as osUptime } from "node:os";
 function parseAfterLastParen(stat) {
   const i = stat.lastIndexOf(")");
   if (i < 0) return null;
   return stat.slice(i + 2).split(" ");
 }
+var UPTIME_WITNESS_PLATFORMS = /* @__PURE__ */ new Set(["linux", "win32"]);
+var rawUptimeSec = () => {
+  try {
+    const u = osUptime();
+    return Number.isFinite(u) ? u : null;
+  } catch {
+    return null;
+  }
+};
+var gateUptime = (platform, raw) => raw !== null && UPTIME_WITNESS_PLATFORMS.has(platform) ? raw : null;
+var gatedUptimeSec = () => gateUptime(process.platform, rawUptimeSec());
 var realProbe = {
   kill0(pid) {
     try {
@@ -77,32 +89,39 @@ var realProbe = {
       return null;
     }
   },
+  uptimeSec() {
+    return gatedUptimeSec();
+  },
   bootInstantMs() {
-    try {
-      return Date.now() - Number(readFileSync("/proc/uptime", "utf8").split(" ")[0]) * 1e3;
-    } catch {
-      return null;
-    }
+    const u = gatedUptimeSec();
+    return u === null ? null : Date.now() - u * 1e3;
   }
 };
 function selfIdentity(token, probe = realProbe) {
-  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform };
+  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform, uptimeSec: probe.uptimeSec() };
 }
 var isStringOrNull = (x) => x === null || typeof x === "string";
+var isFiniteNumberOrAbsent = (x) => x === void 0 || x === null || typeof x === "number" && Number.isFinite(x);
 function tryParsePayload(raw) {
   try {
     const p = JSON.parse(raw);
     if (p === null || typeof p !== "object" || p.v !== 1) return null;
     if (typeof p.token !== "string" || typeof p.pid !== "number" || typeof p.threadId !== "number" || typeof p.platform !== "string") return null;
     if (!isStringOrNull(p.startTicks) || !isStringOrNull(p.bootId) || !isStringOrNull(p.pidNs)) return null;
-    return p;
+    if (!isFiniteNumberOrAbsent(p.uptimeSec)) return null;
+    return { ...p, uptimeSec: p.uptimeSec ?? null };
   } catch {
     return null;
   }
 }
+var usableUptimeWitness = (recorded, self) => recorded.platform === self.platform && UPTIME_WITNESS_PLATFORMS.has(recorded.platform) && typeof recorded.uptimeSec === "number" && Number.isFinite(recorded.uptimeSec) && recorded.pidNs === self.pidNs;
 function classifyHolder(recorded, self, probe) {
   if (recorded.platform !== self.platform) return "alive-unknown";
   if (recorded.bootId !== null && self.bootId !== null && recorded.bootId !== self.bootId) return "dead";
+  if (usableUptimeWitness(recorded, self)) {
+    const now = probe.uptimeSec();
+    if (now !== null && Number.isFinite(now) && now >= 0 && now < recorded.uptimeSec) return "dead";
+  }
   if (recorded.bootId === null !== (self.bootId === null)) return "alive-unknown";
   if (recorded.pidNs !== self.pidNs) return "alive-unknown";
   if (!Number.isSafeInteger(recorded.pid) || recorded.pid <= 0) return "alive-unknown";
@@ -150,8 +169,6 @@ function acquireFileLock(target, opts = {}) {
   const lockPath = canon + ".lock";
   const token = randomBytes(16).toString("hex");
   const self = selfIdentity(token, probe);
-  const payloadText = JSON.stringify(self);
-  if (tryParsePayload(payloadText) === null) throw new Error("withFileLock: internal \u2014 payload failed its own well-formedness check");
   const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const startedAt = performance2.now();
   const elapsedMs = () => Math.round(performance2.now() - startedAt);
@@ -159,6 +176,8 @@ function acquireFileLock(target, opts = {}) {
   let lastHolder = null;
   for (; ; ) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString("hex")}.tmp`;
+    const payloadText = JSON.stringify({ ...self, uptimeSec: probe.uptimeSec() });
+    if (tryParsePayload(payloadText) === null) throw new Error("withFileLock: internal \u2014 payload failed its own well-formedness check");
     try {
       writeFileSync(srcTmp, payloadText, { flag: "wx", mode: 384 });
       try {
@@ -451,8 +470,13 @@ function atomicWriteRegistry(home, reg) {
   atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
 }
 function readOwner(projectRoot) {
+  const path = ownerFile(projectRoot);
   try {
-    return readFileSync3(ownerFile(projectRoot), "utf8").trim();
+    if (lstatSync3(dirname3(path)).isSymbolicLink()) return null;
+    const st = lstatSync3(path);
+    if (!st.isFile()) return null;
+    if (st.nlink > 1) return null;
+    return readFileSync3(path, "utf8").trim();
   } catch {
     return null;
   }
@@ -1071,6 +1095,13 @@ function classifyEmission(content) {
 }
 
 // src/hooks/format-context.ts
+var NON_VERIFYING_FLAG = {
+  "user-relayed": "(relayed source \u2014 confirm with user) ",
+  "agent-inference": "(agent inference \u2014 unconfirmed) ",
+  "agent-test-verified": "(agent test-verified \u2014 self-asserted) ",
+  "codex-agree": "(codex agreement \u2014 unconfirmed) "
+};
+var nonVerifyingFlag = (source) => NON_VERIFYING_FLAG[source] ?? "(non-authoritative \u2014 confirm before use) ";
 var INTEGRITY_UNAVAILABLE_NOTE = "(integrity verification unavailable \u2014 trust grades shown are unverified)";
 var SCALE_ADVISORY_ROWS = 2e3;
 var scaleAdvisoryNote = (unionRows) => `(scale advisory: ${unionRows} union ledger rows \u2014 the indexed-storage build trigger arms at 2500; recall latency grows with ledger size. See README "Scale".)`;
@@ -1099,7 +1130,7 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   const lines = selected.map((s) => {
     const { record: r, scope } = s;
     const reverify = requiresReverifyBeforeUse({ state: r.state, blastRadius: r.blastRadius, source: r.provenance.source });
-    const flag = !reverify ? "" : r.state === "Suspect" ? "(re-verify \u2014 reality may have changed) " : "(relayed source \u2014 confirm with user) ";
+    const flag = !reverify ? "" : r.state === "Suspect" ? "(re-verify \u2014 reality may have changed) " : nonVerifyingFlag(r.provenance.source);
     return {
       text: datamark(`${flag}${r.content.replace(/\s+/g, " ").trim()}`, `DATA[${r.state}:${scope}]| `, maxItemChars),
       reserved: reserved.includes(s),
@@ -1265,25 +1296,45 @@ function createMetricsSink(path, enabled, deps = {}) {
 // src/config.ts
 import { readFileSync as readFileSync8 } from "node:fs";
 import { join as join7 } from "node:path";
-function readJson(path) {
+function readJson(path, onUnusable) {
+  let text;
   try {
-    return JSON.parse(readFileSync8(path, "utf8"));
-  } catch {
+    text = readFileSync8(path, "utf8");
+  } catch (e) {
+    if (e.code !== "ENOENT") onUnusable(e.message);
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    onUnusable(e.message);
     return null;
   }
 }
 function metricsEnabledFromGlobalConfig(home) {
-  const raw = readJson(join7(home, "config.json"));
+  const raw = readJson(join7(home, "config.json"), () => {
+  });
   const m = raw?.metrics;
   return m && typeof m === "object" && typeof m.enabled === "boolean" ? m.enabled : true;
 }
 
-// src/hooks/session-start.ts
-async function readStdin() {
+// src/limits.ts
+var HOOK_STDIN_MAX_BYTES = 1048576;
+
+// src/hooks/session-record.ts
+async function readStdinCapped(stream, maxBytes) {
   const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(chunk);
+  let total = 0;
+  for await (const chunk of stream) {
+    const buf = chunk;
+    total += buf.length;
+    if (total > maxBytes) return null;
+    chunks.push(buf);
+  }
   return Buffer.concat(chunks).toString("utf8");
 }
+
+// src/hooks/session-start.ts
 function gatherScopedRecords({ home, globalLedger, cwd }) {
   const records = [];
   let integrityAvailable = true;
@@ -1328,10 +1379,16 @@ async function main() {
 `);
     }
     let cwd;
-    try {
-      const j = JSON.parse(await readStdin());
-      if (typeof j.cwd === "string") cwd = j.cwd;
-    } catch {
+    const stdinText = await readStdinCapped(process.stdin, HOOK_STDIN_MAX_BYTES);
+    if (stdinText === null) {
+      writeSync2(2, `helix: NOTE - stdin exceeded ${HOOK_STDIN_MAX_BYTES} bytes; proceeding as if stdin were {} (global scope only).
+`);
+    } else {
+      try {
+        const j = JSON.parse(stdinText);
+        if (typeof j.cwd === "string") cwd = j.cwd;
+      } catch {
+      }
     }
     const { records, integrityAvailable, replays, projectDisposition, witnessNotes } = gatherScopedRecords({ home, globalLedger, cwd });
     const text = formatSessionStartContext(records, newNonce(), {
