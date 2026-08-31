@@ -52,6 +52,23 @@ grep -rl "<marker>" ~/.claude/plugins/marketplaces/helix ~/.claude/plugins/cache
 
 If the sha is stale (auto-update race): repeat uninstall → marketplace update → install.
 
+**Two-scope trap (2026-08-14; freeze deviations ledger, `D-2026-08-13` remediation step 3).** `claude plugin
+uninstall helix` acts on the user scope only: a local-scope entry — created by an explicit `--scope local`
+install, or registered by a CLI start inside a project, as the 2026-08-09 dogfood entry was — keeps the
+old sha until it is uninstalled and reinstalled from that project root with `--scope local` (the uninstall
+matches scope AND project path; the flag was read from the 2.1.251 binary — confirm with `--help`). After the sequence, enumerate every
+`helix@helix` entry in `installed_plugins.json`, not just `[0]`.
+
+**In CLI 2.1.251 (read from the binary 2026-08-30; its changelog dates the change to 2.1.232).**
+`claude plugin install <plugin>@<marketplace>` refreshes the marketplace before installing (skipped when
+it was refreshed under 30 s earlier), so the middle line is no longer the only pull; keep it — the
+three-line form is the runbook's own order, executed on 2026-07-22, 07-24, 08-02 and 08-14 (other
+deploys on record used other orders), and the refresh-first behaviour is version-dependent. The CLI installed new
+versions three times within 66 s of a scheduled dogfood run's start despite `DISABLE_AUTOUPDATER=1`
+(2026-08-26/27/30 — a correlation, mechanism untraced); record `readlink -f "$(type -P claude)"` (not
+`command -v`, which prints the alias in a bashrc-sourced shell) and its `sha256sum` before and after a
+deploy, and repeat the sequence if they differ.
+
 Then honor the **launch barrier**: start a NEW Claude Code process (do not rely on `/clear`)
 and live-verify one helix tool call from the new session. A headless verify (`claude -p '…'
 --permission-mode acceptEdits --disable-slash-commands`) must additionally allow-list the tool —

@@ -50,7 +50,9 @@ same day. What remains unrehearsed, each with a reason that is measured rather t
 machine this box is not), A2 (account-side, the owner's), A3's real snapshot (needs every session
 closed, and an MCP server is alive whenever this sheet is being edited), F3 (a commit and a push —
 outside any rehearsal by the repository's git agreement), F4 (`claude plugin marketplace update` is
-the one command the freeze names), F6 (its observable is a difference only F4 can produce), C1.1's
+the one command the freeze names — and, read from the 2.1.251 binary on 2026-08-30, `claude plugin
+install` refreshes the marketplace before installing (a behaviour its changelog dates to 2.1.232), on a binary that has changed at three dogfood
+starts in five days; the throwaway-dir record and the owner's 2026-08-31 reading of the ban are at F4), F6 (its observable is a difference only F4 can produce), C1.1's
 session-close half (closing the rehearsing session is the act), 0.6's reboot-survival sentence
 (measuring it needs a suppressed live run), H2b's off-machine copy (the owner's medium), and H7's
 post-close lock re-run (needs `txClose` to have passed). **The lesson 0.6 taught, generalised: a
@@ -2572,6 +2574,45 @@ runtime through the marketplace clone, which is exactly what the window forbade.
 
   Follow `docs/release/deploy-runbook.md` exactly. If the sha comes back stale (auto-update race),
   repeat all three.
+
+  *(Corrected 2026-08-31, three ways — the original block stays byte-identical.)* **(1) The middle command
+  is no longer the only pull site.** Read from the 2.1.251 binary on 2026-08-30 (its changelog dates the behaviour to 2.1.232, so every
+  in-window CLI from 2.1.233 carried it — including the 2.1.235 of the 08-19 certification cycle, which did
+  not exercise it only because a directory source is ineligible): `claude plugin install
+  <plugin>@<marketplace>` refreshes the marketplace — a `git pull` of the clone — before installing, for
+  github/git/url sources, skipped when the marketplace was refreshed under 30 s earlier (and by a
+  non-essential-traffic gate whose binding is unverified). The third
+  command therefore carries the effect the freeze's ban names, which is why the owner read the ban by
+  EFFECT on 2026-08-31: *before D1 writes the close receipt, no command that refreshes or rewrites the live helix
+  marketplace, registry, cache or load paths — 2.1.251's `install` included; a command confined to a fresh
+  `CLAUDE_CONFIG_DIR` does not reach the ban* (recorded in the deviations ledger, `R-2026-08-30`). Post-receipt both lines are pull sites; the 30 s suppression is an optimisation, not
+  evidence — F5's three-sha check is the evidence. **(2) The two-scope leg is missing above.** The
+  2026-08-14 redeploy needed it (deviations ledger, `D-2026-08-13`, remediation step 3): the user-scope
+  uninstall leaves a local-scope entry on the old sha. Run, from the project root that owns the local
+  entry (C11's enumeration lists it), and repeat for every local entry:
+
+  ```bash
+  # after the three lines above; -s/--scope was read on both verbs in the 2.1.251 binary — confirm with --help from a throwaway CLAUDE_CONFIG_DIR first
+  claude plugin uninstall helix --scope local
+  claude plugin install helix@helix --scope local
+  ```
+
+  **(3) Name the binary before and after.** The CLI self-updated three times in the five days to
+  2026-08-30 (2.1.246, 2.1.247, 2.1.251 — each within 66 s of a dogfood run's `Starting`, despite
+  `DISABLE_AUTOUPDATER=1`), so the binary that runs this step is unlikely to be one any rehearsal saw: capture
+  `readlink -f "$(type -P claude)"` and the `sha256sum` of that file before the first line and after
+  the last (C11's read-only line — `type -P`, not `command -v`, which prints the alias in that shell); if it changed in between, repeat the whole sequence. **Why this step
+  stays UNREHEARSED — the reason measured, not chosen:** a throwaway `CLAUDE_CONFIG_DIR` was exercised
+  in-window on 2026-08-19 (CLI 2.1.235: `marketplace add` with a directory source, `install`, `plugin
+  update`, `uninstall`, `install`, `uninstall`; the live clone and cache on record as untouched, the live registry
+  read only through the throwaway's copy — `v0.1-certification-runsheet.md`) and pre-window on 2026-07-27 with a GitHub source
+  (`c4-drills-2026-07.md`: no credential seeding needed; a clone follows from the GitHub source). A directory source creates no clone,
+  so the refresh-first leg can only be exercised with a remote source — network — on a binary that will
+  have changed again by close day. The exact three-command sequence has four executions on record
+  (2026-07-22, 07-24, 08-02, 08-14 — the last at both scopes and the only one whose order a tracked
+  document names; the other three are in the operator's notes). Deferred by the owner on 2026-08-31 with the conditions above
+  written as the plan; if it is ever run, hash the live settings, registry, clone, cache and load paths
+  before and after, use exactly one refresh, and enumerate every entry afterwards.
 
 - [ ] **F5. The 3-sha, both-load-path verification — of the NEW build.** *"Staleness is
   `gitCommitSha`, never `version`."* Confirm the installed entry's `gitCommitSha`, the marketplace
