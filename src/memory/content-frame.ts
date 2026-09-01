@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import type { ScopedRecord } from '../types.js';
+import type { BlastRadius, MemoryState, ProvenanceSource, ScopedRecord } from '../types.js';
+import { requiresReverifyBeforeUse } from './state-machine.js';
 import type { WitnessVerdict } from './witness-core.js';
 
 /** 128-bit CSPRNG hex nonce. Impure — callers invoke it; pure framers take the result as a param. */
@@ -154,12 +155,39 @@ export function makeDataFrame(opts: {
  */
 export const safeId = (id: string): string => id.replace(/[^A-Za-z0-9_-]/g, '');
 
-/** Memory-recall frame: datamarks each record with its trust state and scope. */
+/** H8/H9: ONE per-item provenance flag vocabulary for EVERY render surface — the SessionStart hook
+ *  (format-context.ts) and the recall tool frame below. H8's lesson: one literal for all
+ *  non-verifying sources asserted a relay that may not have happened, so the flag NAMES the
+ *  source. H9's lesson: the map lived on the hook surface only, so the same fact read as unflagged
+ *  exactly where a session's oracle check reads it (the explicit recall). The flag is PRESENTATION
+ *  inside the datamarked line — record content can fake a flag's PRESENCE (a harmless downgrade),
+ *  never its absence; the unforgeable record stays the out-of-frame aggregate note (handlers.ts).
+ *  It grants no trust in either direction: VERIFYING_SOURCES is unchanged, every branch is still a
+ *  flag, and an unknown/legacy value falls to the generic branch, matching isVerifyingSource's
+ *  fail-closed set membership. `Suspect` outranks the source branch: a stale fact is the more
+ *  urgent problem, and its wording already tells the reader to go and look. */
+const NON_VERIFYING_FLAG: Partial<Record<ProvenanceSource, string>> = {
+  'user-relayed': '(relayed source — confirm with user) ',
+  'agent-inference': '(agent inference — unconfirmed) ',
+  'agent-test-verified': '(agent test-verified — self-asserted) ',
+  'codex-agree': '(codex agreement — unconfirmed) ',
+};
+export function reverifyFlag(r: { state: MemoryState; blastRadius: BlastRadius | null; source: ProvenanceSource }): string {
+  if (!requiresReverifyBeforeUse(r)) return '';
+  if (r.state === 'Suspect') return '(re-verify — reality may have changed) ';
+  return NON_VERIFYING_FLAG[r.source] ?? '(non-authoritative — confirm before use) ';
+}
+
+/** Memory-recall frame: datamarks each record with its trust state and scope, the content led by
+ *  the shared provenance flag (H9 — the hook and the tool must render the same vocabulary). */
 export function frameAsData(scoped: ScopedRecord[], nonce: string, maxChars?: number): string {
   return makeDataFrame({
     label: 'RECALLED MEMORY',
     nonce,
-    lines: scoped.map(({ record, scope }) => ({ text: record.content, mark: `DATA[${record.state}:${scope}]| ` })),
+    lines: scoped.map(({ record, scope }) => ({
+      text: `${reverifyFlag({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source })}${record.content}`,
+      mark: `DATA[${record.state}:${scope}]| `,
+    })),
     maxChars,
   });
 }
