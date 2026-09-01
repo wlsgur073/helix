@@ -7,7 +7,7 @@ import { digestContent } from '../memory/ledger-mac.js';
 import type { RealityCheck } from '../memory/reality-check.js';
 import { MAX_QUERY_CHARS } from '../memory/retrieval.js';
 import {
-  MAX_COMMIT_CONTENT_CHARS, MAX_DV_QUESTION_CHARS, MAX_DV_ANSWER_CHARS,
+  MAX_COMMIT_CONTENT_CHARS, MAX_DV_QUESTION_CHARS, MAX_DV_ANSWER_CHARS, MAX_DV_QUOTED_ITEMS,
   MAX_RECHECK_PATH_CHARS, MAX_RECHECK_PATTERN_CHARS, RECALL_MAX_ITEMS_CAP, RECALL_MAX_CHARS_CAP,
 } from '../limits.js';
 import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, MAX_ID_CHARS, isValidId, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
@@ -179,7 +179,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   const dualVerifyInFlight = new Set<Promise<unknown>>();
   server.registerTool('helix_dual_verify', {
     title: 'Dual-verify with Codex',
-    description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor.",
+    description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor; an omitted stakes counts as 'low' — omission is not an exemption. quotedMemory declares memories this call deliberately quotes, each {id, contentDigest} pair a proof of read; resolved pairs are exempt from the memory-echo guard, unresolvable pairs are discarded.",
     inputSchema: {
       // H3: same bounded-input discipline as commit's content above -- an oversized question/answer
       // is refused by schema validation before the handler (and the JSON-parse allocation it would
@@ -188,6 +188,15 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       question: z.string().max(MAX_DV_QUESTION_CHARS).describe(`The question being verified (max ${MAX_DV_QUESTION_CHARS} characters).`),
       helixAnswer: z.string().max(MAX_DV_ANSWER_CHARS).describe(`Your answer to cross-validate (max ${MAX_DV_ANSWER_CHARS} characters).`),
       stakes: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
+      // H6: proof-of-read declarations. SIZE-bounded only (array length + per-string chars): the
+      // guard DISCARDS a pair that does not resolve against the ledger, so validity refinements
+      // here would turn the designed discard-semantics into a whole-call refusal (a stale digest
+      // is indistinguishable from a wrong one — dual-verify.ts / trifecta.ts carry the argument).
+      quotedMemory: z.array(z.object({
+        id: z.string().max(MAX_ID_CHARS).describe('Ledger id of the record being quoted.'),
+        contentDigest: z.string().max(64).describe("The record's contentDigest (sha-256 hex) as proof of read."),
+      })).max(MAX_DV_QUOTED_ITEMS).optional()
+        .describe(`Memories this call deliberately quotes; resolved pairs are exempted from the memory-echo guard (max ${MAX_DV_QUOTED_ITEMS} pairs).`),
     },
   }, async (args, extra) => {
     const call = m.runOp('helix_dual_verify', () => handleDualVerify(args, dv, extra?.signal));

@@ -51,6 +51,14 @@ export const MAX_DV_QUESTION_CHARS = 65_536;
 /** `helix_dual_verify`'s `helixAnswer` field. Same reasoning as MAX_DV_QUESTION_CHARS — see there. */
 export const MAX_DV_ANSWER_CHARS = 65_536;
 
+/** `helix_dual_verify`'s `quotedMemory` array (H6 proof-of-read declarations). Schema-only, like
+ *  the two DV caps above: the guard layer (`classifyEgress`) DISCARDS any pair that does not
+ *  resolve against the ledger, so correctness never depends on this bound — it exists to reject an
+ *  absurd declaration before the per-pair resolution work runs. Sized well above the bounded-recall
+ *  convention (12 items) and the largest observed echo set, far below anything that costs real
+ *  resolution time (each pair is one Map lookup). */
+export const MAX_DV_QUOTED_ITEMS = 64;
+
 /** `helix_memory_recheck`'s `check.path` field. */
 export const MAX_RECHECK_PATH_CHARS = 4_096;
 
