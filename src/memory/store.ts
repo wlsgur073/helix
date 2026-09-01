@@ -26,7 +26,7 @@ import { interruptedAtPredecessor, type WitnessVerdict } from './witness-core.js
 import { ledgerDigest, subkeyFingerprint, keyVectorEqual, type ScopeKeyComponent, type RecallCacheEntry } from './recall-cache.js';
 import type { MetricsSink } from '../metrics.js';
 import { withFileLock } from './lock.js';
-import { MAX_COMMIT_CONTENT_CHARS } from '../limits.js';
+import { MAX_COMMIT_CONTENT_CHARS, RECALL_RECENCY_APPENDIX_COUNT } from '../limits.js';
 
 export interface MemoryStoreOptions {
   sessionId?: string;
@@ -98,6 +98,14 @@ export interface RecalledItem {
 
 export interface RecallResult {
   items: RecalledItem[];
+  /** H1 recency appendix: the newest served records NOT in `items`, included regardless of rank —
+   *  the lexical(+semantic-neighbor) ranker cannot reach a record sharing no literal term with the
+   *  query, however new it is (mechanism confirmed by experiment, dogfood channel 07-12). Kept
+   *  SEPARATE from `items` so rank consumers (the pilot Hit@K scripts) keep measuring the ranker
+   *  alone; the tool surface renders both and discloses these ids in a trusted out-of-frame note.
+   *  At most RECALL_RECENCY_APPENDIX_COUNT entries, newest first (tx desc, append order breaking
+   *  same-millisecond ties), additive beyond `maxItems`. */
+  appendix: RecalledItem[];
   framed: string; // DATA-quarantined block for prompt injection
   /** False when no master key is available — every state is conservatively clamped to Fresh and
    *  no elevation can be trusted (the verifying replay ran in key-absent mode). */
@@ -635,15 +643,32 @@ export class MemoryStore {
     const expansion = this.opts.expansion ?? defaultExpansion();
     const hits = rankWithArtifacts(enforcedScoped.map((s) => s.record), effectiveArtifacts, query,
       { ...opts, expansion, semDiscount: SEM_DISCOUNT, semGate: SEM_GATE });
-    const items: RecalledItem[] = hits.map((record) => ({
+    // H1 (recency crowding): a record sharing no literal term with the query is unreachable by the
+    // ranker no matter how new it is, so a session's newest decisions lose to older, longer
+    // entries. The repair is this APPENDIX, not a score term: a wall-clock decay component would
+    // make the same bytes rank differently across calls — the exact determinism class the
+    // inspect-asof cursor fix retired — and would poison the A4 cache's HIT path. The appendix is
+    // a pure function of the already-read served set (no extra ledger read), so a cache HIT
+    // computes the same appendix as the MISS that built the slot.
+    const ranked = new Set(hits);
+    const appendixRecords = enforcedScoped
+      .map((s, seq) => ({ rec: s.record, seq }))
+      .filter(({ rec }) => !ranked.has(rec))
+      .sort((a, b) => (a.rec.tx === b.rec.tx ? b.seq - a.seq : a.rec.tx < b.rec.tx ? 1 : -1))
+      .slice(0, RECALL_RECENCY_APPENDIX_COUNT)
+      .map(({ rec }) => rec);
+    const toItem = (record: MemoryRecord): RecalledItem => ({
       record,
       scope: byRecord.get(record)?.scope ?? 'global',
       needsReverify: requiresReverifyBeforeUse({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source }),  // I7: recomputed per call
       integrity: byRecord.get(record)?.integrity ?? 'ok',
-    }));
+    });
+    const items: RecalledItem[] = hits.map(toItem);
+    const appendix: RecalledItem[] = appendixRecords.map(toItem);
     return {
       items,
-      framed: frameAsData(items.map(({ record, scope }) => ({ record, scope })), this.nonce()),  // I7: fresh nonce per call
+      appendix,
+      framed: frameAsData([...items, ...appendix].map(({ record, scope }) => ({ record, scope })), this.nonce()),  // I7: fresh nonce per call
       integrityAvailable: available,
       projectDisposition: disposition,
       witnessNotes: collectWitnessNotes(verdicts.map((v) => v.verdict)),

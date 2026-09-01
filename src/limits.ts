@@ -82,5 +82,13 @@ export const RECALL_MAX_ITEMS_CAP = 200;
 /** Ceiling on `helix_memory_recall`'s optional `maxChars` argument (per-item render cap). */
 export const RECALL_MAX_CHARS_CAP = 10_000;
 
+/** Size of recall's H1 recency appendix (`RecallResult.appendix`): the newest served records
+ *  returned ALONGSIDE the ranked items, because the lexical(+semantic-neighbor) ranker cannot
+ *  reach a record sharing no literal term with the query, however new it is. Core-only, additive
+ *  beyond `maxItems`; the response stays bounded by RESPONSE_MAX_CHARS. Sized to the measured
+ *  need: the dogfood thread's exposed case was a session's two-to-three load-bearing recent
+ *  decisions absent from recall (channel entries 2026-07-11..08-12). */
+export const RECALL_RECENCY_APPENDIX_COUNT = 3;
+
 /** Ceiling on any single MCP tool response's rendered character length. */
 export const RESPONSE_MAX_CHARS = 262_144;
