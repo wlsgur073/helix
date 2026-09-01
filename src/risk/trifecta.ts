@@ -3,7 +3,7 @@
 // the 2a DATA-quarantine. S1 (classifyEgress) is an enforceable egress gate; S2 (classifyEmission)
 // is an advisory flag. detectEcho is a verbatim-copy tripwire, not an exfiltration guard.
 
-import { findSecrets } from '../memory/secret-scan.js';
+import { findSecrets, nearCredential } from '../memory/secret-scan.js';
 import { detectPII, type PiiKind } from '../memory/pii-scan.js';
 import type { EgressPolicy, EgressLeg } from '../config.js';
 
@@ -173,24 +173,11 @@ export const AUDIT_LEG_ORDER: readonly Leg[] = ['secret', 'pii', 'memory_echo'];
 /** Bulk low-severity PII threshold: >= N distinct low-sev hits is exfiltration-shaped. */
 const BULK_PII_N = 3;
 
-// EH-4: credential-context guard for the egress entropy hex-exemption. A pure-hex entropy token
-// (git SHA / digest) is normally RELEASED on egress, UNLESS a credential keyword sits in the SAME
-// statement within ~CRED_WINDOW chars — then it keeps blocking (bias toward protection). Locked
-// tunables (spec §6): boundary set \n . ; ; CRED_WINDOW 24 ; KW_PAD 16 ; keyword set below.
-const CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[_-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token)/i;
-const CRED_WINDOW = 24; // proximity cap (chars)
-const KW_PAD = 16;      // longest guard keyword; pad the raw slice so an edge keyword is not truncated
-/** A credential keyword within ~CRED_WINDOW chars of [start,end), restricted to the same statement
- *  (window clipped at \n / . / ; — comma is intentionally NOT a boundary). */
-function nearCredential(text: string, start: number, end: number): boolean {
-  let pre = text.slice(Math.max(0, start - CRED_WINDOW - KW_PAD), start);
-  let post = text.slice(end, Math.min(text.length, end + CRED_WINDOW + KW_PAD));
-  const b = Math.max(pre.lastIndexOf('\n'), pre.lastIndexOf('.'), pre.lastIndexOf(';'));
-  if (b >= 0) pre = pre.slice(b + 1);
-  const m = post.search(/[\n.;]/);
-  if (m >= 0) post = post.slice(0, m);
-  return CREDENTIAL_CONTEXT.test(pre) || CREDENTIAL_CONTEXT.test(post);
-}
+// EH-4: the credential-context guard for the egress entropy exemptions (a pure-hex or benign
+// word-chain entropy token is normally RELEASED on egress, UNLESS a credential keyword sits in the
+// SAME statement — then it keeps blocking). The definition lives in secret-scan.ts (imported
+// above) as the single copy shared with the W-CITE write-policy selector, so the egress and write
+// paths cannot drift apart on what "near a credential" means.
 
 /** Per-form detector signals. Computed once per scanned FORM of the payload (see classifyEgress). */
 interface Scan {

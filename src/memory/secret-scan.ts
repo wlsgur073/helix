@@ -263,3 +263,43 @@ export function redactSecrets(content: string, spans: SecretSpan[]): Redaction {
   }
   return { content: out, classification: 'secret-redacted', kinds: [...new Set(spans.map((s) => s.kind))] };
 }
+
+// EH-4: credential-context guard, the SINGLE definition — shared by the egress entropy exemptions
+// (trifecta.ts imports it) and the W-CITE write-policy selector below, moved here from trifecta.ts
+// so the two paths cannot drift. A credential keyword within ~CRED_WINDOW chars of the span,
+// restricted to the SAME statement (window clipped at \n / . / ; — comma is intentionally NOT a
+// boundary), keeps the span protected (bias toward protection). Locked tunables (spec §6):
+// boundary set \n . ; ; CRED_WINDOW 24 ; KW_PAD 16 ; keyword set below.
+const CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[_-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token)/i;
+const CRED_WINDOW = 24; // proximity cap (chars)
+const KW_PAD = 16;      // longest guard keyword; pad the raw slice so an edge keyword is not truncated
+export function nearCredential(text: string, start: number, end: number): boolean {
+  let pre = text.slice(Math.max(0, start - CRED_WINDOW - KW_PAD), start);
+  let post = text.slice(end, Math.min(text.length, end + CRED_WINDOW + KW_PAD));
+  const b = Math.max(pre.lastIndexOf('\n'), pre.lastIndexOf('.'), pre.lastIndexOf(';'));
+  if (b >= 0) pre = pre.slice(b + 1);
+  const m = post.search(/[\n.;]/);
+  if (m >= 0) post = post.slice(0, m);
+  return CREDENTIAL_CONTEXT.test(pre) || CREDENTIAL_CONTEXT.test(post);
+}
+
+/** W-CITE write-policy selector: which spans `redactSecrets` must still replace on the WRITE path.
+ *  A span is RELEASED (persisted verbatim) iff its `tiers` is exactly ['entropy'] AND its core is
+ *  a benign word chain AND NOT hex-shaped AND no credential keyword sits in the same statement.
+ *  Deny-dominant on `tiers` (read the accumulated list, never the display `tier`): any
+ *  named/heuristic overlap in a merged span keeps it redacting. Hex keeps redacting because hex is
+ *  the native representation of random secret material — a 40-char hex value may be a git object
+ *  or a key, and persistence cannot infer which — while a word chain's digit-free twin is already
+ *  persisted verbatim today with no exemption involved, so the released arm's marginal exposure is
+ *  the digit-bearing word chain alone (measured 0 of 7 real values on this box; design doc
+ *  2026-08-05 Part 3, falsifier 2026-09-01). The SELECTION lives here; the decision is APPLIED at
+ *  the commit boundary in store.ts, where `secret-redacted` is set only when a span was actually
+ *  replaced — returning it for an all-exempt record would falsely claim a redaction happened, and
+ *  would erase a caller's `personal` (the round-1 Codex counter that shaped this split). */
+export function selectWriteRedactions(content: string, spans: SecretSpan[]): SecretSpan[] {
+  return spans.filter((s) => !(
+    s.tiers.length === 1 && s.tiers[0] === 'entropy' &&
+    s.entropyWordChain === true && s.entropyHex !== true &&
+    !nearCredential(content, s.start, s.end)
+  ));
+}

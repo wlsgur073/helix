@@ -12,7 +12,7 @@ import type { CodexResult, CodexRunOptions } from '../../src/verify/codex.js';
 function dvDeps(over: Partial<DualVerifyHandlerDeps> & { home: string }): DualVerifyHandlerDeps {
   const { home, ...rest } = over;
   return {
-    config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'low', model: null, effort: null, timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, metrics: { enabled: false } },
+    config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'low', model: null, effort: null, timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, persistence: { releaseWordChains: true }, metrics: { enabled: false } },
     runner: async () => ({ ok: true, answer: 'x' }),
     checkAvailable: async () => ({ available: true }),
     echo: { mode: 'disabled' },

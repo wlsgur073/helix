@@ -156,7 +156,7 @@ if (stray.length > 0) {
 // Auto-compaction is read GLOBAL-only (never via loadConfig's project layer): it is destructive — it
 // can close the soft-erase undo window — so a foreign checkout's `.helix/config.json` must never be
 // able to enable or tune it. Default OFF; the store's own gates decide whether it ever fires.
-const store = new MemoryStore(globalLedger, { home, sessionId: process.env.HELIX_SESSION ?? 'cli', project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
+const store = new MemoryStore(globalLedger, { home, sessionId: process.env.HELIX_SESSION ?? 'cli', project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home), releaseWordChains: config.persistence.releaseWordChains });
 
 // WRITE-side witness startup heal (spec §4.9): complete any rewrite that crashed after its bytes
 // landed but before the journal cleared (crash window B), for global + an owned project. Best-effort,

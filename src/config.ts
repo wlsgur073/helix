@@ -86,6 +86,20 @@ export interface HelixConfig {
      *  (OFF). audit.jsonl still records decision metadata regardless of this flag. */
     logContent: boolean;
   };
+  /** W-CITE write-path persistence policy. A SEPARATE key from dualVerify.egressPolicy by design:
+   *  outbound disclosure and durable storage are different decisions (design doc 2026-08-05 Part 3,
+   *  Codex-converged). The server reads this GLOBAL-only (index.ts passes no projectPath), so a
+   *  foreign checkout cannot loosen the write path. Read once at startup. */
+  persistence: {
+    /** Persist entropy-only benign word chains (dated paths, note slugs, citations) VERBATIM on the
+     *  write path instead of destroying them with `[redacted:high-entropy]`. Hex, named/heuristic
+     *  overlaps and credential-adjacent spans keep redacting regardless (selectWriteRedactions).
+     *  Default true: the digit-free twin of every such chain was already persisted verbatim, so the
+     *  released arm's marginal exposure is the digit-bearing word chain alone — measured 0 of 7
+     *  real values on this box (falsifier, 2026-09-01). Set false to restore unconditional entropy
+     *  redaction. */
+    releaseWordChains: boolean;
+  };
   /** Local-only, content-free latency/size records (spec 2026-07-05). Read once at startup. */
   metrics: { enabled: boolean };
   /** Paths that EXIST but could not be parsed or read, so nothing they set is in this object.
@@ -121,6 +135,7 @@ export const DEFAULT_CONFIG: HelixConfig = {
     // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
     logContent: false,
   },
+  persistence: { releaseWordChains: true },
   // Local metrics sensor ON by default ("local logs always, export opt-in"); content-free records.
   metrics: { enabled: true },
 };
@@ -249,6 +264,11 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
     const m = raw?.metrics as Record<string, unknown> | undefined;
     if (m && typeof m === 'object' && typeof m.enabled === 'boolean') {
       merged.metrics.enabled = m.enabled;
+    }
+    const pers = raw?.persistence as Record<string, unknown> | undefined;
+    if (pers && typeof pers === 'object') {
+      if (typeof pers.releaseWordChains === 'boolean') merged.persistence.releaseWordChains = pers.releaseWordChains;
+      else if (pers.releaseWordChains !== undefined) warn(`helix: invalid persistence.releaseWordChains ${q(pers.releaseWordChains)} (boolean) -> ignored`);
     }
   }
   // Set ONLY when non-empty: a clean load must stay deep-equal to DEFAULT_CONFIG, which several

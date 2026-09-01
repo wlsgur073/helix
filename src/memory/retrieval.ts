@@ -361,10 +361,20 @@ export interface RankArtifacts {
   idx: Bm25Index;
 }
 
+/** W-CITE step 5: the write path's redaction marker tokenizes into `redacted` / `high` / `entropy`
+ *  — this project's own core vocabulary — so a redacted record hijacked every entropy-related
+ *  query. Strip the marker on the DOC side only (tokens + normContent), before indexing; a query
+ *  containing these words still matches records that really carry them as prose. Deterministic per
+ *  content, so the A4 cache's purity claim below is unaffected. */
+const REDACTION_MARKER = /\[redacted:[a-z0-9-]+\]/g;
+
 /** Query-INDEPENDENT rank pre-computation: per-record tokens + normalized content, plus the union
  *  BM25 index. A pure function of the record SET — the A4 cache reuses it while the set is unchanged. */
 export function buildRankArtifacts(records: MemoryRecord[]): RankArtifacts {
-  const docs = records.map((r) => ({ id: r.id, tokens: tokenize(r.content), normContent: normalizeText(r.content) }));
+  const docs = records.map((r) => {
+    const indexable = r.content.replace(REDACTION_MARKER, ' ');
+    return { id: r.id, tokens: tokenize(indexable), normContent: normalizeText(indexable) };
+  });
   const idx = buildIndex(docs.map((d) => ({ id: d.id, tokens: d.tokens })));
   return { docs, idx };
 }

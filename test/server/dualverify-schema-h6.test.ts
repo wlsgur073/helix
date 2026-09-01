@@ -42,7 +42,7 @@ async function connected(sink?: MetricsSink): Promise<Client> {
   const server = buildServer(store, {
     // Echo-armed dual-verify deps: enabled, floor 'low' so an explicit stakes passes, echo leg
     // enforcing over one known record, and a runner that answers so a cleared call visibly RUNS.
-    config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'low', model: 'gpt-5.5', effort: 'high', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, metrics: { enabled: true } },
+    config: { dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'low', model: 'gpt-5.5', effort: 'high', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, persistence: { releaseWordChains: true }, metrics: { enabled: true } },
     runner: async () => ({ ok: true, answer: 'agreed' }),
     checkAvailable: async () => ({ available: true }),
     echo: { mode: 'enforce', ledgerTexts: () => [item('m_1', MEMO)] },

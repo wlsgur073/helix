@@ -9,7 +9,7 @@ import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated } from './history.js';
 import { buildAsOfEvidence } from './asof.js';
-import { findSecrets, redactSecrets } from './secret-scan.js';
+import { findSecrets, redactSecrets, selectWriteRedactions } from './secret-scan.js';
 import { canCommit, isVerifyingSource, resolveTransition, type TransitionResult, type VerifyOutcome } from './firewall.js';
 import { runRealityCheck, checkBinding, type RealityCheck } from './reality-check.js';
 import { type RecallOptions } from './projection.js';
@@ -56,6 +56,11 @@ export interface MemoryStoreOptions {
   /** Resolved auto-compaction config (spec 2026-07-09). Injected by the server from the GLOBAL config
    *  only; absent => disabled. */
   compaction?: CompactionConfig;
+  /** W-CITE write policy: persist entropy-only benign word chains verbatim instead of redacting
+   *  them (selectWriteRedactions decides span by span; hex, named/heuristic overlaps and
+   *  credential-adjacent spans keep redacting regardless). Injected by the server from the GLOBAL
+   *  config (`persistence.releaseWordChains`); ABSENT => true, the shipped default. */
+  releaseWordChains?: boolean;
 }
 
 export interface CommitInput {
@@ -308,12 +313,18 @@ export class MemoryStore {
     const ts = this.now();
     let content = input.content;
     let classification: Classification = input.classification ?? 'normal';
+    // W-CITE: findSecrets -> write-policy SELECTION -> redactSecrets(selected) -> persist. The
+    // selection must be APPLIED here at the commit boundary, not inside redactSecrets: gating on
+    // the UNSELECTED spans.length would re-enter the branch for an all-exempt record and either
+    // falsely claim `secret-redacted` or erase a caller's `personal` (the design's round-1 Codex
+    // counter). `secret-redacted` is set only when a span was actually replaced.
     const spans = findSecrets(input.content);
-    if (spans.length > 0) {
+    const redactable = (this.opts.releaseWordChains ?? true) ? selectWriteRedactions(input.content, spans) : spans;
+    if (redactable.length > 0) {
       // Span-level redaction: replace ONLY the secret tokens with a content-free marker, preserving
       // the surrounding text. A high-entropy false positive (e.g. a git SHA) no longer empties the
       // whole record; classification flags that a redaction happened.
-      const red = redactSecrets(input.content, spans);
+      const red = redactSecrets(input.content, redactable);
       content = red.content;
       classification = red.classification;
     }
