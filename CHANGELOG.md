@@ -199,7 +199,12 @@ This file records what shipped in each release of Helix. It follows
   `memoryEcho`, `piiHigh`, `piiBulk`, `secretHeuristic`, `secretEntropy` and `secretEntropyExempt`.
   Each leg is `block` or `allow`. All default to `block` except `secretEntropyExempt`, which defaults
   to `allow` and is what releases a hex-shaped or low-entropy-chain token — a git SHA quoted in
-  design prose — past the egress guard while the write path still redacts it. Provider-format
+  design prose — past the egress guard. On the write path the word-chain arm of that same shape is
+  released by its own key, `persistence.releaseWordChains` (default `true`; set `false` to restore
+  unconditional entropy redaction): a dated path or note slug persists verbatim, while a hex-core
+  token still redacts on write — persistence cannot tell a git object from a key — and a credential
+  keyword in the same statement vetoes the release on both paths (one shared `nearCredential`
+  guard). Provider-format
   credentials are override-proof: no policy value releases them. An invalid value on any of these
   keys is refused with a bounded single-line stderr warning and the default is kept, so a crafted
   newline in a key or value cannot forge a second diagnostic line; an absent key is silent.

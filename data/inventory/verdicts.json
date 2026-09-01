@@ -1,742 +1,742 @@
 [
-  {
-    "rowId": "r001",
-    "surfaceItem": "tool:helix_codex_status",
-    "claimId": "CHANGELOG.md#e6001a810286",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "D2 free probe through the bundle: model/effort/timeout/legs/log",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r002",
-    "surfaceItem": "tool:helix_dual_verify",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "D2 metered: spawned Codex, DATA-framed verdict, audit spawned=true",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r003",
-    "surfaceItem": "tool:helix_memory_adopt",
-    "claimId": "CHANGELOG.md#e6001a810286",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 suite (ownership gate paths); not driven end to end in B/C/D",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r004",
-    "surfaceItem": "tool:helix_memory_commit",
-    "claimId": "README.md#51d1cec94afe",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "B2 headless commit through the installed bundle; A1 bundle.e2e.test.ts",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r005",
-    "surfaceItem": "tool:helix_memory_confirm",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "C fixture: confirm through the bundle produced a Verified grade",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r006",
-    "surfaceItem": "tool:helix_memory_erase",
-    "claimId": "README.md#51d1cec94afe",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "C4 soft erase through the bundle, then recovery via asOf",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r007",
-    "surfaceItem": "tool:helix_memory_inspect",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "B2 headless inspect; C4 asOf/history recipe through the bundle",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r008",
-    "surfaceItem": "tool:helix_memory_recall",
-    "claimId": "CHANGELOG.md#6d55b3aa6889",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "B2 SessionStart injection carried the recall output into a live session",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r009",
-    "surfaceItem": "tool:helix_memory_recheck",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 suite (reality-check paths); not driven end to end in B/C/D",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r010",
-    "surfaceItem": "config:compaction.auto",
-    "claimId": "CHANGELOG.md#00bf86a07d93",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r011",
-    "surfaceItem": "config:compaction.dirtyRatio",
-    "claimId": "CHANGELOG.md#00bf86a07d93",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r012",
-    "surfaceItem": "config:compaction.graceMs",
-    "claimId": "CHANGELOG.md#00bf86a07d93",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r013",
-    "surfaceItem": "config:compaction.maxBytes",
-    "claimId": "CHANGELOG.md#00bf86a07d93",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r014",
-    "surfaceItem": "config:compaction.minDirtyBytes",
-    "claimId": "CHANGELOG.md#00bf86a07d93",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r015",
-    "surfaceItem": "config:compaction.minRows",
-    "claimId": "CHANGELOG.md#00bf86a07d93",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r016",
-    "surfaceItem": "config:dualVerify.effort",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r017",
-    "surfaceItem": "config:dualVerify.egressPolicy.memoryEcho",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r018",
-    "surfaceItem": "config:dualVerify.egressPolicy.piiBulk",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r019",
-    "surfaceItem": "config:dualVerify.egressPolicy.piiHigh",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r020",
-    "surfaceItem": "config:dualVerify.egressPolicy.secretEntropy",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r021",
-    "surfaceItem": "config:dualVerify.egressPolicy.secretEntropyExempt",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r022",
-    "surfaceItem": "config:dualVerify.egressPolicy.secretHeuristic",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r023",
-    "surfaceItem": "config:dualVerify.enabled",
-    "claimId": "CHANGELOG.md#1f6849a6e6e2",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r024",
-    "surfaceItem": "config:dualVerify.logContent",
-    "claimId": "README.md#02befb2d8ac8",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r025",
-    "surfaceItem": "config:dualVerify.mode",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r026",
-    "surfaceItem": "config:dualVerify.model",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r027",
-    "surfaceItem": "config:dualVerify.stakesFloor",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r028",
-    "surfaceItem": "config:dualVerify.timeoutMs",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r029",
-    "surfaceItem": "config:metrics.enabled",
-    "claimId": "CHANGELOG.md#1f6849a6e6e2",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r030",
-    "surfaceItem": "env:HELIX_HOME",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "B2 live session used it to place the isolated store; A1 shipped-claims pins it",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r031",
-    "surfaceItem": "env:HELIX_LEDGER",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r032",
-    "surfaceItem": "env:HELIX_SESSION",
-    "claimId": "README.md#59500db26e28",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r033",
-    "surfaceItem": "env:HELIX_SESSIONS",
-    "claimId": "README.md#59500db26e28",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r034",
-    "surfaceItem": "env:OPENAI_API_KEY",
-    "claimId": "README.md#02befb2d8ac8",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r035",
-    "surfaceItem": "hook:SessionEnd",
-    "claimId": "CHANGELOG.md#e6001a810286",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 suite hooks.e2e.test.ts (10 cases through the bundle)",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r036",
-    "surfaceItem": "hook:SessionStart",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "B2 live session: nonce-framed DATA block injected automatically",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r037",
-    "surfaceItem": "cli:bin/helix-rebaseline.mjs",
-    "claimId": "CHANGELOG.md#0289a799f770",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "D1 TTY ceremony success path + refusal negative control",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r038",
-    "surfaceItem": "cli:bin/helix-trigger.mjs",
-    "claimId": "README.md#ed776da34af9",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 trigger-artifact-smoke; Task 11 pin recovers required flags by execution",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r039",
-    "surfaceItem": "cross-cutting",
-    "claimId": "CHANGELOG.md#5399fa9e4fd3",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: a config outside the global home cannot enable compaction while the same content in the global home can",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r040",
-    "surfaceItem": "cross-cutting",
-    "claimId": "CHANGELOG.md#1bd44f318627",
-    "verdict": "UNEVIDENCED",
-    "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r041",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#01fbf6da7011",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: tools are registered and both session hooks are declared, recovered from the registry and hooks.json",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r042",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#14f6fcb54fab",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "D2 codex_status printed every leg and value; A1 pins the table to DEFAULT_CONFIG",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r043",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#1afbb80c5cf8",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "B2: /mcp showed helix in a live session after install",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r044",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#2e1f9ba5834f",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: DEFAULT_CONFIG ships dual-verify disabled; B2 observed memory carried across two sessions",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r045",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#4ea079373a06",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "B2: the injected block carried DATA[Fresh:project]| exactly as described",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r046",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#54778b5b55b8",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: compactionConfigFromGlobal returns auto=false on an untouched home, and true when the global config says so",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r047",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#59184dbb51ae",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "C1: the playbook backup command ran and restored into an empty directory",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r048",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#6950a5bee471",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "B2 + alias probe: activation follows cwd/.helix, and the aliased case stays global",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r049",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#b27b3d1fb743",
-    "verdict": "UNEVIDENCED",
-    "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r050",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#7ead23770334",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts; D2 status shows dual-verify off unless the global config enables it",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r051",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#80ec9072aea9",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "B2/B3: installed and ran with no npm install; A4 bundles are committed",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r052",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#bfa0596f656b",
-    "verdict": "UNEVIDENCED",
-    "repairTarget": null,
-    "evidence": null,
-    "candidate": null,
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r053",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#8dc69654e271",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "C3: deleting only the key reverted the grade and preserved content",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r054",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#b0bdb28c26b9",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 config.test.ts drives invalid/out-of-range values and keeps defaults",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r055",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#b2969ded6cd3",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "B4: uninstall left all six data files and the ledger byte count unchanged",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r056",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#b4d00a74ad9f",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 shipped-claims recovers every HELIX_ read from the bundles and requires README to name it",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r057",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#b73e2e56dc39",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "A1 bundle.e2e.test.ts asserts the nine names against the shipped bundle",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r058",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#e09520bebf34",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "certification run-sheet, manual evidence: all five shipped bundles show the same contract on node v20.20.2 as on v24.18.0 (and on v22.22.0)",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r059",
-    "surfaceItem": "cross-cutting",
-    "claimId": "README.md#ebc5da41b84c",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "B2: project layer activated from cwd and was read together with global",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r060",
-    "surfaceItem": "cross-cutting",
-    "claimId": "SECURITY.md#3889290ed21f",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: a hand-appended elevated assert clamps to Fresh while a tool-minted grade survives in the same run",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r061",
-    "surfaceItem": "cross-cutting",
-    "claimId": "SECURITY.md#4b70331445b5",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: the shipped series is recovered from the plugin manifest and required to be marked supported; the table must still mark something unsupported",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r062",
-    "surfaceItem": "cross-cutting",
-    "claimId": "SECURITY.md#9b3b9b89a3b7",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: the resolver and family helper the document names are declared in store.ts, and the probe it cites by path exists and exercises a permanent erase",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r063",
-    "surfaceItem": "cross-cutting",
-    "claimId": "SECURITY.md#a6ed3c08e582",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: an empty home plus one commit and no verify already materializes ledger-mac-master.key",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r064",
-    "surfaceItem": "cross-cutting",
-    "claimId": "SECURITY.md#bce27476ac03",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: isIntegrityMarker/isHorizonMarker accept any prefixed marker-shaped row with no MAC; a different prefix is rejected",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r065",
-    "surfaceItem": "cross-cutting",
-    "claimId": "SECURITY.md#ed14167461da",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: a compaction that drops a forged verify mints a content-free unsigned marker at the constant id; one that drops nothing mints none",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": true
-  },
-  {
-    "rowId": "r066",
-    "surfaceItem": "cross-cutting",
-    "claimId": "docs/release/recovery-playbook.md#0064b2696d1f",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "C4: the tool erase was soft and stayed recoverable",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r067",
-    "surfaceItem": "cross-cutting",
-    "claimId": "docs/release/recovery-playbook.md#118ca105e459",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "C4: no undo command exists; recovery went through asOf",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r068",
-    "surfaceItem": "cross-cutting",
-    "claimId": "docs/release/recovery-playbook.md#2dacbae5af3a",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: the erased text stays in the file after a soft erase and is gone after a compaction",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r069",
-    "surfaceItem": "cross-cutting",
-    "claimId": "docs/release/recovery-playbook.md#3f634b1c30db",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: a cross-scope supersede raises the quoted refusal while a same-scope one does not",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r071",
-    "surfaceItem": "cross-cutting",
-    "claimId": "docs/release/recovery-playbook.md#90716eb2c539",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "C4: history blanked the content and asOf returned it in full",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r072",
-    "surfaceItem": "cross-cutting",
-    "claimId": "docs/release/recovery-playbook.md#90c85d93d1e3",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: history+asOf refused while each alone is served, recovered by execution; negative control on handlers.ts:263",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r073",
-    "surfaceItem": "cross-cutting",
-    "claimId": "docs/release/recovery-playbook.md#9cae2460fad9",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "shipped-claims: after erase and re-commit the text returns while the id changes and the grade drops to Fresh from a real Verified",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r074",
-    "surfaceItem": "cross-cutting",
-    "claimId": "docs/release/recovery-playbook.md#ada98792d6d0",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "C4: the row carried DATA[erase:global:\u2026] naming its scope",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  },
-  {
-    "rowId": "r075",
-    "surfaceItem": "cross-cutting",
-    "claimId": "docs/release/recovery-playbook.md#d1c91b7614cb",
-    "verdict": "MET",
-    "repairTarget": null,
-    "evidence": "C4: the rendered interval matched the documented shape",
-    "candidate": "01483ce9192028177c594a1a977d47a154535af6",
-    "securityBoundary": false
-  }
+ {
+  "rowId": "r001",
+  "surfaceItem": "tool:helix_codex_status",
+  "claimId": "CHANGELOG.md#e6001a810286",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "D2 free probe through the bundle: model/effort/timeout/legs/log",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r002",
+  "surfaceItem": "tool:helix_dual_verify",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "D2 metered: spawned Codex, DATA-framed verdict, audit spawned=true",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r003",
+  "surfaceItem": "tool:helix_memory_adopt",
+  "claimId": "CHANGELOG.md#e6001a810286",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 suite (ownership gate paths); not driven end to end in B/C/D",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r004",
+  "surfaceItem": "tool:helix_memory_commit",
+  "claimId": "README.md#51d1cec94afe",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "B2 headless commit through the installed bundle; A1 bundle.e2e.test.ts",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r005",
+  "surfaceItem": "tool:helix_memory_confirm",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "C fixture: confirm through the bundle produced a Verified grade",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r006",
+  "surfaceItem": "tool:helix_memory_erase",
+  "claimId": "README.md#51d1cec94afe",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "C4 soft erase through the bundle, then recovery via asOf",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r007",
+  "surfaceItem": "tool:helix_memory_inspect",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "B2 headless inspect; C4 asOf/history recipe through the bundle",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r008",
+  "surfaceItem": "tool:helix_memory_recall",
+  "claimId": "CHANGELOG.md#6d55b3aa6889",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "B2 SessionStart injection carried the recall output into a live session",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r009",
+  "surfaceItem": "tool:helix_memory_recheck",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 suite (reality-check paths); not driven end to end in B/C/D",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r010",
+  "surfaceItem": "config:compaction.auto",
+  "claimId": "CHANGELOG.md#00bf86a07d93",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r011",
+  "surfaceItem": "config:compaction.dirtyRatio",
+  "claimId": "CHANGELOG.md#00bf86a07d93",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r012",
+  "surfaceItem": "config:compaction.graceMs",
+  "claimId": "CHANGELOG.md#00bf86a07d93",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r013",
+  "surfaceItem": "config:compaction.maxBytes",
+  "claimId": "CHANGELOG.md#00bf86a07d93",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r014",
+  "surfaceItem": "config:compaction.minDirtyBytes",
+  "claimId": "CHANGELOG.md#00bf86a07d93",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r015",
+  "surfaceItem": "config:compaction.minRows",
+  "claimId": "CHANGELOG.md#00bf86a07d93",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r016",
+  "surfaceItem": "config:dualVerify.effort",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r017",
+  "surfaceItem": "config:dualVerify.egressPolicy.memoryEcho",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r018",
+  "surfaceItem": "config:dualVerify.egressPolicy.piiBulk",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r019",
+  "surfaceItem": "config:dualVerify.egressPolicy.piiHigh",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r020",
+  "surfaceItem": "config:dualVerify.egressPolicy.secretEntropy",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r021",
+  "surfaceItem": "config:dualVerify.egressPolicy.secretEntropyExempt",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r022",
+  "surfaceItem": "config:dualVerify.egressPolicy.secretHeuristic",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r023",
+  "surfaceItem": "config:dualVerify.enabled",
+  "claimId": "CHANGELOG.md#1f6849a6e6e2",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r024",
+  "surfaceItem": "config:dualVerify.logContent",
+  "claimId": "README.md#64f702ba04de",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r025",
+  "surfaceItem": "config:dualVerify.mode",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r026",
+  "surfaceItem": "config:dualVerify.model",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r027",
+  "surfaceItem": "config:dualVerify.stakesFloor",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r028",
+  "surfaceItem": "config:dualVerify.timeoutMs",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r029",
+  "surfaceItem": "config:metrics.enabled",
+  "claimId": "CHANGELOG.md#1f6849a6e6e2",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r030",
+  "surfaceItem": "env:HELIX_HOME",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "B2 live session used it to place the isolated store; A1 shipped-claims pins it",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r031",
+  "surfaceItem": "env:HELIX_LEDGER",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r032",
+  "surfaceItem": "env:HELIX_SESSION",
+  "claimId": "README.md#59500db26e28",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r033",
+  "surfaceItem": "env:HELIX_SESSIONS",
+  "claimId": "README.md#59500db26e28",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r034",
+  "surfaceItem": "env:OPENAI_API_KEY",
+  "claimId": "README.md#64f702ba04de",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r035",
+  "surfaceItem": "hook:SessionEnd",
+  "claimId": "CHANGELOG.md#e6001a810286",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 suite hooks.e2e.test.ts (10 cases through the bundle)",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r036",
+  "surfaceItem": "hook:SessionStart",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "B2 live session: nonce-framed DATA block injected automatically",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r037",
+  "surfaceItem": "cli:bin/helix-rebaseline.mjs",
+  "claimId": "CHANGELOG.md#2ebb798702e4",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "D1 TTY ceremony success path + refusal negative control",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r038",
+  "surfaceItem": "cli:bin/helix-trigger.mjs",
+  "claimId": "README.md#ed776da34af9",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 trigger-artifact-smoke; Task 11 pin recovers required flags by execution",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r039",
+  "surfaceItem": "cross-cutting",
+  "claimId": "CHANGELOG.md#5399fa9e4fd3",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: a config outside the global home cannot enable compaction while the same content in the global home can",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r040",
+  "surfaceItem": "cross-cutting",
+  "claimId": "CHANGELOG.md#1bd44f318627",
+  "verdict": "UNEVIDENCED",
+  "repairTarget": null,
+  "evidence": null,
+  "candidate": null,
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r041",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#01fbf6da7011",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: tools are registered and both session hooks are declared, recovered from the registry and hooks.json",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r042",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#14f6fcb54fab",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "D2 codex_status printed every leg and value; A1 pins the table to DEFAULT_CONFIG",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r043",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#1afbb80c5cf8",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "B2: /mcp showed helix in a live session after install",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r044",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#8e86a2b5e676",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: DEFAULT_CONFIG ships dual-verify disabled; B2 observed memory carried across two sessions",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r045",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#4ea079373a06",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "B2: the injected block carried DATA[Fresh:project]| exactly as described",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r046",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#54778b5b55b8",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: compactionConfigFromGlobal returns auto=false on an untouched home, and true when the global config says so",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r047",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#59184dbb51ae",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "C1: the playbook backup command ran and restored into an empty directory",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r048",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#6950a5bee471",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "B2 + alias probe: activation follows cwd/.helix, and the aliased case stays global",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r049",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#b27b3d1fb743",
+  "verdict": "UNEVIDENCED",
+  "repairTarget": null,
+  "evidence": null,
+  "candidate": null,
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r050",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#7ead23770334",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts; D2 status shows dual-verify off unless the global config enables it",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r051",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#80ec9072aea9",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "B2/B3: installed and ran with no npm install; A4 bundles are committed",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r052",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#bfa0596f656b",
+  "verdict": "UNEVIDENCED",
+  "repairTarget": null,
+  "evidence": null,
+  "candidate": null,
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r053",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#8dc69654e271",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "C3: deleting only the key reverted the grade and preserved content",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r054",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#b0bdb28c26b9",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 config.test.ts drives invalid/out-of-range values and keeps defaults",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r055",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#b2969ded6cd3",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "B4: uninstall left all six data files and the ledger byte count unchanged",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r056",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#b4d00a74ad9f",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 shipped-claims recovers every HELIX_ read from the bundles and requires README to name it",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r057",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#b73e2e56dc39",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "A1 bundle.e2e.test.ts asserts the nine names against the shipped bundle",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r058",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#e09520bebf34",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "certification run-sheet, manual evidence: all five shipped bundles show the same contract on node v20.20.2 as on v24.18.0 (and on v22.22.0)",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r059",
+  "surfaceItem": "cross-cutting",
+  "claimId": "README.md#ebc5da41b84c",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "B2: project layer activated from cwd and was read together with global",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r060",
+  "surfaceItem": "cross-cutting",
+  "claimId": "SECURITY.md#3889290ed21f",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: a hand-appended elevated assert clamps to Fresh while a tool-minted grade survives in the same run",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r061",
+  "surfaceItem": "cross-cutting",
+  "claimId": "SECURITY.md#4b70331445b5",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: the shipped series is recovered from the plugin manifest and required to be marked supported; the table must still mark something unsupported",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r062",
+  "surfaceItem": "cross-cutting",
+  "claimId": "SECURITY.md#9b3b9b89a3b7",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: the resolver and family helper the document names are declared in store.ts, and the probe it cites by path exists and exercises a permanent erase",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r063",
+  "surfaceItem": "cross-cutting",
+  "claimId": "SECURITY.md#a6ed3c08e582",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: an empty home plus one commit and no verify already materializes ledger-mac-master.key",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r064",
+  "surfaceItem": "cross-cutting",
+  "claimId": "SECURITY.md#bce27476ac03",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: isIntegrityMarker/isHorizonMarker accept any prefixed marker-shaped row with no MAC; a different prefix is rejected",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r065",
+  "surfaceItem": "cross-cutting",
+  "claimId": "SECURITY.md#ed14167461da",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: a compaction that drops a forged verify mints a content-free unsigned marker at the constant id; one that drops nothing mints none",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": true
+ },
+ {
+  "rowId": "r066",
+  "surfaceItem": "cross-cutting",
+  "claimId": "docs/release/recovery-playbook.md#0064b2696d1f",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "C4: the tool erase was soft and stayed recoverable",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r067",
+  "surfaceItem": "cross-cutting",
+  "claimId": "docs/release/recovery-playbook.md#118ca105e459",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "C4: no undo command exists; recovery went through asOf",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r068",
+  "surfaceItem": "cross-cutting",
+  "claimId": "docs/release/recovery-playbook.md#2dacbae5af3a",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: the erased text stays in the file after a soft erase and is gone after a compaction",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r069",
+  "surfaceItem": "cross-cutting",
+  "claimId": "docs/release/recovery-playbook.md#3f634b1c30db",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: a cross-scope supersede raises the quoted refusal while a same-scope one does not",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r071",
+  "surfaceItem": "cross-cutting",
+  "claimId": "docs/release/recovery-playbook.md#90716eb2c539",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "C4: history blanked the content and asOf returned it in full",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r072",
+  "surfaceItem": "cross-cutting",
+  "claimId": "docs/release/recovery-playbook.md#90c85d93d1e3",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: history+asOf refused while each alone is served, recovered by execution; negative control on handlers.ts:263",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r073",
+  "surfaceItem": "cross-cutting",
+  "claimId": "docs/release/recovery-playbook.md#9cae2460fad9",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "shipped-claims: after erase and re-commit the text returns while the id changes and the grade drops to Fresh from a real Verified",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r074",
+  "surfaceItem": "cross-cutting",
+  "claimId": "docs/release/recovery-playbook.md#ada98792d6d0",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "C4: the row carried DATA[erase:global:…] naming its scope",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ },
+ {
+  "rowId": "r075",
+  "surfaceItem": "cross-cutting",
+  "claimId": "docs/release/recovery-playbook.md#d1c91b7614cb",
+  "verdict": "MET",
+  "repairTarget": null,
+  "evidence": "C4: the rendered interval matched the documented shape",
+  "candidate": "01483ce9192028177c594a1a977d47a154535af6",
+  "securityBoundary": false
+ }
 ]

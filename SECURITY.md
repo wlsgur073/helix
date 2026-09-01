@@ -31,7 +31,19 @@ acknowledgement within a few days.
   recorded in `audit.jsonl`.
 - **Trust states:** `Fresh / Corroborated / Verified / Suspect`, with re-verify-before-use on
   high-blast-radius paths.
-- **Secret handling:** memory is secret-scanned and redacted before it is persisted.
+- **Secret handling:** memory is secret-scanned before it is persisted, and detected spans are
+  redacted — a **syntactically bounded false-positive exclusion, not a promise that a ledger
+  contains no secrets**. What is redacted: named provider tokens, `password=`-style heuristic
+  matches, and high-entropy tokens, each replaced with `[redacted:<kind>]`. The one write-path
+  carve-out: an ENTROPY-ONLY benign word chain (segments individually low-entropy — dated
+  filenames, doc paths, note slugs, citations) with no credential keyword in the same statement is
+  persisted VERBATIM (`persistence.releaseWordChains`, default `true`; set `false` to restore
+  unconditional entropy redaction). A hex-core entropy token (git SHA / digest shape) always
+  redacts on the write path — hex is the native representation of random secret material, and
+  persistence cannot tell a git object from a key. This was always an ACCIDENT guarantee, not an
+  absolute one: a long pure-alphabetic token (no digit) never matched the entropy detector and is
+  persisted verbatim with no exemption involved; the carve-out makes that boundary explicit
+  instead of syntactically arbitrary.
   The dual-verify egress guard hard-blocks **named provider credential tokens**
   (override-proof — a config policy of `allow` cannot release them); generic
   heuristic-detected (`password=`-style) and high-entropy secrets are blocked by
@@ -43,8 +55,12 @@ acknowledgement within a few days.
   which fired twice on real artifact names. It is gated by its own leg,
   `secretEntropyExempt` (default `allow`); set it to `block` to close the exemption.
   Until 2026-08-04 that release was applied inside the detector, upstream of every
-  policy key, so no configuration could reach it. Note the asymmetry that remains by
-  design: the WRITE path redacts these same bytes regardless of this leg.
+  policy key, so no configuration could reach it. The write/egress asymmetry that
+  remains by design sits on the HEX arm: egress treats a hex core as exempt-shaped
+  (releasable under `secretEntropyExempt`), while the write path always redacts it;
+  the word-chain arm is symmetric — released on both paths, each under its own key
+  (`secretEntropyExempt` for egress, `persistence.releaseWordChains` for the write
+  path), with the same shared `nearCredential` statement guard on both.
   A trailing source-citation line reference (`path/to/file.ts:112`, `:44-45`, `:45:7`)
   is removed before the chain test, so a code pointer is judged on its path. The removal
   is conditional on the prefix being file-shaped (a dot plus a 1–5 character extension)
@@ -358,7 +374,10 @@ same one-time path as before; nothing about the key's secrecy changes, only when
 The dual-verify echo check is a **verbatim-copy tripwire, not a robust exfiltration
 guard** against a host model that transforms content before emitting it. The primary
 boundary is the provenance firewall + secret-scan + the DATA-quarantine; the egress
-guard and echo tripwire are defense-in-depth.
+guard and echo tripwire are defense-in-depth. With `quotedMemory` proof-of-read
+exemptions, a NON-transforming host that can read the ledger can also pass the
+tripwire by declaring what it quotes — the ability to earn an exemption is exactly
+the ability to read, so the tripwire catches UNDECLARED verbatim copies.
 
 **The egress guard governs the payload Helix composes — it is not a sandbox around the
 Codex CLI.** The CLI is a separate program with its own model and its own connection to
