@@ -11,7 +11,7 @@
     },
     {
       "name": "helix_dual_verify",
-      "description": "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor.",
+      "description": "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor; an omitted stakes counts as 'low' — omission is not an exemption. quotedMemory declares memories this call deliberately quotes, each {id, contentDigest} pair a proof of read; resolved pairs are exempt from the memory-echo guard, unresolvable pairs are discarded.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -33,6 +33,31 @@
               "high",
               "xhigh"
             ]
+          },
+          "quotedMemory": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "description": "Ledger id of the record being quoted."
+                },
+                "contentDigest": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "description": "The record's contentDigest (sha-256 hex) as proof of read."
+                }
+              },
+              "required": [
+                "id",
+                "contentDigest"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 64,
+            "description": "Memories this call deliberately quotes; resolved pairs are exempted from the memory-echo guard (max 64 pairs)."
           }
         },
         "required": [

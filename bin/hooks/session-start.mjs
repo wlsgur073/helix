@@ -1017,6 +1017,9 @@ function strayTrustFiles(home, globalLedger) {
   });
 }
 
+// src/memory/content-frame.ts
+import { randomBytes as randomBytes5 } from "node:crypto";
+
 // src/memory/state-machine.ts
 var LOW_BLAST = /* @__PURE__ */ new Set(["read-only", "local-reversible"]);
 function requiresReverifyBeforeUse(item) {
@@ -1027,7 +1030,6 @@ function requiresReverifyBeforeUse(item) {
 }
 
 // src/memory/content-frame.ts
-import { randomBytes as randomBytes5 } from "node:crypto";
 function newNonce() {
   return randomBytes5(16).toString("hex");
 }
@@ -1085,6 +1087,17 @@ function datamark(text, mark, maxChars) {
   return normalized.split(LINE_BREAK).map((line) => mark + line).join("\n");
 }
 var safeId = (id) => id.replace(/[^A-Za-z0-9_-]/g, "");
+var NON_VERIFYING_FLAG = {
+  "user-relayed": "(relayed source \u2014 confirm with user) ",
+  "agent-inference": "(agent inference \u2014 unconfirmed) ",
+  "agent-test-verified": "(agent test-verified \u2014 self-asserted) ",
+  "codex-agree": "(codex agreement \u2014 unconfirmed) "
+};
+function reverifyFlag(r) {
+  if (!requiresReverifyBeforeUse(r)) return "";
+  if (r.state === "Suspect") return "(re-verify \u2014 reality may have changed) ";
+  return NON_VERIFYING_FLAG[r.source] ?? "(non-authoritative \u2014 confirm before use) ";
+}
 
 // src/risk/trifecta.ts
 var EGRESS_VERB = /\b(send|post|upload|email|exfiltrate|transmit|leak|forward|fetch)\b/;
@@ -1095,13 +1108,6 @@ function classifyEmission(content) {
 }
 
 // src/hooks/format-context.ts
-var NON_VERIFYING_FLAG = {
-  "user-relayed": "(relayed source \u2014 confirm with user) ",
-  "agent-inference": "(agent inference \u2014 unconfirmed) ",
-  "agent-test-verified": "(agent test-verified \u2014 self-asserted) ",
-  "codex-agree": "(codex agreement \u2014 unconfirmed) "
-};
-var nonVerifyingFlag = (source) => NON_VERIFYING_FLAG[source] ?? "(non-authoritative \u2014 confirm before use) ";
 var INTEGRITY_UNAVAILABLE_NOTE = "(integrity verification unavailable \u2014 trust grades shown are unverified)";
 var SCALE_ADVISORY_ROWS = 2e3;
 var scaleAdvisoryNote = (unionRows) => `(scale advisory: ${unionRows} union ledger rows \u2014 the indexed-storage build trigger arms at 2500; recall latency grows with ledger size. See README "Scale".)`;
@@ -1129,8 +1135,7 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   const selected = usable.filter((s) => keep.has(s));
   const lines = selected.map((s) => {
     const { record: r, scope } = s;
-    const reverify = requiresReverifyBeforeUse({ state: r.state, blastRadius: r.blastRadius, source: r.provenance.source });
-    const flag = !reverify ? "" : r.state === "Suspect" ? "(re-verify \u2014 reality may have changed) " : nonVerifyingFlag(r.provenance.source);
+    const flag = reverifyFlag({ state: r.state, blastRadius: r.blastRadius, source: r.provenance.source });
     return {
       text: datamark(`${flag}${r.content.replace(/\s+/g, " ").trim()}`, `DATA[${r.state}:${scope}]| `, maxItemChars),
       reserved: reserved.includes(s),
