@@ -22,7 +22,9 @@ function storeAt(opts: Record<string, unknown> = {}): MemoryStore {
   return new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1', ...opts });
 }
 
-const SPEC_PATH = 'docs/superpowers/specs/2026-08-09-helix-feedback-merge-design.md';
+// A fictional path, deliberately NOT a real private-workspace path: the output-vocabulary lock
+// forbids tracked files citing that tree, and it caught the first version of this fixture.
+const SPEC_PATH = 'notes/archive/2026-08-09-helix-feedback-merge-design.md';
 const HEX_SHA = '3bd63d0aa11f8ee35410dddf5dd9a57b25536f5e';
 
 describe('W-CITE: the write path releases entropy-only benign word chains', () => {

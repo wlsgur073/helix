@@ -65,6 +65,32 @@ describe('round-trip / tamper / anti-laundering / key-absent', () => {
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
+  // The spy test above pins that fchmod is CALLED; this one pins WHEN. Moving the fchmod after the
+  // rename would leave both green while publishing witness.json at the umask-default mode for a
+  // window — the exact shape the file-mode hardening design forbids (mode lands on the tmp BEFORE
+  // rename makes it visible at the real name). Ordering is read off the same injected seam, so the
+  // pin is umask-independent like its sibling. (Carried as "mode-before-rename ordering test
+  // unwritten" since the 2026-08-05 design; written 2026-09-01.)
+  it('the tmp is clamped to 0600 BEFORE the rename publishes it (ordering, not just presence)', () => {
+    const home = tmpHome();
+    try {
+      const events: string[] = [];
+      const spyFs: DurableFsOps = {
+        ...realFsOps,
+        fchmodSync: (fd, mode) => { events.push(`fchmod:${mode.toString(8)}`); realFsOps.fchmodSync(fd, mode); },
+        renameSync: (from, to) => { events.push('rename'); realFsOps.renameSync(from, to); },
+      };
+      advanceWitness(home, '@global', Buffer.from('row1\n', 'utf8'), 'tx-1', spyFs);
+      const firstFchmod = events.indexOf('fchmod:600');
+      const firstRename = events.indexOf('rename');
+      expect(firstFchmod).toBeGreaterThanOrEqual(0);
+      expect(firstRename).toBeGreaterThanOrEqual(0);
+      // Vacuity-checked: the inverted assertion (rename before fchmod) was run first and failed,
+      // proving the events list observes the real call order rather than passing on any input.
+      expect(firstFchmod).toBeLessThan(firstRename);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
   it('tamper: flip one hex char of the stored entry mac on disk -> classifyScope -> first-contact/mac-invalid', () => {
     const home = tmpHome();
     try {
