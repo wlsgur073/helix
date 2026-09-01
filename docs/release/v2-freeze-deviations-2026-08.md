@@ -1,5 +1,25 @@
 # v2 freeze window — deviation ledger (2026-08)
 
+> **STATUS: HISTORICAL — the window ENDED BY ABORT (marked 2026-09-02).** The second window did not
+> run to its derived close: `Abort A-2026-08-31`, T_abort `2026-08-31T10:02:21.000Z`, anchored at
+> commit `ee35e41` — the commit that added this ledger's own last entry — eleven days before the
+> receipt's `txClose` `2026-09-11T06:20:01.000Z`. **No §9a close claim was ever made**: the close
+> report became the ABORT RECORD `v2-close-report-2026-08.md`, and the reset-and-deviation history
+> that the sentence below calls REQUIRED content was discharged there instead (its §4). Every
+> close-day duty these entries state is **EXECUTED OR CANCELED, NOT PENDING** — no validated close
+> receipt was ever written (`v2-close-receipt-2026-08.json` does not exist; the guard was retired by
+> removal, not by a receipt), the guard wiring was removed on 2026-08-31 (the `~/.bashrc` lines and
+> the systemd drop-in gone, both marketplace `autoUpdate` flags `true` again), and the pins no
+> longer constrain source work: `bin/` was rebuilt and redeployed at both scopes, and the guard's
+> worktree-divergence check is informational, never a failure. **Still binding.** Every adjudication
+> here — the first window's reset, the NOT-A-RESET dispositions, `R-2026-08-30` and its corrigenda —
+> stands as the record the abort record cites, together with the measurements and the corrections
+> entered against them. And the freeze receipt was not edited, so it is still live in two tracked
+> tests: its `txClose` gates `test/output-vocabulary.test.ts`, which holds the three
+> private-workspace citations in `o67-class-rule-2026-07.md` in place until that instant and
+> requires them gone after it, and `test/freeze-guard.test.ts` still verifies the receipt's pin set
+> against candidate `94dd136`. Nothing below has been altered.
+
 Every entry in this ledger is REQUIRED content for the §9a close report's reset-and-deviation
 history (`v2-close-procedure-2026-08.md` links here). The freeze receipt itself
 (`v2-freeze-receipt-2026-08.json`) is immutable evidence and is never edited.

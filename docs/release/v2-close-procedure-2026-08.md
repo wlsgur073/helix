@@ -1,5 +1,20 @@
 # v2 close procedure — the tree the close chain runs from
 
+> **STATUS: HISTORICAL — the window this procedure governed ENDED BY ABORT (marked 2026-09-02).**
+> The second window ended 2026-08-31, not at the derived close this head still names: `Abort
+> A-2026-08-31`, T_abort `2026-08-31T10:02:21.000Z`, anchored at `ee35e41`, eleven days before
+> `2026-09-11T06:20:01.000Z` — an owner decision, not the load-path "abort (never correct)" below.
+> **This procedure has nothing left to execute:** no close chain remains to run, the guard wiring
+> and the `autoUpdate` freeze are lifted, the pins no longer constrain the tree, and repository
+> work is ordinary development. The rule it fixed was FOLLOWED — the abort-run's measured steps ran
+> from a candidate-commit checkout at `94dd136…` (abort record §2.3). One obligation survives, and
+> the abort does not release it: `v2-freeze-receipt-2026-08.json`'s `txClose` still drives
+> `test/output-vocabulary.test.ts`, so `o67-class-rule-2026-07.md`'s three private-workspace
+> citations must REMAIN until `2026-09-11T06:20:01.000Z`; their removal — the D2 exception below —
+> is due at that instant, not after the validated close receipt below, which was never written.
+> Read [`v2-close-report-2026-08.md`](./v2-close-report-2026-08.md), the **ABORT RECORD**; nothing
+> below has been altered.
+
 Written 2026-08-06, during the first v2 window. **Re-pointed 2026-08-14:** that window was reset
 under §8 and its bounds are void; the open window is now `2026-08-14T06:20:01.000Z < tx ≤
 2026-09-11T06:20:01.000Z`. The procedure itself did not change — only the identity it points at,

@@ -1,5 +1,20 @@
 # Helix — preregistered recall pilot, protocol v2
 
+> **STATUS: HISTORICAL — the registered window ENDED BY ABORT (marked 2026-09-02).** The owner
+> ended the second window on 2026-08-31 rather than at §10's close: `Abort A-2026-08-31`, T_abort
+> `2026-08-31T10:02:21.000Z`, anchored at `ee35e41` before any consequent act, eleven days before
+> `2026-09-11T06:20:01.000Z` — not §8's defect abort. **The registration itself stands**, filled
+> and frozen before execution; what lapsed is the window it opened. The head's "IN FORCE" names no
+> live window, §2's population stops at T_abort, §10's pins no longer constrain the tree (freeze
+> guard torn down, runtime rebuilt and redeployed at both scopes), no §9a close claim exists, and
+> no successor window is open. §1's claim and coverage statement and §7's D5 duties still travel
+> with the abort record's numbers; the gate's BLOCKED verdict (eligible Hit@1 exposure 1 against
+> §5's minimum of 2) is that window's evidence, not a live gate. Separately,
+> `v2-freeze-receipt-2026-08.json`'s `txClose` still drives `test/output-vocabulary.test.ts`, so
+> `o67-class-rule-2026-07.md`'s three private-workspace citations must remain until
+> `2026-09-11T06:20:01.000Z`. Read [`v2-close-report-2026-08.md`](./v2-close-report-2026-08.md),
+> the **ABORT RECORD**; nothing below has been altered.
+
 Date drafted: 2026-07-31 · §10 filled: 2026-08-02 · **§10 RE-filled 2026-08-14 after a §8 window
 reset** · Status: **IN FORCE from the commit that carries this filled table — that commit is the
 freeze.**

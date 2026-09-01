@@ -1,5 +1,22 @@
 # v2 close-day run-sheet — 2026-09-11T06:20:01.000Z
 
+> **ABORT — DO NOT EXECUTE THIS RUN-SHEET.** The second window never reached the close instant in
+> this document's own title: the owner ended it on 2026-08-31 — `Abort A-2026-08-31`, T_abort
+> `2026-08-31T10:02:21.000Z`, anchored at commit `ee35e41`, eleven days before `txClose`.
+> **2026-09-11 is not a close day, and the unticked boxes below are not a to-do list — with one
+> exception, D2's instant, stated below.** What else is still owed is tracked in the abort record
+> and `v2-close-evidence-index-2026-08.md`, not here. The pinned chain C1→C11 was driven once, on
+> 2026-08-31, over a corpus ending at T_abort, and the gate blocked at sample sufficiency (eligible
+> Hit@1 exposure 1 against a pre-registered minimum of 2 — historical evidence of an aborted
+> window, not an active gate). The teardown and redeploy ran with it: the freeze-guard wiring is
+> removed and both `autoUpdate` flags are `true` again (G1–G3), `bin/` is rebuilt and redeployed at
+> both scopes (F1/F3/F4/F5), and no validated close receipt (D1) exists or will. **What survives is
+> D2's instant, not the close's:** `test/output-vocabulary.test.ts` reads `txClose` from the
+> signed `v2-freeze-receipt-2026-08.json`, so `o67-class-rule-2026-07.md`'s 3 private-workspace
+> citations must REMAIN until `2026-09-11T06:20:01.000Z` and be removed at it — the fix is the
+> removal, never the date. The measured and rehearsed output below stands as history; the window's
+> record is `v2-close-report-2026-08.md` (**ABORT RECORD**), and nothing below has been altered.
+
 **This is a run-sheet, not an essay.** Tick boxes as you go, paste observed output next to the
 step, and leave the file in the repository as the close-day log. The *why* behind every rule here
 lives in `v2-close-procedure-2026-08.md` and `v2-preregistration-2026-07.md` §9/§9a — this
