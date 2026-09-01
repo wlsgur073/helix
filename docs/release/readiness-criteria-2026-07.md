@@ -73,8 +73,28 @@ or prior-approved requirement; anything else is gold-plating and was deliberatel
   predicates) — a low-level API footgun to type-harden later.
   (iii) three round-4 findings, confirmed by round-5 as correctly OUT of the deletion-blocker scope but
   genuine: `.owner` reused-path trust-LAUNDERING (copied same-path rows validate under an inherited
-  nonce — a conferral vector, not deletion; the "launders nothing" comment is inaccurate; a
-  repair-vs-adopt ceremony split is owed); witnessed-append AUDIT mislabel (a confirm whose verify row
+  nonce — a conferral vector, not deletion; the "launders nothing" comment is inaccurate [RETRACTED
+  2026-09-01 in `ownership.ts`]; a repair-vs-adopt ceremony split is owed
+  **[IMPLEMENTED 2026-09-01, Codex-reconciled; full suite 2533/0/2]**. Threat
+  REPRODUCED: `stampOwnership` computes `existing?.macNonce ?? gen()`, so every re-adoption of a
+  path preserves the trust nonce; adopt P (nonce N) → confirm to Verified → lose the `.owner` →
+  re-adopt the SAME path (N preserved) → drop the old N-signed rows back (backup merge / git
+  restore) → the old Verified row reads Verified in the path's "new" project. My first answer (MCP
+  adopt stays repair + discloses N present rows) was IMPROVED by Codex and I accepted it on
+  evidence: "preserve" is non-destructive to data but is still a trust-CONFERRAL decision, and a
+  present-row count is blind to rows restored LATER (exactly the reproduction's re-adopt-then-copy
+  order) — so an agent must decide NEITHER way when continuity is ambiguous. CONVERGED design: a
+  reversible third registry state `trust-pending`. Valid stamp → preserve nonce, active; first
+  adoption → fresh nonce; registered path + stamp missing/invalid → enter `trust-pending` and clamp
+  prior verifies to Fresh (non-destructive, reversible) until a HUMAN resolves via a SEPARATE TTY
+  ceremony (not folded into rollback rebaseline — witness nonce and trust nonce are unrelated):
+  `repair` reactivates the nonce + its verifies, `fresh` rotates the nonce. Codex's `trustEpochId`
+  (retired-epoch rows clamp to Fresh as stale, not corrupt) was MEASURED and EXCLUDED: rotation is
+  ALREADY stale-not-corrupt today — after rotating the macNonce an old verify reads `state=Fresh,
+  integrity=ok` and a compaction keeps it with no `integrity_marker`, because `planCompaction`'s
+  `mayDrop = keyProven && singleLineage` with fail-closed `keyProven` (ledger.ts:475-482) blocks the
+  drop when the resolved key cannot prove the old lineage. So `fresh` is just a new nonce, already
+  non-destructive on both read and compaction); witnessed-append AUDIT mislabel (a confirm whose verify row
   lands but whose witness advance throws is audited `rejected`); post-stamp `.helix` symlink /
   project-to-project alias coverage (an alias-PREVENTION gap, rendered non-destructive by the gate).
   Deploy dependency: the fix protects only sessions served by the redeployed plugin — the cold-process
