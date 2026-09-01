@@ -17,7 +17,7 @@ import { rankWithArtifacts, buildRankArtifacts, assertQueryWithinBounds, type Ex
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce, collectWitnessNotes } from './content-frame.js';
-import { isOwned, stampOwnership, projectDispositionOf, canonicalRoot, isReviewableRoot, type ProjectDisposition } from './ownership.js';
+import { isOwned, stampOwnership, projectDispositionOf, canonicalRoot, isReviewableRoot, trustStateOf, type ProjectDisposition, type TrustState } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedLiveWitnessed, verifiedProjectionWithSubkey } from './verified-read.js';
@@ -713,6 +713,14 @@ export class MemoryStore {
     const ledger = this.ledgerOf(targetId);
     return withFileLock(ledger, () => {
       ensureMaster(this.homeDir());                 // mint the master on first sign (different lock)
+      // C1.4-③: a pending scope withholds its subkey (subkeyForScope returns null), which would
+      // otherwise surface below as the misleading "not owned?" message. Name the real cause first:
+      // trust is suspended by an unresolved ambiguous re-adoption, and a new verify must not be
+      // minted until a human resolves it (repair or fresh) — minting now would confer trust the
+      // pending state exists to withhold.
+      const root = this.scopeRootOf(ledger);
+      if (root && trustStateOf(root, this.homeDir()) === 'pending')
+        throw new Error('writeVerify: scope is trust-pending (an ambiguous re-adoption) — resolve it (repair or fresh) before minting a verify');
       const subkey = this.subkeyForLedger(ledger);
       if (!subkey) throw new Error('writeVerify: cannot resolve signing subkey (project not owned?)');
       const records = parseLedger(ledger);
@@ -937,6 +945,14 @@ export class MemoryStore {
     // record to Fresh — this only ensures the master exists, it signs nothing that already exists.
     ensureMaster(this.homeDir());
     return active;
+  }
+
+  /** C1.4-③: the active project scope's trust disposition (`active`/`pending`), or 'active' when no
+   *  project layer is configured. Lets the adopt handler DISCLOSE a trust-pending re-adoption rather
+   *  than claim the ledger is trusted while trust is suspended. */
+  projectTrustState(): TrustState {
+    const p = this.opts.project;
+    return p ? trustStateOf(p.root, this.homeDir()) : 'active';
   }
 
   /** Which marker family an id belongs to, or null for a normal id. `integrity_marker`/

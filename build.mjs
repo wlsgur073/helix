@@ -37,7 +37,7 @@ await build({
 
 await build({
   ...common,
-  entryPoints: { 'helix-trigger': 'scripts/trigger-cli.ts', 'helix-rebaseline': 'scripts/rebaseline-cli.ts' },
+  entryPoints: { 'helix-trigger': 'scripts/trigger-cli.ts', 'helix-rebaseline': 'scripts/rebaseline-cli.ts', 'helix-trust-resolve': 'scripts/trust-resolve-cli.ts' },
   outdir: OUT,
   outExtension: { '.js': '.mjs' },
 });

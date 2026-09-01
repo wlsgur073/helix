@@ -446,9 +446,16 @@ export function handleAdopt(
   // record — unlike confirm, whose 'rejected' row marks an attempt against a real target id.
   const scope = store.adopt(args.projectRoot);
   appendAudit(deps.auditPath, { kind: 'adopt', ts, scope });
+  // C1.4-③: an ambiguous re-adoption (registered path, lost/mismatched .owner) enters trust-pending
+  // — the nonce is kept but the scope's elevated grades clamp to Fresh until a human resolves it, so
+  // old Verified rows cannot launder into a path reused for new content. Say so plainly; the old
+  // "now trusted" note would be false while trust is suspended.
+  const note = store.projectTrustState() === 'pending'
+    ? 'this project was re-adopted with a lost or mismatched owner stamp, so it is TRUST-PENDING: prior verified grades read as Fresh until you resolve it in a terminal — helix-trust-resolve --scope <root> --repair (same project) or --fresh (path reused for new content)'
+    : 'this project ledger is now trusted by this Helix install';
   // M2 (fix round 1): scope is the canonical form of the caller-supplied projectRoot — same
   // object-payload quarantine as erase's id (see its comment above).
-  return ok(`adopted ${JSON.stringify({ projectRoot: scope, note: 'this project ledger is now trusted by this Helix install' })}`);
+  return ok(`adopted ${JSON.stringify({ projectRoot: scope, note })}`);
 }
 
 export interface RecheckConfirmDeps {

@@ -17,6 +17,6 @@ describe('surface snapshot', () => {
     expect(s.configLeaves.length).toBeGreaterThan(1);
     expect(s.envVars.length).toBeGreaterThan(1);
     expect(s.hooks.length).toBe(2);
-    expect(s.clis.length).toBe(2);
+    expect(s.clis.length).toBe(3); // helix-trigger, helix-rebaseline, helix-trust-resolve (C1.4-③)
   });
 });

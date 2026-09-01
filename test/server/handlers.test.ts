@@ -370,6 +370,24 @@ describe('id bound (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
     expect(() => handleErase(s, { id: foreignId }, { auditPath })).not.toThrow();
   });
 
+  // C1.4-③: an ambiguous re-adoption (registered path, lost/mismatched .owner) enters trust-pending,
+  // and handleAdopt must DISCLOSE that — its old "now trusted" note would be false while trust is
+  // suspended, and the user needs to know a resolve ceremony is owed.
+  it('discloses trust-pending on an ambiguous re-adoption instead of claiming the ledger is trusted', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    const proj = mkdtempSync(join(tmpdir(), 'helix-p-'));
+    const mk = (sid: string) => new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: sid, project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj } });
+    const auditPath = join(home, 'audit.jsonl');
+    const s1 = mk('s1');
+    handleAdopt(s1, { projectRoot: proj }, { auditPath }); // first adoption -> trusted
+    rmSync(join(proj, '.helix', '.owner')); // lose the stamp
+
+    const out = handleAdopt(mk('s2'), { projectRoot: proj }, { auditPath });
+    const text = out.content.map((c) => c.text ?? '').join('');
+    expect(text).toMatch(/trust-pending|resolve/i);
+    expect(text).not.toMatch(/now trusted/i);
+  });
+
   // FIX ROUND 2 (review Important 2): safeId is STRICTER than the id bound round-1 just widened
   // ([^A-Za-z0-9_-] -> '' vs. isValidId's "any printable, non-control" charset), so handleInspect —
   // the ONE surface a user reads to learn a record's real id — was still mangling a perfectly legal

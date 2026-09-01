@@ -6,7 +6,7 @@ import type { LedgerPath } from './ledger.js';
 import { readLedgerRaw } from './ledger.js';
 import type { MemoryRecord } from '../types.js';
 import { tryReadMaster, deriveSubkey, verifyVerify } from './ledger-mac.js';
-import { scopeNonce, globalScopeNonce } from './ownership.js';
+import { scopeNonce, globalScopeNonce, trustStateOf } from './ownership.js';
 import { buildVerifiedProjection, type VerifiedProjection } from './verified-projection.js';
 import { readLedgerWitnessed } from './witness-read.js';
 import type { WitnessVerdict } from './witness-core.js';
@@ -24,6 +24,14 @@ import type { WitnessVerdict } from './witness-core.js';
 export function subkeyForScope(home: string, projectRoot?: string): Buffer | null {
   const master = tryReadMaster(home);
   if (!master) return null;
+  // C1.4-③: a project scope in `trust-pending` (an ambiguous re-adoption not yet resolved by a
+  // human) WITHHOLDS its subkey — the nonce is preserved in the registry, but returning null forces
+  // the verifying replay into key-absent mode so every grade in this scope clamps to Fresh. That is
+  // the whole read-path effect of pending, reusing the existing fail-closed clamp: old Verified rows
+  // cannot launder into a path reused for new content. Resolving `repair` restores the subkey (the
+  // nonce never moved), so the demotion is fully reversible; `fresh` rotates the nonce. Global scope
+  // has no trustState and is unaffected.
+  if (projectRoot && trustStateOf(projectRoot, home) === 'pending') return null;
   const nonce = projectRoot ? scopeNonce(projectRoot, home) : globalScopeNonce(home);
   return nonce ? deriveSubkey(master, nonce) : null;
 }

@@ -32,7 +32,7 @@ describe('hook extraction', () => {
 describe('operator CLI extraction', () => {
   it('recovers each CLI usage line by executing it with no arguments', () => {
     const clis = extractClis();
-    expect(clis.length).toBe(2);
+    expect(clis.length).toBe(3); // helix-trigger, helix-rebaseline, helix-trust-resolve (C1.4-③)
     for (const c of clis) {
       expect(c.usage.length, `${c.bundle} printed no usage`).toBeGreaterThan(0);
       expect(c.noArgsExitCode, `${c.bundle} did not exit 2 on a usage error`).toBe(2);

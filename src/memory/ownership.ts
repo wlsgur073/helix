@@ -40,7 +40,16 @@ export function projectLedgerPath(projectRoot: string): string {
   return join(projectRoot, '.helix', 'memory.jsonl');
 }
 
-interface RegistryEntry { stamp: string; adoptedAt: string; macNonce: string }
+interface RegistryEntry { stamp: string; adoptedAt: string; macNonce: string; trustState?: TrustState }
+
+/** C1.4-③: a scope's trust disposition. `active` (default; absent field reads as active, so every
+ *  pre-existing registry entry is active) grants the nonce-derived subkey full signing/verifying
+ *  trust. `pending` is entered by an AMBIGUOUS re-adoption — a registered path whose `.owner` stamp
+ *  is missing or mismatched, indistinguishable from a lost-`.owner` repair vs a path reused for new
+ *  content. Pending PRESERVES the nonce (a repair must stay possible) but the read path clamps the
+ *  scope's elevated grades to Fresh, so old Verified rows cannot launder into reused-path content
+ *  before a human resolves the scope (repair → active, or fresh → rotate the nonce). */
+export type TrustState = 'active' | 'pending';
 type Registry = Record<string, RegistryEntry>;
 
 /** Reserved registry key for the global ledger's project-binding nonce. */
@@ -66,6 +75,10 @@ function isValidRegistry(x: unknown): x is Registry {
   for (const v of Object.values(x)) {
     if (!isPlainObject(v)) return false;
     if (typeof v.stamp !== 'string' || typeof v.adoptedAt !== 'string' || typeof v.macNonce !== 'string') return false;
+    // trustState is OPTIONAL (absent = active, so pre-C1.4-③ registries validate unchanged), but when
+    // PRESENT it must be a known value — an off-value would otherwise read as active and silently
+    // re-grant trust a pending scope withheld.
+    if (v.trustState !== undefined && v.trustState !== 'active' && v.trustState !== 'pending') return false;
   }
   return true;
 }
@@ -235,15 +248,30 @@ export function stampOwnership(
     // path), and gating here let a foreign ledger that raced into that window be silently adopted.
     if (opts.autoAdoptLedger && existsSync(opts.autoAdoptLedger))
       throw new Error('commit: a project memory file appeared here that Helix did not create — adopt it explicitly (helix_memory_adopt) or remove it');
-    // Reused-path safety (F6, revised): earlier this REFUSED when the current .owner did not match the
-    // entry — but that bricked a legitimate lost-.owner repair with no recovery ceremony. Deletion
-    // safety now lives at the compaction chokepoint (a wrong/foreign key deletes no genuine verify) and
-    // the read-path clamp (foreign records stay Fresh), so preservation is safe even on a mismatch:
-    // repair restores the genuine nonce, and a foreign repo inheriting the old nonce launders nothing.
+    // Reused-path safety (F6, revised; C1.4-③ closes the conferral half). Earlier this REFUSED when
+    // the current .owner did not match the entry — but that bricked a legitimate lost-.owner repair
+    // with no recovery ceremony. Deletion safety lives at the compaction chokepoint (a wrong/foreign
+    // key deletes no genuine verify) and the read-path clamp (foreign records stay Fresh). Preserving
+    // the nonce on a mismatch is safe for DELETION, but it is NOT trust-neutral on its own — an old
+    // Verified row copied back into a reused path would re-elevate under the preserved nonce (measured
+    // reused-path trust-laundering). That CONFERRAL is what the ambiguity gate below closes: a
+    // mismatched re-adoption enters `trust-pending`, so the scope's grades clamp to Fresh until a
+    // human resolves it (repair restores the nonce; fresh rotates it). The earlier "launders nothing"
+    // claim here was inaccurate and is retracted.
     // Idempotent re-adoption (PR-1): a still-registered project PRESERVES its stamp and macNonce. Minting
     // a fresh macNonce would silently invalidate — and, on the next compaction, DELETE +
     // false-integrity-mark — every verify signed under the old subkey. A first adoption (no prior
     // entry) mints fresh.
+    // C1.4-③ ambiguity gate. An existing registry entry whose current `.owner` no longer matches
+    // (lost or overwritten) is an AMBIGUOUS re-adoption — a lost-`.owner` repair and a path reused
+    // for new content are indistinguishable here. Enter `trust-pending`: preserve the nonce (repair
+    // must stay possible), but the read path will clamp this scope's elevated grades to Fresh so old
+    // Verified rows cannot launder into reused-path content until a human resolves it. Read the
+    // CURRENT `.owner` BEFORE atomicWriteOwner below overwrites it. A first adoption (no entry) and
+    // an idempotent re-adoption whose `.owner` still matches stay active.
+    const priorOwner = readOwner(projectRoot);
+    const ambiguousReadopt = existing !== undefined && priorOwner !== existing.stamp;
+    const trustState: TrustState = ambiguousReadopt ? 'pending' : (existing?.trustState ?? 'active');
     const stamp = existing?.stamp ?? gen();
     // Second draw: a home-only per-project salt for the ledger MAC subkey. Bound to the
     // resolved project path in the home registry, NEVER written to the repo .owner file, so a
@@ -254,9 +282,64 @@ export function stampOwnership(
     assertNotSymlink(helixDir, '.helix directory'); // a symlinked .helix parent would redirect the .owner (and ledger) write out of the repo
     mkdirSync(helixDir, { recursive: true });
     atomicWriteOwner(projectRoot, stamp); // rename-based: never follows a symlinked .owner
-    reg[key] = { stamp, adoptedAt, macNonce };
+    reg[key] = { stamp, adoptedAt, macNonce, trustState };
     atomicWriteRegistry(home, reg);
   });
+}
+
+/** C1.4-③ human resolution of a `trust-pending` scope. This is the DESTRUCTIVE-capable ceremony,
+ *  so it belongs behind a TTY confirmation (see scripts/trust-resolve-cli.ts), NEVER on the
+ *  agent-callable MCP surface — an agent must not be able to choose conferral vs destruction.
+ *  - 'repair': the same project; the `.owner` was just lost. Return to `active` with the nonce and
+ *    stamp UNCHANGED, so the read path re-derives the subkey and the prior verifies re-elevate. Fully
+ *    reversible — nothing was deleted while pending.
+ *  - 'fresh': the path was reused for new content. Return to `active` but ROTATE the macNonce, so the
+ *    old verifies fail under the new subkey and stay Fresh (measured non-destructive on read AND at
+ *    compaction: planCompaction's keyProven gate cannot prove the old lineage under the new key, so
+ *    nothing is deleted and no integrity marker is minted). A fresh stamp is minted too.
+ *  Refuses a scope that is not pending — there is nothing to resolve, and silently rotating an active
+ *  scope's nonce would be a destructive no-op-that-wasn't. */
+export function resolveTrust(
+  projectRoot: string,
+  home: string,
+  resolution: 'repair' | 'fresh',
+  opts: { genStamp?: () => string } = {},
+): void {
+  const gen = opts.genStamp ?? (() => randomBytes(16).toString('hex'));
+  const key = canonicalRoot(projectRoot);
+  ensureHelixDir(home);
+  withFileLock(registryPath(home), () => {
+    const loaded = loadRegistry(home);
+    if (loaded.kind === 'corrupt')
+      throw new Error(`resolveTrust: registry at ${registryPath(home)} is present but unparseable — restore it before resolving`);
+    const reg = loaded.kind === 'ok' ? loaded.reg : {};
+    const existing = reg[key];
+    if (!existing || (existing.trustState ?? 'active') !== 'pending')
+      throw new Error(`resolveTrust: ${key} is not trust-pending — nothing to resolve`);
+    if (resolution === 'repair') {
+      reg[key] = { ...existing, trustState: 'active' };
+    } else {
+      // fresh: rotate the nonce (retire the old lineage) and re-stamp, then go active.
+      const stamp = gen();
+      reg[key] = { stamp, adoptedAt: existing.adoptedAt, macNonce: gen(), trustState: 'active' };
+      const helixDir = join(projectRoot, '.helix');
+      assertNotSymlink(helixDir, '.helix directory');
+      mkdirSync(helixDir, { recursive: true });
+      atomicWriteOwner(projectRoot, stamp);
+    }
+    atomicWriteRegistry(home, reg);
+  });
+}
+
+/** C1.4-③: a scope's trust disposition, read from the home registry. `active` (the default) for an
+ *  unregistered project and for any entry without the field — so nothing pre-existing is treated as
+ *  pending. `pending` only for an entry an ambiguous re-adoption marked so. Corrupt/absent registry
+ *  reads active: this predicate never confers trust on its own (the read-path clamp does), it only
+ *  reports whether a resolution is owed, and treating an unreadable registry as pending would strand
+ *  every scope behind a ceremony over a transient read fault. */
+export function trustStateOf(projectRoot: string, home: string): TrustState {
+  const entry = readRegistry(home)[canonicalRoot(projectRoot)];
+  return entry?.trustState ?? 'active';
 }
 
 /** The project's home-only MAC nonce (project-binding salt for the ledger HMAC subkey).
