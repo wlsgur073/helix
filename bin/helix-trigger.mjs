@@ -91,6 +91,7 @@ function isValidRegistry(x) {
   for (const v of Object.values(x)) {
     if (!isPlainObject(v)) return false;
     if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
+    if (v.trustState !== void 0 && v.trustState !== "active" && v.trustState !== "pending") return false;
   }
   return true;
 }

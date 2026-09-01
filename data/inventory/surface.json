@@ -415,6 +415,11 @@
       "bundle": "bin/helix-trigger.mjs",
       "usage": "usage: trigger-cli --root <path> --run <id> [--service-result <s>] [--exit-code <s>] [--exit-status <s>]",
       "noArgsExitCode": 2
+    },
+    {
+      "bundle": "bin/helix-trust-resolve.mjs",
+      "usage": "usage: helix-trust-resolve --scope <absoluteProjectRoot> --repair | --fresh",
+      "noArgsExitCode": 2
     }
   ]
 }

@@ -14249,6 +14249,7 @@ function isValidRegistry(x) {
   for (const v of Object.values(x)) {
     if (!isPlainObject2(v)) return false;
     if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
+    if (v.trustState !== void 0 && v.trustState !== "active" && v.trustState !== "pending") return false;
   }
   return true;
 }
@@ -14368,6 +14369,9 @@ function stampOwnership(projectRoot2, home2, opts = {}) {
     const existing = reg[key];
     if (opts.autoAdoptLedger && existsSync2(opts.autoAdoptLedger))
       throw new Error("commit: a project memory file appeared here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it");
+    const priorOwner = readOwner(projectRoot2);
+    const ambiguousReadopt = existing !== void 0 && priorOwner !== existing.stamp;
+    const trustState = ambiguousReadopt ? "pending" : existing?.trustState ?? "active";
     const stamp = existing?.stamp ?? gen();
     const macNonce = existing?.macNonce ?? gen();
     const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
@@ -14375,9 +14379,13 @@ function stampOwnership(projectRoot2, home2, opts = {}) {
     assertNotSymlink(helixDir, ".helix directory");
     mkdirSync3(helixDir, { recursive: true });
     atomicWriteOwner(projectRoot2, stamp);
-    reg[key] = { stamp, adoptedAt, macNonce };
+    reg[key] = { stamp, adoptedAt, macNonce, trustState };
     atomicWriteRegistry(home2, reg);
   });
+}
+function trustStateOf(projectRoot2, home2) {
+  const entry = readRegistry(home2)[canonicalRoot(projectRoot2)];
+  return entry?.trustState ?? "active";
 }
 function scopeNonce(projectRoot2, home2) {
   const entry = readRegistry(home2)[canonicalRoot(projectRoot2)];
@@ -15431,6 +15439,7 @@ function readLedgerBytesWitnessed(path, home2, projectRoot2) {
 function subkeyForScope(home2, projectRoot2) {
   const master = tryReadMaster(home2);
   if (!master) return null;
+  if (projectRoot2 && trustStateOf(projectRoot2, home2) === "pending") return null;
   const nonce = projectRoot2 ? scopeNonce(projectRoot2, home2) : globalScopeNonce(home2);
   return nonce ? deriveSubkey(master, nonce) : null;
 }
@@ -15960,6 +15969,9 @@ var MemoryStore = class {
     const ledger = this.ledgerOf(targetId);
     return withFileLock(ledger, () => {
       ensureMaster(this.homeDir());
+      const root = this.scopeRootOf(ledger);
+      if (root && trustStateOf(root, this.homeDir()) === "pending")
+        throw new Error("writeVerify: scope is trust-pending (an ambiguous re-adoption) \u2014 resolve it (repair or fresh) before minting a verify");
       const subkey = this.subkeyForLedger(ledger);
       if (!subkey) throw new Error("writeVerify: cannot resolve signing subkey (project not owned?)");
       const records = parseLedger(ledger);
@@ -16166,6 +16178,13 @@ var MemoryStore = class {
     stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp });
     ensureMaster(this.homeDir());
     return active;
+  }
+  /** C1.4-③: the active project scope's trust disposition (`active`/`pending`), or 'active' when no
+   *  project layer is configured. Lets the adopt handler DISCLOSE a trust-pending re-adoption rather
+   *  than claim the ledger is trusted while trust is suspended. */
+  projectTrustState() {
+    const p = this.opts.project;
+    return p ? trustStateOf(p.root, this.homeDir()) : "active";
   }
   /** Which marker family an id belongs to, or null for a normal id. `integrity_marker`/
    *  `horizon_marker` are single canonical fixpoint ids (exact match); a witness fence has no
@@ -25326,7 +25345,8 @@ function handleAdopt(store2, args, deps) {
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   const scope = store2.adopt(args.projectRoot);
   appendAudit(deps.auditPath, { kind: "adopt", ts, scope });
-  return ok(`adopted ${JSON.stringify({ projectRoot: scope, note: "this project ledger is now trusted by this Helix install" })}`);
+  const note = store2.projectTrustState() === "pending" ? "this project was re-adopted with a lost or mismatched owner stamp, so it is TRUST-PENDING: prior verified grades read as Fresh until you resolve it in a terminal \u2014 helix-trust-resolve --scope <root> --repair (same project) or --fresh (path reused for new content)" : "this project ledger is now trusted by this Helix install";
+  return ok(`adopted ${JSON.stringify({ projectRoot: scope, note })}`);
 }
 function handleRecheck(store2, args, deps) {
   assertValidId(args.id);

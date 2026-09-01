@@ -388,6 +388,7 @@ function isValidRegistry(x) {
   for (const v of Object.values(x)) {
     if (!isPlainObject(v)) return false;
     if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
+    if (v.trustState !== void 0 && v.trustState !== "active" && v.trustState !== "pending") return false;
   }
   return true;
 }
@@ -491,6 +492,10 @@ function projectDispositionOf(project) {
   if (!project) return "inactive";
   if (isOwned(project.root, project.home)) return "owned";
   return existsSync2(project.ledger) ? "unadopted-present" : "inactive";
+}
+function trustStateOf(projectRoot, home) {
+  const entry = readRegistry(home)[canonicalRoot(projectRoot)];
+  return entry?.trustState ?? "active";
 }
 function scopeNonce(projectRoot, home) {
   const entry = readRegistry(home)[canonicalRoot(projectRoot)];
@@ -943,6 +948,7 @@ function readLedgerWitnessed(path, home, projectRoot) {
 function subkeyForScope(home, projectRoot) {
   const master = tryReadMaster(home);
   if (!master) return null;
+  if (projectRoot && trustStateOf(projectRoot, home) === "pending") return null;
   const nonce = projectRoot ? scopeNonce(projectRoot, home) : globalScopeNonce(home);
   return nonce ? deriveSubkey(master, nonce) : null;
 }
