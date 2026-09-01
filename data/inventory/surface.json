@@ -350,6 +350,10 @@
     {
       "path": "metrics.enabled",
       "defaultValue": true
+    },
+    {
+      "path": "persistence.releaseWordChains",
+      "defaultValue": true
     }
   ],
   "envVars": [

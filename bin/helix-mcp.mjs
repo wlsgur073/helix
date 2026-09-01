@@ -13327,8 +13327,12 @@ var W_COVERAGE = 0.4;
 var W_BM25 = 0.1;
 var TRUST_PENALTY = { Verified: 0, Corroborated: 0.01, Fresh: 0.02, Suspect: 0.1 };
 var NONAUTH_PENALTY = 0.03;
+var REDACTION_MARKER = /\[redacted:[a-z0-9-]+\]/g;
 function buildRankArtifacts(records) {
-  const docs = records.map((r) => ({ id: r.id, tokens: tokenize(r.content), normContent: normalizeText(r.content) }));
+  const docs = records.map((r) => {
+    const indexable = r.content.replace(REDACTION_MARKER, " ");
+    return { id: r.id, tokens: tokenize(indexable), normContent: normalizeText(indexable) };
+  });
   const idx = buildIndex(docs.map((d) => ({ id: d.id, tokens: d.tokens })));
   return { docs, idx };
 }
@@ -15246,6 +15250,21 @@ function redactSecrets(content, spans) {
   }
   return { content: out, classification: "secret-redacted", kinds: [...new Set(spans.map((s) => s.kind))] };
 }
+var CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[_-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token)/i;
+var CRED_WINDOW = 24;
+var KW_PAD = 16;
+function nearCredential(text, start, end) {
+  let pre = text.slice(Math.max(0, start - CRED_WINDOW - KW_PAD), start);
+  let post = text.slice(end, Math.min(text.length, end + CRED_WINDOW + KW_PAD));
+  const b = Math.max(pre.lastIndexOf("\n"), pre.lastIndexOf("."), pre.lastIndexOf(";"));
+  if (b >= 0) pre = pre.slice(b + 1);
+  const m = post.search(/[\n.;]/);
+  if (m >= 0) post = post.slice(0, m);
+  return CREDENTIAL_CONTEXT.test(pre) || CREDENTIAL_CONTEXT.test(post);
+}
+function selectWriteRedactions(content, spans) {
+  return spans.filter((s) => !(s.tiers.length === 1 && s.tiers[0] === "entropy" && s.entropyWordChain === true && s.entropyHex !== true && !nearCredential(content, s.start, s.end)));
+}
 
 // src/memory/reality-check.ts
 import { existsSync as existsSync3, openSync as openSync4, fstatSync as fstatSync2, readSync as readSync2, closeSync as closeSync4, constants } from "node:fs";
@@ -15630,8 +15649,9 @@ var MemoryStore = class {
     let content = input.content;
     let classification = input.classification ?? "normal";
     const spans = findSecrets(input.content);
-    if (spans.length > 0) {
-      const red = redactSecrets(input.content, spans);
+    const redactable = this.opts.releaseWordChains ?? true ? selectWriteRedactions(input.content, spans) : spans;
+    if (redactable.length > 0) {
+      const red = redactSecrets(input.content, redactable);
       content = red.content;
       classification = red.classification;
     }
@@ -24555,6 +24575,7 @@ var DEFAULT_CONFIG = {
     // Content logging OFF by default; audit.jsonl still records metadata. Invalid value => false.
     logContent: false
   },
+  persistence: { releaseWordChains: true },
   // Local metrics sensor ON by default ("local logs always, export opt-in"); content-free records.
   metrics: { enabled: true }
 };
@@ -24632,6 +24653,11 @@ function loadConfig(opts = {}) {
     const m = raw?.metrics;
     if (m && typeof m === "object" && typeof m.enabled === "boolean") {
       merged.metrics.enabled = m.enabled;
+    }
+    const pers = raw?.persistence;
+    if (pers && typeof pers === "object") {
+      if (typeof pers.releaseWordChains === "boolean") merged.persistence.releaseWordChains = pers.releaseWordChains;
+      else if (pers.releaseWordChains !== void 0) warn(`helix: invalid persistence.releaseWordChains ${q(pers.releaseWordChains)} (boolean) -> ignored`);
     }
   }
   if (unreadable.length > 0) merged.unreadable = unreadable;
@@ -24864,18 +24890,6 @@ function detectEcho(forms, ledger, opts = {}) {
 var EGRESS_LEG_ORDER = ["memoryEcho", "piiHigh", "secretHeuristic", "secretEntropy", "secretEntropyExempt", "piiBulk"];
 var AUDIT_LEG_ORDER = ["secret", "pii", "memory_echo"];
 var BULK_PII_N = 3;
-var CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[_-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token)/i;
-var CRED_WINDOW = 24;
-var KW_PAD = 16;
-function nearCredential(text, start, end) {
-  let pre = text.slice(Math.max(0, start - CRED_WINDOW - KW_PAD), start);
-  let post = text.slice(end, Math.min(text.length, end + CRED_WINDOW + KW_PAD));
-  const b = Math.max(pre.lastIndexOf("\n"), pre.lastIndexOf("."), pre.lastIndexOf(";"));
-  if (b >= 0) pre = pre.slice(b + 1);
-  const m = post.search(/[\n.;]/);
-  if (m >= 0) post = post.slice(0, m);
-  return CREDENTIAL_CONTEXT.test(pre) || CREDENTIAL_CONTEXT.test(post);
-}
 function scanText(text) {
   const secretSpans = findSecrets(text);
   const piiHits = detectPII(text);
@@ -26294,7 +26308,7 @@ ${causes.join("")}Two ways out, both deliberate:
     process.exit(78);
   }
 }
-var store = new MemoryStore(globalLedger, { home, sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home) });
+var store = new MemoryStore(globalLedger, { home, sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home), releaseWordChains: config2.persistence.releaseWordChains });
 store.healWitness();
 var scanScopes = [
   { ledger: globalLedger },
