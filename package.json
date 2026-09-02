@@ -20,7 +20,8 @@
     "freeze-guard": "tsx scripts/freeze-guard.ts",
     "scan:history": "tsx scripts/scan-history-secrets.ts",
     "inventory": "tsx scripts/inventory/build-inventory.ts",
-    "certify-gate": "tsx scripts/inventory/certify-gate.ts"
+    "certify-gate": "tsx scripts/inventory/certify-gate.ts",
+    "cut-candidate": "tsx scripts/inventory/cut-candidate.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
