@@ -25320,13 +25320,23 @@ ${n}`);
         // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
         // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
         //
-        // The digest rides along for VERIFIED rows only. Superseding one now requires echoing it back as
-        // `supersedesDigest` (proof of read), so without it here the tool surface could never replace a
-        // verified fact at all. Verified-only keeps 64 hex characters off every other row: it is emitted
-        // exactly where it is needed, and it discloses nothing — a reader holding this line already holds
-        // the content it digests.
-        text: record2.state === "Verified" && contentDigest !== void 0 ? `${presentId(record2.id)} ${record2.content}
-    supersedesDigest=${contentDigest}` : `${presentId(record2.id)} ${record2.content}`,
+        // The digest rides along on EVERY row, under its own name. It has two callers and they need it
+        // in different states: `commit` takes it back as `supersedesDigest` when replacing a VERIFIED
+        // fact (proof of read), and `helix_dual_verify` takes it in a `quotedMemory` pair to exempt a
+        // record from the memory-echo guard — and the records a caller quotes are overwhelmingly NOT
+        // verified. It was `Verified`-only until 2026-09-02, which made that second, documented escape
+        // impossible to assemble: the guard resolves a pair against a ledger that carries a digest for
+        // every record (`helix-server.ts` builds it with `contentDigest ?? digestContent(...)`), while
+        // the only surface publishing one withheld it from all but Verified rows. The dogfood channel
+        // measured the cost — 27 refused cross-checks across 22 sessions, each shipping UNVERIFIED.
+        //
+        // The label is `contentDigest` because that is the field's name in both tool descriptions;
+        // `supersedesDigest` is the PARAMETER a caller pastes it into, not the value's name, and the
+        // mismatch between the two was itself half of why the escape went unfound. The cost is 64 hex
+        // characters per row, which `capRendered` absorbs by showing fewer rows; it discloses nothing,
+        // since a reader holding this line already holds the content it digests.
+        text: contentDigest !== void 0 ? `${presentId(record2.id)} ${record2.content}
+    contentDigest=${contentDigest}` : `${presentId(record2.id)} ${record2.content}`,
         mark: `DATA[${record2.state}:${scope}]| `
       }))
     }),
@@ -26094,7 +26104,7 @@ function buildServer(store2, dualDeps, metrics2) {
       classification: external_exports.enum(["normal", "personal"]).optional(),
       supersedes: ID_SCHEMA.optional(),
       supersedesDigest: external_exports.string().regex(/^[0-9a-f]{64}$/, "supersedesDigest must be a 64-character lowercase hex digest").optional().describe(
-        "Required only when superseding a VERIFIED fact: the `supersedesDigest=` value shown for that row by helix_memory_inspect. Echoing it proves you retrieved the record you are replacing; a supersede issued without having read the target is refused."
+        "Required only when superseding a VERIFIED fact: the `contentDigest=` value helix_memory_inspect shows for that row. Echoing it proves you retrieved the record you are replacing; a supersede issued without having read the target is refused."
       ),
       scope: external_exports.enum(["project", "global"]).optional()
     }
