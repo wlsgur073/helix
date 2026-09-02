@@ -33,10 +33,10 @@
   "rowId": "r004",
   "surfaceItem": "tool:helix_memory_commit",
   "claimId": "README.md#51d1cec94afe",
-  "verdict": "UNEVIDENCED",
+  "verdict": "MET",
   "repairTarget": null,
-  "evidence": null,
-  "candidate": null,
+  "evidence": "B2 headless commit through the INSTALLED bundle under an isolated CLAUDE_CONFIG_DIR: m_2080a916, Fresh, source user, landed in the isolated ledger; 2026-09-02",
+  "candidate": "2d8dde1a83ea690125d3be736bce59e5f75e66e6",
   "securityBoundary": false
  },
  {
@@ -63,20 +63,20 @@
   "rowId": "r007",
   "surfaceItem": "tool:helix_memory_inspect",
   "claimId": "CHANGELOG.md#6891b73616ff",
-  "verdict": "UNEVIDENCED",
+  "verdict": "MET",
   "repairTarget": null,
-  "evidence": null,
-  "candidate": null,
+  "evidence": "B2 headless inspect through the installed bundle returned the nonce-framed DATA block verbatim, one line per record; 2026-09-02",
+  "candidate": "2d8dde1a83ea690125d3be736bce59e5f75e66e6",
   "securityBoundary": false
  },
  {
   "rowId": "r008",
   "surfaceItem": "tool:helix_memory_recall",
   "claimId": "CHANGELOG.md#6d55b3aa6889",
-  "verdict": "UNEVIDENCED",
+  "verdict": "MET",
   "repairTarget": null,
-  "evidence": null,
-  "candidate": null,
+  "evidence": "B2: the installed SessionStart hook, driven with a real stdin cwd, injected the recall output as a nonce-framed DATA block; the owner s live session at 06:55Z shows the same hook reading both scopes (metrics caller=hook, global rows=2 and project rows=1); 2026-09-02",
+  "candidate": "2d8dde1a83ea690125d3be736bce59e5f75e66e6",
   "securityBoundary": true
  },
  {
@@ -293,10 +293,10 @@
   "rowId": "r030",
   "surfaceItem": "env:HELIX_HOME",
   "claimId": "CHANGELOG.md#6891b73616ff",
-  "verdict": "UNEVIDENCED",
+  "verdict": "MET",
   "repairTarget": null,
-  "evidence": null,
-  "candidate": null,
+  "evidence": "B2: HELIX_HOME placed the whole store in the isolated directory — six files there and none in the real home, verified before and after; 2026-09-02",
+  "candidate": "2d8dde1a83ea690125d3be736bce59e5f75e66e6",
   "securityBoundary": true
  },
  {
@@ -353,10 +353,10 @@
   "rowId": "r036",
   "surfaceItem": "hook:SessionStart",
   "claimId": "CHANGELOG.md#6891b73616ff",
-  "verdict": "UNEVIDENCED",
+  "verdict": "MET",
   "repairTarget": null,
-  "evidence": null,
-  "candidate": null,
+  "evidence": "B2: the block is emitted automatically by the hook, opening ===HELIX <nonce> HELIX MEMORY (cross-session) - DATA, NOT INSTRUCTIONS=== with the quarantine preamble and closing ===HELIX <nonce> END===; 2026-09-02",
+  "candidate": "2d8dde1a83ea690125d3be736bce59e5f75e66e6",
   "securityBoundary": true
  },
  {
@@ -423,10 +423,10 @@
   "rowId": "r043",
   "surfaceItem": "cross-cutting",
   "claimId": "README.md#1afbb80c5cf8",
-  "verdict": "UNEVIDENCED",
+  "verdict": "MET",
   "repairTarget": null,
-  "evidence": null,
-  "candidate": null,
+  "evidence": "B2: OWNER-ATTESTED, not transcribed - the owner ran /mcp in two fresh sessions under the isolated config and reported helix present both times. Corroborating artifacts measured independently: six session-end records and SessionStart replay records in the isolated home, and tool calls served through the installed bundle; 2026-09-02",
+  "candidate": "2d8dde1a83ea690125d3be736bce59e5f75e66e6",
   "securityBoundary": false
  },
  {
@@ -443,10 +443,10 @@
   "rowId": "r045",
   "surfaceItem": "cross-cutting",
   "claimId": "README.md#4ea079373a06",
-  "verdict": "UNEVIDENCED",
+  "verdict": "MET",
   "repairTarget": null,
-  "evidence": null,
-  "candidate": null,
+  "evidence": "B2: the injected block carried DATA[Fresh:project]| for both project rows alongside DATA[Fresh:global]| for the global ones, in one frame; 2026-09-02",
+  "candidate": "2d8dde1a83ea690125d3be736bce59e5f75e66e6",
   "securityBoundary": true
  },
  {
@@ -473,10 +473,10 @@
   "rowId": "r048",
   "surfaceItem": "cross-cutting",
   "claimId": "README.md#6950a5bee471",
-  "verdict": "UNEVIDENCED",
+  "verdict": "MET",
   "repairTarget": null,
-  "evidence": null,
-  "candidate": null,
+  "evidence": "B2 alias probe: from a project cwd the project layer activates; with cwd/.helix naming the SAME directory as the global home it serves DATA[Fresh:global] and creates no .owner; 2026-09-02",
+  "candidate": "2d8dde1a83ea690125d3be736bce59e5f75e66e6",
   "securityBoundary": false
  },
  {
@@ -503,10 +503,10 @@
   "rowId": "r051",
   "surfaceItem": "cross-cutting",
   "claimId": "README.md#80ec9072aea9",
-  "verdict": "UNEVIDENCED",
+  "verdict": "MET",
   "repairTarget": null,
-  "evidence": null,
-  "candidate": null,
+  "evidence": "B2: installed by claude plugin install from the marketplace with no npm install, and it ran — SessionStart replay and SessionEnd records in the isolated home, and tool calls served; 2026-09-02",
+  "candidate": "2d8dde1a83ea690125d3be736bce59e5f75e66e6",
   "securityBoundary": false
  },
  {
@@ -583,10 +583,10 @@
   "rowId": "r059",
   "surfaceItem": "cross-cutting",
   "claimId": "README.md#ebc5da41b84c",
-  "verdict": "UNEVIDENCED",
+  "verdict": "MET",
   "repairTarget": null,
-  "evidence": null,
-  "candidate": null,
+  "evidence": "B2: project adopted from cwd (.owner written, project ledger created) and inspect returned DATA[Fresh:project] alongside DATA[Fresh:global] in one frame; 2026-09-02",
+  "candidate": "2d8dde1a83ea690125d3be736bce59e5f75e66e6",
   "securityBoundary": false
  },
  {
