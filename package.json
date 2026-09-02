@@ -19,7 +19,8 @@
     "typecheck": "tsc --noEmit",
     "freeze-guard": "tsx scripts/freeze-guard.ts",
     "scan:history": "tsx scripts/scan-history-secrets.ts",
-    "inventory": "tsx scripts/inventory/build-inventory.ts"
+    "inventory": "tsx scripts/inventory/build-inventory.ts",
+    "certify-gate": "tsx scripts/inventory/certify-gate.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

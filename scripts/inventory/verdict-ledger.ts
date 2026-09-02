@@ -65,6 +65,78 @@ export function danglingClaims(rows: VerdictRow[], live: ReadonlySet<string>): s
 }
 
 /**
+ * What an observation was made against: the IMMUTABLE candidate receipt, and the artifact digests it
+ * recorded at the cut, beside the same paths hashed now.
+ *
+ * The comparison target is the receipt, never the branch head. HEAD advances for certification-only
+ * commits that leave the shipped bundle untouched, and invalidating every row on that would make an
+ * honest ledger unmaintainable; what invalidates an observation is the artifact it was made against
+ * changing underneath it.
+ */
+export interface ReleaseBinding {
+  /** `payload.candidateCommit` from the candidate receipt. */
+  receiptCandidate: string;
+  /** Artifact path -> sha256, as the receipt recorded it at the cut. */
+  receiptArtifacts: Readonly<Record<string, string>>;
+  /** The same paths hashed as they stand now. A path absent here was never measured. */
+  liveArtifacts: Readonly<Record<string, string | undefined>>;
+}
+
+/**
+ * Rows whose observation no longer describes the release, and artifacts that have moved under it.
+ *
+ * The third unguarded direction. `danglingClaims` above guards `claimId` -> live block because a
+ * `claimId` "is only a string and nothing dereferences it"; a row's `candidate` is the same shape and
+ * was dereferenced by nobody. Measured 2026-09-02: the committed ledger's every row named a candidate
+ * 111 commits behind HEAD whose shipped bundle differed from the one on disk, and nothing anywhere
+ * reported it.
+ *
+ * A `null` candidate is the ABSENCE of an observation, which `validateLedger` already rules on, so it
+ * is passed over here rather than reported twice. A receipt-pinned artifact that was not hashed is
+ * reported: treating an unmeasured path as matching is the silent skip the run-sheet forbids.
+ *
+ * Matching artifacts never excuse a mismatched candidate. The rule is exact candidate binding, and
+ * artifact equality is an additional requirement rather than a substitute for it.
+ */
+export function staleBinding(rows: VerdictRow[], binding: ReleaseBinding): string[] {
+  const problems: string[] = [];
+  for (const r of rows) {
+    if (r.candidate === null) continue;
+    if (r.candidate !== binding.receiptCandidate) {
+      problems.push(`${r.rowId}: observation is bound to ${r.candidate}, but the receipt names ${binding.receiptCandidate}`);
+    }
+  }
+  for (const [path, recorded] of Object.entries(binding.receiptArtifacts)) {
+    const live = binding.liveArtifacts[path];
+    if (live === undefined) {
+      problems.push(`artifact ${path}: pinned by the receipt but never measured`);
+    } else if (live !== recorded) {
+      problems.push(`artifact ${path}: the receipt recorded ${recorded}, the tree now holds ${live}`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * Expected rows the ledger no longer holds.
+ *
+ * `gatePasses` asks only that the table be non-empty and every row MET, so it opens by DELETION:
+ * measured 2026-09-02, dropping the three unevidenced rows from the committed ledger flipped it from
+ * false to true over the 71 that remained. An expected-case inventory has to come from somewhere the
+ * ledger does not control, which is why it is a parameter here rather than derived from `rows`.
+ *
+ * An EMPTY inventory is reported rather than passed. Silence would read as "no row is missing", when
+ * what is true is that no row could have been found missing.
+ */
+export function missingRows(rows: VerdictRow[], expected: readonly string[]): string[] {
+  if (expected.length === 0) {
+    return ['ledger: no expected row inventory is pinned, so a deleted row cannot be detected'];
+  }
+  const present = new Set(rows.map((r) => r.rowId));
+  return expected.filter((id) => !present.has(id)).map((id) => `ledger: expected row ${id} is not in the ledger`);
+}
+
+/**
  * The gate. A row's risk class does not change whether it passes — only what kind of evidence it
  * takes to get there. An empty ledger does not pass: no rows means the inventory is unfinished.
  */
