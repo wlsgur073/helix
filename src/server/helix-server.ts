@@ -99,8 +99,8 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
         .regex(/^[0-9a-f]{64}$/, 'supersedesDigest must be a 64-character lowercase hex digest')
         .optional()
         .describe(
-          'Required only when superseding a VERIFIED fact: the `supersedesDigest=` value shown for ' +
-          'that row by helix_memory_inspect. Echoing it proves you retrieved the record you are ' +
+          'Required only when superseding a VERIFIED fact: the `contentDigest=` value helix_memory_inspect ' +
+          'shows for that row. Echoing it proves you retrieved the record you are ' +
           'replacing; a supersede issued without having read the target is refused.',
         ),
       scope: z.enum(['project', 'global']).optional(),

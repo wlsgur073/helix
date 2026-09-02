@@ -144,7 +144,10 @@ describe('supersede gate — the tool-surface round trip', () => {
     s.confirm(a.id);
 
     const shown = handleInspect(s, {}).content[0]!.text;
-    const digest = /supersedesDigest=([0-9a-f]{64})/.exec(shown)?.[1];
+    // The published label is `contentDigest` (the value's own name); `supersedesDigest` is the
+    // PARAMETER it is pasted into below. Renamed 2026-09-02 with the same edit that stopped
+    // withholding the line from unverified rows — see the sibling test.
+    const digest = /contentDigest=([0-9a-f]{64})/.exec(shown)?.[1];
     expect(digest).toBeTypeOf('string');
 
     // The same value the store computes, arrived at only by reading the tool's output.
@@ -155,10 +158,22 @@ describe('supersede gate — the tool-surface round trip', () => {
     expect(out.content[0]!.text).toMatch(/^committed /);
   });
 
-  it('an unverified row publishes no digest — the affordance appears exactly where it is required', async () => {
+  // CONTRACT CHANGE, 2026-09-02. This test used to assert the opposite — that an unverified row
+  // publishes NO digest, "the affordance appears exactly where it is required" — on the reading that
+  // the supersede gate was the only consumer. A second consumer had since shipped: `helix_dual_verify`
+  // resolves a `quotedMemory` {id, contentDigest} pair to exempt a record from the memory-echo guard,
+  // and the records a caller quotes are overwhelmingly unverified, so withholding the line made that
+  // documented escape impossible to assemble. Left as it was, the old assertion would ALSO have gone
+  // vacuous rather than red: it matched the literal `supersedesDigest=`, which the same edit renamed,
+  // so it would have kept passing while testing nothing.
+  it('an unverified row publishes its digest too — a second consumer needs it in that state', async () => {
     const { handleInspect } = await import('../../src/server/handlers.js');
     const s = store();
-    s.commit({ content: 'the staging host is stg.internal', source: 'user' }); // Fresh, never confirmed
-    expect(handleInspect(s, {}).content[0]!.text).not.toMatch(/supersedesDigest=/);
+    const rec = s.commit({ content: 'the staging host is stg.internal', source: 'user' }); // Fresh, never confirmed
+    const shown = handleInspect(s, {}).content[0]!.text;
+    expect(shown).toMatch(/contentDigest=[0-9a-f]{64}/);
+    // Published for the row it sits on: the value must be the store's own digest, not a placeholder.
+    const projected = s.inspect().find((r) => r.record.id === rec.id)!.contentDigest;
+    expect(shown).toContain(`contentDigest=${projected}`);
   });
 });

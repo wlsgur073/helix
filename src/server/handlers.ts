@@ -396,13 +396,23 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
         // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
         // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
         //
-        // The digest rides along for VERIFIED rows only. Superseding one now requires echoing it back as
-        // `supersedesDigest` (proof of read), so without it here the tool surface could never replace a
-        // verified fact at all. Verified-only keeps 64 hex characters off every other row: it is emitted
-        // exactly where it is needed, and it discloses nothing — a reader holding this line already holds
-        // the content it digests.
-        text: record.state === 'Verified' && contentDigest !== undefined
-          ? `${presentId(record.id)} ${record.content}\n    supersedesDigest=${contentDigest}`
+        // The digest rides along on EVERY row, under its own name. It has two callers and they need it
+        // in different states: `commit` takes it back as `supersedesDigest` when replacing a VERIFIED
+        // fact (proof of read), and `helix_dual_verify` takes it in a `quotedMemory` pair to exempt a
+        // record from the memory-echo guard — and the records a caller quotes are overwhelmingly NOT
+        // verified. It was `Verified`-only until 2026-09-02, which made that second, documented escape
+        // impossible to assemble: the guard resolves a pair against a ledger that carries a digest for
+        // every record (`helix-server.ts` builds it with `contentDigest ?? digestContent(...)`), while
+        // the only surface publishing one withheld it from all but Verified rows. The dogfood channel
+        // measured the cost — 27 refused cross-checks across 22 sessions, each shipping UNVERIFIED.
+        //
+        // The label is `contentDigest` because that is the field's name in both tool descriptions;
+        // `supersedesDigest` is the PARAMETER a caller pastes it into, not the value's name, and the
+        // mismatch between the two was itself half of why the escape went unfound. The cost is 64 hex
+        // characters per row, which `capRendered` absorbs by showing fewer rows; it discloses nothing,
+        // since a reader holding this line already holds the content it digests.
+        text: contentDigest !== undefined
+          ? `${presentId(record.id)} ${record.content}\n    contentDigest=${contentDigest}`
           : `${presentId(record.id)} ${record.content}`,
         mark: `DATA[${record.state}:${scope}]| `,
       })),
