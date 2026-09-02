@@ -1,31 +1,108 @@
 {
-  "payload": {
-    "artifactKind": "v0.1-release-candidate",
-    "candidateCommit": "01483ce9192028177c594a1a977d47a154535af6",
-    "treeShaAtCut": "b48f07dac95b69a38c5f338962d6be0d410e8741",
-    "cutAt": "2026-08-19T06:48:00.000Z",
-    "bundles": {
-      "bin/helix-mcp.mjs": "e04a01640b67d1d813352a84ae47c5000d4f34e13c81922e843be73a20740d83",
-      "bin/helix-rebaseline.mjs": "510073f3d98af708d836c77d8a52560cac7eea6c2ed58aaf5b9f0895ae98a71c",
-      "bin/helix-trigger.mjs": "2ae99bb4fea132b4543a1c4d283577d98d1dbe274721483927b30c9d194083bb",
-      "bin/hooks/session-end.mjs": "bbb5b5aa52f18942d0d937c9395705f0fe6dcbee68e7befa3f8b1c7eec1de35f",
-      "bin/hooks/session-start.mjs": "0806e945e05de8dc8026fe51ee088160a6be2aed59700d941cfc54479d22ac35"
-    },
-    "manifest": {
-      ".claude-plugin/plugin.json": "5fccae10f7f420c733257a79ac8cebce3878073f32cceae4ff49e5acc39223ce",
-      ".claude-plugin/marketplace.json": "b36c52c1c0dc46cf9906eaf2924c10a1bfe152b8b837718081a7caf181987765",
-      "hooks/hooks.json": "d135a67aa58b10fc805b46a959272099e01e5ed701c511d99319e4641b63bf02"
-    },
-    "claimSet": {
-      "data/inventory/surface.json": "b1f5069fb41f9e432381b2695c44cff1c798a3fc3660d43eba4efc9638b84286",
-      "data/inventory/claims.json": "c3776a6dde0de52a12db941314a2ab2fa44289e6e369f674544b20ca39b5e76d"
-    },
-    "gateAtCut": {
-      "typecheck": "exit 0",
-      "suite": "184 files passed, 2 skipped (186); 2348 tests passed, 2 skipped (2350)",
-      "skippedAre": "the two metered Codex opt-in files, which need HELIX_REAL_CODEX=1",
-      "rebuildMovesBin": false
-    }
+ "payload": {
+  "artifactKind": "v0.1-release-candidate",
+  "candidateCommit": "fc9f500763bed8f195f01bcc16ba33f00892c34e",
+  "treeShaAtCut": "b9841e51dcf6",
+  "cutAt": "2026-09-02T05:47:14.901Z",
+  "bundles": {
+   "bin/helix-mcp.mjs": "4a7f01efe4f371b5aee6db8ba448d6dcdd9a4a113537a63f78070e2c6cd5b51d",
+   "bin/helix-rebaseline.mjs": "4f8d1b874ef7f26762387608a40f3bf80ceeb086a8d4bc3cce6460669c60b182",
+   "bin/helix-trigger.mjs": "2ab612990ab3c4e8339efd7e67695bad82191a9866445285511213a043787e5d",
+   "bin/helix-trust-resolve.mjs": "a5c027b20b65e4abf7ad5ecb321b29084120dfb60dfe090d3494f575a400d6f6",
+   "bin/hooks/session-end.mjs": "83d89a723a02030638e6be76995fa95f3a4dfe1987d3371c735443bf1585c675",
+   "bin/hooks/session-start.mjs": "b140fbf4ac699f3350a690de830e0cd23639883988c3e5dc55e422f14e077c48"
   },
-  "payloadSha256": "2ce045286cc4687fb025cc435b3ebe1dffc9b579c03caf24c4d63c95b92d04f9"
+  "manifest": {
+   ".claude-plugin/plugin.json": "5fccae10f7f420c733257a79ac8cebce3878073f32cceae4ff49e5acc39223ce",
+   ".claude-plugin/marketplace.json": "b36c52c1c0dc46cf9906eaf2924c10a1bfe152b8b837718081a7caf181987765",
+   "hooks/hooks.json": "d135a67aa58b10fc805b46a959272099e01e5ed701c511d99319e4641b63bf02"
+  },
+  "claimSet": {
+   "data/inventory/surface.json": "a780b465c3b642a0b1e0095bd152807782269b1f6b79bc4c35c65da873d4de29",
+   "data/inventory/claims.json": "bbeccef531cf4deb1dcf561c9df6fd71a0edaae8f819ce556b29d354daffd3d6"
+  },
+  "rowIds": [
+   "r001",
+   "r002",
+   "r003",
+   "r004",
+   "r005",
+   "r006",
+   "r007",
+   "r008",
+   "r009",
+   "r010",
+   "r011",
+   "r012",
+   "r013",
+   "r014",
+   "r015",
+   "r016",
+   "r017",
+   "r018",
+   "r019",
+   "r020",
+   "r021",
+   "r022",
+   "r023",
+   "r024",
+   "r025",
+   "r026",
+   "r027",
+   "r028",
+   "r029",
+   "r030",
+   "r031",
+   "r032",
+   "r033",
+   "r034",
+   "r035",
+   "r036",
+   "r037",
+   "r038",
+   "r039",
+   "r040",
+   "r041",
+   "r042",
+   "r043",
+   "r044",
+   "r045",
+   "r046",
+   "r047",
+   "r048",
+   "r049",
+   "r050",
+   "r051",
+   "r052",
+   "r053",
+   "r054",
+   "r055",
+   "r056",
+   "r057",
+   "r058",
+   "r059",
+   "r060",
+   "r061",
+   "r062",
+   "r063",
+   "r064",
+   "r065",
+   "r066",
+   "r067",
+   "r068",
+   "r069",
+   "r071",
+   "r072",
+   "r073",
+   "r074",
+   "r075"
+  ],
+  "gateAtCut": {
+   "typecheck": "exit 0",
+   "suite": "200 files passed, 2 skipped (202); 2559 tests passed, 2 skipped (2561)",
+   "skippedAre": "the two metered Codex opt-in files, which need HELIX_REAL_CODEX=1",
+   "rebuildMovesBin": false
+  }
+ },
+ "payloadSha256": "940b0064c835e903c7490f5a284013e7070986ffc3103c20208910224eba1957"
 }

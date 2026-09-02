@@ -191,6 +191,13 @@ This file records what shipped in each release of Helix. It follows
   requires a typed confirmation, and holds the ledger lock from that display through the commit.
   It is deliberately not an MCP tool: no agent-suppliable parameter can invoke it, and nothing
   invokes it automatically.
+- Operator trust-resolution ceremony: `node bin/helix-trust-resolve.mjs --scope <absoluteProjectRoot> --repair | --fresh`
+  is the only sanctioned way to settle a project ledger in `trust-pending` — the state an ambiguous
+  re-adoption enters when a registered path is re-adopted without its `.owner` stamp, where the scope
+  keeps its nonce but every read clamps to `Fresh` until a person decides. `--repair` keeps the lineage
+  and re-elevates the earlier verifies; `--fresh` rotates the nonce so a reused path cannot inherit
+  trust the new content never earned. Interactive and TTY-only, it requires a typed confirmation, and
+  like the re-baseline ceremony it is deliberately not an MCP tool.
 - Dual-verify configuration, read from the global `~/.helix/config.json` only — a checkout's
   `.helix/config.json` can neither enable the outbound path nor loosen it: `enabled` (bool, default
   `false`), `mode`, `model` (bounded at 64 characters, or `null` to inherit `~/.codex/config.toml`),
