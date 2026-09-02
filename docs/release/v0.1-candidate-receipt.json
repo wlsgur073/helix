@@ -1,9 +1,9 @@
 {
  "payload": {
   "artifactKind": "v0.1-release-candidate",
-  "candidateCommit": "fc9f500763bed8f195f01bcc16ba33f00892c34e",
-  "treeShaAtCut": "b9841e51dcf6",
-  "cutAt": "2026-09-02T05:47:14.901Z",
+  "candidateCommit": "2d8dde1a83ea690125d3be736bce59e5f75e66e6",
+  "treeShaAtCut": "ec5b8deb6e44",
+  "cutAt": "2026-09-02T06:01:14.472Z",
   "bundles": {
    "bin/helix-mcp.mjs": "4a7f01efe4f371b5aee6db8ba448d6dcdd9a4a113537a63f78070e2c6cd5b51d",
    "bin/helix-rebaseline.mjs": "4f8d1b874ef7f26762387608a40f3bf80ceeb086a8d4bc3cce6460669c60b182",
@@ -19,7 +19,7 @@
   },
   "claimSet": {
    "data/inventory/surface.json": "a780b465c3b642a0b1e0095bd152807782269b1f6b79bc4c35c65da873d4de29",
-   "data/inventory/claims.json": "bbeccef531cf4deb1dcf561c9df6fd71a0edaae8f819ce556b29d354daffd3d6"
+   "data/inventory/claims.json": "2f47517de4a584628b455ac6f60703fb0201b4fa2ce2e28508fa1759b4c402ac"
   },
   "rowIds": [
    "r001",
@@ -99,10 +99,10 @@
   ],
   "gateAtCut": {
    "typecheck": "exit 0",
-   "suite": "200 files passed, 2 skipped (202); 2559 tests passed, 2 skipped (2561)",
-   "skippedAre": "the two metered Codex opt-in files, which need HELIX_REAL_CODEX=1",
+   "suite": "the full suite is re-run and recorded in the run-sheet after the ledger is rebound; at the cut the only failure was the committed-ledger multi-candidate check, which the rebinding clears",
+   "skippedAre": "the two metered Codex opt-in files, which need HELIX_REAL_CODEX=1 — both were RUN for Block D at this tree and passed",
    "rebuildMovesBin": false
   }
  },
- "payloadSha256": "940b0064c835e903c7490f5a284013e7070986ffc3103c20208910224eba1957"
+ "payloadSha256": "8dd11e8e1f81778bc8c60f3f24405bdd5ce8b916bcfab42eb95ac761b00b854c"
 }
