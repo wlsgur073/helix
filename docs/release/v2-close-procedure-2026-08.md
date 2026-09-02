@@ -7,13 +7,28 @@
 > **This procedure has nothing left to execute:** no close chain remains to run, the guard wiring
 > and the `autoUpdate` freeze are lifted, the pins no longer constrain the tree, and repository
 > work is ordinary development. The rule it fixed was FOLLOWED — the abort-run's measured steps ran
-> from a candidate-commit checkout at `94dd136…` (abort record §2.3). One obligation survives, and
+> from a candidate-commit checkout at `94dd136…` (abort record §2.3). ~~One obligation survives, and
 > the abort does not release it: `v2-freeze-receipt-2026-08.json`'s `txClose` still drives
 > `test/output-vocabulary.test.ts`, so `o67-class-rule-2026-07.md`'s three private-workspace
 > citations must REMAIN until `2026-09-11T06:20:01.000Z`; their removal — the D2 exception below —
-> is due at that instant, not after the validated close receipt below, which was never written.
-> Read [`v2-close-report-2026-08.md`](./v2-close-report-2026-08.md), the **ABORT RECORD**; nothing
-> below has been altered.
+> is due at that instant, not after the validated close receipt below, which was never written.~~
+>
+> **CORRECTION 2026-09-02, hours after the head above was written: that obligation was DISCHARGED,
+> not waived, and the sentence is kept struck through rather than deleted because it is what this
+> head predicted.** The three citations in `o67-class-rule-2026-07.md` were de-pathed that day —
+> each spec now named by its date and title, on the precedent set at `v2-preregistration-2026-07.md`
+> on 2026-08-12 — and the expiring allowlist in `test/output-vocabulary.test.ts` that had required
+> exactly those three until `txClose` was retired with them. That test now reads neither a clock nor
+> the receipt: ZERO citations, at any time, in every tracked file it scans. What moved is the
+> REMOVAL, not the deadline — the deferral's stated ground was cost (re-issuing a receipt and
+> re-running the verification chain mid-window), and `Abort A-2026-08-31` left no chain to re-run.
+> **The receipt was NOT edited:** its payload is still sha256-sealed and its `txClose` still reads
+> `2026-09-11T06:20:01.000Z`. What the removal cost the working tree is measured in §1 of
+> "Conditions to expect at the close" below.
+>
+> Read [`v2-close-report-2026-08.md`](./v2-close-report-2026-08.md), the **ABORT RECORD**. Nothing
+> below was altered by the abort marking; the one later correction — dated 2026-09-02, in §1 of
+> "Conditions to expect at the close" — is marked in place.
 
 Written 2026-08-06, during the first v2 window. **Re-pointed 2026-08-14:** that window was reset
 under §8 and its bounds are void; the open window is now `2026-08-14T06:20:01.000Z < tx ≤
@@ -120,7 +135,7 @@ and restores both marketplace `autoUpdate` flags to true.
 These are known now. Meeting them for the first time on close day, when they cannot be
 distinguished from a genuine failure, is the outcome this section prevents.
 
-### 1. Both pinned method docs MATCH the receipt — expect no divergence, and treat one as a finding
+### 1. Both pinned method docs MATCH the receipt — expect no divergence, and treat one as a finding *(amended 2026-09-02; see the re-measurement below)*
 
 **This condition INVERTED at the second freeze and the old text would now send an operator hunting
 for a mismatch that is not there.** In the first window the receipt pinned
@@ -134,12 +149,46 @@ diverges from `--commit`. The 2026-08-14 update recording the first window as vo
 INSIDE candidate `94dd136`. Measured 2026-08-14 and re-measured 2026-08-16:
 
 - `gate-decision-2026-07-22.md` — pinned `e51e29373d73f50e…`, tree identical.
-- `o67-class-rule-2026-07.md` — pinned `c1fe768ca0ec2b11…`, tree identical.
+- `o67-class-rule-2026-07.md` — pinned `c1fe768ca0ec2b11…`, tree identical. *(SUPERSEDED
+  2026-09-02: the tree half is now `a074a2643dcdb7b0…`. The 2026-08 value stands as measured on
+  those dates; the re-measurement is below.)*
 
 ⇒ At the close, expect **both to match**. A divergence in either is no longer the known non-event
 it was in the first window; it is a finding to record and report. The one legitimate exception is
 `o67-class-rule-2026-07.md` after run-sheet step D2, which deliberately removes three citations
 AFTER the validated close receipt is written — see the close report §2.2.
+
+**Re-measured 2026-09-02, and the exception arrived early.** There is no close left at which to
+expect anything — the window ended by `Abort A-2026-08-31` — and D2's removal was brought forward to
+2026-09-02 instead of waiting for a validated close receipt that will now never be written (head
+note above). The paragraph above is left as written because it is the expectation the window was run
+under. Measured in this tree that day:
+
+- `gate-decision-2026-07-22.md` — pinned `e51e29373d73f50e…`, tree identical. Unchanged.
+- `o67-class-rule-2026-07.md` — pinned `c1fe768ca0ec2b11…`, tree now `a074a2643dcdb7b0…`. The
+  working tree diverges from that pin permanently and by intent.
+
+Three consequences, each measured or read out of this tree on 2026-09-02 rather than reasoned:
+
+- `npm run freeze-guard` stays GREEN — exit 0, `freeze-guard: anchors verified`. Its HARD anchor
+  check re-hashes each pinned method doc from the CANDIDATE COMMIT (`git show 94dd136:<path>`),
+  whose bytes are untouched, so the receipt is still true about what it actually pinned and the
+  anchor-set condition in "What would invalidate this procedure" is unaffected. The divergence
+  surfaces only as one more `::warning::worktree diverges from pin (pre-close, informational)` line
+  — five on that day, the fifth naming `o67-class-rule-2026-07.md`. That whole warning block is
+  gated on `now <= p.txClose` (`scripts/freeze-guard.ts`), so it stops being emitted once `now`
+  passes `2026-09-11T06:20:01.000Z` — that instant itself still warns — while the anchor check runs
+  unconditionally and is unaffected either way.
+- `scripts/pilot/input-pins.ts` re-derives `hashMethodDocs(process.cwd())` and now refuses
+  `method-drift` (exit 1) in this tree, naming `o67-class-rule-2026-07.md` with both hashes, and
+  will do so permanently. That is the program keeping its own contract; it is harmless only because
+  the close it guarded was canceled.
+- Two tests DO read these live bytes, and neither is bound to this receipt:
+  `test/pilot/freeze-receipt.test.ts` hashes the pinned method docs out of the working tree and
+  compares each to a sha256 it recomputes from the same file, and `test/pilot/input-pins.test.ts`
+  builds its fixture receipt from that same tree — so both pass whatever the bytes are, and nothing
+  in the suite compares them against the SHIPPED receipt's pin. Suite 2551 passed / 0 failed / 2
+  skipped, and `npm run typecheck` clean.
 
 ### 2. The close chain is bound to the deployment machine
 

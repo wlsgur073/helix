@@ -105,9 +105,9 @@ and fail-closed — the distinction is diagnostic labeling only.
 > for the v2 evidence window and is cited as the normative source by
 > `readiness-criteria-2026-07.md` and `gate-decision-2026-07-22.md`, so a reader arriving at §4
 > must not leave with the repealed rule. The full reasoning, the three-round peer reconciliation
-> behind it and the measurements that forced it are in the working design record
-> `docs/superpowers/specs/2026-07-29-v2-gate-composition-design.md` (a local operating doc);
-> C5.1 closure item 9 carries the decisions into the tracked v2 preregistration.
+> behind it and the measurements that forced it are in the 2026-07-29 v2-gate-composition design
+> spec (a local operating doc, not tracked in this repository); C5.1 closure item 9 carries the
+> decisions into the tracked v2 preregistration.
 
 ## 5. Retrodiction evidence (frozen corpus)
 
@@ -153,15 +153,26 @@ Any intervening code/rule/metric/config change resets the window (§f).
 ## 7. Why-log pointer
 
 Design provenance (independent draft → symmetric Codex compare → measurement-decided
-divergences → owner approval) is recorded in the working spec
-`docs/superpowers/specs/2026-07-26-o67-class-rule-design.md` §8 (local operating doc). The
-substantive decisions: full-credit membership decided by dual-variant retrodiction (the anchor
-survives full credit; a direct-only variant misclassifies the repaired O_10); candidate
-universe = MemoryStore's servable view; census vs qualifying exposure split; fail-closed
-unscorable statuses; exclusion-plus-shadow gate recommendation with the deadlock rationale.
+divergences → owner approval) is recorded in §8 of the 2026-07-26 o67-class-rule design spec (a
+local operating doc, not tracked in this repository). The substantive decisions: full-credit
+membership decided by dual-variant retrodiction (the anchor survives full credit; a direct-only
+variant misclassifies the repaired O_10); candidate universe = MemoryStore's servable view;
+census vs qualifying exposure split; fail-closed unscorable statuses; exclusion-plus-shadow
+gate recommendation with the deadlock rationale.
 
 The last of those — the exclusion-plus-shadow recommendation — was REPLACED on 2026-07-30, and the
 blocking consequence of qualifying exposure was withdrawn the same day; see the §4 amendment above.
 Its own provenance (three symmetric peer rounds, then a fourth on the gate composition, plus the
-measurements that showed a ledger-only window cannot produce the class) is in
-`docs/superpowers/specs/2026-07-29-v2-gate-composition-design.md` §9.
+measurements that showed a ledger-only window cannot produce the class) is in §9 of the 2026-07-29
+v2-gate-composition design spec (a local operating doc, not tracked in this repository).
+
+*(Edited 2026-09-02: the three workspace-path citations — the two above and the one in the §4
+amendment — were replaced by the specs' dates and titles; de-identification only, no rule text
+changed. The removal had been deferred to `txClose` because editing a receipt-covered document
+mid-window would have meant re-issuing that receipt and re-running the verification chain; `Abort
+A-2026-08-31` ended that window and left neither cost to pay, so it was brought forward, and the
+expiring allowlist that had held the citations in place until 2026-09-11 was retired in the same
+commit. The freeze receipt is NOT edited and `txClose` is NOT moved — these bytes simply no longer
+match the sha256 the receipt pins for this document, while the blob that pin was taken from, at
+candidate commit `94dd136`, is unchanged and is what the freeze guard re-hashes. The window's own
+disposition is `v2-close-report-2026-08.md`, the abort record.)*

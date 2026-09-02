@@ -127,6 +127,16 @@ the chain runs from the candidate-commit checkout, whose blobs are the pinned on
 as tampering (`v2-close-procedure-2026-08.md` §"Conditions to expect"), so the expected state is
 recorded in advance rather than explained afterwards.
 
+*(2026-09-02: the sentence in bold was written 2026-08-16, and its timing is overtaken. The
+divergence did happen, but on 2026-09-02 — after this report was completed on 2026-08-31, not
+before — and it was the abort that brought it on, not close day. The reasoning under the prediction
+is not overtaken with it, and is worth restating rather than assuming: the chain runs from the
+candidate-commit checkout, whose blobs are unchanged, and that checkout is where `input-pins`
+re-derived these hashes on 2026-08-31. The divergence is visible only to a re-derivation taken from
+the DEVELOPMENT tree, which is not where the chain runs — and from that tree `input-pins` was
+already refusing before this edit, over `src/memory` tool pins, one of which §2.3 records as
+off-pin inside the window. The dated values are in the last three bullets below.)*
+
 - `gate-decision-2026-07-22.md` **matches its pin, and that is a change from the first window.**
   There, the freeze commit appended an update block to this file in the same commit that issued the
   receipt against the preceding candidate, so receipt and tree disagreed by construction from minute
@@ -136,13 +146,34 @@ recorded in advance rather than explained afterwards.
   window is void — therefore lands inside the candidate (`94dd136`), not after it. Measured
   2026-08-14: pin and working tree both `e51e2937…`.
 - `o67-class-rule-2026-07.md` was byte-identical to its pin for the whole window and diverges
-  **from close day onward**: the moment the window closes, `test/output-vocabulary.test.ts` stops
-  allowing that file's three private-workspace citations and requires their removal, and removing
-  them changes its sha256. The close run-sheet performs that edit deliberately after the validated
-  close receipt is written, so the receipt records a re-verification that was still true when it
-  was taken. The candidate-commit blob remains the pinned one, and the working-tree file after the
-  edit is a different, later thing.
-- `sha256sum` of `docs/release/o67-class-rule-2026-07.md` still equals the pinned value — the three D2 citations are deliberately NOT yet removed: the vocabulary lock reads `txClose` from the immutable receipt and requires exactly those three citations until 2026-09-11T06:20:01Z, so removing them at the abort (2026-08-31) would redden the suite eleven days early. The removal is scheduled for the receipt's own instant; until then the pinned and working-tree bytes are identical
+  ~~**from close day onward**: the moment the window closes,~~ **from 2026-09-02, because**
+  `test/output-vocabulary.test.ts` stops allowing that file's three private-workspace citations and
+  requires their removal, and removing them changes its sha256. ~~The close run-sheet performs that
+  edit deliberately after the validated close receipt is written, so the receipt records a
+  re-verification that was still true when it was taken.~~ The candidate-commit blob remains the
+  pinned one, and the working-tree file after the edit is a different, later thing.
+
+  *(Corrected 2026-09-02. This bullet was written 2026-08-16, when the removal was expected at close
+  day. Two spans are struck rather than deleted, so that the forecast and the fact that it was
+  overtaken both stay visible, and one date is inserted in bold in their place. What was wrong was
+  the timing, and then a whole sentence: `Abort A-2026-08-31` ended the window eleven days before
+  the derived close, so close day never arrived, no close run-sheet performed the edit, and no
+  validated close receipt was ever written (§10) — the struck sentence describes an event that can
+  no longer occur. What was right survives unstruck: the file was byte-identical to its pin for the
+  whole window, the test does stop allowing the three citations, removing them does change its
+  sha256, and the candidate-commit blob is still the pinned one. The vocabulary rule no longer turns
+  on the window either. It read `txClose` from the freeze receipt and required exactly those three
+  citations until that instant; on 2026-09-02 that expiring deferral was retired and the rule became
+  unconditional — no tracked file may cite the private workspace, at any time, with no clock read
+  and no receipt read. The deferral's own stated ground was cost, not entitlement — re-issuing the
+  receipt and re-running the verification chain for a documentation citation — and the abort left
+  neither cost to pay, so the removal was brought forward. The deadline was not moved, and what
+  replaced it is stricter than the deadline would have produced. The three sites were de-pathed
+  rather than cut: each names its spec by date and title now, no rule text in the document changed,
+  and the document's own §7 carries a dated note saying so.)*
+- **Measured 2026-08-31 (abort-run fill) — SUPERSEDED 2026-09-02 by the two bullets below; kept with its value, because a superseded measurement is a reading someone took, not prose to be rewritten.** `sha256sum` of `docs/release/o67-class-rule-2026-07.md` still equals the pinned value — the three D2 citations are deliberately NOT yet removed: the vocabulary lock reads `txClose` from the immutable receipt and requires exactly those three citations until 2026-09-11T06:20:01Z, so removing them at the abort (2026-08-31) would redden the suite eleven days early. The removal is scheduled for the receipt's own instant; until then the pinned and working-tree bytes are identical
+- **Measured 2026-09-02 — the reading above no longer holds, by intent.** `sha256sum` of `docs/release/o67-class-rule-2026-07.md` is now `a074a2643dcdb7b096560521e71ca4c038d97ed5bc91b119b95570bccc253bfe`; the table above pins `c1fe768ca0ec2b117bc41a73e8c45546d83a2d3b7d8f344fe143114814b8a448` for it, so the WORKING TREE diverges from that pin permanently and by intent. Two things it is not. The receipt was NOT edited — its `payloadSha256` `360ffe80…` recomputes over the payload, and `txClose` still reads `2026-09-11T06:20:01.000Z`. The pin was NOT invalidated either: the receipt hashed these bytes from the working tree at issuance and refused to accept them unless they were byte-identical to the candidate's blob (`tree-commit-divergence`, `freeze-receipt.ts:306`), and that blob is untouched — `git show 94dd136:docs/release/o67-class-rule-2026-07.md` still hashes to `c1fe768c…`. The other pinned method document, `docs/release/gate-decision-2026-07-22.md`, still equals its pin `e51e2937…` on both sides
+- **Consequences, measured 2026-09-02.** `scripts/freeze-guard.ts` stays GREEN: it hashes each pinned path out of the CANDIDATE COMMIT (`git show 94dd136:<path>`) and reads the working tree only to warn, so the run prints five `worktree diverges from pin (pre-close, informational)` lines — the fifth now naming `o67-class-rule-2026-07.md` — then `freeze-guard: anchors verified`, exit 0. That warning block is gated on `now <= txClose` (`freeze-guard.ts:90`), so from 2026-09-11T06:20:01Z the same run prints no warning at all; a later reader who sees none is not looking at a different tree. `scripts/pilot/input-pins.ts` re-derives the same hashes from `process.cwd()`, so it reads the pinned bytes when it runs where the chain runs — the candidate checkout, which is why the abort-run's pins artifact exists at all — and refuses `method-drift` when it is run from the development tree instead. **That refusal is DERIVED, not run.** `input-pins` takes six required arguments and needs the whole close-bounded artifact set, which the abort means will never exist, so it was not invoked. What WAS measured on 2026-09-02 is the predicate it compares: `hashMethodDocs(process.cwd())` now returns `a074a2643dcdb7b0…` for this file against the receipt's `c1fe768ca0ec2b11…`, while the other pinned method document, `gate-decision-2026-07-22.md`, still MATCHES. The refusal follows from that pair by `input-pins.ts:166`; the count of five above is `freeze-guard`'s warning list, not `input-pins`'s output, and four of those five are `src/memory` tool pins that had already diverged before this edit — one of them, `ownership.ts`, is recorded off-pin inside the window at §2.3 under `R-2026-08-19`. What this edit changed is the content of a standing divergence, not whether one stands. No test asserts on this file's CONTENT — `test/pilot/cli-sweep.test.ts:335` names its path as an `--out` target to prove a refusal and never reads it — so the suite is unmoved: 199 files, 2551 passed / 0 failed / 2 skipped; `npm run typecheck` exit 0
 
 ### 2.3 Re-verification at the close
 
@@ -150,6 +181,13 @@ recorded in advance rather than explained afterwards.
 configuration hash at the close and refuses `method-drift` (exit 1) on any set-wise or value
 difference in either direction, so a report that exists at all was produced under pins that matched.
 That refusal is the evidence; the artifact below records it positively.
+
+*(2026-09-02: run from the development tree as it now stands, this tool refuses `method-drift` over
+five pins — four `src/memory` tool pins, all already off-pin before this edit and one of them,
+`ownership.ts`, adjudicated in-window as `R-2026-08-19`, plus, since 2026-09-02,
+`o67-class-rule-2026-07.md`, whose citations were removed after the abort. §2.2's 2026-09-02
+bullets carry the values. None of that reaches the artifact below, which was derived on 2026-08-31
+from the candidate checkout — a tree that IS the candidate's content, where this tool exited 0.)*
 
 - Method pins re-verified at the close: the input-pins artifact in the close-run directory, `freezeSha256` `360ffe80f6baf853fdc5acb4bc949a14b84838c3827cbeb56832da56bfcc7332`; its ten `inputs` are transcribed in full at §5 element 1b below
 - Where the chain ran from — **every measured step from the candidate checkout; one pre-chain check from the development tree**: (a) every measured step C2–C10 and C11 ran from the candidate checkout at `94dd136925253be74c58df92392044c550aa6ec2` (0.2: `Preparing worktree (detached HEAD 94dd136)`, `status --porcelain` empty; C8's preflight re-asserted the tree, the commit and cleanliness immediately before the producer), with the checkout's own `tsx`; (b) the pre-chain development-tree checks 0.4/0.5 were NOT run in this abort-run — they license the close ceremony's dev-tree exception, and the abort's anchor is the ledger's `Abort A-2026-08-31` entry at `ee35e41`

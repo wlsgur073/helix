@@ -16,6 +16,32 @@
 > citations must REMAIN until `2026-09-11T06:20:01.000Z` and be removed at it — the fix is the
 > removal, never the date. The measured and rehearsed output below stands as history; the window's
 > record is `v2-close-report-2026-08.md` (**ABORT RECORD**), and nothing below has been altered.
+>
+> **CORRECTED 2026-09-02 — the one surviving exception is DISCHARGED, nine days early and outside
+> this sheet's order.** The carve-out above is left standing because it was true when written; what
+> follows supersedes it. D2 — the removal of `o67-class-rule-2026-07.md`'s 3 private-workspace
+> citations — was executed on 2026-09-02. The three sites were DE-PATHED, each now naming its spec
+> by date and title, on the precedent `v2-preregistration-2026-07.md` set on 2026-08-12; and the
+> expiring allowlist in `test/output-vocabulary.test.ts` that read `payload.txClose` was RETIRED the
+> same day, so that rule is now unconditional — no tracked file may cite the private workspace, at
+> any time, with no clock read and no receipt read. The clause "must REMAIN until
+> `2026-09-11T06:20:01.000Z`" named a mechanism that no longer exists; the clause beside it, "the
+> fix is the removal, never the date", is what was done. The deferral's own ground was COST —
+> re-issuing the receipt and re-running the verification chain for a documentation citation — and
+> `Abort A-2026-08-31` dissolved it: there is no close chain to re-run, and no validated close
+> receipt will ever be written. The removal was brought forward; the deadline was not moved. **The
+> signed receipt was NOT edited** — its payload stays sha256-sealed and `payload.txClose` still
+> reads `2026-09-11T06:20:01.000Z`. With D2 discharged, **nothing below is a to-do list at all**;
+> the exception this banner reserved is spent. What it cost is carried below in dated notes, never
+> by rewriting: the working tree now diverges from the receipt's pin for that document, permanently
+> and by intent (D2's execution record in Block D, and 0.4's five-warning re-measurement).
+>
+> **What this correction itself changed, stated so the sentence above can be read exactly.** No
+> sentence written before 2026-09-02 was reworded or deleted; every note added that day sits beside
+> the sentence it supersedes. Two mechanical marks are the exceptions, both visible in place: D2's
+> checkbox is ticked and its bullet carries a dated label ahead of the step's own wording, and one
+> line in H2b is re-wrapped to admit a note. "Nothing below has been altered" is true of the record
+> and of every sentence in it, and false only of those two marks.
 
 **This is a run-sheet, not an essay.** Tick boxes as you go, paste observed output next to the
 step, and leave the file in the repository as the close-day log. The *why* behind every rule here
@@ -273,6 +299,19 @@ content drift — content identity and tree identity are different properties, a
 is what "run from the candidate checkout" asserts. *(This paragraph stated the 08-13 divergence
 alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
 
+**RE-MEASURED 2026-09-02: half of the accident is now permanent, and it is this sheet's own doing.**
+D2 was executed on 2026-09-02, ahead of the close it belonged to and outside this sheet's order (see
+Block D): the pinned METHOD DOC `docs/release/o67-class-rule-2026-07.md` had its three
+private-workspace citations removed, so its bytes differ from the receipt's pin permanently and by
+intent, and a `hashMethodDocs(process.cwd())` comparison refuses `method-drift` from `~/dev/helix`
+whatever the `src/memory` files do next. Read the paragraph above as still governing the TOOL pins —
+a revert or a merge does silently remove those — and do not lean on the method-doc refusal either:
+it is the residue of a canceled close, not a control anyone installed. Measured the same day: pin ∩
+(candidate → HEAD) is four tool paths, `src/memory/{retrieval,store,ownership,verified-read}.ts` —
+the two named above plus two moved after the abort anchor — with the method doc joining them once
+the edit is committed; and the freeze guard printed five worktree-divergence warnings, those four
+tool pins and that method doc (0.4).
+
 - [ ] **0.1 Capture the terminal transcript — FIRST, before any other command.** The report's §6
   execution log and §11 refusal record are sourced from this file, and nothing else captures one.
   The report's §6 marker asks for the commands "from checkout creation through the release record",
@@ -433,6 +472,22 @@ alone until 2026-08-17 and so promised a refusal that can no longer fire.)*
   this box, so npm's periodic version check is a network egress at a moment nothing in this sheet
   records; `npm_config_update_notifier=false` in the environment is npm's documented switch for it,
   UNMEASURED here.)*
+
+  *(RE-MEASURED 2026-09-02 — the expectation above is now FIVE, and the fifth is D2's.)* → five
+  `::warning::worktree diverges from pin (pre-close, informational):` lines, in this order:
+  `src/memory/retrieval.ts`, `src/memory/store.ts`, `src/memory/ownership.ts`,
+  `src/memory/verified-read.ts`, then `docs/release/o67-class-rule-2026-07.md` — then the
+  `note: out of scope (deploy-machine state): …` line, `freeze-guard: anchors verified`, `exit=0`.
+  Four are TOOL pins: `store.ts` and `ownership.ts` are the in-window drift Block B adjudicated,
+  while `retrieval.ts` and `verified-read.ts` were moved AFTER the abort anchor `ee35e41`
+  (`dcba44c`, `08aa3f6`). The fifth is the METHOD-DOC pin, and it is D2's removal of the three
+  citations, executed 2026-09-02 (Block D). **"A third is a finding" was the right rule and it
+  fired** — so read this list by NAME, never against the number two. It is not a failure: the loop's
+  findings go to `warnings`, the anchor loop verified, and the guard exited 0. These lines print at
+  all only because `now <= p.txClose` (`freeze-guard.ts:90`) and 2026-09-02 is inside that window;
+  the bound is INCLUSIVE, so the same divergence prints nothing only strictly AFTER
+  `2026-09-11T06:20:01.000Z` — that is the quiet run the paragraph above tells you to read nothing
+  into.
 
   Success: exit 0 with a final `freeze-guard: anchors verified`.
   Refusal: any `anchor:` / `pin-omitted:` / `payload-sha256:` line, or a final
@@ -767,7 +822,12 @@ candidate and showed the other's real reason was different; see R2.)*
   its own contract." The contract is unchanged; what changed is that the condition triggering it no
   longer holds.)* *(Re-measured 2026-08-25 and 2026-08-27: they DO differ again — the two files named
   in Block B — so today the wrong cwd would refuse `method-drift`; C4 records the refusal as observed
-  and says why that protection is accidental and must not be leant on.)*
+  and says why that protection is accidental and must not be leant on.)* *(Re-measured 2026-09-02:
+  the `hashMethodDocs` half now differs too, and not by accident — D2 edited the pinned method doc
+  `docs/release/o67-class-rule-2026-07.md` that day (Block D), permanently and by intent, so the
+  wrong cwd refuses `method-drift` on that document however the drifted `src/memory` files move
+  next — four of them on that day's measurement, not the two named above; see 0.4. The refusal
+  lists tool pins before method docs, `input-pins.ts:159-160`.)*
 
 **R2 — the one step whose INPUT cannot exist in the checkout: the DEV TREE, with `cd ~/dev/helix`.**
 Exactly one: `npm run freeze-guard` (step 0.4). It reads the freeze receipt, and a freeze receipt is
@@ -1191,6 +1251,15 @@ $TSX scripts/pilot/input-pins.ts \
   happen to differ, and a revert or a merge removes it without notice. The instruction, not the
   mechanism, is what stops a moved chain. See Block B, and C8's preflight for the one step that
   asserts its own tree.
+  *(Re-measured 2026-09-02: the intersection has grown, and one member of it is no longer
+  contingent. Pin ∩ (candidate → HEAD) is four TOOL paths —
+  `src/memory/{retrieval,store,ownership,verified-read}.ts`, the two named above plus two moved
+  after the abort anchor — and D2 edited the pinned METHOD DOC
+  `docs/release/o67-class-rule-2026-07.md` that day (Block D), permanently and by intent. So a chain
+  moved to `~/dev/helix` refuses `method-drift` on that document even if every tool pin above were
+  reverted, and the sentence above governs the tool pins only. The instruction is still what stops a
+  moved chain: a refusal that exists because a canceled close left an edited method doc behind is a
+  residue, not a control.)*
 - [ ] **K and both window bounds are copied from the receipt and cannot be passed** — there is no
   flag for them. That is the mechanism that keeps close day from re-deciding the method.
 - [ ] Success: `pins.json` written, bound back to the freeze by `freezeSha256`.
@@ -2227,6 +2296,38 @@ reason it would refuse there — and the receipt chain's final link is written a
 longer exists. *(Corrected 2026-08-17: "a *second*, unrelated reason" presupposed a first, Block
 B's pin divergence, which the re-freeze removed.)*
 
+> ### SUPERSEDED 2026-09-02 — THE EDIT WAS MADE, AND THE ORDER THIS BLOCK PROTECTS CANNOT ARISE.
+>
+> The paragraphs above are left byte-identical; the first of them is a MEASUREMENT and keeps its
+> value. **Then:** pinned `c1fe768ca0ec2b11…`, "the tree is currently identical — verified
+> 2026-08-13". **Now, measured 2026-09-02:** pinned `c1fe768ca0ec2b11…`, working tree
+> `a074a2643dcdb7b096560521e71ca4c038d97ed5bc91b119b95570bccc253bfe` — divergent, permanently and
+> by intent, because D2 was executed that day (its record sits under D2 below). The other pinned
+> method doc, `gate-decision-2026-07-22.md`, still equals its pin `e51e29373d73f50e…`.
+>
+> Two of the sentences above are now false as written, and neither is deleted. **(a) The trigger was
+> not "the instant `txClose` passes".** `test/output-vocabulary.test.ts`'s expiring allowlist was
+> retired on 2026-09-02 and the rule left in its place is unconditional, so nothing in the suite
+> waits for that instant any more. **(b) The ordering constraint has no order left to get wrong.**
+> Under `Abort A-2026-08-31` the validated close receipt (D1) does not exist and will not, so
+> "receipt first, edit second" was unreachable and the edit could only be made without it. What this
+> block predicted for the wrong order is now simply the state: given the chain's inputs, a step
+> re-run from `~/dev/helix` compares `hashMethodDocs(process.cwd())` against the receipt
+> (`input-pins.ts:291`, refusal composed at `:160`/`:166`) and refuses `method-drift` naming this
+> document, permanently. That is the residue of a canceled close, not a control — no assertion in
+> the suite depends on these bytes, and the freeze guard stays green because it re-hashes the
+> CANDIDATE COMMIT's blob, which is untouched. (The bytes ARE read by the suite: `freeze-guard.test.ts`
+> calls `runFreezeGuard` against the real tree, whose pre-close loop hashes both method docs from
+> the worktree — but it asserts only `failures` / `ok` / `notes`, and a worktree divergence lands in
+> `warnings`.)
+>
+> One clause was already false before today, and correcting it here stops the two errors compounding:
+> "the edited method doc, which as of the re-freeze is the only reason it would refuse there" stopped
+> holding on 2026-08-25, when Block B re-measured pinned `src/memory` files as drifted in this tree.
+> Measured 2026-09-02, pin ∩ (candidate → HEAD) is four TOOL paths —
+> `src/memory/{retrieval,store,ownership,verified-read}.ts` — and this method doc joins that
+> intersection as a fifth member once the edit is committed.
+
 - [ ] **D1. Write the validated close receipt** — only **after** `release-record.json` validated,
   and only **after C11** has observed the runtime pin. Its existence alone is nothing;
   `scripts/freeze-runtime-check.sh` (step 0) validates the shape.
@@ -2303,7 +2404,10 @@ bash ~/dev/helix/scripts/freeze-runtime-check.sh; echo "exit=$?"
   `freezePayloadSha256` or `releaseRecordPayloadSha256` is wrong; the guard then continues to
   hard-fail on every other check. Fix the receipt, do not delete it.
 
-- [ ] **D2. Only now** remove the 3 private-workspace citations from
+- [x] **D2 — DONE 2026-09-02, off-schedule and out of this sheet's order** (the box is ticked
+  because the act happened, not because this run-sheet ran: no D1 receipt preceded it and none will.
+  The dated execution record is under the rehearsal notes below.) The step as written: **Only now**
+  remove the 3 private-workspace citations from
   `docs/release/o67-class-rule-2026-07.md` (lines 109, 157, 167 — they name spec files under the
   gitignored local workspace; the fix is to remove the citations, **never to move the date**).
 
@@ -2323,6 +2427,50 @@ bash ~/dev/helix/scripts/freeze-runtime-check.sh; echo "exit=$?"
   `test/output-vocabulary.test.ts` back to `2 passed` with the clone's receipt STILL past
   `txClose` — the fix is the removal, not the date, now observed. The diff is three hunks of one
   line each.
+
+  > ### EXECUTED 2026-09-02 — the live edit, what it cost, and why it did not wait for `txClose`.
+  >
+  > **What was done.** The three citations were de-pathed in the tracked document rather than cut:
+  > each names its spec by date and title now — the 2026-07-29 v2 gate-composition design at §4's
+  > amendment and again at §7's closing sentence, the 2026-07-26 o67-class-rule design at §7's
+  > opening — every sentence kept, and a dated *(Edited 2026-09-02: …)* note was added at the end of
+  > that document's §7 recording the change. Measured: the needle command above prints nothing,
+  > exit 1, and the document holds zero occurrences of the private-workspace directory name. Three
+  > sites, TWO distinct spec files (the 2026-07-29 design is cited twice); both were removed from
+  > the working tree in the same operation, and their current bytes survive in two local archives.
+  >
+  > **The rehearsal's shape does not describe the live edit.** The 2026-08-27 scratch-clone drill
+  > above produced three one-line hunks and sha256 `9741e615…`. The live edit rewrapped the three
+  > paragraphs and carries the §7 note, so it is **+22/−11 over two hunks** (three at `-U0`) and the
+  > document's sha256 is `a074a2643dcdb7b096560521e71ca4c038d97ed5bc91b119b95570bccc253bfe`. Read
+  > `9741e615…` as the drill's value, not this document's.
+  >
+  > **Why 2026-09-02.** The deferral's stated ground was COST: editing a receipt-covered document
+  > mid-window meant re-issuing that receipt and re-running the verification chain, disproportionate
+  > for a documentation citation. `Abort A-2026-08-31` (T_abort `2026-08-31T10:02:21.000Z`, anchor
+  > `ee35e41`) ended the window, so there is no close chain to re-run and no validated close receipt
+  > will ever be written — the ground was gone, and an obligation to remove was met early rather
+  > than waived. The deadline was not moved. **The signed receipt was not edited**: its payload is
+  > sha256-sealed and `payload.txClose` still reads `2026-09-11T06:20:01.000Z`.
+  >
+  > **Measured the same day, each observed rather than reasoned.** The freeze guard
+  > (`scripts/freeze-guard.ts`, the `freeze-guard` npm script) → five
+  > `::warning::worktree diverges from pin (pre-close, informational):` lines, then
+  > `note: out of scope (deploy-machine state): …`, `freeze-guard: anchors verified`, `exit=0`; the
+  > fifth warning names `docs/release/o67-class-rule-2026-07.md` (0.4 carries the full list and
+  > supersedes its two-warning expectation there). It stays GREEN because it hashes every pinned
+  > method doc out of the CANDIDATE COMMIT — `git show 94dd136:<path>`, `freeze-guard.ts:78-86` —
+  > and that blob is untouched, so the receipt remains true about what it actually pinned; worktree
+  > divergence reaches `warnings`, never `ok`. `scripts/pilot/input-pins.ts` re-derives the same
+  > hashes from `process.cwd()` (`:291`), so a run from this tree with the chain's inputs present
+  > would refuse `method-drift` carrying a `method doc docs/release/o67-class-rule-2026-07.md
+  > (frozen c1fe768c…, close-time a074a264…)` entry, and would do so permanently — read from
+  > `input-pins.ts:154-168` and the sha256 pair above, NOT run live: the close-bounded snapshot it
+  > needs does not exist and never will. `gate-decision-2026-07-22.md`, the other pinned method doc,
+  > still equals its pin. Full suite `Test Files 199 passed | 2 skipped (201)` /
+  > `Tests 2551 passed | 2 skipped (2553)`, exit 0; `npm run typecheck` exit 0. (E4's dated
+  > six-failure set is the freeze's own signature and was cleared by the post-abort `bin/` rebuilds,
+  > not by D2.)
 
 ---
 
@@ -2397,6 +2545,19 @@ behaviour, not a failed close.** Read this block before running `npm test` on cl
   `AssertionError: expected { …(1) } to deeply equal {}` /
   `+ { "docs/release/o67-class-rule-2026-07.md": 3 }` at `test/output-vocabulary.test.ts:66` — the
   instant is read from the receipt, confirmed by the flip following the edited copy.
+
+  > **SUPERSEDED 2026-09-02 — E2 CANNOT FLIP: the mechanism it describes was retired.** The lines
+  > above are the dated record of a gate that existed until that day, and they stay as written. On
+  > 2026-09-02 the expiring allowlist was retired and the three citations were removed (D2), so the
+  > case now asserts `expect(got).toEqual({})` unconditionally — no `ALLOW`, no `Date.now()`, no
+  > read of the receipt at all. Nothing in `test/output-vocabulary.test.ts` waits for `txClose` any
+  > more, and a red there on any date is a REAL failure rather than a scheduled one. Measured
+  > 2026-09-02: `Tests 2 passed (2)`, with the private-workspace needle absent from every tracked
+  > file. Two consequences for reading the block above: its `test/output-vocabulary.test.ts:66`
+  > citation no longer resolves to that assertion — retiring the deferral rewrote the comment above
+  > it and moved every line number in the file, and the assertion now sits at `:94` — and Block E is
+  > down to **one** flip: E3 was withdrawn 2026-08-25, E2 is gone from 2026-09-02, and only the
+  > conditional E1 remains.
 
 - [ ] **E3. WITHDRAWN 2026-08-25 — the gate this step describes no longer exists. Do not expect
   a red flip here.**
@@ -2479,6 +2640,10 @@ behaviour, not a failed close.** Read this block before running `npm test` on cl
   **D2's effect on the set:** D2 removes the 3 citations, so `test/output-vocabulary.test.ts` is
   already green again by the time you get here on this sheet's order. Running Block E before D2 adds
   E2 to the set.
+  *(Overtaken 2026-09-02: D2 ran that day, ahead of this sheet entirely, and the allowlist that made
+  the ordering matter was retired with it. `test/output-vocabulary.test.ts` is green with zero
+  citations under any order, so E2 can no longer join this set — before D2 or after it — and this
+  paragraph's ordering caveat has nothing left to warn about.)*
 
 ---
 
@@ -2954,7 +3119,11 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
     may not carry a literal `/home/<user>` or `/mnt/c/Users/<user>` path — the only allowlisted
     files are the two freeze receipts, the live one and the void `…-2026-08-02-void.json`, three
     paths each (`PRIVATE_ALLOW`, `test/output-vocabulary.test.ts:102-105`; *corrected 2026-08-27 —
-    this said "the freeze receipt itself", one file*). The
+    this said "the freeze receipt itself", one file*).
+    *(Re-measured 2026-09-02: the allowlist itself is unchanged — the same two receipts, three
+    paths each, PERMANENT by design — but it now sits at `test/output-vocabulary.test.ts:131-134`.
+    Retiring the Class B deferral that day rewrote the comment block above it and moved every line
+    number in the file. Read the allowlist by NAME; a line citation into an unpinned file rots.)* The
     chain artifacts DO contain absolute paths (snapshot directory, config path), which is the
     reason this step commits an index and not the artifacts.
 
@@ -3032,6 +3201,11 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   - the **transcript's path and sha256** (§6) — from H7, taken after the capture was closed, never
     from inside it;
   - `o67-class-rule-2026-07.md`'s **post-D2 sha256** (§2.2), alongside its pinned value.
+    *(Measurable since 2026-09-02, and no longer a close-day product: D2 was executed that day, so
+    the pair this line asks for is pinned `c1fe768ca0ec2b11…` against post-D2
+    `a074a2643dcdb7b096560521e71ca4c038d97ed5bc91b119b95570bccc253bfe`. H3 confirms a report that is
+    now the ABORT RECORD, so that record is where the pair belongs; recording it here does not
+    discharge it there.)*
 
 - [ ] **H4. State the two structurally always-pass conditions in their own detail.** *Errors /
   unscorable* and the mechanical half of *Protocol and population integrity* cannot appear as
@@ -3084,6 +3258,11 @@ python3 -c "import json,os;print('known_marketplaces:', json.load(open(os.path.e
   second were byte-identical, `733a6e82…` twice, while the third, a second later, was `b61ba5a5…`.
   "Different on each run" is true at one-second resolution. The post-close lock re-run below is
   unrehearsable until `txClose` has passed.)*
+  *(Corrected 2026-09-02: that reason is gone. `test/output-vocabulary.test.ts`'s expiring allowlist
+  was retired that day (E2, D2), so the lock reads no clock and behaves identically on both sides of
+  `txClose` — measured the same day, `Tests 2 passed (2)`. What stays unrehearsable here is the
+  re-run's INPUT, the filled evidence-index row, not the lock. The top-of-sheet unrehearsed list
+  carries this same superseded reason for this item.)*
 
   Type `exit` (or Ctrl-D) at the transcript shell's prompt. You land back in the shell that started
   0.1, `script` prints its `Script done on …` line, and the file is final. Then:

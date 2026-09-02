@@ -19,6 +19,54 @@
 > private-workspace citations in `o67-class-rule-2026-07.md` in place until that instant and
 > requires them gone after it, and `test/freeze-guard.test.ts` still verifies the receipt's pin set
 > against candidate `94dd136`. Nothing below has been altered.
+>
+> **Correction 2026-09-02, entered the same day as the marking above and after it.** The paragraph
+> above is left standing and unedited because it was true when written; one clause of it was
+> overtaken the same day and is superseded here, not rewritten. The clause: *"its `txClose` gates
+> `test/output-vocabulary.test.ts`, which holds the three private-workspace citations in
+> `o67-class-rule-2026-07.md` in place until that instant and requires them gone after it"*.
+>
+> **What still holds.** `v2-freeze-receipt-2026-08.json` was NOT edited: its payload is still
+> sha256-sealed and its `txClose` still reads `2026-09-11T06:20:01.000Z`. And
+> `test/freeze-guard.test.ts` is untouched, still verifying the receipt's pin set against `94dd136`.
+>
+> **What no longer holds.** The vocabulary lock reads neither the receipt nor the clock. The
+> expiring allowlist that required exactly three citations in `o67-class-rule-2026-07.md` until
+> `txClose`, and none after it, was RETIRED on 2026-09-02, and the three citations were de-pathed
+> the same day — each names its spec by date and title now, on the precedent
+> `v2-preregistration-2026-07.md` set on 2026-08-12. What replaces it is STRICTER than the deadline
+> would have produced: zero citations in any tracked file, at any time. The deadline was not moved,
+> the removal was brought forward — the deferral's stated ground was the cost of re-issuing the
+> receipt and re-running the verification chain mid-window, and `Abort A-2026-08-31` left no chain
+> to re-run. So the receipt is OPENED by one tracked test now rather than two:
+> `test/output-vocabulary.test.ts` still NAMES it, inside the permanent exemption for the three
+> absolute paths its payload records, but no longer parses it. `o67-class-rule-2026-07.md` carries a
+> dated note of its own at the end of its §7, recording the edit at the site of the edit.
+>
+> **The measurement that changed, both values kept.** `o67-class-rule-2026-07.md` is one of the two
+> pinned method documents (`payload.methodDocs`). The pin remains true about what it pinned:
+> `git show 94dd136:docs/release/o67-class-rule-2026-07.md` still hashes to `c1fe768ca0ec2b11…`,
+> the receipt's own value, re-measured 2026-09-02. That document's bytes in this working tree now
+> hash to `a074a2643dcdb7b0…` instead — divergence from the pin, permanent and by intent. The other
+> pinned method document, `gate-decision-2026-07-22.md`, still equals its pin (`e51e29373d73f50e…`,
+> same measurement).
+>
+> **Consequences, measured 2026-09-02 rather than reasoned.** `npm run freeze-guard` prints five
+> informational `::warning::` worktree-divergence lines — the fifth now naming
+> `o67-class-rule-2026-07.md` — then `freeze-guard: anchors verified`, exit 0, because it re-hashes
+> every pinned path out of the CANDIDATE COMMIT and only warns about the tree.
+> `scripts/pilot/input-pins.ts` re-derives the method-doc hashes from `process.cwd()`, so it now
+> refuses `method-drift` naming that file and will do so permanently — harmless only because the
+> close it guarded was canceled. No tracked test compares these bytes with the pin
+> (`test/pilot/freeze-receipt.test.ts` re-hashes them only against `sha256sum` of the same file),
+> so the full suite is green with the divergence in place, 2551 passed / 0 failed / 2 skipped, and
+> `npm run typecheck` is clean. One thing this leaves for a later reader — the guard's
+> worktree-divergence loop is gated IN ITS ENTIRETY on `now <= txClose` (`scripts/freeze-guard.ts`),
+> so after `2026-09-11T06:20:01.000Z` it prints no worktree warnings at all: that fifth line and the
+> four `payload.tools` lines before it vanish together. Silence there will mean the loop stopped
+> running, not that any file was restored.
+>
+> Nothing below this STATUS block is altered by any of it.
 
 Every entry in this ledger is REQUIRED content for the §9a close report's reset-and-deviation
 history (`v2-close-procedure-2026-08.md` links here). The freeze receipt itself

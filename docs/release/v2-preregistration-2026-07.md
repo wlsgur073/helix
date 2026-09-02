@@ -10,10 +10,25 @@
 > no successor window is open. §1's claim and coverage statement and §7's D5 duties still travel
 > with the abort record's numbers; the gate's BLOCKED verdict (eligible Hit@1 exposure 1 against
 > §5's minimum of 2) is that window's evidence, not a live gate. Separately,
-> `v2-freeze-receipt-2026-08.json`'s `txClose` still drives `test/output-vocabulary.test.ts`, so
+> ~~`v2-freeze-receipt-2026-08.json`'s `txClose` still drives `test/output-vocabulary.test.ts`, so
 > `o67-class-rule-2026-07.md`'s three private-workspace citations must remain until
-> `2026-09-11T06:20:01.000Z`. Read [`v2-close-report-2026-08.md`](./v2-close-report-2026-08.md),
-> the **ABORT RECORD**; nothing below has been altered.
+> `2026-09-11T06:20:01.000Z`.~~ **Overtaken 2026-09-02, later the same day the struck sentence was
+> written; it is kept struck rather than deleted so that a reader can see the prediction was made
+> and then overtaken.** The three citations were removed that day and the expiring allowlist in
+> `test/output-vocabulary.test.ts` was retired with them, so that test now opens neither a clock nor
+> the receipt: no tracked file may cite the private workspace, at any time. The deferral's stated
+> ground was COST — editing a receipt-covered document mid-window would have meant re-issuing the
+> receipt and re-running the verification chain — and `Abort A-2026-08-31` left neither cost to pay,
+> so the removal was brought FORWARD; the deadline was not moved, and the rule left behind is
+> stricter than the one the deadline would have produced. **The receipt itself is NOT edited**: its
+> payload stays sha256-sealed and its `txClose` still reads `2026-09-11T06:20:01.000Z`. What the
+> removal costs this document is recorded in §10, where the `o67-class-rule-2026-07.md` method-doc
+> pin row now diverges from the working tree by intent. Read
+> [`v2-close-report-2026-08.md`](./v2-close-report-2026-08.md), the **ABORT RECORD**; nothing below
+> has been altered. *(Amended 2026-09-02: that last clause was true when this banner was written and
+> no longer is. Three dated 2026-09-02 annotations have since been added below — two in §10, on the
+> disclosure-question paragraph and on the `o67-class-rule-2026-07.md` pin row, and one on §12's
+> why-log pointer. None changes a registered rule, a number, or a pinned value.)*
 
 Date drafted: 2026-07-31 · §10 filled: 2026-08-02 · **§10 RE-filled 2026-08-14 after a §8 window
 reset** · Status: **IN FORCE from the commit that carries this filled table — that commit is the
@@ -503,6 +518,29 @@ freeze, and the new candidate simply contains them. The disclosure question the 
 — pinned files whose bytes had moved past the candidate they were pinned against — does not exist
 here, because the re-freeze re-pins them at their current bytes.
 
+*(Corrected 2026-09-02. The sentence immediately above was true when written at the re-freeze; it is
+recorded here rather than rewritten, because what overtook it accumulated afterwards. Measured on
+this date rather than reasoned: five pinned paths' WORKING-TREE bytes have moved past the candidate
+they are pinned against, and they divide into two kinds. Four are `src/memory` rows —
+`retrieval.ts`, `store.ts`, `ownership.ts`, `verified-read.ts` — carrying ordinary post-freeze source
+work committed after `94dd136`; that is the in-window drift the guard is built to tolerate, it
+predates this date, and it is not the disclosure question. The fifth is deliberate and is this
+document's concern: `o67-class-rule-2026-07.md` was edited on 2026-09-02 to remove its three
+private-workspace citations — de-identification only, no rule text changed — so a pinned METHOD
+document now diverges permanently and by intent. Its working tree hashes to sha256
+`a074a2643dcdb7b096560521e71ca4c038d97ed5bc91b119b95570bccc253bfe`, while the candidate blob at
+`94dd136` is untouched and still hashes to the pinned `c1fe768c…`, so the freeze receipt remains
+true about what it actually pinned. `freeze-guard.ts` hashes the pinned paths out of the CANDIDATE
+COMMIT and reports a working-tree difference as a WARNING only, so it stays green — that day's run:
+five informational warnings, `freeze-guard: anchors verified`, exit 0, the fifth naming
+`o67-class-rule-2026-07.md`. `input-pins.ts` re-derives the same hashes from the working tree
+instead, so a close run from this tree would now refuse with `method-drift` naming that file, and
+would do so forever — harmless only because `Abort A-2026-08-31` canceled the close it guarded. The
+other pinned method document, `gate-decision-2026-07-22.md`, still matches its pin at
+`e51e2937…` in both the candidate and the tree, and no test asserts either document's pinned hash —
+the freeze and pin suites run against temporary fixtures — with the full suite at 2551 passed / 0
+failed / 2 skipped and typecheck clean.)*
+
 Identities are pinned **separately**, because they can drift independently:
 
 | pin | value |
@@ -539,7 +577,7 @@ Identities are pinned **separately**, because they can drift independently:
 | `git hash-object` — `src/memory/witness-read.ts` | `c948a73cf740d1c2c580d1aaa916c70abca3af09` |
 | `git hash-object` — `src/memory/witness-core.ts` | `e22468f91eb971a99616dda7c74e56e4134f4cfa` |
 | `git hash-object` — `scripts/close/adjudication-skeleton.ts` *(added 2026-08-14)* | `adb31cc40073ba119c567531b65ff08c303ff67b` |
-| sha256 — `o67-class-rule-2026-07.md` | `c1fe768ca0ec2b117bc41a73e8c45546d83a2d3b7d8f344fe143114814b8a448` |
+| sha256 — `o67-class-rule-2026-07.md` | `c1fe768ca0ec2b117bc41a73e8c45546d83a2d3b7d8f344fe143114814b8a448` — the pin is unchanged and the candidate blob at `94dd136` still hashes to it; *(2026-09-02: the WORKING TREE now hashes to `a074a2643dcdb7b096560521e71ca4c038d97ed5bc91b119b95570bccc253bfe` — divergence by intent; see the dated correction above this table)* |
 | sha256 — `gate-decision-2026-07-22.md` | `e51e29373d73f50e0a26fd6e538b3d45460550205221aaa66a2b4543d4522258` |
 | sha256 — this document's parent commit blob | *(n/a — see below)* |
 
@@ -589,7 +627,17 @@ measurement-decided divergences, recorded in
 the 2026-07-29 v2-gate-composition design spec §9 (a local operating doc — see
 also `2026-07-26-o67-class-rule-design.md` §8 for the membership rule). *(Edited 2026-08-12:
 the workspace-path citation was replaced by the spec's title — de-identification only, no
-content change.)* The substantive reversals worth naming here, because no code or changelog
+content change.)* *(Corrected 2026-09-02: the pointer above still names where this section's
+reasoning was argued, but neither spec is present in the local workspace to consult any longer. Both
+were removed on 2026-09-02, in the same operation that de-identified `o67-class-rule-2026-07.md`'s
+citations to them. Their bytes are retained in local archive tarballs, and what that retention
+measures, checked that day, is uneven: the 2026-07-26 o67-class-rule design spec is present in three
+archives, byte-identical in all three, while the 2026-07-29 v2-gate-composition design spec's FINAL
+bytes are present in two — the third and oldest archive holds an earlier revision of that spec, not
+its final bytes. As before, neither is reachable from a checkout of this repository: the local
+workspace has never been tracked here. The pointer is kept rather than dropped, because it is the
+honest record of where this section's reasoning lives and the reversals below are what it accounts
+for.)* The substantive reversals worth naming here, because no code or changelog
 preserves them:
 
 - the claim was **narrowed** to process integrity (§1) after "a rule not adjusted after seeing

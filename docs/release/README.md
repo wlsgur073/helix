@@ -86,6 +86,13 @@ close-day tooling was built inside it, and the method was re-frozen on 2026-08-1
 receipt is kept, marked void, and must never be edited or deleted — a voided record that
 disappears is worse than no record. The open window runs to `2026-09-11T06:20:01.000Z`.
 
+*(Superseded 2026-09-02: that window never reached the instant this sentence names. The owner ended
+it on 2026-08-31 — `Abort A-2026-08-31`, T_abort `2026-08-31T10:02:21.000Z`, anchored at `ee35e41`,
+eleven days early; the record is `v2-close-report-2026-08.md`, which became the abort record. The
+receipt was NOT edited — its `payload.txClose` still reads `2026-09-11T06:20:01.000Z`, and that
+instant still governs the freeze guard's warn-only comparison against the working tree. What ended
+is the window, not the pins.)*
+
 **August 2026 — certifying the first release candidate.** `v0.1-certification-runsheet.md` is the
 execution record for certifying the release candidate itself, bound to the candidate named in
 `v0.1-candidate-receipt.json`. It is currently marked stale by design: the candidate moved on
@@ -105,6 +112,12 @@ the bundles again and would discard an earlier run.
 - `o67-class-rule-2026-07.md` — the frozen offline classification rule for superset-competition
   cases, without which the exercised/unexercised report the gate decision requires cannot be
   produced. Byte-pinned by the freeze receipt; also read at runtime by `src/memory/retrieval.ts`.
+  *(2026-09-02: the pin is unchanged and still true of what it pinned — the blob at candidate
+  commit `94dd136`, sha256 `c1fe768ca0ec2b11…`, which is what the freeze guard re-hashes — but it
+  no longer describes this tracked file. Its three private-workspace citations were de-pathed that
+  day, each spec now named by date and title, so its bytes are sha256 `a074a2643dcdb7b0…` and the
+  working tree diverges from the pin permanently and by intent; the document's own §7 records why.
+  Editing it was possible because the window had already ended by abort on 2026-08-31.)*
 
 **The withdrawn July attempt — kept because the first release inherits its governance**
 
@@ -145,6 +158,18 @@ the bundles again and would discard an earlier run.
 
 - **The public push.** Deferred 2026-06-21 and still the owner's decision. It is the last step.
 - **The pilot window closes 2026-09-11.** Until then the frozen bytes must not move.
+  *(Superseded 2026-09-02: neither half still holds, and this item is no longer owed. The owner
+  ended the window on 2026-08-31 (`Abort A-2026-08-31`), and on 2026-09-02 one of the two
+  receipt-pinned method documents — `o67-class-rule-2026-07.md` — was edited to de-path its three
+  private-workspace citations. Measured that day rather than reasoned: the freeze guard exits 0,
+  because it re-hashes the pins out of candidate commit `94dd136`, whose blobs are untouched, and
+  reports the working tree's divergence as an informational warning only;
+  `gate-decision-2026-07-22.md`, the other pinned document, still matches its pin; and
+  `scripts/pilot/input-pins.ts`, which re-derives the same hashes from this working tree, refuses
+  `method-drift` over five pins — four `src/memory/` tool pins that had already diverged through
+  post-candidate development, and now this method document as the fifth. The edit adds a name to a
+  refusal that already stood rather than causing it, and that refusal is inert either way because
+  the close it guarded was canceled. The receipt itself was not edited.)*
 - **Certification blocks re-run after the post-close rebuild**, per the run-sheet's own staleness
   rule.
 - **A post-close rebuild and redeploy.** Several fixes are complete in source but deliberately not
@@ -164,6 +189,12 @@ are mechanical rather than editorial:
 1. **Two files are byte-pinned by the freeze receipt.** Editing either one during the open window
    resets the window and discards the real-use verification accumulated so far — which has already
    cost this project one window.
+   *(Superseded 2026-09-02: this reason has lapsed. There is no open window left to reset — the
+   second ended by abort on 2026-08-31 — and on 2026-09-02 `o67-class-rule-2026-07.md`, one of the
+   two, was edited with no reset and no verification discarded. The cost recorded above, the first
+   window reset on 2026-08-13, stands as history. What survives is narrower and blocks nothing: the
+   receipt remains evidence of what the candidate commit held, and that one file's tracked bytes no
+   longer match its pin. Reasons 2 and 3 are untouched by this.)*
 2. **Eleven files are read by literal path** from source, tests, and the freeze guard. Merging them
    breaks the build, not just the prose.
 3. **Three files are close-day instruments**, not narrative: a run-sheet that gets ticked, a report
@@ -172,3 +203,11 @@ are mechanical rather than editorial:
 The consolidation therefore belongs to the post-close cleanup, together with the citation cleanup
 that the vocabulary test already schedules for the same moment. Until then, this file carries the
 single narrative and each document keeps its own authority.
+
+*(Superseded 2026-09-02: the citation cleanup is done, and nothing schedules it any more. The
+vocabulary test's expiring allowlist — exactly three citations required in
+`o67-class-rule-2026-07.md` until the receipt's `txClose`, none permitted after — was retired that
+day and replaced by an unconditional rule: no tracked file may cite the private workspace, at any
+time, with neither a clock nor a receipt read. The three sites were de-pathed the same day, so the
+count is zero. Whether this directory is consolidated, and when, is a separate question this note
+does not settle.)*
