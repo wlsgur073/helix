@@ -6,11 +6,19 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** The five bundles `build.mjs` produces. This list IS the executable surface that ships. */
+/**
+ * The six bundles `build.mjs` produces. This list IS the executable surface that ships, so it has
+ * to be extended whenever `build.mjs` gains an entry point. `helix-trust-resolve.mjs` was added to
+ * `build.mjs` on 2026-09-01 and not to this list, and the omission was invisible: with a real
+ * divergence injected into that bundle, the five-entry list returned `[]` — no staleness reported —
+ * while a six-entry list named it. The candidate receipt already pins all six (11 artifacts =
+ * 6 bundles + 3 manifest + 2 claim set), so this list was the only place still counting five.
+ */
 const BUNDLES: readonly string[] = [
   'helix-mcp.mjs',
   'helix-trigger.mjs',
   'helix-rebaseline.mjs',
+  'helix-trust-resolve.mjs',
   'hooks/session-start.mjs',
   'hooks/session-end.mjs',
 ];
