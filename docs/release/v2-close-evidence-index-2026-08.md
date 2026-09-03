@@ -7,6 +7,12 @@ run sheet's H2b: the working set in the operator's close-run directory, and a du
 owed to the same off-machine location as the Q4 backup (PENDING as of this writing; the snapshot
 directory itself is retained offline only and is not part of the non-secret set).
 
+*(2026-09-03: do NOT discharge that durable copy against the location the Q4 backup was placed in.
+It was measured onto the system disk rather than onto a separate medium — the abort record's Q4
+correction carries the measurement — so copying the evidence chain there would reproduce the same
+defect. The two chain artifacts already placed in that directory sit on the system disk for the same
+reason. Redo Q4's copy first, then use the medium it establishes.)*
+
 | artifact | bytes | sha256 |
 |---|---|---|
 | `manifest.json` | 3269 | `19cfcadf215f0a3733c67195cc0d73fd248bdb3e49476ce2a061f7d299a74793` |

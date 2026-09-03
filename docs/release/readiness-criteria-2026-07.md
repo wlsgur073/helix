@@ -829,3 +829,57 @@ long-standing opt-in metered external-model tests):
 
 C5.1's remaining pre-freeze work is unchanged by this section: fill prereg §10 and commit — the
 freeze — then run the close sequence the tooling now enforces.
+
+---
+
+## 13. Amendment record — 2026-09-03 (what the §5 evidence program produced, and what it left open)
+
+This section closes the readiness ledger's account of the v2 evidence program. It re-decides
+nothing: every C5.x requirement and the 2026-07-30 Q3 amendment in §7 stand exactly as written.
+What it adds is the outcome, which the ledger never recorded.
+
+**The sequence, dated.** The method was frozen on 2026-08-02 and the first window opened. On
+2026-08-13 that window was RESET under the preregistration's own reset clause — close-day tooling
+was built inside it — and the method was re-frozen on 2026-08-14 against a new candidate, the
+superseded receipt kept and marked void. The second window was derived to run to
+`2026-09-11T06:20:01.000Z`. It did not reach that instant: the owner ended it on 2026-08-31 by
+`Abort A-2026-08-31`, T_abort `2026-08-31T10:02:21.000Z`, eleven days early.
+`v2-close-report-2026-08.md` became the abort record, and neither receipt was edited.
+
+**What the window measured.** 13 distinct `(project, record-id)` identities accrued, and exactly
+one eligible Hit@1 probe row. Against C5.2's minimum of two distinct eligible target identities
+the gate returns `blocked: true`, reason `Hit@1 — exposure 1 is below the minimum of 2, so the
+primary measurement did not happen (PARTIALLY EXERCISED — 1/2 (minimum not met))`. The O_67 class
+reports `UNEXERCISED — 0 distinct cases observed (reporting only, non-blocking)`, which is what
+the §7 amendment provides for it. C5.2 priced this outcome in advance — roughly one window in six
+was expected to starve, and the minimum of two is labelled a starvation floor rather than a power
+calculation — so this is a preregistered result rather than a surprise, and D5's duty is
+discharged by reporting the primary measurement as unmade instead of as a pass.
+
+**What is NOT settled, and is left open on purpose.** C5.2 says of this exact state that
+`UNEXERCISED — 0/2` and `PARTIALLY EXERCISED — 1/2 (minimum not met)` both block release. The
+abort record scopes its own consequence to the evidence rather than to the product: *"Nothing is
+released on this record: the gate blocked at sample sufficiency … no pre-registered close claim
+attaches to them."* Read the first way, `v0.1.0` waits for a window that accrues two eligible
+identities. Read the second, `v0.1.0` may ship provided it carries no Hit@1 claim, and the remedy
+for a starved window is to withdraw the claim rather than to withhold the product. **No ruling
+exists in this repository, and this section does not make one** — it is an owner decision, and
+`README.md` §1 in this directory carries the same open question so a reader meets it at the map.
+
+**Where the criteria themselves stand.** C1.3, C3.1–C3.3 and C4.1–C4.6 are done, the last with
+`c4-drills-2026-07.md` as the record. C5.1's pre-freeze work completed at the 2026-08-14
+re-freeze. C5.2 executed and returned the blocked verdict above. §7's own owner decisions are
+unchanged: Q1 resolved 2026-07-24, Q2 decided 2026-07-22, Q3 decided 2026-07-22 and amended
+2026-07-30. What moved belongs to a DIFFERENT numbering — the C4.6 tabletop's owner-owed items,
+which this document does not define and `c4-drills-2026-07.md` does. **C4.6-Q1 and C4.6-Q2 were
+closed by the owner on 2026-09-01**, and **C4.6-Q4 has regressed to open**: its encrypted archive is
+produced and digest-verified, but the copy recorded as living on a separate medium was measured on
+2026-09-02, and re-measured on 2026-09-03, to sit on the same physical disk as its source, so the
+separate-medium requirement is unmet rather than merely undetached. The correction is in the abort
+record; redoing the copy is an owner act, not a change to any criterion here.
+
+**Certification, which is a separate track.** The release candidate's own certification never
+depended on the evidence program. `v0.1-certification-runsheet.md` reads 74 of 74 rows MET at
+candidate `2d8dde1`, `npm run certify-gate` exiting 0 on 2026-09-02. The declaration was deferred
+by the owner the same day and development continues on `feat/helix-v1`, so the certification holds
+only until the next commit that moves `bin/`.

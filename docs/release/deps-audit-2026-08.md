@@ -1,6 +1,7 @@
 # Dependency advisory triage — 2026-08
 
-Snapshot date: 2026-08-21 · Source: `npm audit --json`. Counts **before** the fast-uri fix below:
+Snapshot date: 2026-08-21 · Source: `npm audit --json`. **Counts re-measured 2026-09-03 and they
+have moved — see "Refresh 2026-09-03" at the end before relying on any number in this section.** Counts **before** the fast-uri fix below:
 `{"info":0,"low":2,"moderate":2,"high":4,"critical":0,"total":8}` (production-only,
 `npm audit --omit=dev --json`: `{"info":0,"low":1,"moderate":2,"high":2,"critical":0,"total":5}` —
 5 packages: `@hono/node-server`, `body-parser`, `fast-uri`, `hono`, `ip-address`). Counts **after**
@@ -42,7 +43,9 @@ and again on 2026-08-21 (same versions both times).
 
 Only `fast-uri` required action this cycle: it is the sole advisory-bearing package that ships in
 the frozen `bin/helix-mcp.mjs` (3 files, confirmed both before and after the fix). All three current
-fast-uri GHSAs are fixed as of `3.1.5`, and `ajv@8.20.0`'s declared dependency range (`^3.0.1`)
+fast-uri GHSAs are fixed as of `3.1.5` *(2026-09-03: "current" meant the three GHSAs known on
+2026-08-21. Four more, all high, now cover `3.0.0 - 3.1.5` inclusive, so `3.1.5` no longer clears
+this package — see "Refresh 2026-09-03")*, and `ajv@8.20.0`'s declared dependency range (`^3.0.1`)
 admits it — confirmed both by manual semver reasoning (`^3.0.1` = `>=3.0.1 <4.0.0`) and by
 `npm audit fix --dry-run --json`, which independently proposed the identical `3.1.2 => 3.1.5` bump
 with no `--force`. `package.json` now carries `"overrides": { "fast-uri": "3.1.5" } `; `npm install`
@@ -77,6 +80,10 @@ confirming no further change is pending.
 
 ## actually-reachable outcomes
 
+*(2026-09-03: this `None` covers the 2026-08-21 advisory set only. `fast-uri` carries four
+advisories disclosed since, and their reachability is NOT re-verified — see "Refresh 2026-09-03" at
+the end. Until it is, this section makes no claim about them.)*
+
 None, before or after this refresh. The 8 currently advisory-bearing packages carry 20 distinct
 GHSA advisories on the 2026-08-21 snapshot (up from 9 across 7 packages on 2026-08-03: the original
 9 all recur, plus 11 newly disclosed or newly reached — `GHSA-7p8r` on `fast-uri`; 4 more on `hono`;
@@ -104,3 +111,51 @@ row.
   and reproduce the esbuild metafile exactly as described in Method above, then re-check each
   verdict's evidence — including re-diffing the package list against this snapshot's 9 rows, not
   just re-reading counts.
+
+## Refresh 2026-09-03 — counts re-measured, reachability triage OWED
+
+This is a counts-and-membership refresh, not a new triage. The Limitations section above requires
+re-diffing the package list against the 9 rows of the 2026-08-21 snapshot rather than re-reading
+totals, and that diff is what this section reports. **No verdict below is re-derived: the esbuild
+metafile was not rebuilt and no reachability path was re-traced, so every row's disposition above
+remains the 2026-08-21 one and the new advisories carry no disposition at all.**
+
+Measured 2026-09-03 with the same command the Method section names, on an unchanged dependency
+tree (`@modelcontextprotocol/sdk@1.29.0`, `fast-uri@3.1.5`, `qs@6.15.2`):
+
+- `npm audit --json`: `{"info":0,"low":2,"moderate":3,"high":5,"critical":0,"total":10}` across 10
+  packages — the 8 advisory packages of the 08-21 snapshot plus `qs` and `ajv`. (An earlier reading
+  of this same command during drafting returned 9 keys without `ajv`; three consecutive re-runs
+  return 10, so the 9 was a bad read and the 10 is the measurement. It is recorded rather than
+  silently corrected, because the 9 is the number this section would otherwise have shipped.)
+- `npm audit --omit=dev --json`: `{"info":0,"low":1,"moderate":3,"high":3,"critical":0,"total":7}`
+  across `@hono/node-server`, `ajv`, `body-parser`, `fast-uri`, `hono`, `ip-address`, `qs`.
+
+Three changes since 2026-08-21, and the first is the one that matters:
+
+1. **`fast-uri` is back, on four advisories none of which existed at the last snapshot** —
+   GHSA-5jgf-p345-68v8, GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf and GHSA-jqff-g426-hqxp, all
+   high, all host-confusion or SSRF in the same URI **parse** step as the three the row above
+   triaged. The vulnerable range is `3.0.0 - 3.1.5` and the installed version is `3.1.5`, so the
+   08-21 lockfile upgrade — which did clear the then-known advisories — no longer clears this
+   package. `fast-uri` is the one package carrying an advisory **of its own** that ships inside
+   `bin/helix-mcp.mjs` (3 files, confirmed in that snapshot's metafile), which is why it is listed
+   first here. That qualifier is load-bearing as of this refresh: `ajv`, which carries no GHSA of
+   its own and enters the audit only by inheritance from `fast-uri`, ships too and at 63 files, so
+   "the one advisory package in the bundle" would no longer be true read against the production list
+   above. The 08-21 reachability argument was that the sole AJV call site against
+   caller-supplied data is `elicitInput`, which Helix never calls and whose schemas declare no
+   URI/IRI format; that argument is about the call path rather than about any particular GHSA, so
+   it plausibly carries over — **but it has not been re-verified against these four, and until it
+   is, this row has no disposition.**
+2. **`qs` is new** (moderate; GHSA-x5fp-wj9c-mxmx array-limit bypass, GHSA-4mjr-xmp4-gh2g
+   attacker-controlled `isBuffer` DoS), reached as sdk → `express@5.2.1` → `qs`, the same Express
+   subtree the `body-parser` row above triages as `bundled-unreachable`. Untriaged here for the
+   same reason as above.
+3. **`ajv` now appears as its own production entry**, via `fast-uri`. This is `npm audit`
+   attribution bookkeeping of the kind the `@modelcontextprotocol/sdk` row already documents, not
+   a tree change: `npm ls` still resolves the single sdk → `ajv@8.20.0` → `fast-uri@3.1.5` chain.
+
+**Owed, and named here so it is not lost:** re-run the Method section's metafile reproduction and
+re-trace the four new `fast-uri` GHSAs and the two `qs` ones to a verdict. That work moves nothing
+in `bin/` by itself (`write: false`), so it does not disturb the release candidate.
