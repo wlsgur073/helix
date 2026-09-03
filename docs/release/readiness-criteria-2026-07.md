@@ -483,6 +483,35 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   (and Helix has no telemetry, by design). **Remedy DECIDED 2026-07-22 (owner decision Q2):
   BOTH** the supported-scale statement (folded into C4.9) **AND** the local content-free
   advisory (C4.10) ship before the v2 freeze.
+- **AMENDED 2026-09-03 — the latency arm has FIRED, and the "years away" reading above holds only
+  for the row and byte arms.** Trigger-1 has evaluated `fired` on every daily dogfood run since
+  2026-08-26 (`~/.helix/trigger.jsonl`). On 2026-09-03 the row arm read 62 of 2,500 and the byte
+  arm 175,293 of 4,194,304 — both far below — while the latency arm read 4 slow recalls in a
+  trailing window of 66 against a threshold of 3. The trigger is therefore not adoption-coupled on
+  all three arms: the latency arm is reachable at dogfood scale, today.
+  **The cause is not scale.** Measured 2026-09-03 by driving the SHIPPED bundle under
+  `node --cpu-prof`, three fresh processes per variant, against a fixture the server itself
+  committed (61 rows / 193,299 bytes): cold first recall is **107.3 ms** median, of which
+  **65.7 ms is fixed cost that an EMPTY ledger still pays** and 41.6 ms scales with the ledger. The
+  largest single item is `loadExpansion` at **42.6 ms** — the one-off read of the 1.35 MB
+  semantic-neighbour asset, resolved lazily inside the recall path, so no earlier tool call warms
+  it (a `helix_codex_status` first call left the following recall at 115.5 ms). Warm recalls cost
+  5.0 ms. The tokenise cluster (22.4 ms) and the rank/index cluster (15.8 ms) account for the
+  ledger-dependent 41.6 ms, and the two derivations agree.
+  **Fire-time go/no-go (decision-spec §8), decided on that measurement:** move the asset load off
+  the request path to server start FIRST, then re-measure. Preload alone predicts a cold first
+  recall of ≈ 64.7 ms, under §8's 100 ms bar, and it is one call into an existing module-level lazy
+  cache. Stage 1's sidecar is therefore **not built now** — not because it would not help, since it
+  targets the ~38 ms tokenise-and-index clusters and those are real, but because it becomes
+  unnecessary once the bar is met, and its persistence and invalidation surface would be a cost
+  with no remaining benefit. If the re-measure after preload still misses the bar, Stage 1 returns
+  to the table. Trigger-2 is deliberately NOT evaluated until the fixed cost is gone: today's p95
+  would fire it on that cost alone.
+  **Recorded late, and that is itself the finding.** The fire went unnoticed for seven days.
+  `scripts/trigger-measure.ts` computes `overall: "fired"` and writes it to the sink, but nothing
+  latches it and neither `dogfood-postrun.sh` nor `dogfood-watch.sh` reads it — so the
+  observability gap the bullet above records for external adopters applies to this project's own
+  runs as well. The latch and the surfacing ride with the same batch as the preload.
 
 ## 7. Owner decisions (ratification gate)
 
