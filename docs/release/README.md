@@ -169,7 +169,12 @@ the abort's instead.)*
 - `v2-preregistration-2026-07.md` — the registered method, in force.
 - `v2-freeze-receipt-2026-08.json` — the signed pin set. Read by `src/memory/firewall.ts`, by the
   freeze guard, and by tests, all by literal path.
-- `v2-freeze-runtime-pins-2026-08.txt` — the runtime pin list the guard compares against.
+- `v2-freeze-runtime-pins-2026-08.txt` — the runtime pin list the guard compares against. The
+  guard itself, `scripts/freeze-runtime-check.sh`, is **RETIRED since 2026-09-05 and inert by
+  default**: the window it enforced ended by abort, its checks are anchored to the retired
+  candidate, and it now exits 0 with a notice unless `FRC_FORCE=1` is set. It is kept, not
+  deleted, because the close checklist, the deviation ledger and the abort record cite it. Both
+  files stay for that record; neither constrains the tree any more.
 - `v2-freeze-receipt-2026-08-02-void.json` — the superseded first-window receipt. **Never edit or
   delete.**
 - `v2-freeze-deviations-2026-08.md` — the deviation ledger: every departure from the frozen

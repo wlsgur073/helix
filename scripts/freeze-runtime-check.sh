@@ -1,4 +1,29 @@
 #!/usr/bin/env bash
+#
+# STATUS: RETIRED 2026-09-05 -- INERT BY DEFAULT. The window this guard enforced ENDED BY ABORT on
+# 2026-08-31 (Abort A-2026-08-31, T_abort 2026-08-31T10:02:21Z, anchored at ee35e41; record:
+# docs/release/v2-close-report-2026-08.md, rewritten as the ABORT RECORD). The guard wiring is gone
+# (no shell rc hook, no systemd ExecStartPre) and the autoUpdate freeze is lifted, so there is
+# nothing left to enforce. Its own retirement path CANNOT fire: step 0 exits only on a VALIDATED
+# docs/release/v2-close-receipt-2026-08.json, and the window aborted instead of closing, so that
+# receipt was never written -- and writing one now would falsify the record.
+#
+# Two measured reasons the default had to change, not just the wiring (2026-09-05):
+#   1. The checks below are anchored to the RETIRED candidate 94dd136 and to the aborted window, so
+#      an invocation reports the CORRECT post-abort state (263f2a9 deployed, autoUpdate restored)
+#      as six violations. A guard that fails a healthy system is worse than no guard.
+#   2. FRC_HEAL defaulted to 1, which armed the `git reset --hard "$CANDIDATE"` below. It could only
+#      fire when clone-HEAD drift was the SOLE violation -- six stand today, so it was not live --
+#      but the primitive does not belong in a retired tool. The default is now 0.
+#
+# LEFT IN PLACE RATHER THAN DELETED: the release record cites this script 36 times across four
+# TRACKED documents (v2-close-checklist, v2-freeze-deviations, v2-close-report, v2-close-procedure);
+# deleting the file would make the D1 rehearsal steps those documents specify unreproducible.
+# Measured 2026-09-05: nothing executes it -- no test, no npm script, no CI job, no shell rc, no
+# systemd unit.
+#
+# TO RUN THE HISTORICAL VALIDATOR ANYWAY (forensics, or reproducing a cited drill): FRC_FORCE=1.
+# FRC_HEAL still defaults to 0 and must be set explicitly to re-arm the reset.
 # freeze-runtime-check.sh - v2 freeze window runtime-pin guard (2026-08).
 # Silent when healthy or after a VALIDATED close; one aggregate stderr banner
 # and exit 1 while any violation stands. Point-in-time detection, not
@@ -11,6 +36,12 @@
 # authored time, a moved window means new values here, not an edited receipt. All
 # four must move together — a half-updated set fails the anchor check in step 1,
 # which is the intended behaviour and not a bug to work around.
+
+# Retirement gate (2026-09-05). Nothing below runs unless a caller opts in explicitly.
+if [ "${FRC_FORCE:-0}" != "1" ]; then
+  printf '[freeze-guard] RETIRED 2026-09-05: the v2 window ended by abort on 2026-08-31 and this guard has nothing to enforce (its checks are anchored to the retired candidate). Set FRC_FORCE=1 to run the historical validator.\n' >&2
+  exit 0
+fi
 
 CANDIDATE="${FRC_CANDIDATE:-94dd136925253be74c58df92392044c550aa6ec2}"
 PAYLOAD_SHA="${FRC_PAYLOAD_SHA:-360ffe80f6baf853fdc5acb4bc949a14b84838c3827cbeb56832da56bfcc7332}"
@@ -111,7 +142,7 @@ fi
 # clone-HEAD drift and every byte/pin check passed, mechanize the twice-approved remediation —
 # reset the clone to the candidate, log the heal, notify on stderr, exit healthy. Any other
 # combination (byte drift, flag drift, past-close, dirty clone) still hard-fails below.
-HEAL="${FRC_HEAL:-1}"
+HEAL="${FRC_HEAL:-0}"   # was 1 until 2026-09-05; see the RETIRED banner at the top
 HEAL_LOG="${FRC_HEAL_LOG:-$HOME/.cache/freeze-guard-heals.log}"
 if [ "$HEAL" = "1" ] && [ ${#fails[@]} -eq 1 ] && [[ "${fails[0]}" == "marketplace clone HEAD"* ]]; then
   if [ -z "$(git -C "$CLONE" status --porcelain=v1 2>/dev/null)" ] \
