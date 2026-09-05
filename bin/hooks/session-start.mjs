@@ -1088,9 +1088,11 @@ function frameClose(nonce) {
 }
 var LINE_BREAK = /\n|\u2028|\u2029/;
 var TRAILING_LINE_BREAKS = /(?:\n|\u2028|\u2029)+$/;
+function markLines(text, mark) {
+  return text.replace(TRAILING_LINE_BREAKS, "").split(LINE_BREAK).map((line) => mark + line).join("\n");
+}
 function datamark(text, mark, maxChars) {
-  const normalized = normalizeUntrusted(text, maxChars).replace(TRAILING_LINE_BREAKS, "");
-  return normalized.split(LINE_BREAK).map((line) => mark + line).join("\n");
+  return markLines(normalizeUntrusted(text, maxChars), mark);
 }
 var safeId = (id) => id.replace(/[^A-Za-z0-9_-]/g, "");
 var NON_VERIFYING_FLAG = {

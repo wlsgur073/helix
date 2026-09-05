@@ -15091,15 +15091,27 @@ function frameClose(nonce) {
 }
 var LINE_BREAK = /\n|\u2028|\u2029/;
 var TRAILING_LINE_BREAKS = /(?:\n|\u2028|\u2029)+$/;
+function markLines(text, mark) {
+  return text.replace(TRAILING_LINE_BREAKS, "").split(LINE_BREAK).map((line) => mark + line).join("\n");
+}
 function datamark(text, mark, maxChars) {
-  const normalized = normalizeUntrusted(text, maxChars).replace(TRAILING_LINE_BREAKS, "");
-  return normalized.split(LINE_BREAK).map((line) => mark + line).join("\n");
+  return markLines(normalizeUntrusted(text, maxChars), mark);
 }
 function makeDataFrame(opts) {
-  const body = opts.lines.length === 0 ? ["(no relevant memory)"] : opts.lines.map((l) => datamark(l.text, l.mark, opts.maxChars));
+  const body = opts.lines.length === 0 ? ["(no relevant memory)"] : opts.lines.map((l) => l.normalized === true ? markLines(l.text, l.mark) : datamark(l.text, l.mark, opts.maxChars));
   return [frameOpen(opts.label, opts.nonce), DATA_SEMANTICS, ...body, frameClose(opts.nonce)].join("\n");
 }
 var safeId = (id) => id.replace(/[^A-Za-z0-9_-]/g, "");
+var MAX_ID_CHARS = 128;
+var ID_CHARSET_RE = /^[^\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]+$/u;
+function isValidId(id) {
+  return id.length >= 1 && id.length <= MAX_ID_CHARS && ID_CHARSET_RE.test(id);
+}
+function presentId(id) {
+  if (!isValidId(id)) return safeId(id).slice(0, MAX_ID_CHARS);
+  const normalized = normalizeUntrusted(id);
+  return isValidId(normalized) ? id : safeId(id).slice(0, MAX_ID_CHARS);
+}
 var NON_VERIFYING_FLAG = {
   "user-relayed": "(relayed source \u2014 confirm with user) ",
   "agent-inference": "(agent inference \u2014 unconfirmed) ",
@@ -15115,11 +15127,13 @@ function frameAsData(scoped, nonce, maxChars) {
   return makeDataFrame({
     label: "RECALLED MEMORY",
     nonce,
-    lines: scoped.map(({ record: record2, scope }) => ({
-      text: `${reverifyFlag({ state: record2.state, blastRadius: record2.blastRadius, source: record2.provenance.source })}${record2.content}`,
-      mark: `DATA[${record2.state}:${scope}]| `
-    })),
-    maxChars
+    lines: scoped.map(({ record: record2, scope, contentDigest }) => {
+      const flag = reverifyFlag({ state: record2.state, blastRadius: record2.blastRadius, source: record2.provenance.source });
+      const body = `${flag}${normalizeUntrusted(record2.content, maxChars)}`;
+      const proof = contentDigest === void 0 ? "" : `
+${normalizeUntrusted(`    ${presentId(record2.id)} contentDigest: ${contentDigest}`)}`;
+      return { text: body + proof, mark: `DATA[${record2.state}:${scope}]| `, normalized: true };
+    })
   });
 }
 
@@ -15685,9 +15699,16 @@ var MemoryStore = class {
     return record2;
   }
   /** Resolve the ledger to write to. Project scope claims ownership on first use and refuses a
-   *  pre-existing unowned (foreign) ledger. Falls back to global when no project layer is active. */
+   *  pre-existing unowned (foreign) ledger. With no project layer active, an OMITTED scope falls
+   *  back to global — the contextual default — while an EXPLICIT 'project' is REFUSED rather than
+   *  silently widened; see the argument on that branch below. */
   targetLedger(scope) {
     const p = this.opts.project;
+    if (scope === "project" && !p) {
+      throw new Error(
+        "commit: scope 'project' was requested but no project memory layer is active here. Adopt this project (helix_memory_adopt) or omit `scope` to use the contextual default \u2014 the write is refused rather than silently widened to the global ledger."
+      );
+    }
     if (scope === "global" || !p) return this.global;
     if (!isOwned(p.root, this.homeDir())) {
       if (existsSync4(p.ledger)) {
@@ -15930,14 +15951,15 @@ var MemoryStore = class {
       scope: byRecord.get(record2)?.scope ?? "global",
       needsReverify: requiresReverifyBeforeUse({ state: record2.state, blastRadius: record2.blastRadius, source: record2.provenance.source }),
       // I7: recomputed per call
-      integrity: byRecord.get(record2)?.integrity ?? "ok"
+      integrity: byRecord.get(record2)?.integrity ?? "ok",
+      contentDigest: byRecord.get(record2)?.contentDigest
     });
     const items = hits.map(toItem);
     const appendix = appendixRecords.map(toItem);
     return {
       items,
       appendix,
-      framed: frameAsData([...items, ...appendix].map(({ record: record2, scope }) => ({ record: record2, scope })), this.nonce()),
+      framed: frameAsData([...items, ...appendix].map(({ record: record2, scope, contentDigest }) => ({ record: record2, scope, contentDigest })), this.nonce()),
       // I7: fresh nonce per call
       integrityAvailable: available,
       projectDisposition: disposition,
@@ -25164,22 +25186,12 @@ function appendCodexLog(path, entry) {
 
 // src/server/handlers.ts
 var ok = (text) => ({ content: [{ type: "text", text }] });
-var MAX_ID_CHARS = 128;
-var ID_CHARSET_RE = /^[^\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]+$/u;
-function isValidId(id) {
-  return id.length >= 1 && id.length <= MAX_ID_CHARS && ID_CHARSET_RE.test(id);
-}
 function assertValidId(id) {
   if (!isValidId(id)) {
     throw new Error(
       `invalid id: must be 1-${MAX_ID_CHARS} printable, non-control characters (got ${id.length}). An id from an adopted ledger that still fails this bound is not reachable through this MCP tool, but can be erased/rechecked/confirmed directly via the MemoryStore API from a script (operator-only, outside any conversation) \u2014 see docs/release/recovery-playbook.md.`
     );
   }
-}
-function presentId(id) {
-  if (!isValidId(id)) return safeId(id).slice(0, MAX_ID_CHARS);
-  const normalized = normalizeUntrusted(id);
-  return isValidId(normalized) ? id : safeId(id).slice(0, MAX_ID_CHARS);
 }
 function unadoptedNote(disposition) {
   return disposition === "unadopted-present" ? `
@@ -25234,7 +25246,7 @@ function handleRecall(store2, args) {
 
 (recency appendix \u2014 newest records included regardless of rank: ${recencyIds.join(", ")})` : "";
   const trailingNotes = reverifyNote + egressNote + integrityNote + conflictNote + recencyNote + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes);
-  const scoped = served.map(({ record: record2, scope }) => ({ record: record2, scope }));
+  const scoped = served.map(({ record: record2, scope, contentDigest }) => ({ record: record2, scope, contentDigest }));
   const { text: framedOut } = capRendered(
     scoped.length,
     (n) => frameAsData(scoped.slice(0, n), newNonce(), args.maxChars),
@@ -25336,7 +25348,7 @@ ${n}`);
         // characters per row, which `capRendered` absorbs by showing fewer rows; it discloses nothing,
         // since a reader holding this line already holds the content it digests.
         text: contentDigest !== void 0 ? `${presentId(record2.id)} ${record2.content}
-    contentDigest=${contentDigest}` : `${presentId(record2.id)} ${record2.content}`,
+    contentDigest: ${contentDigest}` : `${presentId(record2.id)} ${record2.content}`,
         mark: `DATA[${record2.state}:${scope}]| `
       }))
     }),
@@ -25477,7 +25489,7 @@ function echoedMemoriesLine(v) {
 }
 function guardLine(g) {
   if (!g) return "";
-  return `guards: ${g.evaluated.join(", ")} \u2014 stopped at ${g.stoppedAt}`;
+  return `guards: ${g.evaluated.join(" -> ")} \u2014 stopped at ${g.stoppedAt}`;
 }
 function egressLine(v) {
   if (!v) return "egress: unavailable (internal)";
@@ -26104,9 +26116,9 @@ function buildServer(store2, dualDeps, metrics2) {
       classification: external_exports.enum(["normal", "personal"]).optional(),
       supersedes: ID_SCHEMA.optional(),
       supersedesDigest: external_exports.string().regex(/^[0-9a-f]{64}$/, "supersedesDigest must be a 64-character lowercase hex digest").optional().describe(
-        "Required only when superseding a VERIFIED fact: the `contentDigest=` value helix_memory_inspect shows for that row. Echoing it proves you retrieved the record you are replacing; a supersede issued without having read the target is refused."
+        "Required only when superseding a VERIFIED fact: the `contentDigest:` value helix_memory_inspect shows for that row. Echoing it proves you retrieved the record you are replacing; a supersede issued without having read the target is refused."
       ),
-      scope: external_exports.enum(["project", "global"]).optional()
+      scope: external_exports.enum(["project", "global"]).optional().describe("Which ledger to write to. Omit for the contextual default: the project ledger when a project layer is active, the global one otherwise. `global` always writes global. `project` REQUIRES an active project layer and is refused when there is none, rather than silently widening the write to global.")
     }
   }, async (args) => m.runOp("helix_memory_commit", () => handleCommit(store2, args)));
   server2.registerTool("helix_memory_recall", {
@@ -26371,6 +26383,7 @@ var server = buildServer(store, {
 }, metrics);
 var transport = new StdioServerTransport();
 await server.connect(transport);
+defaultExpansion();
 installSelfTermination({
   stdin: process.stdin,
   stdout: process.stdout,

@@ -2030,13 +2030,26 @@ function frameClose(nonce) {
 }
 var LINE_BREAK = /\n|\u2028|\u2029/;
 var TRAILING_LINE_BREAKS = /(?:\n|\u2028|\u2029)+$/;
+function markLines(text, mark) {
+  return text.replace(TRAILING_LINE_BREAKS, "").split(LINE_BREAK).map((line) => mark + line).join("\n");
+}
 function datamark(text, mark, maxChars) {
-  const normalized = normalizeUntrusted(text, maxChars).replace(TRAILING_LINE_BREAKS, "");
-  return normalized.split(LINE_BREAK).map((line) => mark + line).join("\n");
+  return markLines(normalizeUntrusted(text, maxChars), mark);
 }
 function makeDataFrame(opts) {
-  const body = opts.lines.length === 0 ? ["(no relevant memory)"] : opts.lines.map((l) => datamark(l.text, l.mark, opts.maxChars));
+  const body = opts.lines.length === 0 ? ["(no relevant memory)"] : opts.lines.map((l) => l.normalized === true ? markLines(l.text, l.mark) : datamark(l.text, l.mark, opts.maxChars));
   return [frameOpen(opts.label, opts.nonce), DATA_SEMANTICS, ...body, frameClose(opts.nonce)].join("\n");
+}
+var safeId = (id) => id.replace(/[^A-Za-z0-9_-]/g, "");
+var MAX_ID_CHARS = 128;
+var ID_CHARSET_RE = /^[^\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]+$/u;
+function isValidId(id) {
+  return id.length >= 1 && id.length <= MAX_ID_CHARS && ID_CHARSET_RE.test(id);
+}
+function presentId(id) {
+  if (!isValidId(id)) return safeId(id).slice(0, MAX_ID_CHARS);
+  const normalized = normalizeUntrusted(id);
+  return isValidId(normalized) ? id : safeId(id).slice(0, MAX_ID_CHARS);
 }
 var NON_VERIFYING_FLAG = {
   "user-relayed": "(relayed source \u2014 confirm with user) ",
@@ -2053,11 +2066,13 @@ function frameAsData(scoped, nonce, maxChars) {
   return makeDataFrame({
     label: "RECALLED MEMORY",
     nonce,
-    lines: scoped.map(({ record, scope }) => ({
-      text: `${reverifyFlag({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source })}${record.content}`,
-      mark: `DATA[${record.state}:${scope}]| `
-    })),
-    maxChars
+    lines: scoped.map(({ record, scope, contentDigest }) => {
+      const flag = reverifyFlag({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source });
+      const body = `${flag}${normalizeUntrusted(record.content, maxChars)}`;
+      const proof = contentDigest === void 0 ? "" : `
+${normalizeUntrusted(`    ${presentId(record.id)} contentDigest: ${contentDigest}`)}`;
+      return { text: body + proof, mark: `DATA[${record.state}:${scope}]| `, normalized: true };
+    })
   });
 }
 
@@ -2615,9 +2630,16 @@ var MemoryStore = class {
     return record;
   }
   /** Resolve the ledger to write to. Project scope claims ownership on first use and refuses a
-   *  pre-existing unowned (foreign) ledger. Falls back to global when no project layer is active. */
+   *  pre-existing unowned (foreign) ledger. With no project layer active, an OMITTED scope falls
+   *  back to global — the contextual default — while an EXPLICIT 'project' is REFUSED rather than
+   *  silently widened; see the argument on that branch below. */
   targetLedger(scope) {
     const p = this.opts.project;
+    if (scope === "project" && !p) {
+      throw new Error(
+        "commit: scope 'project' was requested but no project memory layer is active here. Adopt this project (helix_memory_adopt) or omit `scope` to use the contextual default \u2014 the write is refused rather than silently widened to the global ledger."
+      );
+    }
     if (scope === "global" || !p) return this.global;
     if (!isOwned(p.root, this.homeDir())) {
       if (existsSync4(p.ledger)) {
@@ -2860,14 +2882,15 @@ var MemoryStore = class {
       scope: byRecord.get(record)?.scope ?? "global",
       needsReverify: requiresReverifyBeforeUse({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source }),
       // I7: recomputed per call
-      integrity: byRecord.get(record)?.integrity ?? "ok"
+      integrity: byRecord.get(record)?.integrity ?? "ok",
+      contentDigest: byRecord.get(record)?.contentDigest
     });
     const items = hits.map(toItem);
     const appendix = appendixRecords.map(toItem);
     return {
       items,
       appendix,
-      framed: frameAsData([...items, ...appendix].map(({ record, scope }) => ({ record, scope })), this.nonce()),
+      framed: frameAsData([...items, ...appendix].map(({ record, scope, contentDigest }) => ({ record, scope, contentDigest })), this.nonce()),
       // I7: fresh nonce per call
       integrityAvailable: available,
       projectDisposition: disposition,
