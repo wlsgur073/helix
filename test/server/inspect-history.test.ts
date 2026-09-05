@@ -31,6 +31,14 @@ function appendRaw(ledger: string, over: Record<string, unknown>): void {
   appendFileSync(ledger, JSON.stringify({ ...RAW, ...over }) + '\n');
 }
 
+// Mirrors test/server/inspect-content-digest.test.ts's `store()`/`text()` pair: a bare store (real
+// clock — no timing assertions in the digest test below) and a one-line content extractor.
+function store(): MemoryStore {
+  const home = mkdtempSync(join(tmpdir(), 'helix-ih2-'));
+  return new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's1' });
+}
+const text = (r: { content: Array<{ text: string }> }) => r.content[0]!.text;
+
 describe('handleInspect history mode', () => {
   it('default (no history) is unchanged: a CURRENT MEMORY frame, no interval in the mark', () => {
     const { store } = tmpStore();
@@ -146,5 +154,20 @@ describe('handleInspect history mode', () => {
     expect(handleInspect(store, { history: true }).content[0]!.text).toContain('integrity verification unavailable');
     store.confirm(a.id); // mints the master key + signs a genuine verify -> integrity now available
     expect(handleInspect(store, { history: true }).content[0]!.text).not.toContain('integrity verification unavailable');
+  });
+
+  it('publishes a digest for a LIVE history row and none for a closed one', () => {
+    const s = store();
+    const a = s.commit({ content: 'alpha is live', source: 'user' });
+    const b = s.commit({ content: 'bravo will be superseded', source: 'user' });
+    s.commit({ content: 'bravo replacement', supersedes: b.id, source: 'user' });
+    const out = text(handleInspect(s, { history: true }));
+    const live = s.inspect().find((r) => r.record.id === a.id)!.contentDigest;
+    expect(out).toContain(`contentDigest: ${live}`);
+    // The closed row's digest would resolve against nothing — the guard ledger is the live
+    // projection — so it is deliberately absent rather than present and unusable.
+    const closedLine = out.split('\n').find((l) => l.includes(b.id) && l.includes('..'));
+    expect(closedLine, 'no closed row rendered').toBeDefined();
+    expect(out).not.toMatch(new RegExp(`${b.id}[^\\n]*\\n[^\\n]*contentDigest`));
   });
 });

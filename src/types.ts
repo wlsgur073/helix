@@ -96,6 +96,14 @@ export interface HistoricalRecord {
 export interface ScopedHistoricalRecord extends HistoricalRecord {
   scope: MemoryScope;
   integrity?: 'ok' | 'compromised';
+  /** SHA-256 of this row's content, as the ledger MAC computes it — the same proof-of-read token
+   *  `ScopedRecord.contentDigest` carries. Present ONLY while the row is LIVE (`txTo === null`).
+   *  A closed row gets none, for two reasons pointing the same way: an erase-closed row's content is
+   *  blanked by `buildHistory`'s redaction, so its digest would be the constant `digestContent('')`
+   *  and would resolve against nothing in the guard ledger; and no consumer can act on a closed row —
+   *  `supersedesDigest` names a live target and the echo guard resolves against the live projection.
+   *  Optional for the same reason `integrity` is. */
+  contentDigest?: string;
 }
 
 /** One valid verify considered when reconstructing a fact's grade, with the forensic detail the live
@@ -123,4 +131,11 @@ export interface AsOfFact {
 /** An AsOfFact tagged with its source scope (mirrors ScopedHistoricalRecord). */
 export interface ScopedAsOfFact extends AsOfFact {
   scope: MemoryScope;
+  /** SHA-256 of this fact's content, as the ledger MAC computes it. REQUIRED, unlike the
+   *  `ScopedHistoricalRecord` field: every fact in an as-of snapshot was live at `t` and carries its
+   *  real content (an erased fact is ABSENT from the snapshot after the erase's tx rather than
+   *  blanked), so there is no state in which the value is unavailable. Required also makes the render
+   *  branch unconditional, which is what keeps the as-of surface — the one a reader reaches while
+   *  doing forensics — from publishing a digest for some rows and not others. */
+  contentDigest: string;
 }

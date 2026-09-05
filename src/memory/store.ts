@@ -882,7 +882,11 @@ export class MemoryStore {
       if (!rawV.keyAvailable) integrityAvailable = false; // key-absent => every grade clamped Fresh (fail-safe)
       const v = enforceWitnessProjection(rawV, w.verdict);
       for (const r of v.live.values()) {
-        rows.push({ record: r, scope, txTo: null, closedBy: null, integrity: v.compromised.has(r.id) ? 'compromised' : 'ok' });
+        rows.push({
+          record: r, scope, txTo: null, closedBy: null,
+          integrity: v.compromised.has(r.id) ? 'compromised' : 'ok',
+          contentDigest: digestContent(r.content),   // LIVE rows only — see ScopedHistoricalRecord
+        });
       }
       // Closed rows from the SAME record array.
       const h = buildHistory(w.records);
@@ -929,7 +933,12 @@ export class MemoryStore {
       if (ledgerTruncated(w.records)) truncated = true;      // over the FULL records, not the t-window
       // asOf facts are HISTORICAL — a mismatch renders the note (below) but does NOT clamp the grades
       // (a point-in-time reconstruction keeps what the ledger attested then).
-      for (const f of out.facts) facts.push({ ...f, scope });
+      // The digest is computed HERE, not at render time: `capRendered` calls its `render(n)` closure
+      // O(log n) times while binary-searching the item count that fits, so a digest taken in the
+      // renderer would be re-hashed on every probe. It is also the value the verify binds — asof.ts
+      // computes the identical `digestContent(rec.content)` to test a promotion's targetDigest — so a
+      // reader can quote it against the same ledger the echo guard consults.
+      for (const f of out.facts) facts.push({ ...f, scope, contentDigest: digestContent(f.record.content) });
     };
     addScope(this.global, 'global');                       // exact project block copied from historyView
     const p = this.opts.project;

@@ -48,6 +48,13 @@ function asOfLatest(ledger: string): string {
   return txs.sort().at(-1)!;
 }
 
+// Mirrors test/server/inspect-content-digest.test.ts's `store()`: a bare, undecorated store for the
+// digest test below (which needs one plain live fact, not `mk()`'s commit+confirm pair).
+function store(): MemoryStore {
+  const home = mkdtempSync(join(tmpdir(), 'helix-ia2-'));
+  return new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's1' });
+}
+
 describe('handleInspect asOf (spec C §6)', () => {
   const mk = () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-ia-'));
@@ -108,7 +115,11 @@ describe('handleInspect asOf (spec C §6)', () => {
 
     // (b) The forged state:'Verified' never surfaces as a mark grade — R1 clamps the row to Fresh. Exactly
     //     ONE line carries the genuine Verified fact mark (the confirmed `id`); the forged row is not it.
-    const verifiedMarks = out.split('\n').filter((l) => l.startsWith('DATA[Verified:global]| '));
+    //     `datamark` prefixes EVERY line of an item's text with that item's mark, so the genuine fact's
+    //     own digest continuation line also carries this mark — excluded here since the property under
+    //     test is "no forged row acquires the Verified mark", not "the frame has one Verified line".
+    const verifiedMarks = out.split('\n')
+      .filter((l) => l.startsWith('DATA[Verified:global]| ') && !l.includes('contentDigest: '));
     expect(verifiedMarks).toHaveLength(1);
     expect(verifiedMarks[0]!).toContain(id);
     expect(verifiedMarks[0]!).not.toContain('forged');
@@ -172,5 +183,18 @@ describe('handleInspect asOf (spec C §6)', () => {
     expect(out).toContain(id);                   // the compromised id is listed (via safeId; store ids are clean)
     // the fact renders at the clamped Fresh grade, never the conflicting Verified/Suspect claim
     expect(out.split('\n').some((l) => l.startsWith('DATA[Fresh:global]| ') && l.includes(id))).toBe(true);
+  });
+
+  it('publishes a digest for every as-of fact', () => {
+    const s = store();
+    const a = s.commit({ content: 'alpha as of now', source: 'user' });
+    // Cursor = the fact's own tx, not a second `new Date().toISOString()` read: `asOfLatest`'s
+    // docstring above measured a 1-in-42 flake from exactly that shape (a real-clock read taken AFTER
+    // the commit's own can sort before it if the host's clock steps backward in between, pushing the
+    // row out of the `tx <= t` window). `a.tx` is the same instant the row was stamped with, so there
+    // is no second read and no race.
+    const out = text(handleInspect(s, { asOf: a.tx }));
+    const digest = s.inspect().find((r) => r.record.id === a.id)!.contentDigest;
+    expect(out).toContain(`contentDigest: ${digest}`);
   });
 });

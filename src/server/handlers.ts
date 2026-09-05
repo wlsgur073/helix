@@ -213,7 +213,13 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
     // split a fact's content row from its own evidence sub-rows, which the plain per-LINE granularity
     // recall/history use would risk here.
     const buildLines = (n: number): Array<{ text: string; mark: string }> => facts.slice(0, n).flatMap((f) => {
-      const out: Array<{ text: string; mark: string }> = [{ text: `${presentId(f.record.id)} ${f.record.content}`, mark: `DATA[${f.grade}:${f.scope}]| ` }];
+      // The digest rides INSIDE the fact's own `text`, as a second line, so `datamark` re-applies
+      // this row's mark to it and `capRendered` — which drops whole FACTS — can never split the
+      // digest from the record it digests. No `maxChars` reaches this branch, so no slice can cut it.
+      const out: Array<{ text: string; mark: string }> = [{
+        text: `${presentId(f.record.id)} ${f.record.content}\n    contentDigest: ${f.contentDigest}`,
+        mark: `DATA[${f.grade}:${f.scope}]| `,
+      }];
       for (const e of f.evidence) {
         const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? 'Y' : 'N'} applicable=${e.applicable ? 'Y' : 'N'}${e.winner ? ' WINNER' : ''}`;
         out.push({ text: `${presentId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
@@ -248,7 +254,15 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
         lines: rows.slice(0, n).map((r) => {
           const verb = r.closedBy ? r.closedBy.kind : r.record.state; // closed: verb; live: grade (both enums)
           const interval = `${iso(r.record.tx)}..${r.txTo === null ? '' : iso(r.txTo)}`;
-          return { text: `${presentId(r.record.id)} ${r.record.content}`, mark: `DATA[${verb}:${r.scope}:${interval}]| ` };
+          // No `maxChars` is threaded into this branch — `handleInspect`'s history param carries none —
+          // so no slice runs here, and the digest rides inside the row's own `text`, so `capRendered`
+          // drops it together with its row rather than orphaning it (see the asOf branch's identical note).
+          return {
+            text: r.contentDigest === undefined
+              ? `${presentId(r.record.id)} ${r.record.content}`
+              : `${presentId(r.record.id)} ${r.record.content}\n    contentDigest: ${r.contentDigest}`,
+            mark: `DATA[${verb}:${r.scope}:${interval}]| `,
+          };
         }),
       }),
       RESPONSE_MAX_CHARS - trailingNotes.length,
