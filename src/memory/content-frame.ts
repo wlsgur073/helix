@@ -128,19 +128,28 @@ export function frameClose(nonce: string): string {
 const LINE_BREAK = /\n|\u2028|\u2029/;
 const TRAILING_LINE_BREAKS = /(?:\n|\u2028|\u2029)+$/;
 
+/** Prefix EVERY line of ALREADY-NORMALIZED text with `mark` (continuous per-line provenance).
+ *  Split out of `datamark` for the one caller that must normalize its spans SEPARATELY: recall caps
+ *  the record content but never the id or digest beside it, and a second `normalizeUntrusted` pass
+ *  over the composed line would fold the truncation marker U+2026 into three ASCII dots (NFKC gives
+ *  it a compatibility decomposition), silently retiring the H5 ellipsis contract. Callers of this
+ *  function OWN the obligation that every untrusted span was normalized exactly once. */
+export function markLines(text: string, mark: string): string {
+  return text.replace(TRAILING_LINE_BREAKS, '').split(LINE_BREAK).map((line) => mark + line).join('\n');
+}
+
 /** normalizeUntrusted the text, then prefix EVERY line with `mark` (continuous per-line provenance). */
 export function datamark(text: string, mark: string, maxChars?: number): string {
-  const normalized = normalizeUntrusted(text, maxChars).replace(TRAILING_LINE_BREAKS, '');
-  return normalized.split(LINE_BREAK).map((line) => mark + line).join('\n');
+  return markLines(normalizeUntrusted(text, maxChars), mark);
 }
 
 /** Assemble a fully-untrusted block: nonce open + semantics + datamarked lines + nonce close. */
 export function makeDataFrame(opts: {
-  label: string; nonce: string; lines: Array<{ text: string; mark: string }>; maxChars?: number;
+  label: string; nonce: string; lines: Array<{ text: string; mark: string; normalized?: boolean }>; maxChars?: number;
 }): string {
   const body = opts.lines.length === 0
     ? ['(no relevant memory)']
-    : opts.lines.map((l) => datamark(l.text, l.mark, opts.maxChars));
+    : opts.lines.map((l) => (l.normalized === true ? markLines(l.text, l.mark) : datamark(l.text, l.mark, opts.maxChars)));
   return [frameOpen(opts.label, opts.nonce), DATA_SEMANTICS, ...body, frameClose(opts.nonce)].join('\n');
 }
 
@@ -321,15 +330,23 @@ export function reverifyFlag(r: { state: MemoryState; blastRadius: BlastRadius |
 }
 
 /** Memory-recall frame: datamarks each record with its trust state and scope, the content led by
- *  the shared provenance flag (H9 — the hook and the tool must render the same vocabulary). */
+ *  the shared provenance flag (H9 — the hook and the tool must render the same vocabulary). Each
+ *  row also carries an indented second-line proof of read — the record's id and contentDigest — so
+ *  a caller that recalls and never inspects can still assemble a `quotedMemory` pair (H10). */
 export function frameAsData(scoped: ScopedRecord[], nonce: string, maxChars?: number): string {
   return makeDataFrame({
     label: 'RECALLED MEMORY',
     nonce,
-    lines: scoped.map(({ record, scope }) => ({
-      text: `${reverifyFlag({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source })}${record.content}`,
-      mark: `DATA[${record.state}:${scope}]| `,
-    })),
-    maxChars,
+    lines: scoped.map(({ record, scope, contentDigest }) => {
+      const flag = reverifyFlag({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source });
+      // Each untrusted span is normalized EXACTLY ONCE, with its own budget: the content carries
+      // `maxChars`, the proof line carries none (id and digest are bounded by construction). A
+      // single pass over the composition would re-fold the content's U+2026 truncation marker.
+      const body = `${flag}${normalizeUntrusted(record.content, maxChars)}`;
+      const proof = contentDigest === undefined
+        ? ''
+        : `\n${normalizeUntrusted(`    ${presentId(record.id)} contentDigest: ${contentDigest}`)}`;
+      return { text: body + proof, mark: `DATA[${record.state}:${scope}]| `, normalized: true };
+    }),
   });
 }

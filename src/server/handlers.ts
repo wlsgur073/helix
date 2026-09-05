@@ -176,7 +176,7 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
   // the store's own `framed` (built once, over ALL items, before any per-item maxChars) can no longer
   // be reused once dropping items is possible — exactly like the existing maxChars branch already
   // re-frames instead of reusing it (H5), just for every call now, not only a maxChars-bearing one.
-  const scoped = served.map(({ record, scope }) => ({ record, scope }));
+  const scoped = served.map(({ record, scope, contentDigest }) => ({ record, scope, contentDigest }));
   const { text: framedOut } = capRendered(
     scoped.length,
     (n) => frameAsData(scoped.slice(0, n), newNonce(), args.maxChars),

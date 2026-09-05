@@ -99,6 +99,10 @@ export interface RecalledItem {
    *  RecallResult.integrityAvailable), and a forged elevation that was simply ignored (it shows its
    *  honest clamped state, no conflict). */
   integrity: 'ok' | 'compromised';
+  /** SHA-256 of this record's content, carried through from the verified projection so the RECALL
+   *  surface can publish it. Optional for the same reason ScopedRecord.contentDigest is: a pairing
+   *  built outside the store's verified projection may omit it. */
+  contentDigest?: string;
 }
 
 export interface RecallResult {
@@ -673,13 +677,14 @@ export class MemoryStore {
       scope: byRecord.get(record)?.scope ?? 'global',
       needsReverify: requiresReverifyBeforeUse({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source }),  // I7: recomputed per call
       integrity: byRecord.get(record)?.integrity ?? 'ok',
+      contentDigest: byRecord.get(record)?.contentDigest,
     });
     const items: RecalledItem[] = hits.map(toItem);
     const appendix: RecalledItem[] = appendixRecords.map(toItem);
     return {
       items,
       appendix,
-      framed: frameAsData([...items, ...appendix].map(({ record, scope }) => ({ record, scope })), this.nonce()),  // I7: fresh nonce per call
+      framed: frameAsData([...items, ...appendix].map(({ record, scope, contentDigest }) => ({ record, scope, contentDigest })), this.nonce()),  // I7: fresh nonce per call
       integrityAvailable: available,
       projectDisposition: disposition,
       witnessNotes: collectWitnessNotes(verdicts.map((v) => v.verdict)),

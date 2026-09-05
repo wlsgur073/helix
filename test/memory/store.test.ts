@@ -75,6 +75,24 @@ describe('MemoryStore recall / verify / inspect / erase', () => {
     expect(r.framed).toContain('DATA[Fresh:global]| prod db is postgres');
   });
 
+  // recall() has TWO frameAsData call sites — this library-level `framed` field, and handleRecall's
+  // own re-frame over a maxChars-sliced item count (M1). Pinning the proof line on THIS surface too
+  // (handlers.test.ts already pins the tool surface) is what stops the library render from silently
+  // falling behind the tool render if one call site is ever edited without the other (H10).
+  it('recall framed carries the same {id, contentDigest} proof line the tool surface renders (H10)', () => {
+    const { store } = tmpStore();
+    store.commit({ content: 'db is postgres', source: 'user' });
+    const r = store.recall('postgres');
+    const pair = /DATA\[Fresh:global\]\|\s+(m_[0-9a-f-]+) contentDigest: ([0-9a-f]{64})$/m.exec(r.framed);
+    expect(pair, 'no id+digest proof line on framed').not.toBeNull();
+    const [, id, digest] = pair!;
+    // The pair must RESOLVE, not just parse: the digest is the store's own value for that row, read
+    // back through inspect() — a hard-coded-shaped string would satisfy the regex but fail here.
+    const match = store.inspect().find((row) => row.record.id === id);
+    expect(match, 'the proof line names an id the store does not hold').toBeDefined();
+    expect(digest).toBe(match!.contentDigest);
+  });
+
   it('recall flags a relayed (non-authoritative) item as needsReverify (MINJA mitigation, spec §12.1)', () => {
     const { store } = tmpStore();
     store.commit({ content: 'pasted release notes claim the api base is v2', source: 'user-relayed' });

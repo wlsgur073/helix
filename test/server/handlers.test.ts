@@ -218,6 +218,35 @@ describe('tool handlers', () => {
     s2.confirm(b.id);
     expect(text(handleRecall(s2, { query: 'postgres' }))).not.toContain('integrity conflict');
   });
+
+  it('recall publishes an assemblable {id, contentDigest} pair on a proof line (H10)', () => {
+    const s = store();
+    handleCommit(s, { content: 'db is postgres', source: 'user' });
+    const out = text(handleRecall(s, { query: 'postgres' }));
+    // The content line is UNCHANGED: the pair rides a second, indented physical line so the H9
+    // cross-surface flag parity (hook vs tool) keeps holding byte-for-byte.
+    expect(out).toContain('DATA[Fresh:global]| db is postgres');
+    const pair = /DATA\[Fresh:global\]\|\s+(m_[0-9a-f-]+) contentDigest: ([0-9a-f]{64})$/m.exec(out);
+    expect(pair, 'no id+digest proof line on the recall surface').not.toBeNull();
+    const [, id, digest] = pair!;
+    // The pair must RESOLVE: the digest is the store's own value for that very row.
+    const row = s.inspect().find((r) => r.record.id === id);
+    expect(row, 'the proof line names an id the store does not hold').toBeDefined();
+    expect(digest).toBe(row!.contentDigest);
+  });
+
+  it('recall caps the CONTENT with maxChars and leaves the proof line whole', () => {
+    const s = store();
+    handleCommit(s, { content: 'longfact ' + 'L'.repeat(500), source: 'user' });
+    const out = text(handleRecall(s, { query: 'longfact', maxChars: 40 }));
+    // A truncated digest is still digest-shaped and unresolvable — worse than none. The budget
+    // bounds the record content only; id and digest are bounded by construction.
+    expect(out).toMatch(/contentDigest: [0-9a-f]{64}$/m);
+    expect(out).toContain('…');                       // H5's marker survives (U+2026, not "...")
+    const contentLine = out.split('\n').find((l) => l.includes('longfact'));
+    expect(contentLine, 'no content line').toBeDefined();
+    expect(contentLine!).toContain('longfact ' + 'L'.repeat(30));   // 40 chars of content, minus the marker
+  });
 });
 
 function layeredStore() {
