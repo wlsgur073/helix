@@ -103,7 +103,8 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
           'shows for that row. Echoing it proves you retrieved the record you are ' +
           'replacing; a supersede issued without having read the target is refused.',
         ),
-      scope: z.enum(['project', 'global']).optional(),
+      scope: z.enum(['project', 'global']).optional()
+        .describe('Which ledger to write to. Omit for the contextual default: the project ledger when a project layer is active, the global one otherwise. `global` always writes global. `project` REQUIRES an active project layer and is refused when there is none, rather than silently widening the write to global.'),
     },
   }, async (args) => m.runOp('helix_memory_commit', () => handleCommit(store, args)));
 

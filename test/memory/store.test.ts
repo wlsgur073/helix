@@ -429,3 +429,24 @@ describe('MemoryStore cross-scope supersede', () => {
     expect(live.filter((s) => s.record.content === 'global db is postgres')).toHaveLength(1);
   });
 });
+
+describe('MemoryStore scope enforcement — no project layer', () => {
+  function store(): MemoryStore {
+    const home = mkdtempSync(join(tmpdir(), 'helix-scope-'));
+    return new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's1' });
+  }
+
+  it('refuses an EXPLICIT project scope when no project layer is active', () => {
+    const s = store();                                  // no project layer
+    expect(() => s.commit({ content: 'x', scope: 'project', source: 'user' }))
+      .toThrow(/no project memory layer is active/);
+  });
+
+  it('leaves the other three scope cases alone', () => {
+    const s = store();                                  // no project layer
+    expect(s.commit({ content: 'omitted goes global', source: 'user' }).id).toMatch(/^m_/);
+    expect(s.commit({ content: 'explicit global', scope: 'global', source: 'user' }).id).toMatch(/^m_/);
+    const r = s.recall('goes global');
+    expect(r.items.every((i) => i.scope === 'global')).toBe(true);
+  });
+});

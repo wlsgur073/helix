@@ -346,9 +346,23 @@ export class MemoryStore {
   }
 
   /** Resolve the ledger to write to. Project scope claims ownership on first use and refuses a
-   *  pre-existing unowned (foreign) ledger. Falls back to global when no project layer is active. */
+   *  pre-existing unowned (foreign) ledger. With no project layer active, an OMITTED scope falls
+   *  back to global — the contextual default — while an EXPLICIT 'project' is REFUSED rather than
+   *  silently widened; see the argument on that branch below. */
   private targetLedger(scope: MemoryScope | undefined): LedgerPath {
     const p = this.opts.project;
+    // An EXPLICIT project scope with no project layer used to fall through to the global ledger with
+    // no signal: the caller named the narrower ledger and its record was persisted in the broader
+    // one, undetectable except by inspecting the other scope. Refused instead. Deliberately narrow —
+    // an OMITTED scope keeps the contextual default (project when a layer is active, global
+    // otherwise), which is the overwhelming majority path, and an explicit 'global' is untouched.
+    if (scope === 'project' && !p) {
+      throw new Error(
+        'commit: scope \'project\' was requested but no project memory layer is active here. ' +
+        'Adopt this project (helix_memory_adopt) or omit `scope` to use the contextual default — ' +
+        'the write is refused rather than silently widened to the global ledger.',
+      );
+    }
     if (scope === 'global' || !p) return this.global;
     if (!isOwned(p.root, this.homeDir())) {
       if (existsSync(p.ledger)) {
