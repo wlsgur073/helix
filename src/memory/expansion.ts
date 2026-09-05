@@ -37,7 +37,8 @@ export function loadExpansion(json: string, theta: number, k: number): Expansion
 let cached: Expansion | undefined | null = null; // null = not yet attempted
 /**
  * Resolve + load data/semantic-neighbors.json once (cached). Tries the source-tree path first, then
- * the path beside the bundled server (build.mjs copies the asset there). Returns undefined — a
+ * the path one level up from a bundle in bin/ — which resolves to the SAME repo-root data/
+ * directory; build.mjs has no copy step and bin/data does not exist. Returns undefined — a
  * graceful pure-lexical fallback — if the asset is absent or malformed.
  */
 export function defaultExpansion(): Expansion | undefined {

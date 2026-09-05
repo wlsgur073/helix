@@ -9,6 +9,7 @@ import { scanLegacyElevated, classifyLegacyOffenders } from '../memory/legacy-sc
 import { hardenHomePermissions } from '../memory/home-permissions.js';
 import { subkeyForScope } from '../memory/verified-read.js';
 import { aliasesGlobalLedger } from '../memory/scope-target.js';
+import { defaultExpansion } from '../memory/expansion.js';
 import { strayTrustFiles, collidingTrustFiles, assessGradeLoss } from '../memory/trust-store-layout.js';
 import { verifyVerify, digestContent } from '../memory/ledger-mac.js';
 import { buildServer } from './helix-server.js';
@@ -207,6 +208,12 @@ const server = buildServer(store, {
 }, metrics);
 const transport = new StdioServerTransport();
 await server.connect(transport);
+// Trigger-1 fired on the latency arm because the 1.35 MB semantic-neighbour asset loads lazily on
+// the FIRST recall of every process, putting a one-time ~45 ms cost on a request path. Warm it here
+// instead: after connect, so nothing delays the transport becoming ready, and before any handler
+// can run, because the loop is still awaiting its first message. `defaultExpansion` memoises and
+// returns undefined rather than throwing when the asset is absent, so this cannot fail startup.
+defaultExpansion();
 installSelfTermination({
   stdin: process.stdin,
   stdout: process.stdout,
