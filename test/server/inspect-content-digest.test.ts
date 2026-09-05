@@ -42,7 +42,7 @@ function guardLedger(s: MemoryStore): Array<{ id: string; content: string; conte
  */
 function pairsFromInspect(text: string): Map<string, string> {
   const found = new Map<string, string>();
-  const re = /(m_[0-9a-f-]+)[^\n]*\n[^\n]*?contentDigest=([0-9a-f]{64})/g;
+  const re = /(m_[0-9a-f-]+)[^\n]*\n[^\n]*?contentDigest: ([0-9a-f]{64})/g;
   for (const m of text.matchAll(re)) found.set(m[1]!, m[2]!);
   return found;
 }

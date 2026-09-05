@@ -287,7 +287,7 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
         // characters per row, which `capRendered` absorbs by showing fewer rows; it discloses nothing,
         // since a reader holding this line already holds the content it digests.
         text: contentDigest !== undefined
-          ? `${presentId(record.id)} ${record.content}\n    contentDigest=${contentDigest}`
+          ? `${presentId(record.id)} ${record.content}\n    contentDigest: ${contentDigest}`
           : `${presentId(record.id)} ${record.content}`,
         mark: `DATA[${record.state}:${scope}]| `,
       })),

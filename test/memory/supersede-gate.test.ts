@@ -147,7 +147,7 @@ describe('supersede gate — the tool-surface round trip', () => {
     // The published label is `contentDigest` (the value's own name); `supersedesDigest` is the
     // PARAMETER it is pasted into below. Renamed 2026-09-02 with the same edit that stopped
     // withholding the line from unverified rows — see the sibling test.
-    const digest = /contentDigest=([0-9a-f]{64})/.exec(shown)?.[1];
+    const digest = /contentDigest: ([0-9a-f]{64})/.exec(shown)?.[1];
     expect(digest).toBeTypeOf('string');
 
     // The same value the store computes, arrived at only by reading the tool's output.
@@ -171,9 +171,9 @@ describe('supersede gate — the tool-surface round trip', () => {
     const s = store();
     const rec = s.commit({ content: 'the staging host is stg.internal', source: 'user' }); // Fresh, never confirmed
     const shown = handleInspect(s, {}).content[0]!.text;
-    expect(shown).toMatch(/contentDigest=[0-9a-f]{64}/);
+    expect(shown).toMatch(/contentDigest: [0-9a-f]{64}/);
     // Published for the row it sits on: the value must be the store's own digest, not a placeholder.
     const projected = s.inspect().find((r) => r.record.id === rec.id)!.contentDigest;
-    expect(shown).toContain(`contentDigest=${projected}`);
+    expect(shown).toContain(`contentDigest: ${projected}`);
   });
 });
