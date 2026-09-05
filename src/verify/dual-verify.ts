@@ -105,7 +105,7 @@ export function buildCritiquePrompt(question: string, helixAnswer: string): stri
 
 /**
  * Cross-validate helixAnswer against Codex. Gates: enabled -> stakesFloor -> egress-guard (S1,
- * secret/PII/memory-echo) -> available -> ran (cheapest first; the egress guard is free + pre-spawn).
+ * secret/PII/memory-echo) -> available -> runner (cheapest first; the egress guard is free + pre-spawn).
  * On any gate failure it degrades with a reason and NO codexAnswer (never fabricates).
  */
 export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps): Promise<DualVerifyResult> {

@@ -100,9 +100,11 @@ describe('handleDualVerify', () => {
     const d = deps({});
     const res = await handleDualVerify({ question: 'db?', helixAnswer: 'use postgres', stakes: 'low' }, d);
     const out = text(res);
-    expect(out).toContain('guards: enabled, stakesFloor');
+    expect(out).toContain('guards: enabled -> stakesFloor');
     expect(out).toContain('stopped at stakesFloor');
-    expect(out).not.toContain('egress,');          // the floor returns before the egress leg runs
+    // NOT `not.toContain('egress,')`: under the ` -> ` join that substring is unproducible, so the
+    // assertion would pass vacuously and stop testing anything. Name the leg itself.
+    expect(out).not.toContain('egress');            // the floor returns before the egress leg runs
   });
 
   it('the audit row records the stopping guard, so a later reader need not infer it from wording (H7)', async () => {

@@ -549,7 +549,7 @@ function echoedMemoriesLine(v: EgressVerdict | undefined): string {
  *  dual-verify, never caller or Codex bytes, so it needs no datamark and no quarantine frame. */
 function guardLine(g: GateTrace | undefined): string {
   if (!g) return '';
-  return `guards: ${g.evaluated.join(', ')} — stopped at ${g.stoppedAt}`;
+  return `guards: ${g.evaluated.join(' -> ')} — stopped at ${g.stoppedAt}`;
 }
 
 /** The D1 disclosure line, composed EXCLUSIVELY from the verdict's closed typed fields — never from the
