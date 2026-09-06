@@ -449,4 +449,25 @@ describe('MemoryStore scope enforcement — no project layer', () => {
     const r = s.recall('goes global');
     expect(r.items.every((i) => i.scope === 'global')).toBe(true);
   });
+
+  it('an OMITTED scope routes to the PROJECT ledger when a project layer is active', () => {
+    // Task 4's docstring and its new `scope` .describe() both assert this "contextual default", and
+    // measured 2026-09-05 nothing pinned it: every test that commits against an active project layer
+    // passes scope:'project' EXPLICITLY (project-disposition.test.ts:36,:85; store.test.ts:338,:365,
+    // :384). The cell was unpinned before this batch too, so this is not a regression — but the batch
+    // documented a behaviour it did not test, and Task 4's "leaves the other cases alone" case exists
+    // precisely to pin the cells that must not move. This completes it.
+    const home = mkdtempSync(join(tmpdir(), 'helix-scope-owned-home-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-scope-owned-proj-'));
+    let n = 0;
+    const s = new MemoryStore(join(home, 'memory.jsonl'), {
+      home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}`,
+      project: { ledger: join(root, '.helix', 'memory.jsonl'), root },
+    });
+    s.adopt(root); // stamps ownership explicitly, same fixture as project-disposition.test.ts (b)
+    s.commit({ content: 'omitted scope with an owned project layer active', source: 'user' });
+    const items = s.recall('omitted scope with an owned project layer').items;
+    expect(items.length).toBe(1);
+    expect(items[0]!.scope).toBe('project');
+  });
 });
