@@ -198,7 +198,7 @@ const server = buildServer(store, {
   config,
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
-  // inspect()'s own projection sets contentDigest unconditionally (store.ts:767), but the field is
+  // inspect()'s own projection sets contentDigest unconditionally (store.ts:830), but the field is
   // optional on ScopedRecord for pairings built outside that projection. The fallback computes the
   // same pure function `inspect()` already applies rather than fabricating a value, so a record that
   // ever arrives without one is still matchable instead of silently unquotable.
