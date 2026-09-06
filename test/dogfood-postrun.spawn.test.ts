@@ -21,6 +21,8 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { parseTriggerRecord } from './helpers/trigger-record.js';
+import type { EvaluationRecord } from '../scripts/trigger-measure.js';
+import type { Leg } from '../scripts/trigger-eval.js';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const REAL_SCRIPT = join(repoRoot, 'scripts', 'dogfood-postrun.sh');
@@ -118,6 +120,24 @@ function runAdapter(scriptPath: string, root: string, env: NodeJS.ProcessEnv): {
 }
 
 const sinkLines = (home: string): string[] => readFileSync(join(home, 'trigger.jsonl'), 'utf8').split('\n').filter((l) => l.length > 0);
+
+/** One evaluation-kind sink line, built from the REAL `EvaluationRecord` shape and `JSON.stringify`
+ *  (Task 12) -- same field set and same compact no-space form scripts/trigger-measure.ts:317-323
+ *  itself writes, so the fired-history reporter's fixed-string parse is exercised against genuine
+ *  production bytes rather than a hand-formatted approximation. Only `kind`/`ts`/`overall` are read
+ *  by that parse, so every leg is the same inert placeholder. */
+function evalLine(ts: string, overall: EvaluationRecord['overall'], run: string): string {
+  const leg: Leg = { min: null, max: null, threshold: 0, status: 'unavailable' };
+  const record: EvaluationRecord = {
+    v: 1, policy: 'T1-2026-07-11', kind: 'evaluation',
+    ts, run,
+    service_result: null, exit_code: null, exit_status: null,
+    legs: { rows: leg, bytes: leg, latency: leg },
+    latencyN: null, overall,
+    project: 'owned', metricsState: 'present', unknownLines: 0, unknownMaxOps: 0,
+  };
+  return JSON.stringify(record);
+}
 
 describe('scripts/dogfood-postrun.sh (ExecStopPost adapter spawn tests)', () => {
   it('artifact exit 0, lifecycle env set -> adapter exit 0, NO reporter-failure record in the sink', () => {
@@ -307,5 +327,27 @@ describe('ISSUES.md auto-file on run-level failure (issue-tracking decision 2026
     const lines = sinkLines(home);
     expect(lines.length).toBe(1);
     expect(lines[0]).toContain('reporter-failure');
+  });
+});
+
+describe('Trigger-1 fired-history summary (Task 12 derived reporter)', () => {
+  it('sink whose LAST evaluation is not-fired but has earlier fired rows -> stdout still names the first fired ts and the fired count', () => {
+    const { scriptPath } = buildTree(STUB_OK);
+    const home = mkdtempSync(join(tmpdir(), 'helix-postrun-home-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-postrun-root-'));
+    const fixtureLines = [
+      evalLine('2026-08-26T13:18:49.278Z', 'fired', 'r1'),
+      evalLine('2026-08-27T09:00:00.000Z', 'fired', 'r2'),
+      evalLine('2026-09-05T09:00:00.000Z', 'not-fired', 'r3'), // LAST evaluation is not-fired
+    ];
+    writeFileSync(join(home, 'trigger.jsonl'), fixtureLines.join('\n') + '\n');
+    const env = { ...baseEnv(home), INVOCATION_ID: 'inv-fired-history', SERVICE_RESULT: 'success', EXIT_CODE: '0', EXIT_STATUS: '0/SUCCESS' };
+
+    const { status, stdout } = runAdapter(scriptPath, root, env);
+
+    expect(status).toBe(0);
+    // first-fired ts is the earliest fired row (r1); count is over the last 14 evaluation lines seen
+    // (only 3 exist here, 2 of them fired) -- the LAST evaluation being not-fired must not suppress it.
+    expect(stdout).toContain('Trigger-1 has fired since 2026-08-26T13:18:49.278Z; 2 of the last 14 evaluations fired.');
   });
 });

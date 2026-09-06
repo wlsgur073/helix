@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Terminal-riding watchdog for the helix dogfood runner.
-# Silent when healthy. Banners (max once per calendar day) when the schedule
-# mechanism is dead or no run completion has been recorded for >= 2 days.
+# Silent when healthy. Banners (max once per calendar day, each on its own stamp) when the schedule
+# mechanism is dead, no run completion has been recorded for >= 2 days, or Trigger-1 has ever fired
+# in the sink's history (a standing disclosure, independent of the two health banners above).
 # Spec: the dogfood schedule-reliability design (local operating notes)
 # Contract: never break shell startup - no set -e, every path neutralized,
 # always exit 0. Env seams exist so drills never touch live state.
@@ -9,6 +10,7 @@
 TRIGGER_FILE="${TRIGGER_FILE:-$HOME/.helix/trigger.jsonl}"
 TIMER_UNIT="${TIMER_UNIT:-helix-dogfood.timer}"
 STAMP_FILE="${STAMP_FILE:-$HOME/.cache/dogfood-watch.stamp}"
+TRIGGER_STAMP_FILE="${TRIGGER_STAMP_FILE:-$HOME/.cache/dogfood-watch-trigger.stamp}"
 
 today() { TZ=Asia/Seoul date +%Y-%m-%d; }
 
@@ -23,6 +25,41 @@ banner() {
     printf '[dogfood-watch] %s\n' "$1"
   fi
 }
+
+# Trigger-1 has no latch and needs none: every evaluation is already a durable line in the sink.
+# What was missing is a reader. Report the DERIVED history rather than the last evaluation alone —
+# the asset preload retires the cause, so once the evaluator's trailing window rolls the arm reports
+# not-fired and a last-evaluation reader would go silent, hiding a fire that did happen.
+# Fixed-string parse of JSON.stringify output: no spaces after colons, every '"' inside a string
+# escaped, so '"kind":"evaluation"' and '"overall":"fired"' can occur only as those fields.
+trigger_fired_summary() {
+  f="$1"                                   # watch.sh passes "$TRIGGER_FILE"; postrun.sh passes "$sink"
+  [ -r "$f" ] || return 0
+  first=$(grep '"kind":"evaluation"' "$f" 2>/dev/null | grep -m1 '"overall":"fired"' | grep -o '"ts":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+  [ -n "$first" ] || return 0
+  recent=$(grep '"kind":"evaluation"' "$f" 2>/dev/null | tail -n 14 | grep -c '"overall":"fired"')
+  printf 'Trigger-1 has fired since %s; %s of the last 14 evaluations fired.\n' "$first" "$recent"
+}
+
+trigger_fired_banner() {
+  # Throttled separately from banner() above, on its OWN stamp (TRIGGER_STAMP_FILE): once per KST
+  # calendar day is enough to guarantee Trigger-1's fire can never again go unseen for seven days the
+  # way the 2026-08-26 fire did — that failure mode was zero readers, not a daily one — and a line on
+  # every shell start would be exactly the nag "Silent when healthy" exists to prevent. A separate
+  # stamp keeps this disclosure from competing with banner()'s single daily slot below: printing this
+  # first must never suppress a same-day timer/gap banner, and vice versa.
+  msg=$(trigger_fired_summary "$TRIGGER_FILE")
+  [ -n "$msg" ] || return 0
+  [ -f "$TRIGGER_STAMP_FILE" ] && [ "$(cat "$TRIGGER_STAMP_FILE" 2>/dev/null)" = "$(today)" ] && return 0
+  mkdir -p "$(dirname "$TRIGGER_STAMP_FILE")" 2>/dev/null
+  today > "$TRIGGER_STAMP_FILE" 2>/dev/null
+  if [ -t 1 ]; then
+    printf '\033[1;31m[dogfood-watch]\033[0m %s\n' "$msg"
+  else
+    printf '[dogfood-watch] %s\n' "$msg"
+  fi
+}
+trigger_fired_banner
 
 # Signal 1: mechanism alive (priority - a dead timer subsumes the gap it causes,
 # and it is the one condition catch-up cannot self-heal).

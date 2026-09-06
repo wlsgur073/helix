@@ -46,6 +46,24 @@ artifact="$(cd "$(dirname "$0")" && pwd)/../bin/helix-trigger.mjs"
 # the stdout echo is the journald-only trace (the already-tested sink-unwritable path).
 sink="${HELIX_HOME:-${HOME:-}/.helix}/trigger.jsonl"
 
+# Trigger-1 has no latch and needs none: every evaluation is already a durable line in the sink.
+# What was missing is a reader. Report the DERIVED history rather than the last evaluation alone --
+# the asset preload retires the cause, so once the evaluator's trailing window rolls the arm reports
+# not-fired and a last-evaluation reader would go silent, hiding a fire that did happen.
+# Fixed-string parse of JSON.stringify output: no spaces after colons, every '"' inside a string
+# escaped, so '"kind":"evaluation"' and '"overall":"fired"' can occur only as those fields.
+trigger_fired_summary() {
+  f="$1"                                   # watch.sh passes "$TRIGGER_FILE"; postrun.sh passes "$sink"
+  [ -r "$f" ] || return 0
+  first=$(grep '"kind":"evaluation"' "$f" 2>/dev/null | grep -m1 '"overall":"fired"' | grep -o '"ts":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+  [ -n "$first" ] || return 0
+  recent=$(grep '"kind":"evaluation"' "$f" 2>/dev/null | tail -n 14 | grep -c '"overall":"fired"')
+  printf 'Trigger-1 has fired since %s; %s of the last 14 evaluations fired.\n' "$first" "$recent"
+}
+# Runs unconditionally, before the artifact call below, so it can never be skipped by an early exit
+# (the artifact success path returns right after the call below, with no further stdout of its own).
+trigger_fired_summary "$sink"
+
 # HELIX_POSTRUN_TIMEOUT / HELIX_POSTRUN_KILL_AFTER override the production 45s/5s budget. They exist
 # ONLY so tests can avoid real 45-second waits -- production always runs with the defaults.
 timeout -k "${HELIX_POSTRUN_KILL_AFTER:-5}" "${HELIX_POSTRUN_TIMEOUT:-45}" \
