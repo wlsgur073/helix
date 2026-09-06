@@ -72,6 +72,17 @@ export interface VerifyAudit {
   checkKind?: 'file-contains' | 'file-exists';
   bound?: boolean;
   outcome?: { ran: boolean; indeterminate: boolean; passed: boolean };
+  /** ADDITIVE, and additive is the point (same evolution rule as `decidedLeg` above: audit.jsonl is
+   *  append-only, so old rows are never migrated and `resultState` can never gain a value). Present
+   *  ONLY when the ledger append LANDED and the post-append witness advance then threw — the one
+   *  ordering `witness-write.ts` guarantees, since the append is unconditional and precedes
+   *  `advanceWitness`. `resultState` on such a row names the grade the landed record confers, NOT
+   *  'rejected': the row is on disk and no code path unwinds it. What did NOT happen is the witness
+   *  advance, so the scope's alarm still stands and a reader may see that grade clamped on the read
+   *  side — this key is how a reader tells that case from an honest promotion. Absent on every other
+   *  outcome, including a genuine rejection, so a reader that does not know the key reads exactly the
+   *  rows it always did. */
+  witnessAdvance?: 'failed';
 }
 
 /** Adopt audit: every helix_memory_adopt is recorded — best-effort, like the others. Adoption is one

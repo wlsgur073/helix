@@ -16,6 +16,7 @@ import {
   classifyWitness, advanceAllowed, cleanupClearAllowed, sha256Hex,
   type WitnessEntry, type JournalEntry, type WitnessVerdict,
 } from './witness-core.js';
+import type { MemoryState } from '../types.js';
 
 export function witnessPath(home: string): string { return join(home, 'witness.json'); }
 export function witnessLogPath(home: string): string { return join(home, 'witness-log.jsonl'); }
@@ -28,7 +29,29 @@ export function scopeKeyOf(home: string, projectRoot?: string): string {
   return projectRoot === undefined ? '@global' : canonicalRoot(projectRoot);
 }
 
-export class WitnessAdvanceError extends Error {}
+/** A refused (or race-invalidated) witness advance. Two of its throw sites refuse BEFORE any ledger
+ *  byte moves (openTransition, discardTransition); `advanceWitness`'s own — reached from
+ *  witness-write.ts's post-append call — refuses AFTER the record already landed. `landedState` is
+ *  how a caller tells those apart without re-reading the ledger. */
+export class WitnessAdvanceError extends Error {
+  /** The marker `isWitnessAdvanceError` reads. See there for why it is a property and not the class. */
+  readonly witnessAdvance = true;
+  /** The state of the record that ALREADY LANDED when this throw happened. Set by the ONE caller that
+   *  knows it — witness-write.ts's post-append `advanceWitness` call. Undefined for every
+   *  rewrite-path throw, which refuses before the ledger moves, so `undefined` reads as "nothing is
+   *  known to have landed", never as "nothing landed". */
+  landedState?: MemoryState;
+  constructor(message: string) { super(message); this.name = 'WitnessAdvanceError'; }
+}
+
+/** Read as a PROPERTY rather than through `instanceof`, for the reason
+ *  scripts/pilot/artifact-io.ts's `isInvocationError` sets out: a class is identified by the module
+ *  instance that evaluated its declaration, so any arrangement that loads this module twice mints two
+ *  unrelated classes and `instanceof` answers "no" for a genuine one — silently restoring the exact
+ *  mislabel this marker exists to fix. Returns `boolean`, matching the precedent, rather than a type
+ *  predicate a merely structural object could satisfy. */
+export const isWitnessAdvanceError = (e: unknown): boolean =>
+  e instanceof Error && (e as { witnessAdvance?: unknown }).witnessAdvance === true;
 /** The operation a blocked witnessed write was performing. Append ops ('commit' | 'erase' |
  *  'verify') come from the three witness-write callers; rewrite ops ('compaction' |
  *  'permanent-erase') are DERIVED from the flowing witness kind at the authoritative gate, so

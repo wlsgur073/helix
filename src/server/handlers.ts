@@ -6,6 +6,7 @@ import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js'
 import { dualVerify, persistedReason, type EchoSource, type GateTrace } from '../verify/dual-verify.js';
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, asOfWitnessNotes, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
+import { isWitnessAdvanceError } from '../memory/witness-store.js';
 import { appendAudit, type VerifyAudit } from '../audit.js';
 import { readFileSync } from 'node:fs';
 import { classifyEmission, type EgressVerdict, type Leg, type QuotedMemory } from '../risk/trifecta.js';
@@ -362,6 +363,16 @@ export interface RecheckConfirmDeps {
   now?: () => string;
 }
 
+/** The grade a verify row LANDED with when its post-append witness advance threw, or null when the
+ *  error is anything else — a genuine rejection. 'Fresh' is excluded on purpose: writeVerify is only
+ *  ever called with a resolveTransition state ('Corroborated' / 'Suspect') or confirm's 'Verified',
+ *  so a 'Fresh' verify is unreachable and would be a schema violation rather than a row to record. */
+function landedVerifyState(e: unknown): 'Corroborated' | 'Verified' | 'Suspect' | null {
+  if (!isWitnessAdvanceError(e)) return null;
+  const s = (e as { landedState?: unknown }).landedState;
+  return s === 'Corroborated' || s === 'Verified' || s === 'Suspect' ? s : null;
+}
+
 /** Mechanical reality-check (two-tier ladder): caps at Corroborated, never Verified. EVERY outcome
  *  is audited content-free — including the reject path (an unbound/bad check throws but is still
  *  recorded as `rejected`/`bound:false` then re-thrown) and the contested path. */
@@ -377,7 +388,18 @@ export function handleRecheck(store: MemoryStore, args: { id: string; check: Rea
     // M2 (fix round 1): same object-payload quarantine as erase's id.
     return ok(`recheck ${JSON.stringify({ id: args.id, state: resultState })}`);
   } catch (e) {
-    appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'reality-check', checkKind: args.check.kind, resultState: 'rejected', bound: false });
+    // A throw out of store.recheck is NOT uniformly a rejection. The verify append is unconditional
+    // and lands BEFORE the witness advance, and that advance is the only one reachable from here, so
+    // a WitnessAdvanceError escaping proves two things at once: the signed row is on disk, and
+    // checkBinding already passed (an unbound check throws a plain Error strictly earlier). The old
+    // row asserted the negation of both — 'rejected' and bound:false. `outcome` is genuinely
+    // unavailable on this path and is OMITTED rather than guessed; it is optional in the schema.
+    const landed = landedVerifyState(e);
+    const base = { kind: 'verify', ts, id: args.id, source: 'reality-check', checkKind: args.check.kind } as const;
+    const row: VerifyAudit = landed === null
+      ? { ...base, resultState: 'rejected', bound: false }
+      : { ...base, resultState: landed, bound: true, witnessAdvance: 'failed' };
+    appendAudit(deps.auditPath, row);
     throw e; // re-throw — MCP must still surface the error
   }
 }
@@ -390,7 +412,14 @@ export function handleConfirm(store: MemoryStore, args: { id: string }, deps: Re
   try {
     store.confirm(args.id);
   } catch (e) {
-    appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'rejected' });
+    // Confirm reaches writeVerify with the state provably 'Verified' (resolveTransition returns
+    // {kind:'state', state:'Verified'} unconditionally for evidenceSource 'user'), and the append
+    // precedes the advance, so a WitnessAdvanceError here means the signed Verified row already
+    // landed and only the advance failed. Audit what landed, marked — never 'rejected'.
+    const row: VerifyAudit = isWitnessAdvanceError(e)
+      ? { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'Verified', witnessAdvance: 'failed' }
+      : { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'rejected' };
+    appendAudit(deps.auditPath, row);
     throw e;
   }
   // Confirm SUCCEEDED. Audit it as Verified AFTER the try, so a failure of the (now fsync'd) audit

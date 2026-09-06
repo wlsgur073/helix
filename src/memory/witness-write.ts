@@ -39,7 +39,7 @@ import { withFileLock } from './lock.js';
 import { advanceAllowed, type WitnessVerdict } from './witness-core.js';
 import {
   classifyState, readScopeWitness, scopeKeyOf, advanceWitness, completeTransition,
-  WitnessBlockedError,
+  WitnessBlockedError, WitnessAdvanceError, isWitnessAdvanceError,
 } from './witness-store.js';
 
 /** Unlocked inner variant — for a caller that ALREADY holds `withFileLock(ledger)` (store.ts's
@@ -95,8 +95,15 @@ export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord
   if (shouldAdvance) {
     // Second-layer safety (Task 2 contract): re-classifies from CURRENT disk state under the
     // witness lock and throws WitnessAdvanceError if a racing writer invalidated our gate between
-    // the read above and now. Left to propagate — never caught here.
-    advanceWitness(home, key, after, record.tx);
+    // the read above and now. The append above already landed by this point, so the throw is
+    // annotated with the grade it conferred (the one caller that knows it) before propagating —
+    // it is never swallowed here.
+    try {
+      advanceWitness(home, key, after, record.tx);
+    } catch (e) {
+      if (isWitnessAdvanceError(e)) (e as WitnessAdvanceError).landedState = record.state;
+      throw e;
+    }
   }
   // else: the pre-append verdict was 'mismatch' — the append above still landed (availability), but
   // the witness is untouched. The mismatch signal persists for the next reader (anti-laundering).
