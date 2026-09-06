@@ -11,7 +11,7 @@ export interface LedgerItem {
   id: string;
   content: string;
   /** The record's proof-of-read token, exactly as `inspect()` already returns it
-   *  (`store.ts:767`, labelled there as the token for a guarded supersede). REQUIRED rather than
+   *  (`store.ts:830`, labelled there as the token for a guarded supersede). REQUIRED rather than
    *  optional so the compiler locates every supplier: an echo source that silently omitted it would
    *  make every quote declaration against its records unresolvable, and the failure mode would be a
    *  block that looks correct. Supplying it is a pass-through — never recompute a digest here. */
@@ -113,9 +113,9 @@ export interface EgressInput {
   policy: EgressPolicy;            // dualVerify.egressPolicy (per-leg block/allow; named secrets ignore it)
   /** H6: memories the caller declares it is quoting (see QuotedMemory). A pair that does not resolve
    *  against `ledger` is discarded, never an error. Absent or empty reproduces the pre-H6 behaviour
-   *  byte-for-byte, which is the state the whole freeze window runs in — the tool parameter that
-   *  populates this is post-close, because `compareSurfaces` forbids a schema change while `bin/`
-   *  holds candidate bytes. */
+   *  byte-for-byte — the tool parameter that populates this (`quotedMemory`) has been on the schema
+   *  and wired through `dual-verify.ts` since 2026-09-01, so an absent/empty value here now means the
+   *  caller declared nothing, not that the surface is unreachable. */
   quoted?: readonly QuotedMemory[];
 }
 

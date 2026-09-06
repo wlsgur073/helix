@@ -666,7 +666,7 @@ export class MemoryStore {
     // Keyed by the record OBJECT, not its id: ranking returns the very references it was handed
     // (retrieval.ts rankWithArtifacts maps records -> scored -> back to `s.rec`), so this pairing is
     // exact. An id-keyed map collapses last-wins under a cross-scope id collision and would report
-    // ONE scope and ONE integrity verdict for both copies — the same hazard retrieval.ts:353-357
+    // ONE scope and ONE integrity verdict for both copies — the same hazard retrieval.ts:411-414
     // already fixed for the scoring path, on the tagging path it had been left on.
     const byRecord = new Map(enforcedScoped.map((s) => [s.record, s]));
     const expansion = this.opts.expansion ?? defaultExpansion();

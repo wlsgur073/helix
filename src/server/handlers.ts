@@ -273,8 +273,9 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
   const { records: rows, projectDisposition, witnessNotes } = store.currentView();
   if (rows.length === 0) return ok('(memory is empty)' + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
   const trailingNotes = unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes);
-  // M1: total response bound — one record is one item; a VERIFIED row's extra `supersedesDigest`
-  // sub-line rides along inside that SAME item's `text`, so it is never split from its own row.
+  // M1: total response bound — one record is one item; every row's extra `contentDigest` sub-line
+  // rides along inside that SAME item's `text` (not restricted to Verified rows since 2026-09-02),
+  // so it is never split from its own row.
   const { text: frame } = capRendered(
     rows.length,
     (n) => makeDataFrame({
@@ -614,10 +615,10 @@ function egressLine(v: EgressVerdict | undefined): string {
 }
 
 export async function handleDualVerify(
-  /** `quotedMemory` is H6 and is NOT yet on the tool's inputSchema — `compareSurfaces` forbids a
-   *  tool-surface change while `bin/` holds candidate bytes, so in-window no caller can populate it.
-   *  It is typed here because the post-close half is one schema field plus this hand-off, and a
-   *  parameter the handler cannot express is a wire that has to be re-derived later. */
+  /** `quotedMemory` is H6: {id, contentDigest} proof-of-read pairs a caller declares it is quoting;
+   *  a resolved pair exempts that record from the memory-echo guard. On the tool's inputSchema
+   *  (helix-server.ts) and wired through since 2026-09-01 — this type is not ahead of the schema,
+   *  it mirrors it. */
   args: { question: string; helixAnswer: string; stakes?: 'low' | 'medium' | 'high' | 'xhigh'; quotedMemory?: readonly QuotedMemory[] },
   deps: DualVerifyHandlerDeps,
   /** MCP request cancellation (the SDK's extra.signal), NOT a tool argument -- kept out of `args`

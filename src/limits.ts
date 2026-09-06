@@ -6,18 +6,18 @@
 //
 // MAX_COMMIT_CONTENT_CHARS is the one constant enforced literally both ways: the MCP schema
 // (`helix-server.ts:75-78`) rejects an oversized `content` before the handler runs, and the store
-// (`store.ts:218-225`, `MemoryStore.commit`) rejects it again, so a caller into `store.commit` that
+// (`store.ts:240-241`, `MemoryStore.commit`) rejects it again, so a caller into `store.commit` that
 // does not come through the MCP schema (hooks, CLI, tests) still cannot persist an oversized fact.
 //
 // MAX_DV_QUESTION_CHARS/MAX_DV_ANSWER_CHARS and MAX_RECHECK_PATH_CHARS/MAX_RECHECK_PATTERN_CHARS are
 // schema-only — no core code reads these four constants — but each pair still has a core-side bound,
 // through a DIFFERENT, pre-existing mechanism at a DIFFERENT value, not a second read of the
 // constant. Dual-verify's `question` and `helixAnswer` are jointly bounded by `classifyEgress`
-// (`src/risk/trifecta.ts:243,247`), which joins the two with a newline and compares that length
+// (`src/risk/trifecta.ts:257,261`), which joins the two with a newline and compares that length
 // against its own 200,000-char scan limit, chosen independently of this table (see "Measured cause"
 // below for why the schema caps sit under 200,000 rather than at it — they pre-empt the allocation,
 // they do not duplicate the scan). Recheck's `path`/`pattern` are bounded TRANSITIVELY: `store.
-// recheck` (`store.ts:708-711`) runs `checkBinding(target.content, check)` before any file read, and
+// recheck` (`store.ts:771-774`) runs `checkBinding(target.content, check)` before any file read, and
 // `checkBinding` (`src/memory/reality-check.ts:84-89`) refuses unless both strings are raw
 // substrings of the item's own `content` — so path and pattern can never exceed the 16,384-char
 // commit cap that already bounds `content`, even though nothing checks them against

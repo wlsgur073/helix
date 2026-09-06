@@ -61,7 +61,7 @@ export function installSelfTermination(deps: SelfTerminationDeps): void {
 
   // 3. stdout EPIPE backstop: client gone but stdin stayed open -> next write faults.
   //    The SDK never registers a stdout 'error' listener, so this also prevents an
-  //    otherwise-unhandled EPIPE from throwing (cf. src/verify/codex.ts:131).
+  //    otherwise-unhandled EPIPE from throwing (cf. src/verify/codex.ts:225).
   deps.stdout.on('error', () => shutdown('stdout-error'));
 
   // 4. external shutdown signals.

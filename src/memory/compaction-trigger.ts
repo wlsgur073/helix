@@ -8,10 +8,14 @@ export type DeferReason = 'notAuto' | 'tooSmall' | 'tooBig' | 'notQuiescent';
  *
  *  `rows` is the ledger's TOTAL PHYSICAL row count (every line), never liveRows.
  *
- *  Guard ORDER is part of the contract, because `reason` is a shipped observable that labels the
- *  compaction metric: disabled-ness dominates every diagnostic, since telling a user who merely set
- *  `auto: false` that their ledger is `tooSmall` is actively misleading. `proceed` itself is an
- *  order-invariant conjunction. Order (pinned by tests): notAuto -> tooSmall -> tooBig -> notQuiescent.
+ *  Guard ORDER is part of the contract, though `reason` is not a shipped observable today: the sole
+ *  caller (`store.ts`) reads only `gate.proceed` and drops `reason` on the `continue` that follows a
+ *  deferred gate, and even a completed compaction's metric record (`metrics.ts:117-119`) carries no
+ *  `reason` field — a deferred compaction emits no metric at all. The order still matters because
+ *  `cheapGate` is tested directly: disabled-ness dominates every diagnosis, since asserting `tooSmall`
+ *  against a ledger where the caller merely set `auto: false` would be the wrong fact to pin. `proceed`
+ *  itself is an order-invariant conjunction. Order (pinned by tests): notAuto -> tooSmall -> tooBig ->
+ *  notQuiescent.
  *
  *  Quiescence compares the ledger FILE's mtime against nowMs, never a record's declared `tx`. A
  *  declared `tx` is author-controlled and forgeable in BOTH directions: dated forward it defers

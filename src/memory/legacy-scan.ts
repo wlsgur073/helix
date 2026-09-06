@@ -1,10 +1,10 @@
 import type { MemoryRecord } from '../types.js';
 import { isKnownState } from './verified-projection.js';
 
-/** A content-free audit marker — the compaction horizon marker (ledger.ts:141) or the integrity
- *  tombstone (ledger.ts:124): a verify-shaped record with a null target, no MAC, empty content, and
+/** A content-free audit marker — the compaction horizon marker (ledger.ts:30) or the integrity
+ *  tombstone (ledger.ts:37): a verify-shaped record with a null target, no MAC, empty content, and
  *  state Suspect. It is inert in every replay (a null-target verify elevates nothing —
- *  verified-projection.ts:29), so it is NOT a forged elevation and must not be reported. */
+ *  verified-projection.ts:181), so it is NOT a forged elevation and must not be reported. */
 const isContentFreeMarker = (r: MemoryRecord): boolean =>
   r.type === 'verify' && r.supersedes === null && !r.mac && r.content === '' && r.state === 'Suspect';
 

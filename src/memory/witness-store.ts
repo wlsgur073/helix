@@ -1,7 +1,7 @@
 /** witness.json + witness-log.jsonl IO, MAC, locking, single-slot journal supersession (spec
  *  2026-07-17-high-water-counter-decision §4.1-§4.3). The ONLY writer of witness state — every
  *  compound operation runs inside ONE `withFileLock(witnessPath(home), ...)` scope (withFileLock
- *  is not re-entrant per path, lock.ts:107), so the functions below never call each other; each
+ *  is not re-entrant per path, lock.ts:166-167), so the functions below never call each other; each
  *  re-derives its own view of the current disk state under its own lock acquisition. */
 import { randomBytes, createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -29,10 +29,10 @@ export function scopeKeyOf(home: string, projectRoot?: string): string {
   return projectRoot === undefined ? '@global' : canonicalRoot(projectRoot);
 }
 
-/** A refused (or race-invalidated) witness advance. Two of its throw sites refuse BEFORE any ledger
- *  byte moves (openTransition, discardTransition); `advanceWitness`'s own — reached from
- *  witness-write.ts's post-append call — refuses AFTER the record already landed. `landedState` is
- *  how a caller tells those apart without re-reading the ledger. */
+/** A refused (or race-invalidated) witness advance, thrown by `openTransition`, `completeTransition`,
+ *  `discardTransition` and `advanceWitness`. `landedState` is set by exactly ONE caller —
+ *  witness-write.ts's post-append `advanceWitness` call — and is undefined on every other throw,
+ *  which reads as "nothing is known to have landed", never as "nothing landed". */
 export class WitnessAdvanceError extends Error {
   /** The marker `isWitnessAdvanceError` reads. See there for why it is a property and not the class. */
   readonly witnessAdvance = true;
