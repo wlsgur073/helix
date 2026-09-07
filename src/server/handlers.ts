@@ -413,13 +413,18 @@ export function handleConfirm(store: MemoryStore, args: { id: string }, deps: Re
   try {
     store.confirm(args.id);
   } catch (e) {
-    // Confirm reaches writeVerify with the state provably 'Verified' (resolveTransition returns
-    // {kind:'state', state:'Verified'} unconditionally for evidenceSource 'user'), and the append
-    // precedes the advance, so a WitnessAdvanceError here means the signed Verified row already
-    // landed and only the advance failed. Audit what landed, marked — never 'rejected'.
-    const row: VerifyAudit = isWitnessAdvanceError(e)
-      ? { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'Verified', witnessAdvance: 'failed' }
-      : { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'rejected' };
+    // A WitnessAdvanceError reaches here from two sides of the append: advanceWitness throws AFTER
+    // the row lands and sets landedState (the one caller that knows a row landed), while
+    // completeTransition throws BEFORE any byte moves, on the transition-heal path
+    // (witness-write.ts:63), leaving landedState undefined. So only landedState says whether a row
+    // landed — never the error class alone. Confirm's landed grade is provably 'Verified'
+    // (resolveTransition returns {kind:'state', state:'Verified'} unconditionally for evidenceSource
+    // 'user'), but auditing the carried state rather than a hard-coded 'Verified' keeps this handler
+    // on the same landedVerifyState signal handleRecheck above already uses.
+    const landed = landedVerifyState(e);
+    const row: VerifyAudit = landed === null
+      ? { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'rejected' }
+      : { kind: 'verify', ts, id: args.id, source: 'user', resultState: landed, witnessAdvance: 'failed' };
     appendAudit(deps.auditPath, row);
     throw e;
   }
