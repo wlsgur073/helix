@@ -233,7 +233,12 @@ export function isValidId(id: string): boolean {
 
 /** MOVED here from `server/handlers.ts` so the memory layer can render an id in-frame without
  *  importing the server layer. `handlers.ts` re-exports all four; the CALL-SITE rule the block below
- *  states is unchanged and is still enforced by reading `handlers.ts`. */
+ *  states is unchanged and is still enforced by reading `handlers.ts`. The same holds for the two
+ *  blocks moved together with this one, just above: MAX_ID_CHARS's "ID_SCHEMA imports isValidId from
+ *  here" remark and isValidId's own "this file's assertValidId" phrase both still mean
+ *  `server/handlers.ts` too, not this file -- the moved prose stays byte-identical on purpose (an
+ *  intact move is auditable), so this note is the correction instead. */
+
 /** How an attacker-controllable id — one sourced from LEDGER CONTENT, not a schema-validated tool
  *  argument (e.g. `echoMemoryIds` below, or a `record.id` rendered INSIDE a DATA-frame row) — is
  *  represented anywhere it reaches a reader. Never REJECTS: rejecting the whole call/render over one

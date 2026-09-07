@@ -253,7 +253,11 @@ export class MemoryStore {
       // but projection is per-ledger. If the target lives in a different ledger than the write, the
       // supersede would NOT evict it — both stay live (a duplicate, stale fact never removed). Reject
       // the scope mismatch. (Side-effect-free write-ledger resolution: mirrors targetLedger() routing
-      // WITHOUT its ownership-claim side effect, so a rejected commit never stamps/creates a ledger.)
+      // WITHOUT its ownership-claim side effect, so a rejected commit never stamps/creates a ledger.
+      // M-3: one cell now diverges on purpose rather than mirrors it — an explicit 'project' scope
+      // with no active project layer, which targetLedger() REFUSES outright, this line still routes
+      // to global. Harmless: that refusal fires at the real targetLedger() call below, before any
+      // write, so this mirror's routing choice for that one cell never reaches disk either way.)
       const writeLedger = input.scope === 'global' || !this.opts.project ? this.global : this.opts.project.ledger;
       if (targetLedger !== writeLedger) {
         throw new Error('commit: cannot supersede across scopes (target lives in a different ledger)');
