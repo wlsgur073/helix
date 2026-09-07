@@ -1369,7 +1369,19 @@ function scopeKeyOf(home, projectRoot) {
   return projectRoot === void 0 ? "@global" : canonicalRoot(projectRoot);
 }
 var WitnessAdvanceError = class extends Error {
+  /** The marker `isWitnessAdvanceError` reads. See there for why it is a property and not the class. */
+  witnessAdvance = true;
+  /** The state of the record that ALREADY LANDED when this throw happened. Set by the ONE caller that
+   *  knows it — witness-write.ts's post-append `advanceWitness` call. Undefined for every
+   *  rewrite-path throw, which refuses before the ledger moves, so `undefined` reads as "nothing is
+   *  known to have landed", never as "nothing landed". */
+  landedState;
+  constructor(message) {
+    super(message);
+    this.name = "WitnessAdvanceError";
+  }
 };
+var isWitnessAdvanceError = (e) => e instanceof Error && e.witnessAdvance === true;
 var WitnessBlockedError = class extends Error {
   constructor(op, message) {
     super(message);
@@ -1912,7 +1924,12 @@ function appendWitnessedUnlocked(ledger, record, home, projectRoot, op) {
   appendRecordUnlocked(ledger, record);
   const after = readLedgerBytes(ledger);
   if (shouldAdvance) {
-    advanceWitness(home, key, after, record.tx);
+    try {
+      advanceWitness(home, key, after, record.tx);
+    } catch (e) {
+      if (isWitnessAdvanceError(e)) e.landedState = record.state;
+      throw e;
+    }
   }
 }
 function appendWitnessed(ledger, record, home, projectRoot, op) {
@@ -2030,6 +2047,9 @@ function frameClose(nonce) {
 }
 var LINE_BREAK = /\n|\u2028|\u2029/;
 var TRAILING_LINE_BREAKS = /(?:\n|\u2028|\u2029)+$/;
+function stripTrailingLineBreaks(s) {
+  return s.replace(TRAILING_LINE_BREAKS, "");
+}
 function markLines(text, mark) {
   return text.replace(TRAILING_LINE_BREAKS, "").split(LINE_BREAK).map((line) => mark + line).join("\n");
 }
@@ -2068,7 +2088,7 @@ function frameAsData(scoped, nonce, maxChars) {
     nonce,
     lines: scoped.map(({ record, scope, contentDigest }) => {
       const flag = reverifyFlag({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source });
-      const body = `${flag}${normalizeUntrusted(record.content, maxChars)}`;
+      const body = stripTrailingLineBreaks(`${flag}${normalizeUntrusted(record.content, maxChars)}`);
       const proof = contentDigest === void 0 ? "" : `
 ${normalizeUntrusted(`    ${presentId(record.id)} contentDigest: ${contentDigest}`)}`;
       return { text: body + proof, mark: `DATA[${record.state}:${scope}]| `, normalized: true };
@@ -3065,7 +3085,15 @@ var MemoryStore = class {
       if (!rawV.keyAvailable) integrityAvailable = false;
       const v = enforceWitnessProjection(rawV, w.verdict);
       for (const r of v.live.values()) {
-        rows.push({ record: r, scope, txTo: null, closedBy: null, integrity: v.compromised.has(r.id) ? "compromised" : "ok" });
+        rows.push({
+          record: r,
+          scope,
+          txTo: null,
+          closedBy: null,
+          integrity: v.compromised.has(r.id) ? "compromised" : "ok",
+          contentDigest: digestContent(r.content)
+          // LIVE rows only — see ScopedHistoricalRecord
+        });
       }
       const h = buildHistory(w.records);
       for (const id of h.anomalies) anomalies.add(id);
@@ -3103,7 +3131,7 @@ var MemoryStore = class {
       });
       if (!out.keyAvailable) keyAvailable = false;
       if (ledgerTruncated(w.records)) truncated = true;
-      for (const f of out.facts) facts.push({ ...f, scope });
+      for (const f of out.facts) facts.push({ ...f, scope, contentDigest: digestContent(f.record.content) });
     };
     addScope(this.global, "global");
     const p = this.opts.project;

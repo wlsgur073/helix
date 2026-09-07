@@ -554,6 +554,17 @@ function scopeKeyOf(home, projectRoot) {
   return projectRoot === void 0 ? "@global" : canonicalRoot(projectRoot);
 }
 var WitnessAdvanceError = class extends Error {
+  /** The marker `isWitnessAdvanceError` reads. See there for why it is a property and not the class. */
+  witnessAdvance = true;
+  /** The state of the record that ALREADY LANDED when this throw happened. Set by the ONE caller that
+   *  knows it — witness-write.ts's post-append `advanceWitness` call. Undefined for every
+   *  rewrite-path throw, which refuses before the ledger moves, so `undefined` reads as "nothing is
+   *  known to have landed", never as "nothing landed". */
+  landedState;
+  constructor(message) {
+    super(message);
+    this.name = "WitnessAdvanceError";
+  }
 };
 function macKeyFor(scopeKey, master) {
   return Buffer.from(hkdfSync2("sha256", master, Buffer.from(scopeKey), "helix-witness-mac-v1", 32));
