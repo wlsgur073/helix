@@ -4,7 +4,7 @@ import type { HelixConfig } from '../config.js';
 import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS, DEFAULT_CONFIG } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type EchoSource, type GateTrace } from '../verify/dual-verify.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, asOfWitnessNotes, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, asOfWitnessNotes, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, stripTrailingLineBreaks } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
 import { isWitnessAdvanceError } from '../memory/witness-store.js';
 import { appendAudit, type VerifyAudit } from '../audit.js';
@@ -217,8 +217,11 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
       // The digest rides INSIDE the fact's own `text`, as a second line, so `datamark` re-applies
       // this row's mark to it and `capRendered` — which drops whole FACTS — can never split the
       // digest from the record it digests. No `maxChars` reaches this branch, so no slice can cut it.
+      // M-1: strip the content's own trailing line break(s) before the digest suffix -- otherwise
+      // datamark's single normalize-and-mark pass over the whole composed string only strips a
+      // break at the very END of it (after the digest), leaving an empty marked line in between.
       const out: Array<{ text: string; mark: string }> = [{
-        text: `${presentId(f.record.id)} ${f.record.content}\n    contentDigest: ${f.contentDigest}`,
+        text: `${presentId(f.record.id)} ${stripTrailingLineBreaks(f.record.content)}\n    contentDigest: ${f.contentDigest}`,
         mark: `DATA[${f.grade}:${f.scope}]| `,
       }];
       for (const e of f.evidence) {
@@ -258,10 +261,12 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
           // No `maxChars` is threaded into this branch — `handleInspect`'s history param carries none —
           // so no slice runs here, and the digest rides inside the row's own `text`, so `capRendered`
           // drops it together with its row rather than orphaning it (see the asOf branch's identical note).
+          // M-1: the digest branch strips the content's own trailing break(s) first (same reason as the
+          // asOf branch above); the no-digest branch is untouched -- there is no suffix line to protect.
           return {
             text: r.contentDigest === undefined
               ? `${presentId(r.record.id)} ${r.record.content}`
-              : `${presentId(r.record.id)} ${r.record.content}\n    contentDigest: ${r.contentDigest}`,
+              : `${presentId(r.record.id)} ${stripTrailingLineBreaks(r.record.content)}\n    contentDigest: ${r.contentDigest}`,
             mark: `DATA[${verb}:${r.scope}:${interval}]| `,
           };
         }),
@@ -302,8 +307,11 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
         // mismatch between the two was itself half of why the escape went unfound. The cost is 64 hex
         // characters per row, which `capRendered` absorbs by showing fewer rows; it discloses nothing,
         // since a reader holding this line already holds the content it digests.
+        //
+        // M-1: the digest branch strips the content's own trailing break(s) first (same reason as
+        // the asOf/history branches above); the no-digest branch is untouched -- no suffix to protect.
         text: contentDigest !== undefined
-          ? `${presentId(record.id)} ${record.content}\n    contentDigest: ${contentDigest}`
+          ? `${presentId(record.id)} ${stripTrailingLineBreaks(record.content)}\n    contentDigest: ${contentDigest}`
           : `${presentId(record.id)} ${record.content}`,
         mark: `DATA[${record.state}:${scope}]| `,
       })),

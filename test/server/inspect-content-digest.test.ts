@@ -69,6 +69,16 @@ describe('inspect publishes a contentDigest a caller can quote', () => {
     expect(quoted).toBe(guardLedger(s).find((i) => i.id === rec.id)!.contentDigest);
   });
 
+  it('content ending in a line break renders the contentDigest line directly under the content line (M-1)', () => {
+    const s = store();
+    const rec = s.commit({ content: 'hello\n', source: 'user' });
+    const lines = handleInspect(s, {}).content[0]!.text.split('\n');
+    const contentIdx = lines.findIndex((l) => l.includes(rec.id) && l.includes('hello'));
+    expect(contentIdx, 'no content line found').toBeGreaterThanOrEqual(0);
+    // Directly under it — never an empty marked line first (M-1's exact defect shape).
+    expect(lines[contentIdx + 1]).toContain('contentDigest: ');
+  });
+
   it('publishes the digest of the row it sits on, not of some other row', () => {
     const s = store();
     const a = s.commit({ content: 'alpha lives at alpha.internal', source: 'user' });

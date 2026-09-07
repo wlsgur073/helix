@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleRecheck, handleConfirm, isValidId, presentId, MAX_ID_CHARS } from '../../src/server/handlers.js';
+import { reverifyFlag } from '../../src/memory/content-frame.js';
 import { isOwned, canonicalRoot } from '../../src/memory/ownership.js';
 import { subkeyForScope } from '../../src/memory/verified-read.js';
 import { signVerify, digestContent } from '../../src/memory/ledger-mac.js';
@@ -37,7 +38,9 @@ describe('tool handlers', () => {
     const s = store();
     handleCommit(s, { content: 'longfact ' + 'L'.repeat(500), source: 'user' });
     const capped = text(handleRecall(s, { query: 'longfact', maxChars: 40 }));
-    const dataLines = capped.split('\n').filter((l) => l.startsWith('DATA['));
+    // M-5: the proof line (H10) is exempt -- it is a fixed-shape id+digest line, not content, and a
+    // production `m_<uuid>` id alone makes it ~142 chars, so this bound stays pinned to content lines.
+    const dataLines = capped.split('\n').filter((l) => l.startsWith('DATA[') && !l.includes('contentDigest: '));
     expect(dataLines.length).toBeGreaterThan(0);
     for (const l of dataLines) expect(l.length).toBeLessThan(120);
     expect(capped).toContain('…');
@@ -235,6 +238,19 @@ describe('tool handlers', () => {
     expect(digest).toBe(row!.contentDigest);
   });
 
+  it('content ending in a line break renders no empty marked line before the proof line (M-1)', () => {
+    const s = store();
+    handleCommit(s, { content: 'db is postgres\n', source: 'user' });
+    const out = text(handleRecall(s, { query: 'postgres' }));
+    const lines = out.split('\n');
+    // Content-line bytes are UNCHANGED (H9 parity) — only the trailing break itself is gone.
+    const contentIdx = lines.indexOf('DATA[Fresh:global]| db is postgres');
+    expect(contentIdx, 'no content line').toBeGreaterThanOrEqual(0);
+    // The very next physical line is the proof line, never an empty marked line in between.
+    expect(lines[contentIdx + 1]).toMatch(/^DATA\[Fresh:global\]\|\s+m_[0-9a-f-]+ contentDigest: [0-9a-f]{64}$/);
+    expect(lines).not.toContain('DATA[Fresh:global]| '); // the bare mark, with nothing after it
+  });
+
   it('recall caps the CONTENT with maxChars and leaves the proof line whole', () => {
     const s = store();
     handleCommit(s, { content: 'longfact ' + 'L'.repeat(500), source: 'user' });
@@ -246,6 +262,16 @@ describe('tool handlers', () => {
     const contentLine = out.split('\n').find((l) => l.includes('longfact'));
     expect(contentLine, 'no content line').toBeDefined();
     expect(contentLine!).toContain('longfact ' + 'L'.repeat(30));   // 40 chars of content, minus the marker
+  });
+
+  it('maxChars bounds the CONTENT only, never a non-empty reverify flag prefix (ledger 86)', () => {
+    const s = store();
+    handleCommit(s, { content: 'longfact ' + 'L'.repeat(500), source: 'user-relayed' });
+    const out = text(handleRecall(s, { query: 'longfact', maxChars: 40 }));
+    // spec §3.4: content is sliced to maxChars FIRST, then `flag + slicedContent` is composed -- the
+    // flag sits OUTSIDE the maxChars budget and must render intact, never itself truncated.
+    const flag = reverifyFlag({ state: 'Fresh', blastRadius: null, source: 'user-relayed' });
+    expect(out).toContain(`DATA[Fresh:global]| ${flag}longfact ` + 'L'.repeat(30) + '…');
   });
 });
 

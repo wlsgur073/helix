@@ -128,6 +128,15 @@ export function frameClose(nonce: string): string {
 const LINE_BREAK = /\n|\u2028|\u2029/;
 const TRAILING_LINE_BREAKS = /(?:\n|\u2028|\u2029)+$/;
 
+/** M-1: strip trailing line breaks from a content span BEFORE it is composed with a suffix line (a
+ *  proof-of-read line, a `contentDigest:` row) -- composing first and stripping the WHOLE result
+ *  after (as `markLines` does) only strips breaks at the very end of the composition, so a content
+ *  ending in a break left an empty marked line between the content and the suffix. EXPORTED so
+ *  `server/handlers.ts`'s three inspect render sites share this exact regex instead of copying it. */
+export function stripTrailingLineBreaks(s: string): string {
+  return s.replace(TRAILING_LINE_BREAKS, '');
+}
+
 /** Prefix EVERY line of ALREADY-NORMALIZED text with `mark` (continuous per-line provenance).
  *  Split out of `datamark` for the one caller that must normalize its spans SEPARATELY: recall caps
  *  the record content but never the id or digest beside it, and a second `normalizeUntrusted` pass
@@ -342,7 +351,11 @@ export function frameAsData(scoped: ScopedRecord[], nonce: string, maxChars?: nu
       // Each untrusted span is normalized EXACTLY ONCE, with its own budget: the content carries
       // `maxChars`, the proof line carries none (id and digest are bounded by construction). A
       // single pass over the composition would re-fold the content's U+2026 truncation marker.
-      const body = `${flag}${normalizeUntrusted(record.content, maxChars)}`;
+      // M-1: strip trailing line breaks from the composed body (flag + content) rather than from
+      // the content span alone -- the flag prefix is a constant, break-free string, so the two are
+      // equivalent, and this reads the same as the proof line composed right below it. Without
+      // this, content ending in a break rendered an empty marked line before the proof line.
+      const body = stripTrailingLineBreaks(`${flag}${normalizeUntrusted(record.content, maxChars)}`);
       const proof = contentDigest === undefined
         ? ''
         : `\n${normalizeUntrusted(`    ${presentId(record.id)} contentDigest: ${contentDigest}`)}`;
