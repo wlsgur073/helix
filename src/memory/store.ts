@@ -362,9 +362,10 @@ export class MemoryStore {
     // otherwise), which is the overwhelming majority path, and an explicit 'global' is untouched.
     if (scope === 'project' && !p) {
       throw new Error(
-        'commit: scope \'project\' was requested but no project memory layer is active here. ' +
-        'Adopt this project (helix_memory_adopt) or omit `scope` to use the contextual default — ' +
-        'the write is refused rather than silently widened to the global ledger.',
+        'commit: scope \'project\' was requested but no project memory layer is active here ' +
+        '(Helix configures one only when started inside a directory holding a .helix folder). ' +
+        'Omit `scope` to use the contextual default, or start Helix inside the project and adopt it ' +
+        '(helix_memory_adopt) — the write is refused rather than silently widened to the global ledger.',
       );
     }
     if (scope === 'global' || !p) return this.global;
@@ -1059,6 +1060,18 @@ export class MemoryStore {
       return kind === 'absent' ? null : kind;
     };
     if (scope) {
+      // An EXPLICIT project scope with no project layer used to route to the GLOBAL ledger with no
+      // signal — for a DESTRUCTIVE operation. Refused, mirroring targetLedger's commit-side refusal.
+      // A project layer exists only when the server started inside a directory holding .helix/
+      // (src/server/index.ts), so adopting cannot cure this state on its own.
+      if (scope === 'project' && !p) {
+        throw new Error(
+          'erase: scope \'project\' was requested but no project memory layer is active here ' +
+          '(Helix configures one only when started inside a directory holding a .helix folder). ' +
+          'Omit `scope`, or start Helix inside the project and adopt it (helix_memory_adopt) — ' +
+          'the erase is refused rather than silently widened to the global ledger.',
+        );
+      }
       const ledger = scope === 'global' || !p ? this.global
         : (projectActive ? p.ledger : (() => { throw new Error('erase: project ledger not owned — adopt it (helix_memory_adopt) then erase, or remove it'); })());
       const kind = classify(ledger);

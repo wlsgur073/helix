@@ -450,6 +450,21 @@ describe('MemoryStore scope enforcement — no project layer', () => {
     expect(r.items.every((i) => i.scope === 'global')).toBe(true);
   });
 
+  it('refuses an EXPLICIT project-scope ERASE when no project layer is active, and leaves the global ledger untouched', () => {
+    // The defect: with no project layer CONFIGURED at all, `scope: 'project'` used to route the erase
+    // to the GLOBAL ledger — a destructive operation acting on the ledger the caller did not name.
+    const home = mkdtempSync(join(tmpdir(), 'helix-scope-erase-'));
+    const ledger = join(home, 'memory.jsonl');
+    const s = new MemoryStore(ledger, { home, sessionId: 's1' });     // no project layer
+    const r = s.commit({ content: 'a global fact the widened erase used to hit', source: 'user' });
+    const before = readFileSync(ledger);
+
+    expect(() => s.erase(r.id, { scope: 'project' })).toThrow(/no project memory layer is active/);
+
+    expect(readFileSync(ledger).equals(before)).toBe(true);           // no tombstone landed on the wrong ledger
+    expect(s.recall('global fact').items.some((i) => i.record.id === r.id)).toBe(true);
+  });
+
   it('an OMITTED scope routes to the PROJECT ledger when a project layer is active', () => {
     // Task 4's docstring and its new `scope` .describe() both assert this "contextual default", and
     // measured 2026-09-05 nothing pinned it: every test that commits against an active project layer
