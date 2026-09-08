@@ -16,7 +16,7 @@ import { type RecallOptions } from './projection.js';
 import { rankWithArtifacts, buildRankArtifacts, assertQueryWithinBounds, type Expansion } from './retrieval.js';
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
-import { frameAsData, newNonce, collectWitnessNotes } from './content-frame.js';
+import { frameAsData, newNonce, collectWitnessNotes, asOfWitnessNotes } from './content-frame.js';
 import { isOwned, stampOwnership, projectDispositionOf, canonicalRoot, isReviewableRoot, trustStateOf, type ProjectDisposition, type TrustState } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
@@ -947,7 +947,9 @@ export class MemoryStore {
     addScope(this.global, 'global');                       // exact project block copied from historyView
     const p = this.opts.project;
     if (p && disposition === 'owned') addScope(p.ledger, 'project');
-    return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: collectWitnessNotes(verdicts) };
+    // The as-of surface never clamps, so the LIVE mismatch note (which promises a clamp) is false here.
+    // Mapped at the SOURCE so a library caller gets the surface-true wording, not only the tool.
+    return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: asOfWitnessNotes(collectWitnessNotes(verdicts)) };
   }
 
   /** Explicitly adopt the active project ledger (trust its current contents). For team-shared

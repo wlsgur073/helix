@@ -4,7 +4,7 @@ import type { HelixConfig } from '../config.js';
 import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS, DEFAULT_CONFIG } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type EchoSource, type GateTrace } from '../verify/dual-verify.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, asOfWitnessNotes, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, stripTrailingLineBreaks } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, stripTrailingLineBreaks } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
 import { isWitnessAdvanceError } from '../memory/witness-store.js';
 import { appendAudit, type VerifyAudit } from '../audit.js';
@@ -197,9 +197,7 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
     if (args.history) return ok('inspect: history and asOf are mutually exclusive — pass one.');
     if (!isIsoInstant(args.asOf)) return ok('inspect: as-of cursor must be a canonical ISO-8601 instant (e.g. 2026-07-04T00:00:00.000Z).');
     const { facts, keyAvailable, truncated, projectDisposition, witnessNotes } = store.asOfView(args.asOf);
-    // asOf does not clamp, so the live mismatch note — which promises a clamp — is false here.
-    const asOfNotes = asOfWitnessNotes(witnessNotes);
-    if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + unadoptedNote(projectDisposition) + witnessNotesText(asOfNotes));
+    if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
     const notes: string[] = ['\n\n(as-of snapshot — membership and timing are declared, not authenticated; only auth=Y verify timing is MAC-bound)'];
     if (!keyAvailable) notes.push('\n\n(integrity verification unavailable — trust grades shown are unverified)');
     // Same two causes as the recall note above (equal-gen verify mismatch OR duplicate fact id) — this
@@ -208,7 +206,7 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
     if (facts.some((f) => f.evidence.some((e) => !e.txAuthenticated))) notes.push('\n\n(verify timing marked auth=N is declared, not authenticated — v1/legacy)');
     if (truncated) notes.push('\n\n(history may be truncated by a past compaction — reconstruction before the horizon is unreliable)');
     if (projectDisposition === 'unadopted-present') notes.push(unadoptedNote(projectDisposition));
-    for (const n of asOfNotes) notes.push(`\n\n${n}`);
+    for (const n of witnessNotes) notes.push(`\n\n${n}`);
     const trailingNotes = notes.join('');
     // M1: total response bound (capRendered's docstring). Drop whole FACTS from the tail — never
     // split a fact's content row from its own evidence sub-rows, which the plain per-LINE granularity

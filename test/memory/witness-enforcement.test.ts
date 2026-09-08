@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { handleRecall, handleInspect } from '../../src/server/handlers.js';
 import {
-  WITNESS_MISMATCH_NOTE, WITNESS_TRANSITION_NOTE, WITNESS_INIT_NOTE,
+  WITNESS_MISMATCH_NOTE, WITNESS_MISMATCH_ASOF_NOTE, WITNESS_TRANSITION_NOTE, WITNESS_INIT_NOTE,
 } from '../../src/memory/content-frame.js';
 import {
   planTransition, openTransition, advanceWitness, readScopeWitness, scopeKeyOf,
@@ -115,6 +115,10 @@ describe('Task 7 — read-side witness enforcement', () => {
         const view = store.asOfView('2026-07-19T00:00:00.000Z');
         const factA = view.facts.find((f) => f.record.id === aId)!;
         expect(factA.grade).toBe('Verified');             // asOf is NOT clamped — unchanged, on purpose
+        // Move 2 (B): the STORE now returns the as-of wording, so a library caller reading
+        // asOfView().witnessNotes gets the surface-true note with no help from the render layer.
+        expect(view.witnessNotes).toContain(WITNESS_MISMATCH_ASOF_NOTE);
+        expect(view.witnessNotes).not.toContain(WITNESS_MISMATCH_NOTE);
 
         const out = TEXT(handleInspect(store, { asOf: '2026-07-19T00:00:00.000Z' }));
         expect(out).toContain('rollback witness mismatch');           // the alarm is still disclosed
