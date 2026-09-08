@@ -59,8 +59,14 @@ export const isWitnessAdvanceError = (e: unknown): boolean =>
  *  is refused inside compactLedger (Codex round 3). */
 export type WitnessBlockedOp = 'commit' | 'erase' | 'verify' | 'compaction' | 'permanent-erase';
 export class WitnessBlockedError extends Error {
-  constructor(readonly op: WitnessBlockedOp, message: string) { super(message); }
+  /** Marker `isWitnessBlockedError` reads — a property, never the class (see isWitnessAdvanceError). */
+  readonly witnessBlocked = true;
+  constructor(readonly op: WitnessBlockedOp, message: string) { super(message); this.name = 'WitnessBlockedError'; }
 }
+/** Every WitnessBlockedError is thrown BEFORE the ledger moves (witness-write.ts steps 3/3b, the
+ *  compaction gate), so a handler may audit it as a pre-write refusal. Property read, not instanceof. */
+export const isWitnessBlockedError = (e: unknown): boolean =>
+  e instanceof Error && (e as { witnessBlocked?: unknown }).witnessBlocked === true;
 
 export interface ScopeWitnessState { entry: WitnessEntry | null; journal: JournalEntry | null; macInvalid: boolean }
 

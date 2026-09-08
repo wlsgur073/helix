@@ -136,6 +136,16 @@ export interface RecheckResult {
   record: MemoryRecord | null;
 }
 
+/** A refusal thrown by `resolveEraseTarget` / `erase` BEFORE any byte moves — the pre-write half of
+ *  handlers.ts's three-way erase audit. Read by property (`isEraseRefusedError`), never instanceof,
+ *  for the reason witness-store.ts's `isWitnessAdvanceError` sets out. */
+export class EraseRefusedError extends Error {
+  readonly eraseRefused = true;
+  constructor(message: string) { super(message); this.name = 'EraseRefusedError'; }
+}
+export const isEraseRefusedError = (e: unknown): boolean =>
+  e instanceof Error && (e as { eraseRefused?: unknown }).eraseRefused === true;
+
 /** Orchestrates the deterministic core modules over a real JSONL ledger file. */
 export class MemoryStore {
   constructor(private readonly global: LedgerPath, private readonly opts: MemoryStoreOptions) {
@@ -1055,7 +1065,7 @@ export class MemoryStore {
         // bearing on what it does: it stays the documented out-of-band escape for a planted marker
         // (ledger.ts, F5 residual) and routes as a marker — no tombstone, straight to compaction.
         if (permanent) return 'marker';
-        throw new Error('erase: this id names both a marker row and a record in a candidate ledger — a soft erase cannot tell which row to tombstone; a permanent erase purges every row carrying the id');
+        throw new EraseRefusedError('erase: this id names both a marker row and a record in a candidate ledger — a soft erase cannot tell which row to tombstone; a permanent erase purges every row carrying the id');
       }
       return kind === 'absent' ? null : kind;
     };
@@ -1065,7 +1075,7 @@ export class MemoryStore {
       // A project layer exists only when the server started inside a directory holding .helix/
       // (src/server/index.ts), so adopting cannot cure this state on its own.
       if (scope === 'project' && !p) {
-        throw new Error(
+        throw new EraseRefusedError(
           'erase: scope \'project\' was requested but no project memory layer is active here ' +
           '(Helix configures one only when started inside a directory holding a .helix folder). ' +
           'Omit `scope`, or start Helix inside the project and adopt it (helix_memory_adopt) — ' +
@@ -1073,9 +1083,9 @@ export class MemoryStore {
         );
       }
       const ledger = scope === 'global' || !p ? this.global
-        : (projectActive ? p.ledger : (() => { throw new Error('erase: project ledger not owned — adopt it (helix_memory_adopt) then erase, or remove it'); })());
+        : (projectActive ? p.ledger : (() => { throw new EraseRefusedError('erase: project ledger not owned — adopt it (helix_memory_adopt) then erase, or remove it'); })());
       const kind = classify(ledger);
-      if (kind === null) throw new Error(`erase: id not found in scope ${scope}`);
+      if (kind === null) throw new EraseRefusedError(`erase: id not found in scope ${scope}`);
       return { ledger, kind };
     }
     const candidates: LedgerPath[] = [this.global, ...(projectActive ? [p!.ledger] : [])];
@@ -1091,7 +1101,7 @@ export class MemoryStore {
           throw err;
         }
         if (parseLedgerHealth(text).skippedNonBlank > 0) {
-          throw new Error('erase: a ledger has skipped (corrupt/torn) lines — pass an explicit scope');
+          throw new EraseRefusedError('erase: a ledger has skipped (corrupt/torn) lines — pass an explicit scope');
         }
       }
     }
@@ -1100,7 +1110,7 @@ export class MemoryStore {
       const kind = classify(c);
       if (kind !== null) hits.push({ ledger: c, kind });
     }
-    if (hits.length > 1) throw new Error('erase: id present in more than one scope — pass an explicit scope');
+    if (hits.length > 1) throw new EraseRefusedError('erase: id present in more than one scope — pass an explicit scope');
     return hits[0] ?? null;
   }
 
@@ -1128,30 +1138,35 @@ export class MemoryStore {
         `permanent-erase: scope for id '${id}' is in a MISMATCH (rollback-alarm) state — refusing a permanent erase that would launder the alarm; re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry (spec §4.2)`,
       );
     }
-    const isMarker = kind === 'marker';                       // by the ROW, not the id (R5(c))
-    const alreadyDead = !this.verifiedOf(ledger).live.has(id);
-    if (!isMarker && !alreadyDead) {                          // skip tombstone for markers (T1-g) + already-dead ids (D8)
-      const ts = this.now();
-      appendWitnessed(ledger, {
-        id: this.id(), tx: ts, validFrom: ts, validTo: null,
-        type: 'erase', content: '', state: 'Suspect',
-        provenance: { source: 'user', sessionId: this.session() },
-        supersedes: id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
-      }, this.homeDir(), this.scopeRootOf(ledger), 'erase');
+    try {
+      const isMarker = kind === 'marker';                       // by the ROW, not the id (R5(c))
+      const alreadyDead = !this.verifiedOf(ledger).live.has(id);
+      if (!isMarker && !alreadyDead) {                          // skip tombstone for markers (T1-g) + already-dead ids (D8)
+        const ts = this.now();
+        appendWitnessed(ledger, {
+          id: this.id(), tx: ts, validFrom: ts, validTo: null,
+          type: 'erase', content: '', state: 'Suspect',
+          provenance: { source: 'user', sessionId: this.session() },
+          supersedes: id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+        }, this.homeDir(), this.scopeRootOf(ledger), 'erase');
+      }
+      if (opts.permanent) {
+        // HMAC-aware compaction: preserve genuine signed verifies for this ledger, drop forgeries.
+        // Resolve the subkey ONCE (see keepValidVerifyFor) so the whole compaction makes one atomic
+        // keep/drop decision, and share that predicate with the auto-compaction trigger so the two
+        // paths can never diverge. A permanent erase is a ledger REWRITE (prefix change), so it drives
+        // the witness transition (kind:'erase') — otherwise the next witnessed read would false-alarm.
+        const sk = this.subkeyForLedger(ledger);
+        compactLedger(ledger, {
+          erasedIds: new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk), provesKey: this.provesKeyFor(sk),
+          witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), this.scopeRootOf(ledger)), now: () => this.now(), kind: 'erase' },
+        });
+      }
+    } finally {
+      // I8: self-erase gives zero in-memory retention window — cleared even when the append landed
+      // and a LATER step threw, so a landed tombstone can never be masked by a stale recall cache.
+      this.rankCache = null;
     }
-    if (opts.permanent) {
-      // HMAC-aware compaction: preserve genuine signed verifies for this ledger, drop forgeries.
-      // Resolve the subkey ONCE (see keepValidVerifyFor) so the whole compaction makes one atomic
-      // keep/drop decision, and share that predicate with the auto-compaction trigger so the two
-      // paths can never diverge. A permanent erase is a ledger REWRITE (prefix change), so it drives
-      // the witness transition (kind:'erase') — otherwise the next witnessed read would false-alarm.
-      const sk = this.subkeyForLedger(ledger);
-      compactLedger(ledger, {
-        erasedIds: new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk), provesKey: this.provesKeyFor(sk),
-        witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), this.scopeRootOf(ledger)), now: () => this.now(), kind: 'erase' },
-      });
-    }
-    this.rankCache = null;   // I8: self-erase gives zero in-memory retention window
   }
 
   /** WRITE-side startup step (spec §4.9): complete any transition whose new bytes already landed

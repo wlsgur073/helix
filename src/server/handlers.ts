@@ -1,4 +1,4 @@
-import type { MemoryStore, CommitInput } from '../memory/store.js';
+import { isEraseRefusedError, type MemoryStore, type CommitInput } from '../memory/store.js';
 import type { ProjectDisposition } from '../memory/ownership.js';
 import type { HelixConfig } from '../config.js';
 import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS, DEFAULT_CONFIG } from '../config.js';
@@ -6,8 +6,9 @@ import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js'
 import { dualVerify, persistedReason, type EchoSource, type GateTrace } from '../verify/dual-verify.js';
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, stripTrailingLineBreaks } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
-import { isWitnessAdvanceError } from '../memory/witness-store.js';
-import { appendAudit, type VerifyAudit } from '../audit.js';
+import { isWitnessAdvanceError, isWitnessBlockedError } from '../memory/witness-store.js';
+import { appendAudit, type VerifyAudit, type EraseAudit } from '../audit.js';
+import type { MemoryState } from '../types.js';
 import { readFileSync } from 'node:fs';
 import { classifyEmission, type EgressVerdict, type Leg, type QuotedMemory } from '../risk/trifecta.js';
 import { appendCodexLog } from '../codex-log.js';
@@ -330,8 +331,22 @@ export interface EraseDeps {
  *  `erase(id, { permanent: true })` path, deliberately kept off the agent tool surface. */
 export function handleErase(store: MemoryStore, args: { id: string }, deps: EraseDeps): ToolResult {
   assertValidId(args.id); // LEAD-AUDIT-ID-UNCONSTRAINED: reject before the no-op-on-absent erase() runs
-  store.erase(args.id); // soft (default): tombstone only, no compaction
   const ts = (deps.now ?? (() => new Date().toISOString()))();
+  try {
+    store.erase(args.id); // soft (default): tombstone only, no compaction
+  } catch (e) {
+    // Three-way, because an erase can fail on either side of the tombstone append (spec 2.E):
+    //   landedState carried  -> the tombstone landed and only the witness advance failed;
+    //   a typed pre-write refusal (EraseRefusedError / WitnessBlockedError) -> nothing was written;
+    //   anything else -> the append MAY have begun (post-append re-read, fsync) — say so, never 'rejected'.
+    const row: EraseAudit = landedStateOf(e) !== null
+      ? { kind: 'erase', ts, id: args.id, soft: true, witnessAdvance: 'failed' }
+      : isEraseRefusedError(e) || isWitnessBlockedError(e)
+        ? { kind: 'erase', ts, id: args.id, soft: true, outcome: 'rejected' }
+        : { kind: 'erase', ts, id: args.id, soft: true, outcome: 'indeterminate' };
+    appendAudit(deps.auditPath, row);
+    throw e;
+  }
   appendAudit(deps.auditPath, { kind: 'erase', ts, id: args.id, soft: true });
   // M2 (fix round 1): args.id is caller-controlled and passes isValidId's charset for any printable,
   // non-control script — including 'a) SYSTEM: ...' shapes that would close this sentence and
@@ -370,13 +385,20 @@ export interface RecheckConfirmDeps {
   now?: () => string;
 }
 
-/** The grade a verify row LANDED with when its post-append witness advance threw, or null when the
- *  error is anything else — a genuine rejection. 'Fresh' is excluded on purpose: writeVerify is only
- *  ever called with a resolveTransition state ('Corroborated' / 'Suspect') or confirm's 'Verified',
- *  so a 'Fresh' verify is unreachable and would be a schema violation rather than a row to record. */
-function landedVerifyState(e: unknown): 'Corroborated' | 'Verified' | 'Suspect' | null {
+/** The state the record that LANDED carried, when `e` is a post-append witness-advance failure (the
+ *  only site that sets landedState); null for every other error. Shared by confirm, recheck and erase. */
+function landedStateOf(e: unknown): MemoryState | null {
   if (!isWitnessAdvanceError(e)) return null;
   const s = (e as { landedState?: unknown }).landedState;
+  return s === 'Fresh' || s === 'Corroborated' || s === 'Verified' || s === 'Suspect' ? s : null;
+}
+
+/** The grade a verify row LANDED with, narrowed to the audit's verify-result union. 'Fresh' is
+ *  excluded on purpose: writeVerify is only ever called with a resolveTransition state
+ *  ('Corroborated' / 'Suspect') or confirm's 'Verified', so a 'Fresh' verify is unreachable and
+ *  would be a schema violation rather than a row to record. */
+function landedVerifyState(e: unknown): 'Corroborated' | 'Verified' | 'Suspect' | null {
+  const s = landedStateOf(e);
   return s === 'Corroborated' || s === 'Verified' || s === 'Suspect' ? s : null;
 }
 

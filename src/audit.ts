@@ -51,6 +51,14 @@ export interface EraseAudit {
   ts: string;
   id: string;
   soft: boolean; // true = tombstone-only (recoverable); false = physical compaction (right-to-erasure)
+  /** ADDITIVE (same evolution rule as VerifyAudit.witnessAdvance): present ONLY when the tombstone
+   *  append LANDED and the post-append witness advance then threw. Absent on every success row. */
+  witnessAdvance?: 'failed';
+  /** ADDITIVE: how a FAILED erase failed. 'rejected' — the store refused BEFORE any write (a typed
+   *  EraseRefusedError or a WitnessBlockedError); 'indeterminate' — an unclassified error escaped
+   *  after the write may have begun (post-append re-read, fsync), so the tombstone MAY be on disk.
+   *  An undefined landedState never means "nothing landed" (witness-store.ts), hence the third value. */
+  outcome?: 'rejected' | 'indeterminate';
 }
 
 /** Verify audit (two-tier trust ladder): every trust transition attempt (recheck / confirm) is
@@ -109,14 +117,14 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit | AdoptAudit
  *  The directory fsync is swallowed UNCONDITIONALLY here — narrower than fs-ops.ts's own fsyncDir
  *  contract (task 7), which now propagates a genuinely failed attempt. No caller (handlers.ts) wraps
  *  this call, and by the time it runs every caller has already COMPLETED its primary operation — not
- *  always successfully. Four of seven call sites — handlers.ts `handleErase`, `handleAdopt`, and the
+ *  always successfully. Four of eight call sites — handlers.ts `handleErase`, `handleAdopt`, and the
  *  post-success appends in `handleRecheck` and `handleConfirm` — run it after a SUCCEEDED operation;
- *  two — the appends in `handleRecheck`'s and `handleConfirm`'s catch blocks — run it INSIDE a catch,
- *  after the primary operation already FAILED, immediately before re-throwing that real error; one —
- *  `handleDualVerify` — follows an operation that commits nothing to disk at all: audit.jsonl IS the
- *  durable record there. Sites are named by FUNCTION rather than by line because the line form of this
- *  same enumeration was corrected twice for its reasoning and then invalidated a third time by
- *  unrelated edits above it, silently and without any check noticing. `grep -n appendAudit
+ *  three — the appends in `handleRecheck`'s, `handleConfirm`'s and `handleErase`'s catch blocks — run
+ *  it INSIDE a catch, after the primary operation already FAILED, immediately before re-throwing that
+ *  real error; one — `handleDualVerify` — follows an operation that commits nothing to disk at all:
+ *  audit.jsonl IS the durable record there. Sites are named by FUNCTION rather than by line because
+ *  the line form of this same enumeration was corrected twice for its reasoning and then invalidated
+ *  a third time by unrelated edits above it, silently and without any check noticing. `grep -n appendAudit
  *  src/server/handlers.ts` re-derives it. Fix round 1 (review Important 3): an earlier version of this
  *  comment claimed every caller's primary operation had "already durably committed", which is false
  *  for the reject paths and the dual-verify path. Fix round 2: that same earlier version also
