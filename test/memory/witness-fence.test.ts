@@ -167,9 +167,10 @@ describe('store.recall — a fence row never surfaces (Step 1c)', () => {
   });
 });
 
-// Task title scope: "fence rows — mint, drop-on-rewrite, ERASE ROUTING". markerFamilyOf routes
-// witness_fence_ ids by PREFIX (unlike the two exact-match fixpoint families) because a fence has
-// no single canonical id — one exists per epoch+nonce. Mirrors erase-routing.test.ts's style.
+// Task title scope: "fence rows — mint, drop-on-rewrite, ERASE ROUTING". A queried fence id resolves
+// ANY on-disk fence ROW of the family (C10) because a fence has no single canonical id — one exists
+// per epoch+nonce. Since move 2 (R5(c)) the family match applies to marker-SHAPED rows only: a live
+// record's exact id always wins over a family-only match (test/memory/erase-marker-shape.test.ts).
 describe('erase routing — witness_fence_ family (markerFamilyOf)', () => {
   it('C10 family-prefix presence: an erase call resolves via ANY on-disk fence, even a different nonce than queried', () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-fence-'));

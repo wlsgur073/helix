@@ -813,7 +813,7 @@ export class MemoryStore {
    *  no self-race), applies read-side witness enforcement (clamp on mismatch / exclude on
    *  transition-interrupted), and emits the replay metric verifiedOf used to. It deliberately does NOT
    *  reuse scopedProjection()/verifiedOf(): those stay UNENFORCED for the write/routing paths
-   *  (commit/ledgerOf/presentIn/liveTarget), where a witness clamp must not change authority checks. */
+   *  (commit/ledgerOf/erase/liveTarget), where a witness clamp must not change authority checks. */
   currentView(): { records: ScopedRecord[]; projectDisposition: ProjectDisposition; witnessNotes: string[] } {
     const disposition = this.projectDisposition();
     const home = this.homeDir();
@@ -989,46 +989,72 @@ export class MemoryStore {
     return p ? trustStateOf(p.root, this.homeDir()) : 'active';
   }
 
-  /** Which marker family an id belongs to, or null for a normal id. `integrity_marker`/
-   *  `horizon_marker` are single canonical fixpoint ids (exact match); a witness fence has no
-   *  single canonical id — one exists per epoch+nonce (witnessFenceRecord, ledger.ts) — so it
-   *  routes by PREFIX instead, the same way presentIn's family-prefix check (below) already
-   *  treats the other two families once matched. */
-  private markerFamilyOf(id: string): 'integrity_' | 'horizon_' | 'witness_fence_' | null {
+  /** The marker family a canonical id ADDRESSES, or null. `integrity_marker` / `horizon_marker` are
+   *  single canonical ids; a witness fence has one id per epoch+nonce, so ANY id wearing that prefix
+   *  addresses the family (C10 — a caller erasing "the fence" need not know the nonce). This is the
+   *  id-side half; `markerFamilyOf` below is the row-side half. */
+  private familyPrefixOf(id: string): 'integrity_' | 'horizon_' | 'witness_fence_' | null {
     if (id === 'integrity_marker') return 'integrity_';
     if (id === 'horizon_marker') return 'horizon_';
     if (id.startsWith('witness_fence_')) return 'witness_fence_';
     return null;
   }
 
-  /** Is `id` present in `ledger` — family-prefix for a marker (C10), else live-or-raw. */
-  private presentIn(ledger: LedgerPath, id: string): boolean {
-    const fam = this.markerFamilyOf(id);
-    const records = parseLedger(ledger);
-    // A marker id is present iff a row of that family that compaction would ACTUALLY purge is here —
-    // i.e. a canonical marker SHAPE (verify-shaped, null target, no mac) with the family prefix, exactly
-    // what isIntegrityMarker/isHorizonMarker recognize. Matching the bare prefix would count an
-    // unrelated non-marker row (e.g. an `assert` with an `integrity_`-prefixed id), making erase report
-    // success + compact a scope where no marker lives (finding 1).
-    if (fam) return records.some((r) => isMarkerShape(r) && r.id.startsWith(fam));
-    if (this.verifiedOf(ledger).live.has(id)) return true;
-    return records.some((r) => r.id === id);
+  /** The family of a marker-SHAPED row, or null for any row that is not a marker — whatever its id.
+   *  Takes the RECORD, not the id (R5(c)): a live assert wearing a marker prefix is a record.
+   *  Membership is by family PREFIX, mirroring ledger.ts's isIntegrityMarker / isHorizonMarker /
+   *  isWitnessFence (marker SHAPE + prefix): a marker row of a fixpoint family need NOT carry the
+   *  canonical id — anyone who can append an `integrity_`-prefixed marker row mints one (ledger.ts's
+   *  F5 residual), and clearing it is exactly what the C10 family match is for. Deliberately wider
+   *  than familyPrefixOf, which answers the narrower id-side question of what an id ADDRESSES. */
+  private markerFamilyOf(r: MemoryRecord): 'integrity_' | 'horizon_' | 'witness_fence_' | null {
+    if (!isMarkerShape(r)) return null;
+    if (r.id.startsWith('integrity_')) return 'integrity_';
+    if (r.id.startsWith('horizon_')) return 'horizon_';
+    if (r.id.startsWith('witness_fence_')) return 'witness_fence_';
+    return null;
   }
 
-  /** Resolve the single ledger an erase acts on, or null for a clean-and-absent no-scope no-op. Throws
-   *  on: unowned project scope; explicit scope where the id is absent (C4/D7); a no-scope PERMANENT
-   *  erase over a ledger with any skipped line (C5/C6); or a no-scope id live/present in more than one
-   *  scope (D9). `permanent` gates the corruption check: a physical purge must not silently miss a
-   *  secret hiding in a skipped line, but a SOFT erase only tombstones (parseLedger tolerates a torn
+  /** What `id` names in `ledger`, classified by the parsed ROWS (R5(c)):
+   *  - 'record'    a non-marker row with exactly this id (live or raw) — an exact id always wins
+   *                over a family-only marker match, so a live row wearing a marker prefix is erasable;
+   *  - 'marker'    only marker-shaped rows match: this exact id, or this id's family (C10);
+   *  - 'ambiguous' a record AND a marker row carry the SAME exact id — refused, operator path;
+   *  - 'absent'    nothing matches.
+   *  Snapshot-relative: computed before the mutation lock, exactly like the presence check it
+   *  replaces; a concurrent writer can create the ambiguity after this returns. */
+  private findEraseTarget(ledger: LedgerPath, id: string): 'record' | 'marker' | 'ambiguous' | 'absent' {
+    const records = parseLedger(ledger);
+    const fam = this.familyPrefixOf(id);
+    const recordHit = records.some((r) => !isMarkerShape(r) && r.id === id);
+    const markerExact = records.some((r) => isMarkerShape(r) && r.id === id);
+    const markerFamily = fam !== null && records.some((r) => this.markerFamilyOf(r) === fam);
+    if (recordHit) return markerExact ? 'ambiguous' : 'record';
+    if (markerExact || markerFamily) return 'marker';
+    return 'absent';
+  }
+
+  /** Resolve the single ledger an erase acts on — and what the id names there — or null for a
+   *  clean-and-absent no-scope no-op. Throws on: unowned project scope; explicit scope where the id
+   *  is absent (C4/D7); a no-scope PERMANENT erase over a ledger with any skipped line (C5/C6); a
+   *  no-scope id present in more than one scope (D9); or an id that names both a marker row and a
+   *  record (R5(c)). `permanent` gates the corruption check: a physical purge must not silently miss
+   *  a secret hiding in a skipped line, but a SOFT erase only tombstones (parseLedger tolerates a torn
    *  line as §10 specifies), so an unrelated corrupt line must never brick it (finding 2). */
-  private resolveEraseTarget(id: string, scope: MemoryScope | undefined, permanent: boolean): LedgerPath | null {
+  private resolveEraseTarget(id: string, scope: MemoryScope | undefined, permanent: boolean): { ledger: LedgerPath; kind: 'record' | 'marker' } | null {
     const p = this.opts.project;
     const projectActive = !!p && isOwned(p.root, this.homeDir());
+    const classify = (ledger: LedgerPath): 'record' | 'marker' | null => {
+      const kind = this.findEraseTarget(ledger, id);
+      if (kind === 'ambiguous') throw new Error('erase: this id names both a marker row and a record in the resolved ledger — operator path only');
+      return kind === 'absent' ? null : kind;
+    };
     if (scope) {
       const ledger = scope === 'global' || !p ? this.global
         : (projectActive ? p.ledger : (() => { throw new Error('erase: project ledger not owned — adopt it (helix_memory_adopt) then erase, or remove it'); })());
-      if (!this.presentIn(ledger, id)) throw new Error(`erase: id not found in scope ${scope}`);
-      return ledger;
+      const kind = classify(ledger);
+      if (kind === null) throw new Error(`erase: id not found in scope ${scope}`);
+      return { ledger, kind };
     }
     const candidates: LedgerPath[] = [this.global, ...(projectActive ? [p!.ledger] : [])];
     // Corruption gate — PERMANENT (destructive) erase only. The only production caller (the MCP tool)
@@ -1047,7 +1073,11 @@ export class MemoryStore {
         }
       }
     }
-    const hits = candidates.filter((c) => this.presentIn(c, id));
+    const hits: Array<{ ledger: LedgerPath; kind: 'record' | 'marker' }> = [];
+    for (const c of candidates) {
+      const kind = classify(c);
+      if (kind !== null) hits.push({ ledger: c, kind });
+    }
     if (hits.length > 1) throw new Error('erase: id present in more than one scope — pass an explicit scope');
     return hits[0] ?? null;
   }
@@ -1059,8 +1089,9 @@ export class MemoryStore {
    *  one candidate ledger may hold the id (else throws ambiguity), and a corrupt/torn line on ANY
    *  candidate throws rather than silently risking a wrong-file compaction. */
   erase(id: string, opts: { permanent?: boolean; scope?: MemoryScope } = {}): void {
-    const ledger = this.resolveEraseTarget(id, opts.scope, opts.permanent ?? false);
-    if (ledger === null) { this.rankCache = null; return; }   // clean + absent → idempotent no-op success
+    const target = this.resolveEraseTarget(id, opts.scope, opts.permanent ?? false);
+    if (target === null) { this.rankCache = null; return; }   // clean + absent → idempotent no-op success
+    const { ledger, kind } = target;
     // Anti-laundering (spec §4.2 PR-1): a PERMANENT erase ends in a witnessed compactLedger rewrite,
     // which refuses to advance the witness over a MISMATCH. Gate the WHOLE permanent erase up front on
     // the scope's stable (witness-first + retry-once) verdict, so a rolled-back scope is refused BEFORE
@@ -1075,7 +1106,7 @@ export class MemoryStore {
         `permanent-erase: scope for id '${id}' is in a MISMATCH (rollback-alarm) state — refusing a permanent erase that would launder the alarm; re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry (spec §4.2)`,
       );
     }
-    const isMarker = this.markerFamilyOf(id) !== null;
+    const isMarker = kind === 'marker';                       // by the ROW, not the id (R5(c))
     const alreadyDead = !this.verifiedOf(ledger).live.has(id);
     if (!isMarker && !alreadyDead) {                          // skip tombstone for markers (T1-g) + already-dead ids (D8)
       const ts = this.now();

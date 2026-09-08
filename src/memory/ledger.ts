@@ -496,11 +496,11 @@ export function planCompaction(records: MemoryRecord[], opts: CompactOptions): {
   // prefix has ever existed, the canonical id keeps getting re-minted unless explicitly suppressed.
   // FIXED (was a known limitation): `store.ts`'s erase now routes through `resolveEraseTarget`,
   // which is scope-aware and never falls back to the global ledger for an id it didn't find there —
-  // an explicit `scope: 'project'` (or C10's family-prefix presence check for a marker id) resolves
-  // to the ledger that actually holds it. This hatch clears the marker as long as the erase call
-  // carries the right scope; residual (F5, still true): the marker's PRESENCE is forgeable by
-  // anyone who can append an `integrity_`-prefixed row, real incident or not — only its clearing is
-  // now correctly routed.
+  // an explicit `scope: 'project'` (or C10's family match for a marker-SHAPED row — a live row
+  // merely wearing the prefix is a record and is tombstoned, R5(c)) resolves to the ledger that
+  // actually holds it. This hatch clears the marker as long as the erase call carries the right
+  // scope; residual (F5, still true): the marker's PRESENCE is forgeable by anyone who can append
+  // an `integrity_`-prefixed row, real incident or not — only its clearing is now correctly routed.
   if ((records.some(isIntegrityMarker) || droppedForgedVerifies > 0) && !opts.erasedIds.has('integrity_marker')) {
     kept.push(canonicalMarker('integrity_marker'));
   }
