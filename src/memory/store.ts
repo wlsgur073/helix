@@ -1037,16 +1037,25 @@ export class MemoryStore {
   /** Resolve the single ledger an erase acts on — and what the id names there — or null for a
    *  clean-and-absent no-scope no-op. Throws on: unowned project scope; explicit scope where the id
    *  is absent (C4/D7); a no-scope PERMANENT erase over a ledger with any skipped line (C5/C6); a
-   *  no-scope id present in more than one scope (D9); or an id that names both a marker row and a
-   *  record (R5(c)). `permanent` gates the corruption check: a physical purge must not silently miss
-   *  a secret hiding in a skipped line, but a SOFT erase only tombstones (parseLedger tolerates a torn
-   *  line as §10 specifies), so an unrelated corrupt line must never brick it (finding 2). */
+   *  no-scope id present in more than one scope (D9); or — for a SOFT erase only — an id that names
+   *  both a marker row and a record (R5(c)). `permanent` gates the corruption check: a physical
+   *  purge must not silently miss a secret hiding in a skipped line, but a SOFT erase only
+   *  tombstones (parseLedger tolerates a torn line as §10 specifies), so an unrelated corrupt line
+   *  must never brick it (finding 2). */
   private resolveEraseTarget(id: string, scope: MemoryScope | undefined, permanent: boolean): { ledger: LedgerPath; kind: 'record' | 'marker' } | null {
     const p = this.opts.project;
     const projectActive = !!p && isOwned(p.root, this.homeDir());
     const classify = (ledger: LedgerPath): 'record' | 'marker' | null => {
       const kind = this.findEraseTarget(ledger, id);
-      if (kind === 'ambiguous') throw new Error('erase: this id names both a marker row and a record in the resolved ledger — operator path only');
+      if (kind === 'ambiguous') {
+        // A SOFT erase must know which row it tombstones, so an id carried by BOTH a marker row and a
+        // record is refused. A PERMANENT erase is a physical purge of every row carrying the id, marker
+        // and record alike (compactLedger drops by id — "erasure still wins"), so the ambiguity has no
+        // bearing on what it does: it stays the documented out-of-band escape for a planted marker
+        // (ledger.ts, F5 residual) and routes as a marker — no tombstone, straight to compaction.
+        if (permanent) return 'marker';
+        throw new Error('erase: this id names both a marker row and a record in a candidate ledger — a soft erase cannot tell which row to tombstone; a permanent erase purges every row carrying the id');
+      }
       return kind === 'absent' ? null : kind;
     };
     if (scope) {

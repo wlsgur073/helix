@@ -90,4 +90,18 @@ describe('erase routes by the parsed row, not by the id prefix (R5(c))', () => {
 
     expect(readFileSync(ledger).equals(before)).toBe(true);
   });
+
+  it('the same ambiguous state under a PERMANENT erase purges every row carrying the id — the documented escape stays open', () => {
+    // compactLedger drops every live row whose id is in erasedIds, marker and record alike, so a
+    // permanent erase has one meaning here and remains the out-of-band way to clear a planted marker.
+    const { store, ledger } = fresh();
+    store.commit({ content: 'anchor fact so the ledger exists', source: 'user' });
+    appendRaw(ledger, witnessFenceRecord(1, 'aaaa', TS));
+    appendRaw(ledger, rec({ id: 'witness_fence_1_aaaa', content: 'a record that stole the fence id' }));
+
+    expect(() => store.erase('witness_fence_1_aaaa', { permanent: true, scope: 'global' })).not.toThrow();
+
+    expect(parseLedger(ledger).some((r) => r.id === 'witness_fence_1_aaaa')).toBe(false);   // fence AND record gone
+    expect(liveIds(store, 'stole the fence id')).toHaveLength(0);
+  });
 });
