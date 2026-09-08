@@ -55,9 +55,11 @@ export interface EraseAudit {
    *  append LANDED and the post-append witness advance then threw. Absent on every success row. */
   witnessAdvance?: 'failed';
   /** ADDITIVE: how a FAILED erase failed. 'rejected' — the store refused BEFORE any write (a typed
-   *  EraseRefusedError or a WitnessBlockedError); 'indeterminate' — an unclassified error escaped
-   *  after the write may have begun (post-append re-read, fsync), so the tombstone MAY be on disk.
-   *  An undefined landedState never means "nothing landed" (witness-store.ts), hence the third value. */
+   *  EraseRefusedError, a WitnessBlockedError, or a WitnessAdvanceError carrying no landedState — the
+   *  pre-append completeTransition throw; the post-append advance always stamps landedState);
+   *  'indeterminate' — an UNCLASSIFIED error escaped after the write may have begun (post-append
+   *  re-read, fsync), so the tombstone MAY be on disk. For an unclassified error an undefined
+   *  landedState never means "nothing landed" (witness-store.ts), hence the third value. */
   outcome?: 'rejected' | 'indeterminate';
 }
 

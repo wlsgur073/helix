@@ -337,11 +337,14 @@ export function handleErase(store: MemoryStore, args: { id: string }, deps: Eras
   } catch (e) {
     // Three-way, because an erase can fail on either side of the tombstone append (spec 2.E):
     //   landedState carried  -> the tombstone landed and only the witness advance failed;
-    //   a typed pre-write refusal (EraseRefusedError / WitnessBlockedError) -> nothing was written;
+    //   a typed pre-write refusal (EraseRefusedError / WitnessBlockedError), or a WitnessAdvanceError
+    //     WITHOUT landedState -> nothing was written: for the soft erase this handler issues, that
+    //     shape can only come from completeTransition, which witness-write.ts runs BEFORE the append
+    //     (the post-append advance always stamps landedState, which is why it is tested first above);
     //   anything else -> the append MAY have begun (post-append re-read, fsync) — say so, never 'rejected'.
     const row: EraseAudit = landedStateOf(e) !== null
       ? { kind: 'erase', ts, id: args.id, soft: true, witnessAdvance: 'failed' }
-      : isEraseRefusedError(e) || isWitnessBlockedError(e)
+      : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e)
         ? { kind: 'erase', ts, id: args.id, soft: true, outcome: 'rejected' }
         : { kind: 'erase', ts, id: args.id, soft: true, outcome: 'indeterminate' };
     appendAudit(deps.auditPath, row);

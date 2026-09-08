@@ -197,6 +197,29 @@ describe('a failed erase is audited three ways (spec 2.E)', () => {
     expect(ledgerMod.parseLedger(ledgerPath).some((r) => r.type === 'erase' && r.supersedes === rec.id)).toBe(true);
   });
 
+  it('pre-write: completeTransition throws (a WitnessAdvanceError with NO landedState) -> outcome: rejected, record still live', () => {
+    const s = store();
+    const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');
+    const rec = s.commit({ content: 'erase me but fail before the write', source: 'user' });
+    // Same shape as the confirm-side pre-write case above: armed AFTER the commit, classifyState's next
+    // call is witness-write.ts's PRE-append read; 'transition-heal' sends it into the REAL
+    // completeTransition, which finds no pending journal and throws before the tombstone append.
+    const journal: JournalEntry = {
+      kind: 'compaction', epoch: 1, predecessor: null,
+      expected: { byteLength: 0, prefixHash: '' }, nonce: 'n', tx: '2026-06-09T00:00:00.000Z',
+      supersedes: null, mac: 'journal-mac',
+    };
+    const spy = vi.spyOn(witnessStoreMod, 'classifyState').mockImplementationOnce(() => ({ kind: 'transition-heal', journal }));
+    try {
+      expect(() => handleErase(s, { id: rec.id }, { auditPath })).toThrow(/no pending journal/);
+    } finally { spy.mockRestore(); }
+    const row = lastEraseAuditRow(auditPath);
+    expect(row).toMatchObject({ kind: 'erase', id: rec.id, soft: true, outcome: 'rejected' });
+    expect(row.witnessAdvance).toBeUndefined();
+    // No byte moved: the record is still live.
+    expect(s.recall('erase me but fail before').items.some((i) => i.record.id === rec.id)).toBe(true);
+  });
+
   it('success: the audit row carries neither new field', () => {
     const s = store();
     const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');
