@@ -249,6 +249,7 @@ This file records what shipped in each release of Helix. It follows
 - `helix_dual_verify` now labels every `agree` as lexical agreement in the response itself — "matched
   claims share tokens and polarity; not a semantic check" — instead of leaving a bare `verdict: agree`
   to read as semantic verification. The enum value and the `audit.jsonl` field are unchanged.
-- Dependency advisory triage refreshed (`docs/release/deps-audit-2026-08.md`); `fast-uri` is
-  overridden to `3.1.5` in `package.json`/`package-lock.json` as defense-in-depth for the one
-  advisory-bearing package that ships (the shipped bundle itself picks it up at the next rebuild).
+- Dependency advisory triage refreshed (`docs/release/deps-audit-2026-09.md`); `fast-uri` is
+  overridden to `3.1.7` in `package.json`/`package-lock.json`. The advisories that remain are
+  transitive dependencies of the MCP SDK's HTTP transports, which the shipped bundle does not
+  contain — the record measures that rather than assuming it.

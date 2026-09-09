@@ -133,7 +133,8 @@ for the current list rather than quoting a number.
   user-visible tool response (`src/server/handlers.ts`) and is read by literal path in
   `test/docs/shipped-claims.doc.test.ts`, and its blocks are claim-classified, so it cannot be
   renamed without moving code, tests and the ledger together.
-- `deps-audit-2026-08.md` — dependency advisory triage.
+- `deps-audit-2026-09.md` — dependency advisory triage at the release, with a measured
+  reachability verdict for every production advisory.
 - `c3-audit-2026-09.md` — the C3.1 security-claim sweep at the release candidate.
 
 **Removed files.** These were deleted on 2026-09-09 because nothing was left for them to do. Records
@@ -146,6 +147,7 @@ that cite them are correct about the past; recover the bytes with
 | `v2-close-evidence-index-2026-08.md` | its artifact table and its one open item moved into `v2-close-report-2026-08.md`, Appendix A |
 | `v2-freeze-runtime-pins-2026-08.txt` | the `sha256sum -c` input of the retired guard script |
 | `scripts/freeze-runtime-check.sh` | retired in place 2026-09-05, inert by default, anchored to a retired candidate, and citing a close receipt that will never exist |
+| `deps-audit-2026-08.md` | superseded by `deps-audit-2026-09.md`, which carries its dispositions forward |
 
 ## 4. What is still owed
 
