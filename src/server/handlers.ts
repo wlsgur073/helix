@@ -388,12 +388,17 @@ export interface RecheckConfirmDeps {
   now?: () => string;
 }
 
+/** Every MemoryState as a compile-time-checked whitelist: adding a state to the union without adding it
+ *  here fails `satisfies`, so a post-append failure carrying a new grade can never fall through to the
+ *  'rejected' audit outcome (final review, M-5). */
+const MEMORY_STATES = { Fresh: true, Corroborated: true, Verified: true, Suspect: true } satisfies Record<MemoryState, true>;
+
 /** The state the record that LANDED carried, when `e` is a post-append witness-advance failure (the
  *  only site that sets landedState); null for every other error. Shared by confirm, recheck and erase. */
 function landedStateOf(e: unknown): MemoryState | null {
   if (!isWitnessAdvanceError(e)) return null;
   const s = (e as { landedState?: unknown }).landedState;
-  return s === 'Fresh' || s === 'Corroborated' || s === 'Verified' || s === 'Suspect' ? s : null;
+  return typeof s === 'string' && Object.hasOwn(MEMORY_STATES, s) ? (s as MemoryState) : null;
 }
 
 /** The grade a verify row LANDED with, narrowed to the audit's verify-result union. 'Fresh' is

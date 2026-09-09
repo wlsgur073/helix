@@ -86,8 +86,6 @@ export function witnessNoteFor(verdict: WitnessVerdict): string | null {
   }
 }
 
-/** Map an ordered list of per-scope verdicts (global first, then project) to their notes — deduped,
- *  order-preserving. Two scopes sharing a verdict render the note once (spec: ordered + deduped). */
 /** The as-of rendering of a read surface's witness notes: the mismatch note becomes its surface-true
  *  variant, every other note passes through. Applied by `MemoryStore.asOfView` itself (move 2), so a
  *  LIBRARY caller reading `asOfView().witnessNotes` receives the surface-true wording; the render layer
@@ -96,6 +94,8 @@ export function asOfWitnessNotes(notes: string[]): string[] {
   return notes.map((n) => (n === WITNESS_MISMATCH_NOTE ? WITNESS_MISMATCH_ASOF_NOTE : n));
 }
 
+/** Map an ordered list of per-scope verdicts (global first, then project) to their notes — deduped,
+ *  order-preserving. Two scopes sharing a verdict render the note once (spec: ordered + deduped). */
 export function collectWitnessNotes(verdicts: WitnessVerdict[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];

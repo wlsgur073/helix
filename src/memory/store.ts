@@ -1130,8 +1130,8 @@ export class MemoryStore {
    *  compaction, so an erroneous/poisoned erase can be undone). `permanent` compacts immediately for
    *  genuine right-to-erasure. Scope-aware routing (D5/D7/C4/C10): never falls back to a ledger the id
    *  does not live in — an explicit scope must contain the id or this throws; with no scope, exactly
-   *  one candidate ledger may hold the id (else throws ambiguity), and a corrupt/torn line on ANY
-   *  candidate throws rather than silently risking a wrong-file compaction. */
+   *  one candidate ledger may hold the id (else throws the multi-scope refusal), and a corrupt/torn
+   *  line on ANY candidate throws rather than silently risking a wrong-file compaction. */
   erase(id: string, opts: { permanent?: boolean; scope?: MemoryScope } = {}): void {
     const target = this.resolveEraseTarget(id, opts.scope, opts.permanent ?? false);
     if (target === null) { this.rankCache = null; return; }   // clean + absent → idempotent no-op success
