@@ -6,6 +6,10 @@ freeze (C5.1) pins their identities (file hashes + commit) together with the sys
 Governing texts: gate-decision D5 (`gate-decision-2026-07-22.md`), readiness C1.3/C5.1/C5.2/Q3
 (`readiness-criteria-2026-07.md`), holdout independence spec (`pilot-amendment-1.md` §f).
 
+*(2026-09-09: the v2 evidence window this status binds to ended by `Abort A-2026-08-31`, and the
+rule's binding force lapsed with it — no measurement rests on it now. The divergence of these tracked
+bytes from the freeze pin is recorded at the end of this file and is unchanged.)*
+
 ## 1. Purpose
 
 D5 documents the O_67 class — superset competition: the target is the short record defining a
