@@ -4,6 +4,25 @@ Status: standing operational doc (C4.8 of `readiness-criteria-2026-07.md`). Ever
 was learned from a live deploy failure; this file exists so the procedure no longer lives in
 any assistant's session memory.
 
+> **Re-read against CLI 2.1.266 on 2026-09-09**, during the v0.1.0 release's pristine install.
+> What still holds: the `installed_plugins.json` entry carries `gitCommitSha`, so the staleness
+> check below is unchanged; `install`, `uninstall`, `marketplace update` and the `--scope` flag all
+> behave as written; and the entry is an ARRAY per plugin id, so enumerate it rather than reading
+> `[0]`. Two things this release added:
+>
+> - **A local checkout can be the marketplace.** `claude plugin marketplace add <path>` registers it
+>   (`Validating local marketplace`), which is how an unreleased candidate is installed on a machine
+>   with nothing published yet. The install path is the same version-keyed cache dir, so the cache
+>   trap below applies unchanged.
+> - **`gitCommitSha` records the marketplace source's HEAD, not the bytes copied.** Installing from
+>   a local checkout with uncommitted changes recorded the previous commit's sha beside the working
+>   tree's bytes — the same disagreement the auto-update race produces, reached a different way. The
+>   fix is the same: commit first, then uninstall → marketplace update → install, and re-verify.
+> - **The manifest is schema-validated at install time, and the schema is stricter than JSON.**
+>   `repository` as an npm-style `{ type, url }` object was refused outright with
+>   `Validation errors: repository: Invalid input`, taking the whole plugin down. It must be a plain
+>   URL string. `test/plugin/packaging.test.ts` now pins the shapes so this fails in the suite.
+
 ## The two failure classes
 
 1. **Version-keyed cache trap.** The plugin cache is keyed by version string
