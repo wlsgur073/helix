@@ -33,9 +33,10 @@ const realDirFsyncSyscalls: DirFsyncSyscalls = { openSync, fsyncSync, closeSync 
 /** Errno codes meaning "this platform/filesystem cannot fsync a directory at all" — the SWALLOWED
  *  class below. EINVAL/EISDIR are the POSIX-common pair; ENOTSUP/EOPNOTSUPP are a second, distinct
  *  pair some filesystems return instead (they share one numeric value on Linux but are DISTINCT
- *  symbols on other platforms — list both, never assume they coincide). EPERM/EACCES join them for
- *  the open() leg, where a restricted directory is a standing environment fact rather than an I/O
- *  fault. Deliberately over-inclusive: an unrecognized "can't do this" code landing here only
+ *  symbols on other platforms — list both, never assume they coincide). EPERM/EACCES join them
+ *  because a restricted directory is a standing environment fact rather than an I/O fault; note that
+ *  `isUnsupported` is applied to BOTH legs, so those two are swallowed on the fsync leg as well —
+ *  an earlier version of this comment said "for the open() leg", which the code below never did. Deliberately over-inclusive: an unrecognized "can't do this" code landing here only
  *  restores the OLD shipped behavior (a silent durability loss) for that one code, whereas the
  *  opposite mistake — a genuine platform limit misclassified as PROPAGATED — makes memory unusable on
  *  that platform. The two directions are not symmetric, so when the classification is a guess about

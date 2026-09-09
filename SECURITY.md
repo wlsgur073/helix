@@ -381,20 +381,23 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   (power cut mid-append) is isolated by the next writer's tail repair and counted by parse health,
   and a complete-but-unacknowledged record commits (at-least-once). The **directory** fsync that
   makes a new file's name durable is attempted on the same path, and splits into two classes on
-  **errno alone, never on the message**: if the directory cannot be opened at all, or the fsync call
-  itself fails with `EINVAL`/`EISDIR`/`ENOTSUP`/`EOPNOTSUPP`, the platform genuinely cannot fsync a
-  directory (some filesystems, and Windows, reject it outright — `ENOTSUP`/`EOPNOTSUPP` are a second
-  pair some filesystems return instead of `EINVAL`/`EISDIR`; the same numeric value on Linux but
-  distinct symbols elsewhere) and the failure is suppressed — success is still reported, so an
-  acknowledged append could, after power loss, be found under a directory entry that never reached
-  the platter. Any other failure (`EIO`, `ENOSPC`, and their class) means the fsync was attempted
-  and genuinely failed, and now **propagates**: the append itself throws rather than reporting a
+  **errno alone, never on the message**: if the fsync call, or the `open` that precedes it, fails
+  with `EINVAL`/`EISDIR`/`ENOTSUP`/`EOPNOTSUPP`/`EPERM`/`EACCES`, the platform or the directory's
+  standing permissions genuinely cannot fsync a directory (some filesystems reject it outright —
+  `ENOTSUP`/`EOPNOTSUPP` are a second pair some filesystems return instead of `EINVAL`/`EISDIR`; the
+  same numeric value on Linux but distinct symbols elsewhere; `EPERM`/`EACCES` are a standing
+  environment fact rather than an I/O fault), and the failure is suppressed — success is still
+  reported, so an acknowledged append could, after power loss, be found under a directory entry that
+  never reached the platter. Windows cannot open a directory for reading at all and stays wholesale
+  best-effort on the same path. Any other failure on either leg (`EIO`, `ENOSPC`, `EMFILE`, `ENOENT`
+  and their class) means the attempt was real and genuinely failed, and **propagates**: the append itself throws rather than reporting a
   success that isn't true, converting that rare disk-level failure into an availability failure on
   every write path (append, compaction's post-rename fsync, master-key mint, witness advance, orphan
   -tmp sweep) at once — a deliberate trade against silently lying about durability. The audit trail
   (`audit.jsonl`) is the one exception: it is documented best-effort/non-transactional already (see
-  its own docstring), and its directory fsync on first creation stays unconditionally suppressed, so a
-  disk hiccup on that side channel never reports an already-succeeded operation as failed — or, at a
+  its own docstring), and its directory fsync — attempted on every append, not only on the one that
+  creates the file — stays unconditionally suppressed, so a disk hiccup on that side channel never
+  reports an already-succeeded operation as failed — or, at a
   rejection site, replaces the real rejection error with an unrelated one on its way out.
   The line's own bytes are unaffected either way.
 - **Rollout launch barrier (normative):** old bundles age-steal locks and do not sweep — while any
