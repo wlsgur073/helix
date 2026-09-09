@@ -1030,7 +1030,9 @@ export class MemoryStore {
    *  - 'record'    a non-marker row with exactly this id (live or raw) — an exact id always wins
    *                over a family-only marker match, so a live row wearing a marker prefix is erasable;
    *  - 'marker'    only marker-shaped rows match: this exact id, or this id's family (C10);
-   *  - 'ambiguous' a record AND a marker row carry the SAME exact id — refused, operator path;
+   *  - 'ambiguous' a record AND a marker row carry the SAME exact id — a SOFT erase tombstones the
+   *                record (marker rows are inert to a tombstone); a PERMANENT erase purges every row
+   *                carrying the id;
    *  - 'absent'    nothing matches.
    *  Snapshot-relative: computed before the mutation lock, exactly like the presence check it
    *  replaces; a concurrent writer can create the ambiguity after this returns. */
@@ -1047,10 +1049,10 @@ export class MemoryStore {
 
   /** Resolve the single ledger an erase acts on — and what the id names there — or null for a
    *  clean-and-absent no-scope no-op. Throws on: unowned project scope; explicit scope where the id
-   *  is absent (C4/D7); a no-scope PERMANENT erase over a ledger with any skipped line (C5/C6); a
-   *  no-scope id present in more than one scope (D9); or — for a SOFT erase only — an id that names
-   *  both a marker row and a record (R5(c)). `permanent` gates the corruption check: a physical
-   *  purge must not silently miss a secret hiding in a skipped line, but a SOFT erase only
+   *  is absent (C4/D7); a no-scope PERMANENT erase over a ledger with any skipped line (C5/C6); or a
+   *  no-scope id present in more than one scope (D9) — which a SOFT erase reaches only when no single
+   *  candidate holds a record with this exact id (I-2). `permanent` gates the corruption check: a
+   *  physical purge must not silently miss a secret hiding in a skipped line, but a SOFT erase only
    *  tombstones (parseLedger tolerates a torn line as §10 specifies), so an unrelated corrupt line
    *  must never brick it (finding 2). */
   private resolveEraseTarget(id: string, scope: MemoryScope | undefined, permanent: boolean): { ledger: LedgerPath; kind: 'record' | 'marker' } | null {
@@ -1059,13 +1061,14 @@ export class MemoryStore {
     const classify = (ledger: LedgerPath): 'record' | 'marker' | null => {
       const kind = this.findEraseTarget(ledger, id);
       if (kind === 'ambiguous') {
-        // A SOFT erase must know which row it tombstones, so an id carried by BOTH a marker row and a
-        // record is refused. A PERMANENT erase is a physical purge of every row carrying the id, marker
-        // and record alike (compactLedger drops by id — "erasure still wins"), so the ambiguity has no
-        // bearing on what it does: it stays the documented out-of-band escape for a planted marker
-        // (ledger.ts, F5 residual) and routes as a marker — no tombstone, straight to compaction.
-        if (permanent) return 'marker';
-        throw new EraseRefusedError('erase: this id names both a marker row and a record in a candidate ledger — a soft erase cannot tell which row to tombstone; a permanent erase purges every row carrying the id');
+        // A marker-shaped row and a record carry the same exact id. A SOFT erase tombstones the RECORD:
+        // the tombstone acts on the id in the projection, and marker-shaped rows never enter the live
+        // projection (null target), so no marker row is touched either way — refusing here protected
+        // nothing and let anyone who can append a row deny the record's erasure (final review, I-1).
+        // A PERMANENT erase is a physical purge of every row carrying the id, marker and record alike
+        // (compactLedger drops by id — "erasure still wins"), so it routes as a marker: no tombstone,
+        // straight to compaction — the documented out-of-band escape for a planted marker.
+        return permanent ? 'marker' : 'record';
       }
       return kind === 'absent' ? null : kind;
     };
@@ -1109,6 +1112,15 @@ export class MemoryStore {
     for (const c of candidates) {
       const kind = classify(c);
       if (kind !== null) hits.push({ ledger: c, kind });
+    }
+    // SOFT erases (the tool's only shape — it cannot pass a scope) prefer the one candidate holding a
+    // RECORD with this exact id over candidates whose only match is a family marker: every ledger that
+    // has ever been rewritten carries a witness fence, so a family-only hit is the ordinary state of the
+    // OTHER scope, not a second home for the record (final review, I-2). A permanent no-scope erase
+    // with more than one hit stays refused — the operator passes an explicit scope.
+    if (!permanent) {
+      const recs = hits.filter((h) => h.kind === 'record');
+      if (recs.length === 1) return recs[0]!;
     }
     if (hits.length > 1) throw new EraseRefusedError('erase: id present in more than one scope — pass an explicit scope');
     return hits[0] ?? null;
