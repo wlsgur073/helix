@@ -43,6 +43,22 @@
 > line in H2b is re-wrapped to admit a note. "Nothing below has been altered" is true of the record
 > and of every sentence in it, and false only of those two marks.
 
+> **THIRD NOTE — 2026-09-09, pre-release cleanup. Nothing below is altered.** Block A's items are
+> disposed of elsewhere and not here: A1's home-machine pins were CANCELED (abort record §2), A2's Q1
+> and Q2 were closed 2026-09-01, and A3's Q4 separate-medium copy is **NOT met** and is tracked in
+> `README.md` §4 of this directory. Steps 0.6 and G6 were skipped for cause (deviation ledger,
+> `Abort A-2026-08-31` execution order); 0.7, F6, G7 and H6 have no record either way and are not
+> owed. The D1 and G4 rehearsal steps drove `scripts/freeze-runtime-check.sh`, retired 2026-09-05 and
+> **deleted** 2026-09-09 with its pin list, so those steps are no longer reproducible from a
+> checkout — and steps 3139 and 3141, which stage and check in the close-run evidence index by name,
+> name a file that no longer exists either (its contents are Appendix A of the abort record). Where
+> this sheet quotes a count of pinned paths diverging from the working tree, that number is stale and
+> keeps going stale as development continues; `npm run freeze-guard` prints the current list. And
+> where its banner reads the blocked gate as settled, the reading that governs is
+> `readiness-criteria-2026-07.md` §14 (2026-09-09): the block attaches to the recall-quality claim,
+> not to the product.
+
+
 **This is a run-sheet, not an essay.** Tick boxes as you go, paste observed output next to the
 step, and leave the file in the repository as the close-day log. The *why* behind every rule here
 lives in `v2-close-procedure-2026-08.md` and `v2-preregistration-2026-07.md` §9/§9a — this
