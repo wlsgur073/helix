@@ -412,7 +412,7 @@
  {
   "rowId": "r042",
   "surfaceItem": "cross-cutting",
-  "claimId": "README.md#14f6fcb54fab",
+  "claimId": "README.md#5d58fb60beb0",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and value; A1 pins the table to DEFAULT_CONFIG; re-observed 2026-09-02",
@@ -492,7 +492,7 @@
  {
   "rowId": "r050",
   "surfaceItem": "cross-cutting",
-  "claimId": "README.md#7ead23770334",
+  "claimId": "README.md#7bec4d59640f",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts; D2 status shows dual-verify off unless the global config enables it",
@@ -572,7 +572,7 @@
  {
   "rowId": "r058",
   "surfaceItem": "cross-cutting",
-  "claimId": "README.md#e09520bebf34",
+  "claimId": "README.md#f18afc82d1c4",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "certification run-sheet, manual evidence: all five shipped bundles show the same contract on node v20.20.2 as on v24.18.0 (and on v22.22.0)",
