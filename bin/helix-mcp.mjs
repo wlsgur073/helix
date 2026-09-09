@@ -16355,7 +16355,6 @@ var MemoryStore = class {
     if (!binding.bound) throw new Error(`recheck: ${binding.reason}`);
     const outcome = runRealityCheck(check2);
     const result = resolveTransition({
-      targetSource: target.provenance.source,
       targetState: target.state,
       evidenceSource: "reality-check",
       outcome
@@ -16370,7 +16369,6 @@ var MemoryStore = class {
       throw new Error("confirm: only a source=user item is eligible (re-commit as source=user to take authorship first)");
     }
     const result = resolveTransition({
-      targetSource: "user",
       targetState: target.state,
       evidenceSource: "user",
       outcome: { ran: true, indeterminate: false, passed: true }

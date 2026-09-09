@@ -60,10 +60,14 @@ describe('resolveTransition (write-side authority)', () => {
   // it explicitly, with the load-bearing invariant that no unauthenticated field may drive a trust
   // decision) and the verified projection spreads it through unclamped (it clamps `state` only). A
   // caller-declared `source: 'user'` therefore used to make an item permanently undemotable. The
-  // field is still ACCEPTED — store.ts is freeze-pinned and cannot stop passing it — so the lock has
-  // to be behavioural: every (state, outcome) verdict must be identical for every claimed source,
-  // including unknown/legacy values. This is what fails if the disjunct is ever reintroduced.
+  // The field was REMOVED from the signature on 2026-09-09, once the abort released store.ts from the
+  // freeze, so the lock is now two parts and both are needed. The type refuses the field (the case
+  // after this one). This case keeps asking the RUNTIME question, because JavaScript can hand any
+  // function an extra property whatever the type says: every (state, outcome) verdict must still be
+  // identical for every claimed source, including unknown/legacy values. The cast is what lets it
+  // keep asking; it is not a workaround for the removal.
   it('INVARIANT: the write-side authority ignores provenance — a claimed source cannot change any verdict', () => {
+    type TransitionInput = Parameters<typeof resolveTransition>[0];
     const SOURCES: ProvenanceSource[] = [
       'user', 'user-relayed', 'agent-inference', 'agent-test-verified', 'reality-check', 'codex-agree',
       'legacy-mystery' as ProvenanceSource,
@@ -73,11 +77,20 @@ describe('resolveTransition (write-side authority)', () => {
         for (const outcome of [PASS, FAIL, INDET]) {
           const baseline = resolveTransition({ targetState, evidenceSource, outcome });
           for (const targetSource of SOURCES) {
-            const withClaim = resolveTransition({ targetState, evidenceSource, outcome, targetSource });
+            const withClaim = resolveTransition(
+              { targetState, evidenceSource, outcome, targetSource } as unknown as TransitionInput);
             expect(withClaim, `${targetState}/${evidenceSource}/${targetSource}`).toEqual(baseline);
           }
         }
       }
     }
+  });
+
+  it('INVARIANT: the signature does not accept a claimed target source at all', () => {
+    // @ts-expect-error - if this line ever compiles again, someone re-opened the channel
+    // N2-CONTESTED closed: the target's own claim about its provenance reaching the write-side
+    // authority. @ts-expect-error fails the typecheck when the error stops occurring, so the
+    // guarantee cannot be lost quietly.
+    resolveTransition({ targetState: 'Fresh', evidenceSource: 'reality-check', outcome: PASS, targetSource: 'user' });
   });
 });
