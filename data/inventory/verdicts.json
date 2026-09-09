@@ -722,7 +722,7 @@
  {
   "rowId": "r074",
   "surfaceItem": "cross-cutting",
-  "claimId": "docs/release/recovery-playbook.md#ada98792d6d0",
+  "claimId": "docs/release/recovery-playbook.md#31984b6c27f3",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "C4: the row carried DATA[erase:global:…] naming its scope; re-observed 2026-09-02",

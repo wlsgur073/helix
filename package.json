@@ -4,6 +4,9 @@
   "private": true,
   "description": "Verifiable, trust-indexed cross-session memory for Claude Code (provenance firewall, fail-closed) with optional Codex dual-verify.",
   "license": "MIT",
+  "author": {
+    "name": "wlsgur073"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/wlsgur073/helix.git"
