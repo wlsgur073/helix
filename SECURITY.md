@@ -19,7 +19,7 @@ acknowledgement within a few days.
 
 - **Provenance firewall (fail-closed):** a mechanical reality-check (`helix_memory_recheck`)
   raises a fact only to `Corroborated`; only you (`helix_memory_confirm`) can promote it to
-  `Verified`; agreement from an external model never does. `Corroborated`/`Verified` are now
+  `Verified`; agreement from an external model never does. `Corroborated`/`Verified` are
   **tamper-evident at the file surface** (see *Ledger integrity* below): a forged or hand-edited
   ledger record replays as `Fresh`. The grade is still **not** an enforceable human-approval
   signal at the *tool* surface, so do **not** allow-list `helix_memory_confirm` — it must prompt
@@ -54,8 +54,7 @@ acknowledgement within a few days.
   statement, is RELEASED by default — a false-positive mitigation for design prose,
   which fired twice on real artifact names. It is gated by its own leg,
   `secretEntropyExempt` (default `allow`); set it to `block` to close the exemption.
-  Until 2026-08-04 that release was applied inside the detector, upstream of every
-  policy key, so no configuration could reach it. The write/egress asymmetry that
+  The release is applied at the policy layer, so that leg genuinely governs it. The write/egress asymmetry that
   remains by design sits on the HEX arm: egress treats a hex core as exempt-shaped
   (releasable under `secretEntropyExempt`), while the write path always redacts it;
   the word-chain arm is symmetric — released on both paths, each under its own key
@@ -92,7 +91,7 @@ record is HMAC-SHA256-authenticated with a key held **only** in `~/.helix` (a 32
 mode `0600`, never written into the repo ledger; each project signs with its own HKDF subkey).
 That location is the home directory itself — `HELIX_HOME` when set — and it is **not** derived from
 where the ledger happens to be: pointing `HELIX_LEDGER` into a repository moves the data file and
-nothing else. When trust-store files are found beside a relocated ledger — the layout an older build produced —
+nothing else. When trust-store files are found beside a relocated ledger — a layout a hand-assembled `HELIX_LEDGER` setup can produce —
 the server measures whether starting would lose a grade this ledger currently carries, and refuses to
 start only in that case, rather than minting a second key over the top of them. Otherwise it starts
 and prints a note naming the leftover files: refusing on the layout alone was itself a denial of
@@ -103,7 +102,7 @@ locally-held key, so:
 
 - A forged or hand-edited `verify` record (no MAC, or a MAC that no longer matches) is **ignored**,
   and a forged elevated `assert` is clamped to `Fresh` — minting a top grade by appending raw JSON
-  to `.helix/memory.jsonl` no longer works.
+  to `.helix/memory.jsonl` does not work.
 - Against an adversary that can write `.helix/memory.jsonl` but **cannot read `~/.helix`**,
   `Corroborated`/`Verified` are **unforgeable at the file/append surface**. This is the same trust
   boundary the ownership registry already relies on.
@@ -117,7 +116,7 @@ locally-held key, so:
 - **A grade cannot be minted while the rollback alarm stands.** The witness verdict used to gate
   what a read *displayed* but not what the write path *signed*, and a signed `verify` records
   nothing about the verdict it was minted under — so it was indistinguishable from an honest one
-  afterwards. An elevated `verify` is now refused under a `mismatch` verdict, before anything is
+  afterwards. An elevated `verify` is refused under a `mismatch` verdict, before anything is
   appended, so the alarm survives to be investigated rather than written over. The refusal is
   narrow: ordinary commits, soft erases, and reality-check **demotions** still land, because a scope
   under suspicion must stay able to record that something failed. Note what this does *not* claim:
@@ -127,8 +126,9 @@ locally-held key, so:
   lone surrogate with U+FFFD, so unboundedly many distinct contents — including well-formed ones —
   shared a digest and could be substituted under a signed grade. Well-formed content hashes exactly
   as before, so every previously signed `verify` still applies.
-- **Verification timing is authenticated (MAC v2).** A `verify` record now also binds its system-time
-  `tx` into the MAC, so the *timing* of a genuine verification cannot be edited in place. This is
+- **Verification timing is authenticated (MAC v2 — the ledger record format's second version, which
+  has nothing to do with the recall pilot's protocol v2 under `docs/release/`).** A `verify` record
+  binds its system-time `tx` into the MAC, so the *timing* of a genuine verification cannot be edited in place. This is
   **authenticity, not accuracy**: it certifies the bytes the signing clock claimed at mint time, not
   that the clock was correct. Pre-existing v1 verifications stay valid but carry an unauthenticated
   (editable) `tx` — timing trust is therefore per-record, and grows only as facts are genuinely
@@ -143,7 +143,7 @@ locally-held key, so:
 call still carries no enforceable human-approval signal, so the guidance above stands: do **not**
 allow-list `helix_memory_confirm`, and do **not** allow-list `helix_memory_adopt`.
 
-### Compaction integrity/horizon markers (F5) — clearing a planted marker is an operator procedure
+### Compaction integrity/horizon markers — clearing a planted marker is an operator procedure
 
 A compaction mints a content-free, **unsigned** `integrity_marker` when it drops one or more forged
 `verify` records, and a `horizon_marker` when it drops closed fact history — coalesced to a single
@@ -164,8 +164,8 @@ it always tombstones (soft), it can never pass `permanent: true`. So a prompt-in
 reach this path and cannot destroy a genuine forgery-audit signal; only an operator running code
 outside the agent's conversation (a script or REPL against `MemoryStore`) can.
 
-**Marker-erase routing (fixed); general non-live-id fallback (narrower residual).** A permanent erase
-of a *project* ledger's planted marker no longer risks landing on the global ledger: `erase()` resolves
+**Marker-erase routing; general non-live-id fallback (narrower residual).** A permanent erase
+of a *project* ledger's planted marker does not risk landing on the global ledger: `erase()` resolves
 its target through `resolveEraseTarget`, which recognizes a marker by its canonical family
 (`markerFamilyOf` + a family-prefix presence check in `presentIn`) rather than by live-projection
 membership, and the `scope` parameter (`erase(id, { permanent: true, scope: 'project' })`) lets a
@@ -196,7 +196,7 @@ still confirm which ledger it physically lives in (read the ledger JSONL directl
 - **Rollback-by-suppression is not detected by the per-record MAC alone.** Deleting or truncating
   a later legitimate `verify` to preserve a stale elevated grade is invisible to a per-record MAC
   in isolation. A home-side per-scope high-water witness that closes this for a boundary-writable,
-  git-tracked ledger has shipped — see *Rollback witness* below for what it catches and its own
+  git-tracked ledger closes this — see *Rollback witness* below for what it catches and its own
   residual bounds (a whole-home coordinated rollback is still undetectable locally).
 - **Trust is machine-local.** The signing key never leaves `~/.helix`, so a `Verified` grade does
   not transfer to another machine (e.g. a Windows vs. WSL clone) — elevations signed elsewhere
@@ -230,10 +230,10 @@ still confirm which ledger it physically lives in (read the ledger JSONL directl
   model choose it — the server has no way to tell what you said from what a document you pasted said.
   So it may drive **disclosure and ranking** (the reverify-before-use flag, the recall penalty, which
   items the SessionStart preamble surfaces), where failing open still leaves the content visible in
-  front of you. It must never drive a **durable trust-state** decision. Until 2026-08-05 one did: a
-  determinate reality-check failure against an item *claiming* `source=user` was suppressed entirely
-  rather than demoting it to `Suspect`, so the claim alone bought permanent immunity from mechanical
-  contradiction. The demotion guard now reads only the authenticated `Verified` grade. Two
+  front of you. It must never drive a **durable trust-state** decision, and it does not: the demotion
+  guard reads only the authenticated `Verified` grade, so an item merely *claiming* `source=user`
+  buys no immunity from a determinate reality-check failure — it is demoted to `Suspect` like any
+  other. Two
   configuration-dependent controls remain, and are defence-in-depth rather than mechanisms: the
   supersede refusal, and `confirm`'s eligibility check — which is only as strong as the tool-approval
   prompt above it, per the trust-model note on not allow-listing `helix_memory_confirm`.
@@ -276,7 +276,7 @@ adversary cannot read or write, so a ledger's current bytes are checked against 
   **not** an MCP tool: no agent-suppliable parameter can invoke it, and nothing invokes it
   automatically.
 
-Note: because the witness is signed, a witnessed append now materializes the master signing key
+Note: because the witness is signed, a witnessed append materializes the master signing key
 (`~/.helix/ledger-mac-master.key`) on the *first* memory write rather than the first `verify` —
 the key simply comes into existence earlier in a fresh install's life. It is created 0600 by the
 same one-time path as before; nothing about the key's secrecy changes, only when it first appears.
@@ -311,6 +311,42 @@ same one-time path as before; nothing about the key's secrecy changes, only when
   removed. Only what cannot be decided from the bytes — an interruption whose ledger is on the
   post-rewrite lineage, one with no predecessor to compare against, or a fork off both — stays
   ceremony-bound, and that scope stays dark until a human runs it.
+
+## Ambiguous re-adoption and the trust-resolution ceremony
+
+A project's ownership stamp selects the per-scope subkey that verifies that project's ledger, so the
+stamp is part of the trust boundary rather than bookkeeping beside it. Preserving a stamp's nonce
+across a re-adoption is convenient and, on its own, non-destructive — but it is still a decision
+about whose trust applies to rows that may be restored *later*, which is why a present-row count
+cannot settle it.
+
+**When continuity is ambiguous, Helix decides neither way.** If a path is already registered but its
+stamp is missing or invalid, the scope enters a reversible `trust-pending` state and every prior
+verification there reads as `Fresh` until a human resolves it. Nothing is deleted and nothing is
+rewritten; the grades come back if the resolution says they should.
+
+Resolution is a **separate ceremony**, deliberately not folded into the rollback re-baseline — a
+witness nonce and a trust nonce are unrelated, and one operator gesture must not silently answer both
+questions:
+
+```bash
+node bin/helix-trust-resolve.mjs --scope <absoluteProjectRoot> --repair   # keep the nonce
+node bin/helix-trust-resolve.mjs --scope <absoluteProjectRoot> --fresh    # rotate it
+```
+
+- It **requires an interactive terminal** and prompts before acting; declining changes nothing.
+- It refuses a scope that is not `trust-pending`, so it cannot be used to re-key a healthy project.
+- `--repair` keeps the existing trust nonce, and the scope's rows return to their stored grades.
+- `--fresh` rotates the nonce. Rows signed under the old one **stay `Fresh` rather than being
+  deleted**: compaction may drop a verification only when the resolved key proves a single lineage,
+  and after a rotation it cannot, so rotation is non-destructive on both the read and compaction
+  paths.
+- It is **not** an MCP tool. No agent-suppliable parameter reaches it, and nothing invokes it
+  automatically.
+
+**Residual.** This closes the conferral path where a re-adopted path silently inherits trust for rows
+dropped back afterwards. It does not make ownership authenticated against an adversary who can write
+`~/.helix` itself — that is the same machine-local boundary the rest of this document describes.
 
 ## Ledger locking, erasure, and durability boundaries
 
@@ -400,7 +436,8 @@ not acceptable, run it under an OS-level sandbox or leave the feature off.
   group- or world-accessible is repaired at the next start instead: the startup pass
   tightens every Helix-owned file in `~/.helix` back to `0o600` and names each one it
   repaired on stderr. It warns rather than refusing, because an over-broad mode is a
-  state older versions created and is not by itself evidence of tampering — the
+  state an interrupted copy or an external tool can leave behind and is not by itself
+  evidence of tampering — the
   integrity guarantee does not rest on the mode.
 - `~/.helix/codex-log.jsonl` exists only if you opt in (`dualVerify.logContent: true`);
   it stores the exact prompt/response, is created `0o600`, and is capped. A

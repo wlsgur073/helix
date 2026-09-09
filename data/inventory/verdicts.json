@@ -592,7 +592,7 @@
  {
   "rowId": "r060",
   "surfaceItem": "cross-cutting",
-  "claimId": "SECURITY.md#3889290ed21f",
+  "claimId": "SECURITY.md#6c3a0b7fdfc9",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims: a hand-appended elevated assert clamps to Fresh while a tool-minted grade survives in the same run",
@@ -612,7 +612,7 @@
  {
   "rowId": "r062",
   "surfaceItem": "cross-cutting",
-  "claimId": "SECURITY.md#9b3b9b89a3b7",
+  "claimId": "SECURITY.md#c9aeaffd8614",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims: the resolver and family helper the document names are declared in store.ts, and the probe it cites by path exists and exercises a permanent erase",
@@ -622,7 +622,7 @@
  {
   "rowId": "r063",
   "surfaceItem": "cross-cutting",
-  "claimId": "SECURITY.md#a6ed3c08e582",
+  "claimId": "SECURITY.md#c56f2d9e8c47",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims: an empty home plus one commit and no verify already materializes ledger-mac-master.key",
