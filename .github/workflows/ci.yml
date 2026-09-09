@@ -78,3 +78,19 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm run scan:history
+  # The runtime floor README promises, exercised on the Node it promises. Deliberately WITHOUT
+  # `npm ci`: the bundles under bin/ are self-contained because a cloned plugin never runs an
+  # install, so installing here would test a condition no user is in. This job is also the evidence
+  # for the certification run-sheet's Node-floor row, which was previously carried across changed
+  # bundle bytes and named five bundles where the receipt pins six.
+  runtime-floor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+      - run: node scripts/smoke-runtime-floor.mjs
