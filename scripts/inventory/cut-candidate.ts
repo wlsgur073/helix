@@ -18,7 +18,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, posix, relative } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 export interface CandidatePayload {
@@ -116,6 +116,47 @@ const hashAll = (repoRoot: string, paths: string[]): Record<string, string> => {
 const git = (repoRoot: string, args: string[]): string =>
   execFileSync('git', ['-C', repoRoot, ...args], { encoding: 'utf8' }).trim();
 
+/** A runner's summary line, or a statement that none was found — never a blank that reads as clean. */
+export function gateSummaryLine(out: string, re: RegExp): string {
+  const line = out.split('\n').map((l) => l.trim()).find((l) => re.test(l));
+  return line ?? 'no summary line found in the runner output';
+}
+
+/**
+ * The gate state at the cut, MEASURED here rather than described.
+ *
+ * Until 2026-09-09 this field held three instruction strings and the console told the operator to
+ * "fill it … then re-seal". That instruction was unfollowable: the payload is sha256-sealed, this
+ * file is the only producer, and re-running it restores the placeholder — so the receipt could carry
+ * a real gate result or it could verify, never both. The last cut resolved it by hand-editing and
+ * hand-recomputing the seal, which is exactly the unverifiable step the receipt exists to remove.
+ *
+ * The suite subsumes the bundle question: `test/plugin/packaging.test.ts` rebuilds from `src/` and
+ * byte-compares against `bin/`, so a green suite IS the statement that a rebuild moves nothing.
+ * Skip ACCOUNTING stays in the run-sheet's Block A1, where a skip that appeared or disappeared can
+ * be argued about; the count below is only the number.
+ *
+ * Nothing here writes into the tree. The self-reference is deliberate and benign: the suite reads
+ * this receipt from disk, so a cut records the gate of the tree as it stood BEFORE the cut — which
+ * is what "at cut" means.
+ */
+export function measureGateAtCut(repoRoot: string): Record<string, unknown> {
+  const run = (script: string): { status: number; out: string } => {
+    const r = spawnSync('npm', ['run', '--silent', script], {
+      cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 28,
+    });
+    return { status: r.status ?? -1, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+  const typecheck = run('typecheck');
+  const suite = run('test');
+  return {
+    typecheck: `exit ${typecheck.status}`,
+    suite: `exit ${suite.status} — ${gateSummaryLine(suite.out, /^Tests\s+\d/)}`,
+    suiteFiles: gateSummaryLine(suite.out, /^Test Files\s+\d/),
+    measuredAt: new Date().toISOString(),
+  };
+}
+
 export function buildCandidatePayload(repoRoot: string, cutAt: string, gateAtCut: Record<string, unknown>): CandidatePayload {
   const rows = JSON.parse(readFileSync(join(repoRoot, 'data/inventory/verdicts.json'), 'utf8')) as Array<{ rowId: string }>;
   return {
@@ -140,11 +181,8 @@ if (isEntrypoint) {
     console.error(dirty);
     process.exit(1);
   }
-  const payload = buildCandidatePayload(root, new Date().toISOString(), {
-    typecheck: 'run npm run typecheck and record its exit',
-    suite: 'run npm test and record its summary line',
-    note: 'gateAtCut is filled by the operator from the run that accompanied this cut',
-  });
+  console.log('cut-candidate: measuring the gate before sealing (typecheck, then the full suite)…');
+  const payload = buildCandidatePayload(root, new Date().toISOString(), measureGateAtCut(root));
   const receipt = composeCandidateReceipt(payload);
   const problems = verifyCandidateReceipt(receipt);
   for (const p of problems) console.error(`FAIL ${p}`);
@@ -154,5 +192,10 @@ if (isEntrypoint) {
   console.log(`cut-candidate: wrote ${out}`);
   console.log(`  candidate ${payload.candidateCommit}`);
   console.log(`  ${Object.keys(payload.bundles).length} bundles, ${Object.keys(payload.manifest).length} manifest, ${Object.keys(payload.claimSet).length} claim-set, ${payload.rowIds.length} rows`);
-  console.log('  gateAtCut is a PLACEHOLDER — fill it from the run that accompanied this cut, then re-seal.');
+  const gate = payload.gateAtCut as Record<string, string>;
+  console.log(`  gateAtCut MEASURED here — typecheck ${gate.typecheck}, suite ${gate.suite}`);
+  if (!/^exit 0\b/.test(gate.typecheck ?? '') || !/^exit 0\b/.test(gate.suite ?? '')) {
+    console.log('  NOTE: the gate was RED at this cut. That is recorded faithfully, not refused — a');
+    console.log('        receipt saying the suite failed is evidence; one that cannot be written hides it.');
+  }
 }
