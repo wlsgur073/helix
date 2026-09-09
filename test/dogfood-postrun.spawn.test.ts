@@ -348,6 +348,25 @@ describe('Trigger-1 fired-history summary (Task 12 derived reporter)', () => {
     expect(status).toBe(0);
     // first-fired ts is the earliest fired row (r1); count is over the last 14 evaluation lines seen
     // (only 3 exist here, 2 of them fired) -- the LAST evaluation being not-fired must not suppress it.
-    expect(stdout).toContain('Trigger-1 has fired since 2026-08-26T13:18:49.278Z; 2 of the last 14 evaluations fired.');
+    expect(stdout).toContain('Trigger-1 has fired since 2026-08-26T13:18:49.278Z; 2 of the last 3 evaluations fired.');
+  });
+
+  it('a sink with MORE than 14 evaluations reports the count over the last 14 and names 14 as the window', () => {
+    const { scriptPath } = buildTree(STUB_OK);
+    const home = mkdtempSync(join(tmpdir(), 'helix-postrun-home-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-postrun-root-'));
+    // 15 rows: 1-10 fired, 11-15 not-fired. The last 14 are rows 2-15, of which rows 2-10 fired (9).
+    const fixtureLines: string[] = [];
+    for (let i = 1; i <= 15; i++) {
+      const day = String(i).padStart(2, '0');
+      fixtureLines.push(evalLine(`2026-08-${day}T09:00:00.000Z`, i <= 10 ? 'fired' : 'not-fired', `r${i}`));
+    }
+    writeFileSync(join(home, 'trigger.jsonl'), fixtureLines.join('\n') + '\n');
+    const env = { ...baseEnv(home), INVOCATION_ID: 'inv-fired-window', SERVICE_RESULT: 'success', EXIT_CODE: '0', EXIT_STATUS: '0/SUCCESS' };
+
+    const { status, stdout } = runAdapter(scriptPath, root, env);
+
+    expect(status).toBe(0);
+    expect(stdout).toContain('Trigger-1 has fired since 2026-08-01T09:00:00.000Z; 9 of the last 14 evaluations fired.');
   });
 });

@@ -37,8 +37,10 @@ trigger_fired_summary() {
   [ -r "$f" ] || return 0
   first=$(grep '"kind":"evaluation"' "$f" 2>/dev/null | grep -m1 '"overall":"fired"' | grep -o '"ts":"[^"]*"' | head -n 1 | cut -d'"' -f4)
   [ -n "$first" ] || return 0
+  n=$(grep -c '"kind":"evaluation"' "$f" 2>/dev/null)
+  w=$(( n < 14 ? n : 14 ))                 # the window never claims more evaluations than exist
   recent=$(grep '"kind":"evaluation"' "$f" 2>/dev/null | tail -n 14 | grep -c '"overall":"fired"')
-  printf 'Trigger-1 has fired since %s; %s of the last 14 evaluations fired.\n' "$first" "$recent"
+  printf 'Trigger-1 has fired since %s; %s of the last %s evaluations fired.\n' "$first" "$recent" "$w"
 }
 
 trigger_fired_banner() {
