@@ -6,10 +6,7 @@
     "name": "wlsgur073"
   },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/wlsgur073/helix.git"
-  },
+  "repository": "https://github.com/wlsgur073/helix",
   "keywords": [
     "memory",
     "mcp",
@@ -24,5 +21,6 @@
         "${CLAUDE_PLUGIN_ROOT}/bin/helix-mcp.mjs"
       ]
     }
-  }
+  },
+  "homepage": "https://github.com/wlsgur073/helix"
 }
