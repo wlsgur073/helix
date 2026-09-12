@@ -1,5 +1,12 @@
 # Pilot amendment 1 (pre-execution)
 
+> **STATUS (marked 2026-09-09): §a–§e are HISTORICAL; §f is still normative.** This amendment belongs
+> to the v0.2.0 cycle that was withdrawn on 2026-07-22, and its release-wording and waiver sections
+> describe an outcome that did not happen — the registered verdict is NOT MET permanently and the
+> conditional gate failed at 27/28 (`gate-decision-2026-07-22.md`). What survives is §f, the
+> future-runs appendix, which gate-decision D3 and the v2 preregistration both incorporate by
+> reference. Nothing below has been altered.
+
 This document amends the recall pilot defined in `pilot-protocol.md`. It is committed **after the
 relevance mapping was adjudicated but before any retrieval has run**. It informed an independent
 design cross-check and was ratified by the release maintainer. The frozen originals

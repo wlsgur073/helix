@@ -3,252 +3,179 @@
 This file records what shipped in each release of Helix. It follows
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.0]
+## [0.1.0] — 2026-09-09
+
+First release.
 
 ### Added
-- Trust-indexed, verifiable cross-session memory: an append-only JSONL ledger with a
-  provenance firewall (fail-closed promotion), `Fresh / Verified / Suspect` trust
-  states, blast-radius re-verify-before-use, crash-safe compaction, and a
-  cross-process lock.
+
+#### Memory, trust, and integrity
+
+- Trust-indexed, verifiable cross-session memory: an append-only JSONL ledger with a provenance
+  firewall (fail-closed promotion), `Fresh / Corroborated / Verified / Suspect` trust states,
+  blast-radius re-verify-before-use, crash-safe compaction, and a cross-process lock.
 - Layered memory scope: a global ledger plus an ownership-gated per-project ledger
   (`helix_memory_adopt`, default-deny).
-- Lexical recall ranker (coverage / phrase-first, BM25-assisted).
-- Untrusted-content quarantine: NFKC/control/bidi normalization + per-line
-  datamarking + a per-call 128-bit nonce frame.
-- Optional Codex dual-verify (off by default) with a deterministic egress guard
-  (secret / PII / memory-echo), plus `helix_codex_status` and an opt-in content log.
-- Nine MCP tools and SessionStart/SessionEnd hooks, installable as a Claude Code
-  plugin with self-contained committed bundles (no `npm install` to use).
-- Codex 5.6 reasoning efforts. `dualVerify.effort` now accepts `max` and `ultra`. Per-model support
-  varies and Helix does not arbitrate it — `codex debug models` is the authority.
-- `helix_codex_status` now reports the effective model, the configured effort, and the run timeout.
-  When `dualVerify.model` is `null` (inherit), it resolves the name from a free
-  `codex doctor --json` probe; a failed probe prints `(unresolved)` rather than guessing. There is no
-  equivalent probe for effort — `codex doctor --json` does not report `model_reasoning_effort` — so when
-  `dualVerify.effort` is `null` the line prints only the literal `inherited from codex config`, and the
-  advisory note below never fires on that path. A Helix-set (non-`null`) `max` or `ultra` effort at a run
-  timeout of `300000` ms or less prints that advisory note, because a timeout tree-kills the run after
-  the Codex quota is spent.
-- Automatic compaction trigger — **opt-in, GLOBAL config only, default OFF** (`compaction.auto`).
-  When enabled, a recall whose ledger passes every gate rewrites that ledger through the existing
-  crash-safe `compactLedger` (ledger lock held across read → rewrite → atomic rename), synchronously,
-  at most once per session. It is checked on the first recall that rebuilds its index — a recall served
-  from the in-process recall cache (unchanged ledger bytes) skips the check entirely. The attempt is
-  counted whether it **succeeds or fails**: a compaction that throws is swallowed (it never breaks the
-  recall) but still consumes the session's single attempt, and is not retried until a new session. It
-  surfaces as an `ok: false` metric row *if metrics are enabled* (see below). That failure path splits at
-  the rename. A throw **before** it leaves the ledger byte-identical — `compactLedger` writes a tmp file
-  and renames — and the writer retracts its own journal, so nothing was dropped. A throw **after** it
-  (the directory fsync, or completing the witness transition) is a failure over a ledger that has
-  already been replaced: the live projection survives by construction, but the soft-erase undo window
-  does not, and the scope recovers through `transition-heal` on the next read. The metric row tells the
-  two apart: `landed` is `false` for a before-the-rename throw (`dropped_rows`/`reclaimed_bytes` are
-  honestly `0`, nothing happened) and `true` for an after-the-rename throw, where `dropped_rows`/
-  `reclaimed_bytes` report the REAL counts the rewrite actually wrote, not a zeroed default.
-
-  **The consequence you are opting into.** Compaction drops *every* dead record, however recently it
-  died — it has no per-record age filter. So once a ledger goes quiescent past the grace window
-  (`compaction.graceMs`, default 24 h since the ledger file's **last write**), an ordinary
-  `helix_memory_recall` can **permanently close the soft-erase undo window** and **drop recent
-  point-in-time (`asOf` / `history`) rows**. What a recall *answers* is unchanged: the live projection
-  is preserved by construction.
-
-  Because the config is destructive it is read from the **global `~/.helix/config.json` only** — a
-  cloned repo's `.helix/config.json` can neither enable nor tune it. That one global setting still
-  governs compaction of **both** the global ledger and an *owned* project ledger, each gated
-  independently.
-
-  Keys (invalid or out-of-range values silently keep the default): `auto` (bool, `false`),
-  `dirtyRatio` in `(0, 1]` (`0.5`), `minRows` int ≥ 0 (`200`), `minDirtyBytes` int ≥ 1 (`1048576`),
-  `graceMs` int ≥ 0 (`86400000`), `maxBytes` int > 0 (`52428800`). `graceMs: 0` disables the grace
-  entirely — a fact soft-erased moments ago can be destroyed by the very next eligible recall, with no
-  undo window at all.
-
-  Self-limiting: a compacted ledger has *essentially* zero reclaimable rows and bytes, so it will not
-  re-compact until new churn. The content-free integrity/horizon tombstones a compaction mints (see
-  below) are a **coalesced canonical fixpoint** — constant ids (`integrity_marker` / `horizon_marker`)
-  and fixed sentinel timestamps — so a later compaction *re-mints the byte-identical row*, it does not
-  drop it. That makes the self-limiting argument *stronger*, not weaker: a preserved marker is
-  simultaneously read (in the compaction's input rows) and rewritten (in its kept set) every time, so
-  it contributes exactly **zero** to `reclaimable = records.length - kept.length` — the very count the
-  next compaction's dirty-gate is computed from. It also cannot re-trigger the gates by growth alone:
-  one ~330-byte row satisfies neither the default `dirtyRatio` (at the default `minRows` of 200,
-  `1/200` is far below `0.5`) nor the default `minDirtyBytes` of 1 MiB.
-
-  Observable **when metrics are enabled** (`metrics.enabled`, the default): every attempt emits a
-  content-free `compaction` record to `~/.helix/metrics.jsonl`, failures included (`ok: false`). Its
-  `reclaimed_bytes` is **legitimately negative** when a compaction drops little but mints a content-free
-  horizon/integrity tombstone — the ledger net-grew, and that is reported, not clamped. The record also
-  carries `dropped_forged_verifies`: a content-free count of forged `verify` rows this compaction
-  destroyed under HMAC-aware compaction (`0` when compaction ran without a resolvable subkey, or
-  genuinely dropped none) — the forensic counterpart to the integrity marker's mere presence, which is
-  itself forgeable (see below); and `landed`, a boolean recording whether the rewrite physically reached
-  disk for this attempt (see the rename-split note above) — the field that lets `dropped_rows`/
-  `reclaimed_bytes` be trusted on an `ok: false` row instead of read as an unconditional zero. With
-  `metrics.enabled: false` the sink is a no-op, so **neither a successful nor a failed compaction leaves
-  any trace**: turning compaction on while metrics are off means a destructive operation runs with zero
-  visibility.
-
-  Named v1 limitations (spec §7). It does **not** bound total ledger size: preserved audit data (erase
-  tombstones, genuine signed verifies on live targets) is never reclaimed. A continuously churny ledger
-  may **never** auto-compact — quiescence is required and there is no max-lag force-compaction. A ledger
-  already above `maxBytes` is skipped and gets **no automatic relief**; it defers to manual/incremental
-  compaction. And a **forward clock step of at least `graceMs`** (bad RTC at boot, VM snapshot restore)
-  can make a just-written ledger read as quiescent and fire early, closing the undo window ahead of
-  schedule — quiescence is file-mtime versus wall clock, and the read path has no monotonic reference.
-  Backward skew only defers, never fires early. **Ledger integrity is never at risk in any of these
-  cases**: the compaction lock plus the atomic rename hold regardless.
-- Dual-verify `xhigh` stakes tier: a 4th, strictest self-classified stakes level above `high`
-  (`stakes` on `helix_memory`-adjacent `helix_dual_verify`, and `dualVerify.stakesFloor` in config).
-  With `stakesFloor: "xhigh"`, only calls the agent classifies `xhigh` spend Codex quota — `high`
-  and below are skipped. Omitting `stakes` is read as the lowest tier, so any floor above `low`
-  refuses an undeclared call — omission is not an exemption.
-- Every `helix_dual_verify` result whose payload was actually TRANSMITTED — a successful `sent` run
-  AND a run that reached Codex but then errored out — now carries an `egress: ...` disclosure line,
-  rendered ABOVE the quarantine frame, so the calling agent can tell a config-valved release from a
-  clean pass instead of crediting the pass to its own prose. That includes the failure path: the prompt
-  already left the machine before Codex exited non-zero, so the disclosure renders there too, not just
-  on success. A refused (firewall-blocked), unavailable (runner never invoked), or skipped (disabled /
-  below the stakes floor) result carries no disclosure line, because nothing left the machine. Three
-  forms: `pass` (every leg clean), `pass with audit-only legs` (a leg logged the check but did not
-  block), and `allowed_override with released policy keys + audit-only legs` (an otherwise-blocking leg
-  was released by `dualVerify.egressPolicy`). The line is content-free — it names leg outcomes and
-  policy keys, never the scanned content.
-- Replay metrics sensor: content-free op/replay latency records in `~/.helix/metrics.jsonl`
-  (default on; `metrics.enabled: false` disables; hook honors the global config only). The
-  sensor makes the long-deferred "migrate to SQLite at recall p95 > 150 ms" trigger observable.
-- Standing replay benchmark `scripts/bench-replay.ts`: synthetic EN/KO sweep with REAL signed
-  verify records (HMAC-era baseline), `--real` read-only mode, and a streaming `--report` mode with a
-  windowed, **tri-state** verdict (`exceeded` / `below` / `insufficient`) against the 150 ms trigger,
-  computed from **successful** recalls only — a failed recall carries no latency signal, so it no
-  longer counts toward a confident `below` verdict. `insufficient` requires fewer than 20 successful
-  samples in the window and renders an explicit reason (`no successful samples` vs. `n < 20`); with at
-  least one successful sample it still renders the provisional p95-vs-trigger comparison, just flagged
-  as provisional, so a single lucky/unlucky sample is visible but never mistaken for a confident
-  judgment.
-- Recall index cache (A4): an in-process, single-slot cache keyed by content identity — the ledger
-  byte digest, the resolved MAC-subkey fingerprint, and the scope set. On an unchanged ledger a warm
-  recall reuses the verified projection and BM25 artifacts instead of re-reading and re-replaying, so
-  repeated recalls within a session get materially cheaper. Invalidated by any ledger byte change
-  (content-digest keyed, so even a same-length in-place edit misses), a master-key/subkey change, or a
-  project-ownership flip; it is per-process and dies with the store. Observable metrics effect: a warm
-  (HIT) recall emits no replay row to `metrics.jsonl` (a cold/MISS recall still emits one per scope).
-- Two-tier memory trust labels on the tool path: machine-corroborated **Corroborated**
-  (`helix_memory_recheck`, a content-bound mechanical file check) and best-effort human-attested
-  **Verified** (`helix_memory_confirm`).
-- Ledger HMAC: `Corroborated`/`Verified` are now **tamper-evident at the file surface**. Trust is
-  conferred only by `verify` records, each HMAC-SHA256-authenticated with a key held only in
-  `~/.helix` (per-project HKDF subkey; never written to the repo ledger). A forged or edited ledger
-  record replays as `Fresh`, so minting an elevated grade by appending raw JSON to the ledger no
-  longer works — **unforgeable at the file surface against an adversary that cannot read `~/.helix`**.
-  Still **not** the tool surface: a `helix_memory_confirm` call carries no enforceable human-approval
-  signal, so do **not** allow-list it. Documented residuals: an adversary that can read `~/.helix`
-  can mint valid MACs (irreducible; a readable home key voids the guarantee); rollback-by-suppression
-  (deleting a later `verify`) is invisible to the per-record MAC alone — the rollback witness
-  (below) closes that gap; and trust is machine-local (a `Verified` grade does not transfer to
-  another machine).
-- Ledger MAC v2: `verify` records now bind their system-time `tx` into the MAC, so a genuine
-  verification's *timing* cannot be edited in place (authenticity, not clock accuracy). Reads
-  dual-accept existing v1 signatures, so no grades are lost; only new verifications become
-  `tx`-bound. A cross-version gen collision from a stale reader resolves to the lower trust grade
-  (never a permanent conflict), and an older binary can no longer destroy a newer version's records
-  during compaction.
-- Best-effort garbage collection of leaked Codex scratch directories: an age-based sweep
-  (3-day floor, directories only, rate-limited to once a day) runs at runner start and never
-  throws into the verify path.
-- Forensic point-in-time snapshot: `helix_memory_inspect asOf=<ISO instant>` reconstructs which
-  facts were live at a system-time, the grade each held, and the full verify evidence for why.
-  Grade reconstruction shares the live projection's rule (asOf(now) == live grade); membership and
-  legacy v1 verify timing are surfaced as declared, only v2 verify timing is authenticated.
-- Bitemporal history: `helix_memory_inspect history` reconstructs every fact's system-time
-  `[tx, txTo)` interval across the whole ledger — when it became live and, if closed, when and by
-  what (`supersede` / `invalidate` / `erase`) — computed atomically alongside the live projection
-  in the same single read `asOf` uses. An unresolvable master key clamps every grade shown to
-  `Fresh` with an explicit note, the same policy `asOf` and recall already apply, rather than
-  silently trusting stale evidence.
-- Lock durability hardening: the cross-process ledger lock is now published atomically together
-  with its owner payload (`linkSync`), so a live creator can never present a malformed lock file,
-  and a liveness matrix — never age — decides whether a recorded holder is reclaimed: only a
-  provably-dead holder is ever stolen, and every reclaim is serialized through a per-boot reaper
-  gate so two reapers can never act on the same victim. Every append and compaction now fsyncs
-  both the data and the containing directory before reporting success, and a hard-linked ledger
-  (link count ≠ 1) is refused outright, since two alias names would carry two independent locks
-  with no mutual exclusion.
-- Rollback witness (high-water counter): a home-side, per-scope witness (`~/.helix/witness.json`,
-  MAC'd with the same master key as `verify` records) detects a ledger that has forked from or
-  fallen behind the head it last saw — a regression the per-record MAC alone cannot catch, because
-  a restored older ledger file is itself validly signed. A detected mismatch clamps that scope's
-  `Verified`/`Corroborated` grades to `Fresh` on every live projection (recall, inspect, the
-  SessionStart hook) and renders a constant disclosure note; the scope keeps serving reads and
-  accepting new appends, but the witness itself never advances past a mismatch until an explicit
-  re-baseline. Fenced to each scope's current head only — never a history of erased eras — and
-  kept honest by a content-free marker planted at the end of every legitimate rewrite. Armed from
-  the first release, not opt-in; first contact, a key rotation, and a deleted witness file are all
-  honest trust-on-first-use, each surfaced by its own note.
+- Two-tier trust labels: machine-corroborated **Corroborated** (`helix_memory_recheck`, a
+  content-bound mechanical file check) and human-attested **Verified** (`helix_memory_confirm`).
+- Lexical recall ranker (coverage / phrase-first, BM25-assisted), with an in-process recall cache
+  keyed by content identity — the ledger byte digest, the resolved MAC-subkey fingerprint, and the
+  scope set — so repeated recalls in a session reuse the verified projection instead of replaying it.
+- Ledger HMAC: `Corroborated`/`Verified` are tamper-evident at the file surface. Trust is conferred
+  only by `verify` records, each HMAC-SHA256-authenticated with a key held only in `~/.helix`
+  (per-project HKDF subkey, never written to the repo ledger), so a forged or edited ledger record
+  replays as `Fresh`. **Unforgeable at the file surface against an adversary that cannot read
+  `~/.helix`** — and no further: a reader of `~/.helix` can mint valid MACs, trust is machine-local,
+  and `helix_memory_confirm` carries no enforceable human-approval signal, so do **not** allow-list
+  it.
+- Ledger MAC v2: `verify` records bind their system-time `tx` into the MAC, so a genuine
+  verification's *timing* cannot be edited in place — authenticity, not clock accuracy. Reads
+  dual-accept v1 signatures, so no grade is lost.
+- Rollback witness: a home-side, per-scope high-water counter (`~/.helix/witness.json`, MAC'd with
+  the same master key) that detects a ledger forked from or behind the head it last saw — a
+  regression the per-record MAC cannot catch, because a restored older ledger is itself validly
+  signed. A mismatch clamps that scope's grades to `Fresh` on every live projection and renders a
+  disclosure note; reads and appends continue, and the witness never advances past a mismatch
+  without an explicit re-baseline. Armed from the first release, not opt-in.
 - Operator re-baseline ceremony: `node bin/helix-rebaseline.mjs --scope global` (or
-  `--scope <projectRoot>`) is the only sanctioned way to clear a rollback-witness mismatch — an
-  interactive, TTY-only command that displays the mismatched scope's hash and target epoch,
-  requires a typed confirmation, and holds the ledger lock from that display through the commit.
-  It is deliberately not an MCP tool: no agent-suppliable parameter can invoke it, and nothing
-  invokes it automatically.
-- Operator trust-resolution ceremony: `node bin/helix-trust-resolve.mjs --scope <absoluteProjectRoot> --repair | --fresh`
-  is the only sanctioned way to settle a project ledger in `trust-pending` — the state an ambiguous
-  re-adoption enters when a registered path is re-adopted without its `.owner` stamp, where the scope
-  keeps its nonce but every read clamps to `Fresh` until a person decides. `--repair` keeps the lineage
-  and re-elevates the earlier verifies; `--fresh` rotates the nonce so a reused path cannot inherit
-  trust the new content never earned. Interactive and TTY-only, it requires a typed confirmation, and
-  like the re-baseline ceremony it is deliberately not an MCP tool.
-- Dual-verify configuration, read from the global `~/.helix/config.json` only — a checkout's
-  `.helix/config.json` can neither enable the outbound path nor loosen it: `enabled` (bool, default
-  `false`), `mode`, `model` (bounded at 64 characters, or `null` to inherit `~/.codex/config.toml`),
-  `effort`, `stakesFloor`, `timeoutMs` (a valid integer ≥ 1 s, clamped to a 1-hour maximum at the
-  config boundary and again in the Codex runner), and `egressPolicy` — a per-leg map over
-  `memoryEcho`, `piiHigh`, `piiBulk`, `secretHeuristic`, `secretEntropy` and `secretEntropyExempt`.
-  Each leg is `block` or `allow`. All default to `block` except `secretEntropyExempt`, which defaults
-  to `allow` and is what releases a hex-shaped or low-entropy-chain token — a git SHA quoted in
-  design prose — past the egress guard. On the write path the word-chain arm of that same shape is
-  released by its own key, `persistence.releaseWordChains` (default `true`; set `false` to restore
-  unconditional entropy redaction): a dated path or note slug persists verbatim, while a hex-core
-  token still redacts on write — persistence cannot tell a git object from a key — and a credential
-  keyword in the same statement vetoes the release on both paths (one shared `nearCredential`
-  guard). Provider-format
-  credentials are override-proof: no policy value releases them. An invalid value on any of these
-  keys is refused with a bounded single-line stderr warning and the default is kept, so a crafted
-  newline in a key or value cannot forge a second diagnostic line; an absent key is silent.
-- Two environment inputs place Helix's state. `HELIX_HOME` (default `~/.helix`) is where the ledger
-  signing key, the ownership registry, the rollback witness, the audit log and the metrics stream
-  are always created; `HELIX_LEDGER` moves the global ledger data file and nothing else. A server
-  that finds trust-store files beside a relocated ledger refuses to start and names both
-  directories, rather than minting a fresh key and silently dropping every grade the old one
-  conferred.
+  `--scope <projectRoot>`), the only sanctioned way to clear a witness mismatch. Interactive and
+  TTY-only, it displays the mismatched hash and target epoch, requires a typed confirmation, and
+  holds the ledger lock from that display through the commit.
+- Operator trust-resolution ceremony:
+  `node bin/helix-trust-resolve.mjs --scope <absoluteProjectRoot> --repair | --fresh`, the only
+  sanctioned way to settle a project ledger in `trust-pending` — the state an ambiguous re-adoption
+  enters when a registered path returns without its `.owner` stamp, where every read clamps to
+  `Fresh` until a person decides. `--repair` keeps the lineage and re-elevates the earlier verifies;
+  `--fresh` rotates the nonce so a reused path cannot inherit trust the new content never earned.
+- Neither ceremony is an MCP tool: no agent-suppliable parameter can invoke either, and nothing
+  invokes them automatically.
+- Forensic point-in-time views: `helix_memory_inspect asOf=<ISO instant>` reconstructs which facts
+  were live at a system-time and the evidence for each grade, and `history` reconstructs every
+  fact's `[tx, txTo)` interval and what closed it (`supersede` / `invalidate` / `erase`). An
+  unresolvable master key clamps every grade shown to `Fresh` with an explicit note.
+- Lock durability: the cross-process ledger lock is published atomically with its owner payload, a
+  liveness matrix — never age — decides whether a recorded holder may be reclaimed, every reclaim is
+  serialized through a per-boot reaper gate, appends and compactions fsync both the data and its
+  directory before reporting success, and a hard-linked ledger (link count ≠ 1) is refused outright.
+- Untrusted-content quarantine: NFKC / control / bidi normalization, per-line datamarking, and a
+  per-call 128-bit nonce frame.
 
-### Changed
-- `helix_memory_commit`'s `content` field now rejects payloads over 16,384 characters, enforced by
-  both the MCP schema (before the handler runs) and the store (`store.commit`), so no non-MCP
-  caller into the same store can bypass it.
-- `helix_dual_verify`'s `question`/`helixAnswer` and `helix_memory_recheck`'s `check.path`/
-  `check.pattern` fields now carry MCP schema maxima: 65,536 characters each for `question` and
-  `helixAnswer` (their sum is kept under `classifyEgress`'s existing 200,000-char joint scan
-  limit), 4,096 for `check.path`, 2,048 for `check.pattern`.
-- `helix_memory_recall` and `helix_memory_inspect` (default, `history`, and `asOf` shapes) now cap
-  their rendered response at 262,144 characters: an oversized response drops whole tail items —
-  never a partial one — and appends a trailing `N item(s) omitted (response cap)` note.
-  `helix_memory_recall`'s optional `maxItems` (≤ 200) and `maxChars` (≤ 10,000) arguments now carry
+#### Optional Codex dual-verify — off by default
+
+- `helix_dual_verify` with a deterministic egress guard (secret / PII / memory-echo), plus
+  `helix_codex_status` and an opt-in content log.
+- Configuration is read from the global `~/.helix/config.json` only — a checkout's
+  `.helix/config.json` can neither enable the outbound path nor loosen it. Keys: `enabled` (default
+  `false`), `mode`, `model` (≤ 64 characters, or `null` to inherit `~/.codex/config.toml`), `effort`,
+  `stakesFloor`, `timeoutMs` (integer ≥ 1 s, clamped to 1 hour), and `egressPolicy` — a per-leg map
+  over `memoryEcho`, `piiHigh`, `piiBulk`, `secretHeuristic`, `secretEntropy` and
+  `secretEntropyExempt`. Each leg is `block` or `allow`; all default to `block` except
+  `secretEntropyExempt`, which defaults to `allow` and is what releases a hex-shaped or
+  low-entropy-chain token — a git SHA quoted in design prose — past the guard. On the write path the
+  word-chain arm of that shape has its own key, `persistence.releaseWordChains` (default `true`), so
+  a dated path or note slug persists verbatim while a hex-core token still redacts; a credential
+  keyword in the same statement vetoes the release on both paths. Provider-format credentials are
+  override-proof: no policy value releases them.
+- An invalid value on `mode`, `stakesFloor`, `model` or `effort` is refused with a bounded
+  single-line stderr warning and the default is kept, so a crafted newline cannot forge a second
+  diagnostic line. `enabled`, `timeoutMs` and `logContent` fall back to their defaults silently. An
+  absent key is silent in every case.
+- A fourth, strictest stakes tier `xhigh` above `high`. Omitting `stakes` is read as the lowest
+  tier, so any floor above `low` refuses an undeclared call: omission is not an exemption.
+- Codex 5.6 reasoning efforts: `dualVerify.effort` accepts `max` and `ultra`. Per-model support
+  varies and Helix does not arbitrate it — `codex debug models` is the authority. A Helix-set `max`
+  or `ultra` at a run timeout of `300000` ms or less prints an advisory, because a timeout
+  tree-kills the run after the quota is spent.
+- `helix_codex_status` reports the effective model, the configured effort and the run timeout. With
+  `dualVerify.model: null` it resolves the name from a free `codex doctor --json` probe and prints
+  `(unresolved)` rather than guessing; there is no equivalent probe for effort, so a `null` effort
+  prints only `inherited from codex config`.
+- Every result whose payload was actually transmitted — a successful run, and a run that reached
+  Codex and then errored — carries an `egress: …` disclosure line above the quarantine frame, so the
+  calling agent can tell a config-valved release from a clean pass. A refused, unavailable or
+  skipped result carries no line, because nothing left the machine. The line is content-free: it
+  names leg outcomes and policy keys, never the scanned content.
+- Agreement is assigned claim-to-claim rather than by scoring every candidate pair, so a sentence
+  pair whose figures differ cannot render `agree` — the verdict withholds and names both values.
+  Every `agree` is labelled lexical agreement in the response itself: matched claims share tokens
+  and polarity, and that is not a semantic check.
+
+#### Automatic compaction — opt-in, default OFF
+
+- `compaction.auto`. When enabled, a recall whose ledger passes every gate rewrites that ledger
+  through the crash-safe `compactLedger` (lock held across read → rewrite → atomic rename),
+  synchronously, at most once per session. The attempt is counted whether it succeeds or fails: a
+  compaction that throws never breaks the recall, but still spends the session's single attempt.
+- **The consequence you are opting into.** Compaction drops *every* dead record, however recently it
+  died — there is no per-record age filter. Once a ledger goes quiescent past the grace window
+  (`compaction.graceMs`, default 24 h since the file's last write), an ordinary `helix_memory_recall`
+  can permanently close the soft-erase undo window and drop recent `asOf` / `history` rows. What a
+  recall *answers* is unchanged: the live projection is preserved by construction.
+- Because the setting is destructive it is read from the **global `~/.helix/config.json` only** — a
+  cloned repo's `.helix/config.json` can neither enable nor tune it. That one setting still governs
+  both the global ledger and an owned project ledger, each gated independently.
+- Keys, with invalid or out-of-range values silently keeping the default: `auto` (bool, `false`),
+  `dirtyRatio` in `(0, 1]` (`0.5`), `minRows` ≥ 0 (`200`), `minDirtyBytes` ≥ 1 (`1048576`),
+  `graceMs` ≥ 0 (`86400000`), `maxBytes` > 0 (`52428800`). `graceMs: 0` disables the grace entirely,
+  so a fact soft-erased moments ago can be destroyed by the very next eligible recall.
+- Self-limiting: a compacted ledger has essentially zero reclaimable rows, and the content-free
+  integrity / horizon markers a compaction mints are a coalesced canonical fixpoint — a later
+  compaction re-mints the byte-identical row rather than dropping it, contributing exactly zero to
+  the count the next dirty-gate is computed from.
+- Observable when metrics are enabled (`metrics.enabled`, the default): every attempt emits a
+  content-free `compaction` record to `~/.helix/metrics.jsonl`, failures included. `reclaimed_bytes`
+  is legitimately negative when a compaction drops little but mints a marker — the ledger net-grew,
+  and that is reported rather than clamped. `landed` records whether the rewrite physically reached
+  disk, which is what lets `dropped_rows` be trusted on a failed attempt instead of read as zero.
+  With `metrics.enabled: false` the sink is a no-op, so a destructive operation runs with no
+  visibility at all.
+- Named limitations: it does not bound total ledger size, since preserved audit data is never
+  reclaimed; a continuously churny ledger may never auto-compact, because quiescence is required and
+  there is no max-lag force; a ledger already above `maxBytes` is skipped and gets no automatic
+  relief; and a forward clock step of at least `graceMs` can make a just-written ledger read as
+  quiescent and fire early. Ledger integrity is never at risk in any of these cases — the compaction
+  lock and the atomic rename hold regardless.
+
+#### Surface
+
+- Nine MCP tools and SessionStart/SessionEnd hooks, installable as a Claude Code plugin with
+  self-contained committed bundles — no `npm install` to use.
+- Two environment inputs place Helix's state: `HELIX_HOME` (default `~/.helix`) holds the signing
+  key, the ownership registry, the rollback witness, the audit log and the metrics stream;
+  `HELIX_LEDGER` moves the global ledger data file and nothing else.
+- Content-free replay metrics in `~/.helix/metrics.jsonl` (default on; `metrics.enabled: false`
+  disables; the hook honours the global config only).
+
+### Limits
+
+- `helix_memory_commit`'s `content` is capped at 16,384 characters, enforced by both the MCP schema
+  and the store, so no non-MCP caller into the same store can bypass it.
+- `helix_dual_verify`'s `question` and `helixAnswer` are capped at 65,536 characters each — their
+  sum stays under the egress guard's 200,000-character joint scan limit — and
+  `helix_memory_recheck`'s `check.path` and `check.pattern` at 4,096 and 2,048.
+- `helix_memory_recall` and `helix_memory_inspect` cap their rendered response at 262,144
+  characters, dropping whole tail items rather than a partial one and appending an
+  `N item(s) omitted (response cap)` note. `maxItems` (≤ 200) and `maxChars` (≤ 10,000) carry
   matching schema maxima.
-- The SessionStart and SessionEnd hooks now bound their stdin read at 1 MiB and refuse fail-closed
-  past it; SessionEnd additionally truncates the record's `session_id` (128 chars) and `reason`
-  (256 chars) fields to their caps instead of storing them unbounded.
-- `helix_memory_erase`, `helix_memory_adopt`, `helix_memory_recheck`, and `helix_memory_confirm`
-  now report success as `<verb> {json}` — one JSON object carrying the id or path — matching
-  `helix_memory_commit`'s existing shape. A caller-controlled id or path no longer re-enters the
-  success prose as a bare, unescaped string.
-- `helix_dual_verify` agreement now assigns claim sentences one-to-one instead of scoring every
-  candidate pair independently: a sentence pair whose figures differ can no longer render `agree` —
-  the verdict withholds and names both values instead. Two narrower cross-pairing shapes remain
-  disclosed, pinned limits (see `src/verify/agreement-map.ts`).
-- `helix_dual_verify` now labels every `agree` as lexical agreement in the response itself — "matched
-  claims share tokens and polarity; not a semantic check" — instead of leaving a bare `verdict: agree`
-  to read as semantic verification. The enum value and the `audit.jsonl` field are unchanged.
-- Dependency advisory triage refreshed (`docs/release/deps-audit-2026-08.md`); `fast-uri` is
-  overridden to `3.1.5` in `package.json`/`package-lock.json` as defense-in-depth for the one
-  advisory-bearing package that ships (the shipped bundle itself picks it up at the next rebuild).
+- The session hooks bound their stdin read at 1 MiB and refuse fail-closed past it.
+- Tool results report success as `<verb> {json}`, one JSON object carrying the id or path, so a
+  caller-controlled value never re-enters the success prose as a bare unescaped string.
+
+### Not claimed
+
+- **Recall quality.** Helix makes no measured claim about how well recall ranks — no hit rate, no
+  accuracy figure. A preregistered pilot was run to support one and did not reach its own minimum
+  sample, so the claim was withdrawn rather than weakened. `docs/release/v2-close-report-2026-08.md`
+  is the record.
+- **Cross-machine trust.** A `Verified` grade is machine-local and does not transfer.
+- **Compatibility before 1.0.** The ledger is append-only JSONL with no schema migrations to date,
+  and no forward or backward compatibility is guaranteed across versions before 1.0.
+
+### Dependencies
+
+- Dependency advisory triage is recorded in `docs/release/deps-audit-2026-09.md`; `fast-uri` is
+  overridden to `3.1.7`. The advisories that remain are transitive dependencies of the MCP SDK's
+  HTTP transports, which the shipped bundle does not contain — the record measures that rather than
+  assuming it.
+
+[0.1.0]: https://github.com/wlsgur073/helix/releases/tag/v0.1.0

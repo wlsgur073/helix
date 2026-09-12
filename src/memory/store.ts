@@ -789,7 +789,7 @@ export class MemoryStore {
     if (!binding.bound) throw new Error(`recheck: ${binding.reason}`);
     const outcome = runRealityCheck(check);
     const result = resolveTransition({
-      targetSource: target.provenance.source, targetState: target.state,
+      targetState: target.state,
       evidenceSource: 'reality-check', outcome,
     });
     const record = result.kind === 'state' ? this.writeVerify(id, result.state, 'reality-check') : null;
@@ -803,7 +803,7 @@ export class MemoryStore {
       throw new Error('confirm: only a source=user item is eligible (re-commit as source=user to take authorship first)');
     }
     const result = resolveTransition({
-      targetSource: 'user', targetState: target.state,
+      targetState: target.state,
       evidenceSource: 'user', outcome: { ran: true, indeterminate: false, passed: true },
     });
     // resolveTransition guarantees { kind:'state', state:'Verified' } for evidenceSource 'user'

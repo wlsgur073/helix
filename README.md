@@ -8,11 +8,12 @@ It ships the **engine** — memory and dual-verify, exposed as MCP tools and ses
 
 ## Requirements
 
-- **Node.js ≥ 20 on your `PATH`.** Claude Code launches the MCP server and the session hooks with `node`; a standalone Claude Code install with no system Node.js cannot run them. Check with `node --version`. (Node ≥ 20 *runs* the plugin; developing on the repo itself expects Node ≥ 24 — the `engines` field in `package.json` declares the dev toolchain, not the runtime floor.)
+- **Node.js ≥ 20 on your `PATH`.** Claude Code launches the MCP server and the session hooks with `node`; a standalone Claude Code install with no system Node.js cannot run them. Check with `node --version`. (Node ≥ 20 *runs* the plugin, and CI exercises all six shipped bundles on Node 20 on every push, so the floor is tested rather than asserted; developing on the repo itself expects Node ≥ 24 — the `engines` field in `package.json` declares the dev toolchain, not the runtime floor.)
 - **Claude Code** — the host application.
 - **Codex CLI** — *optional*, only for the `helix_dual_verify` tool. Install it and sign in (`codex login`); dual-verify is **off by default**.
 - **Platforms.** Continuously exercised on Linux/WSL2 (daily autonomous use); macOS is expected to work (POSIX semantics, hard-link file locking) but is not continuously exercised; **native Windows is not currently validated** — the locking layer's hard-link semantics have only been verified on POSIX filesystems. On Korean Windows hosts, set the console to UTF-8 (`chcp 65001`) — a cp949 console garbles non-ASCII output from any CLI in the chain.
-- **Scale.** Correctness is exercised daily at tens-of-rows scale and was acceptance-tested on a frozen pilot corpus; recall latency is benchmark-characterized to a few thousand rows (cold-path ≈150 ms near ~3.3k union rows on the baseline machine). Treat ledgers **beyond ~2,500 union rows** (bulk imports, shared team ledgers) as outside the v0.1 validated envelope: an indexed-storage design is approved and deliberately unbuilt until real corpora approach that scale.
+- **Scale.** Correctness is exercised daily at tens-of-rows scale. Recall latency is characterized by the maintainer's own benchmarks rather than by any validated measurement: cold-path recall runs near 150 ms at roughly 3.3k union rows on the maintainer's machine. Treat ledgers **beyond ~2,500 union rows** (bulk imports, shared team ledgers) as outside what `v0.1` has been exercised on: an indexed-storage design is approved and deliberately unbuilt until real corpora approach that scale.
+- **Recall quality is not claimed.** Helix makes no measured claim about how well recall ranks — no hit rate, no accuracy figure. A preregistered pilot was run to support one and did not reach its own minimum sample, so the claim was withdrawn rather than weakened; `docs/release/v2-close-report-2026-08.md` is the record of that.
 
 No build or `npm install` is needed to *use* Helix — the runtime ships as self-contained bundles under `bin/`.
 
@@ -56,8 +57,8 @@ Dual-verify is disabled by default. To enable it, create `~/.helix/config.json`.
 file these settings are read from: a project's `.helix/config.json` is **not** consulted, because a
 repository you opened must not be able to configure the process that opened it — turning the outbound
 path on, releasing the egress legs, or enabling verbatim prompt logging are all decisions that belong
-to you, not to a checkout. (If you have such a file from an earlier version, the server prints a note
-at startup saying it is being ignored.)
+to you, not to a checkout. (If such a file exists, the server prints a note at startup
+saying it is being ignored.)
 
 ```json
 {
@@ -77,8 +78,7 @@ at startup saying it is being ignored.)
 - `stakesFloor` — skip the metered Codex call below this stakes level (`low` / `medium` / `high` / `xhigh`).
   A call that omits `stakes` is **read as the lowest tier**, so any floor above `low` refuses it:
   omission is not an exemption. Declare the level a call deserves, or set `stakesFloor` to `low` to
-  gate nothing. (Through 0.1.0 development an omitted value bypassed the floor instead; that is
-  closed — a caller who declared `low` honestly was refused where a silent caller was not.)
+  gate nothing.
 - `model` / `effort` — omit (or `null`) to inherit your `~/.codex/config.toml`; set to override for
   dual-verify only. Valid efforts are `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. Support varies
   by model — `codex debug models` lists what yours accepts.
@@ -90,8 +90,9 @@ at startup saying it is being ignored.)
   when `effort` is a Helix override, never on the inherited path.
 
 - `egressPolicy` — the per-leg map the egress guard consults, one key per class of content it can
-  refuse to send. Every leg takes `"block"` or `"allow"`; anything else is read as `"block"`. Named
-  provider credentials are refused regardless of this map and have no leg.
+  refuse to send. Every leg takes `"block"` or `"allow"`. A value that is neither is refused, and that leg keeps its
+  default — `"block"` for the five below, `"allow"` for `secretEntropyExempt`. Named provider
+  credentials are refused regardless of this map and have no leg.
 
   | Leg | Default | What it governs |
   |---|---|---|
@@ -128,8 +129,9 @@ effect if you do, so they are listed rather than left silent.
 | `HELIX_SESSION` | `cli` | The session id stamped on each memory row's provenance and on the SessionEnd record. A label only — it moves no data and confers no trust. |
 | `HELIX_SESSIONS` | `<HELIX_HOME>/sessions.jsonl` | Where the SessionEnd hook appends its records. Like `HELIX_LEDGER`, it takes precedence over `HELIX_HOME`, so setting it puts that file outside the directory the backup and removal steps below name. |
 
-If you used `HELIX_LEDGER` before v0.1.0, an older build wrote the trust store beside the ledger
-instead. On that layout the server measures what starting would actually cost: it refuses to start
+Helix also recognizes a second layout, with the trust store beside the ledger rather than under
+`HELIX_HOME` — a shape a hand-assembled `HELIX_LEDGER` setup can produce. On that layout the server
+measures what starting would actually cost: it refuses to start
 only when a grade this ledger currently carries would be lost, and prints both directories and the
 two ways to resolve it. When nothing elevated is in play it starts and prints a note naming the
 leftover files instead — refusing on the layout alone would let one planted, shape-valid file stop
@@ -248,7 +250,7 @@ Helix's memory lives in plain files under your control. Back them up like any ot
 - **What to back up.** Back up the whole `~/.helix/` directory rather than a file list — that is the unit, and the list below is what it contains rather than a subset to pick from. It holds the global ledger (`memory.jsonl`), the signing key (`ledger-mac-master.key`), the rollback-witness state (`witness.json`) and its diagnostic log (`witness-log.jsonl`), config (`config.json`), the project-ownership registry (`projects.json`), the erase/verify audit trail (`audit.jsonl`), the session records (`sessions.jsonl`), and — when the corresponding feature is on — the local metrics (`metrics.jsonl`), the dual-verify content log (`codex-log.jsonl`), and the scale-trigger records (`trigger.jsonl`). Copying only the first six loses the audit trail that makes an erroneous erase both detectable and recoverable. Each project's own `<project-root>/.helix/` is a second, independent unit. Back up both while no Claude Code session is running against them — an external backup tool isn't covered by Helix's own file lock, so copying mid-rewrite can catch an inconsistent instant. If you set `HELIX_LEDGER`, the global ledger is **not** inside `~/.helix/` — back up that file separately; everything else in the list stays under `HELIX_HOME` regardless.
 - **Restoring.** Copy the directories back into place. **An intentionally restored older ledger will trip the rollback witness by design**: the witness lives in `~/.helix/` independently of whichever ledger bytes are on disk, so a restored file that no longer matches the head it last saw gets that scope's elevated grades clamped to `Fresh` plus a disclosure note. This is not a failure to route around — the legitimate way to adopt an old backup on purpose is the operator re-baseline ceremony: `node bin/helix-rebaseline.mjs --scope global` (or `--scope <absoluteProjectRoot>` for a project), an interactive, TTY-only command that is never run automatically. See [SECURITY.md's rollback witness section](./SECURITY.md#rollback-witness-cross-boundary-ledger-rollback) for the full mechanics.
 - **Key loss.** Without `ledger-mac-master.key`, no signed `verify` record can validate, so any grade a `verify` record conferred — `Corroborated`, `Verified`, or `Suspect` — reverts to `Fresh` until a new key signs fresh verifications; for `Suspect` that reversion is a trust *increase*, not fail-low: the item's displayed state quietly reads `Fresh` again and the session hint loses its Suspect-specific wording, though such items (always non-authoritative) remain flagged for confirmation on source grounds. A new key is minted automatically on the next write; re-elevate a fact with `helix_memory_confirm`, or re-run `helix_memory_recheck` to restore a lapsed `Suspect` label. Losing the key never loses content — only a verify-conferred grade is affected.
-- **Corruption.** A torn tail line (e.g. power loss mid-append) is repaired by the next writer, which prefixes a separator so its own record lands cleanly while the torn fragment is isolated as its own skipped line. A more structurally damaged line elsewhere in the ledger is simply excluded from the live view rather than guessed at or fabricated. Restore from backup for anything worse than a torn tail, and never hand-edit a ledger file while a session is running — Helix's own file lock coordinates only its own processes, not an external editor.
+- **Corruption.** A torn tail line (e.g. power loss mid-append) is repaired by the next writer, which prefixes a separator so its own record lands cleanly while the torn fragment is isolated as its own skipped line. A more structurally damaged line elsewhere in the ledger is simply excluded from the live view rather than guessed at or fabricated. Restore from backup for anything worse than a torn tail — which trips the rollback witness exactly as **Restoring** above describes, clamping that scope's elevated grades to `Fresh` until the re-baseline ceremony adopts the older ledger on purpose — and never hand-edit a ledger file while a session is running: Helix's own file lock coordinates only its own processes, not an external editor.
 - **Migration & downgrade honesty.** The ledger is append-only JSONL with no schema migrations to date, and Helix does not yet guarantee forward or backward compatibility across versions before 1.0. Keep your backups across upgrades.
 - **Undoing an erase or a wrong supersede.** There is no undo command, but a soft-erased or superseded fact is recoverable until a compaction — the recipes (and the trap that `inspect history` blanks erased content while `inspect asOf` returns it) are in [the recovery playbook](./docs/release/recovery-playbook.md), which also carries the verified backup command.
 
@@ -342,7 +344,7 @@ npm test           # vitest — rebuild bin/ first after editing bundled src
 npm run typecheck
 ```
 
-The runtime targets **Node ≥ 20**; development (the toolchain) expects **Node ≥ 24**. `bin/` is committed on purpose, so an installed plugin runs with no install step.
+The runtime targets **Node ≥ 20**, checked on every push by the `runtime-floor` CI job, which drives each shipped bundle under Node 20 with no `npm install` — the condition a cloned plugin is actually in (`scripts/smoke-runtime-floor.mjs`). Development (the toolchain) expects **Node ≥ 24**. `bin/` is committed on purpose, so an installed plugin runs with no install step.
 
 ## License
 

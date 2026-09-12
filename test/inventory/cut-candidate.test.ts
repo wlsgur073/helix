@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  canonicalPayloadSha256, composeCandidateReceipt, verifyCandidateReceipt,
+  canonicalPayloadSha256, composeCandidateReceipt, verifyCandidateReceipt, gateSummaryLine,
   type CandidatePayload,
 } from '../../scripts/inventory/cut-candidate.js';
 
@@ -91,5 +91,28 @@ describe('the committed candidate receipt', () => {
       { payload: Record<string, unknown>; payloadSha256: string };
     expect(canonicalPayloadSha256(doc.payload), 'the committed receipt no longer matches its own seal')
       .toBe(doc.payloadSha256);
+  });
+});
+
+// The gate state used to be three instruction strings with a console line telling the operator to
+// fill them in "then re-seal" — an instruction with no command behind it, against a sha256-sealed
+// payload. These cases pin that the field holds observations instead.
+describe('gate state at the cut', () => {
+  it('records a measurement, not prose describing one', () => {
+    const doc = JSON.parse(readFileSync(join(ROOT, 'docs/release/v0.1-candidate-receipt.json'), 'utf8')) as
+      { payload: { gateAtCut: Record<string, unknown> } };
+    const gate = doc.payload.gateAtCut;
+    expect(String(gate.typecheck), 'typecheck should be an observed exit code').toMatch(/^exit -?\d+\b/);
+    expect(String(gate.suite), 'suite should be an observed exit code and summary').toMatch(/^exit -?\d+\b/);
+  });
+
+  it('states an absent summary rather than leaving a blank that reads as clean', () => {
+    expect(gateSummaryLine('nothing useful here\n', /^Tests\s+\d/))
+      .toBe('no summary line found in the runner output');
+  });
+
+  it('finds the runner summary line and trims it', () => {
+    expect(gateSummaryLine('  x\n      Tests  7 passed | 2 skipped (9)\n  y\n', /^Tests\s+\d/))
+      .toBe('Tests  7 passed | 2 skipped (9)');
   });
 });

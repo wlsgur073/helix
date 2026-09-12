@@ -70,3 +70,42 @@ describe('committed bundles are fresh', () => {
     expect(staleBundles(), 'bin/ is stale — run npm run build and commit bin/').toEqual([]);
   }, 30_000);
 });
+
+// The plugin loader validates .claude-plugin/plugin.json against its own schema, and it is stricter
+// than "is this JSON". Measured on 2026-09-09: adding `repository` as an npm-style
+// `{ type, url }` object made `claude plugin install` refuse the whole plugin with
+// `repository: Invalid input` — caught only because the release did a real pristine install. The
+// shape check below is cheap; discovering it at install time is not.
+describe('the plugin manifest uses the shapes the loader accepts', () => {
+  const manifest = (): Record<string, unknown> =>
+    JSON.parse(readFileSync(join(root, '.claude-plugin/plugin.json'), 'utf8')) as Record<string, unknown>;
+
+  // Recovered from the manifests the official marketplace ships, which the loader demonstrably
+  // accepts, rather than from a schema this repository does not have.
+  const KNOWN_KEYS = new Set([
+    'name', 'description', 'version', 'author', 'license', 'keywords', 'repository', 'homepage',
+    'mcpServers', 'commands', 'agents', 'hooks', 'skills',
+  ]);
+
+  it('carries no key outside the set the shipped official manifests use', () => {
+    expect(Object.keys(manifest()).filter((k) => !KNOWN_KEYS.has(k))).toEqual([]);
+  });
+
+  it('states repository and homepage as plain URL strings, not objects', () => {
+    const m = manifest();
+    for (const key of ['repository', 'homepage'] as const) {
+      if (m[key] === undefined) continue;
+      expect(typeof m[key], `${key} must be a string — an object is refused at install time`).toBe('string');
+      expect(String(m[key])).toMatch(/^https:\/\//);
+    }
+  });
+
+  it('states license and keywords in the shipped shapes', () => {
+    const m = manifest();
+    if (m.license !== undefined) expect(typeof m.license).toBe('string');
+    if (m.keywords !== undefined) {
+      expect(Array.isArray(m.keywords)).toBe(true);
+      for (const k of m.keywords as unknown[]) expect(typeof k).toBe('string');
+    }
+  });
+});

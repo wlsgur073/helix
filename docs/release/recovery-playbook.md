@@ -97,7 +97,10 @@ So:
 project directory you were working in when the fact was written — otherwise the project layer
 is not active and a project-scope fact will not appear at all. When you re-commit (§4), a
 commit made from that directory lands in the project ledger by default; pass
-`scope: "global"` or `scope: "project"` to be explicit.
+`scope: "global"` or `scope: "project"` to be explicit. Note that `scope: "project"` is
+**refused** when no project layer is active, rather than silently falling back to the global
+ledger — so if you get that refusal, you are in the wrong directory, which is exactly the
+condition that would otherwise have written your repair into the wrong ledger.
 
 ## 4. Re-commit — and know what you are NOT getting back
 
@@ -105,6 +108,11 @@ Re-commit the retrieved text with `helix_memory_commit`. For a wrong supersede, 
 `supersedes: <the wrong replacement's id>` so the chain stays coherent (superseding the wrong row
 is better than erasing it — an erase leaves a content-blank history row, a supersede leaves a
 readable one).
+
+**If the row you are superseding is `Verified`, you also need `supersedesDigest`** — the digest of
+the content you are replacing, which the tool requires as proof that you read the fact before
+overwriting it. `helix_memory_inspect` renders it beside the row. It is a proof of read, not an
+authorization: it stops an accidental blind overwrite of a human-attested fact, and nothing more.
 
 Pass `source: "user"` if you are authoring the correction — it is also the only source that can
 be re-confirmed later (§5).
@@ -252,8 +260,9 @@ fixed quiet slot per week.
   plus the in-repo `.owner` stamp, so a project ledger restored into a fresh clone (or at a new
   path) is treated as foreign: its rows are excluded from results and you get
   `(an unadopted project memory file is present and excluded from results; adoption requires
-  explicit user approval)`. Call `helix_memory_adopt` from that directory to bring it back —
-  and expect its elevated grades to read `Fresh` afterwards (trust is machine- and scope-local).
+  explicit user approval)`. Call `helix_memory_adopt` with `projectRoot` set to that directory's
+  absolute path — the tool requires it, and will not infer it from where the session happens to be
+  — and expect its elevated grades to read `Fresh` afterwards (trust is machine- and scope-local).
 - **What still works in a mismatch state:** reads keep serving with the disclosure note and
   clamped grades, and ordinary appends still land — so recovery by re-commit is available. What
   is refused is a *rewrite*: a permanent erase or a compaction on an alarmed scope, precisely so
@@ -272,6 +281,9 @@ fixed quiet slot per week.
 
 ---
 
-Validated 2026-07-27 against the installed 0.1.0 bundle @ `afc29c4` on an isolated `HELIX_HOME`:
-the history-vs-`asOf` asymmetry, the success answer for an unknown erase id, the confirm
-eligibility refusal, plaintext survival after a tool erase, and both `tar` forms.
+Validated by execution, not inference, against the shipped bundle at each candidate it has been
+bound to: first on 2026-07-27 at `afc29c4` on an isolated `HELIX_HOME` — the history-vs-`asOf`
+asymmetry, the success answer for an unknown erase id, the confirm eligibility refusal, plaintext
+survival after a tool erase, and both `tar` forms — then re-driven at `01483ce` on 2026-08-19 and
+at `2d8dde1` on 2026-09-02 as Block C of `v0.1-certification-runsheet.md`, which is where each
+later re-run is recorded.

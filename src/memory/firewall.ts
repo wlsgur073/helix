@@ -47,18 +47,8 @@ export type TransitionResult =
 export function resolveTransition(input: {
   targetState: MemoryState;
   evidenceSource: ProvenanceSource; outcome: VerifyOutcome;
-  /** ACCEPTED AND IGNORED. Callers still pass the target's claimed source; it must never reach a
-   *  branch. Declared (rather than dropped) only because `src/memory/store.ts` is pinned by
-   *  `docs/release/v2-freeze-receipt-2026-08.json` for the v2 pilot window and cannot be edited to
-   *  stop passing it — removing the field outright would fail tsc's excess-property check at that
-   *  frozen call site. POST-FREEZE: delete this field and the two `targetSource:` arguments in
-   *  store.ts, so the invariant is enforced by the signature instead of by review. "Post-freeze"
-   *  is `payload.txClose` in that receipt, READ FROM IT rather than repeated here — the first
-   *  window was reset and re-issued on 2026-08-14, and a date copied into this comment would have
-   *  invited the deletion four weeks early, inside a live window, against a pinned file. */
-  targetSource?: ProvenanceSource;
 }): TransitionResult {
-  const { targetState, evidenceSource, outcome } = input; // targetSource deliberately not destructured
+  const { targetState, evidenceSource, outcome } = input;
   if (evidenceSource === 'user') return { kind: 'state', state: 'Verified' }; // confirm: human vouch
   if (evidenceSource !== 'reality-check') return { kind: 'no-change' };        // nothing else may transition
   if (!outcome.ran || outcome.indeterminate) return { kind: 'no-change' };     // can't check → no change

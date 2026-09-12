@@ -912,3 +912,44 @@ depended on the evidence program. `v0.1-certification-runsheet.md` reads 74 of 7
 candidate `2d8dde1`, `npm run certify-gate` exiting 0 on 2026-09-02. The declaration was deferred
 by the owner the same day and development continues on `feat/helix-v1`, so the certification holds
 only until the next commit that moves `bin/`.
+
+---
+
+## 14. Amendment record — 2026-09-09 (owner ruling: what the aborted window costs the first release)
+
+§13 recorded an open question and declined to answer it: C5.2 says `PARTIALLY EXERCISED — 1/2
+(minimum not met)` blocks release, while the abort record scopes its own consequence to the
+evidence. The owner ruled on 2026-09-09, and this section is that ruling.
+
+**The ruling.** C5.2's block attaches to the **recall-quality claim**, not to the product. `v0.1.0`
+ships carrying **no Hit@1 claim and no recall-quality claim of any kind**, and the aborted window is
+disclosed as a primary measurement that did not happen, with `v2-close-report-2026-08.md` as its
+disposition. D5's duty is discharged by reporting the measurement as unmade — never as a pass, and
+never by silence.
+
+**What is not re-decided.** C5.2 stands exactly as written and governs any future recall-quality
+claim: making one requires a new freeze and a new window (`v2-preregistration-2026-07.md` §8).
+Gate-decision D1–D5 are untouched, and D1's rejection of a signed O_67 deviation still stands — this
+ruling waives nothing and asserts nothing about recall quality. It decides only which of two readings
+of C5.2 the project takes, and it takes the narrower one.
+
+**D4 and protocol §8, disposed of here because they live in a byte-pinned file.** Gate-decision D4
+authorizes non-gating reuse of both frozen manifests during development, and `pilot-protocol.md` §8
+converts the frozen probes into a regression suite "after a release". Measured 2026-09-09: no script,
+test or CI job runs either manifest, and the current runner refuses a manifest whose sha256 no gate
+set pins, so neither reuse nor conversion is executable today. **Neither is performed for `v0.1.0`**,
+and no claim rests on either. Whether to build a harness for §8 conversion is a post-release question.
+
+**Where the criteria stand at this release.** C1.1–C1.4, C2.1–C2.3, C3.1–C3.3 and C4.1–C4.10 are
+done; C3.1 is re-run against the release candidate and recorded in `c3-audit-2026-09.md`, because the
+2026-07-26 sweep was bound to `18bee14` and both audited documents have changed many times since.
+C5.1's pre-freeze work completed at the 2026-08-14 re-freeze. C5.2 executed and returned the blocked
+verdict this section rules on. The release's own gate is the certification run-sheet, not the evidence
+program.
+
+**Constraints this ruling places on what may be written.** They bind the release notes and every
+shipped document: no Hit@1 or recall-quality number; the phrase "all runtime identity pins held" is
+never used (`v2-freeze-deviations-2026-08.md`; `v2-close-report-2026-08.md` — byte continuity held
+**except** the one measured interval on 2026-08-19, 1 h 32 m 27 s); no inferential recall claim
+(`v2-preregistration-2026-07.md` §1); and any pilot number quoted at all travels with the abort
+record's own coverage statement.

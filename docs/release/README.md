@@ -1,284 +1,177 @@
-# Helix release record — the road to the first release
+# Helix release record — the first release
 
-**Helix has never been released. `v0.1.0` will be its first release, and it has not happened yet.**
+**Helix has never been released. `v0.1.0` is its first release.** Everything in this directory is
+preparation for that one event. There is no second release planned, no earlier release to maintain,
+and the version string has read `0.1.0` at every site continuously except for one day in July 2026.
 
-Everything in this directory is preparation for that one event. There is no second release to plan
-for and no earlier release to maintain: the version string has read `0.1.0` at every site
-(`package.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`) continuously,
-except for one day in July described below. The `v0.1.0` tag exists only as a local ref in a
-separate clone; the public push was deferred by the owner on 2026-06-21 and remains deferred.
-
-This file is the single entry point. Read it first, then open only the document that answers the
-question you actually have. **It is a map and a narrative, not a replacement**: every other file
-here stays authoritative for its own subject, and several of them are read at runtime by source
-code, by tests, and by the freeze guard, so they cannot be folded into prose.
+Read this file first, then open only the document that answers the question you actually have. It is
+a map and a narrative, not a replacement: every other file here stays authoritative for its own
+subject, and several are read by literal path from scripts and tests, so they cannot be folded into
+prose.
 
 ---
 
-## 1. One release, and two names that are not it
+## 1. One release, two names that are not it, and one ruling
 
-**There is exactly one release in this project's plan: `v0.1.0`, the first one. Nothing is planned
-after it.** There is no `v0.2.0` on the roadmap, no later version, and no maintenance line. When a
-file here names a version other than `0.1.0`, it is naming a past event or a measurement method —
-never a future release.
+**`v0.2.0` is a past event, not a plan.** A release cycle opened under that number in July 2026 and
+was withdrawn when it failed its own gate. Nothing was published, the version identity reverted to
+`0.1.0` on 2026-07-22, and the number is not scheduled to return.
 
-Two other version-shaped names appear in this directory, and neither is a release:
+**`v2` is a measurement method, not a version of the product.** After the July gate failed, the
+recall *pilot protocol* was rewritten, and the rewritten method is called protocol v2. Every `v2-*`
+filename here is that method.
 
-**`v0.2.0` — a past event, not a plan.** A release cycle opened under that number in July 2026 and
-was withdrawn when it failed its own gate. Nothing was published under it, the version identity was
-reverted to `0.1.0` on 2026-07-22, and the number is not scheduled to return. The next release is
-still the first one.
+**The ruling that closes this directory's one open question.** The protocol v2 window was frozen on
+2026-08-14 and ended early, by the owner, on 2026-08-31 (`Abort A-2026-08-31`), with its primary
+measurement unmade: `Hit@1 — exposure 1 is below the minimum of 2 … (PARTIALLY EXERCISED — 1/2
+(minimum not met))`. Whether that barred the product or only the claim was left open until
+**2026-09-09, when the owner ruled that it bars the claim** — `readiness-criteria-2026-07.md` §14.
+`v0.1.0` ships carrying **no Hit@1 claim and no recall-quality claim of any kind**, and the aborted
+window is disclosed as a measurement that did not happen. C5.2 is unchanged and still governs any
+future recall-quality claim, which would require a new freeze and a new window.
 
-**`v2` — a gate on the way to `v0.1.0`, not a version of the product.** After the July gate failed,
-the recall *pilot protocol* was rewritten, and the rewritten method is called protocol v2. Every
-`v2-*` filename here is that method, not a product version.
+*One inconsistency, recorded here rather than fixed, because the file that carries it must not be
+edited: `gate-decision-2026-07-22.md`'s last update states the second window's instants as
+`06:12:55`, taken from a candidate that was re-cut within the hour. The freeze receipt's `06:20:01`
+is authoritative. That document is the last receipt-pinned file whose tracked bytes still equal
+their pin, and that equality is the only live evidence of what the receipt pinned.*
 
-It is also not a parallel track that could be dropped. `gate-decision-2026-07-22.md` is binding and
-states that a future release requires **one of**: (a) an explicit user-signed deviation for the
-failing probe with mechanism evidence attached, or (b) a prospectively preregistered protocol v2 —
-and its D1 chose path (b) as policy. **The v2 pilot was therefore made a precondition of shipping
-`v0.1.0`, not a separate release and not an alternative to it.** Its window closing was to be a step
-in the first release, which is why the certification run-sheet originally scheduled its remaining
-work after that close. Both halves are history rather than instruction now, and the note below says
-what replaced them.
+## 2. What has happened
 
-*(Updated 2026-09-03: path (b) was taken and carried out as a procedure, and it produced no
-result. The protocol v2 preregistration was frozen and in force, its second window ran, and the
-owner ended that window early with the primary measurement unmade — `Hit@1 — exposure 1 is below
-the minimum of 2, so the primary measurement did not happen (PARTIALLY EXERCISED — 1/2 (minimum
-not met))`, quoted from `v2-close-report-2026-08.md`. What that state costs the first release is
-NOT settled anywhere in this directory, and the two tracked texts do not read the same way.
-`readiness-criteria-2026-07.md` §5 C5.2 says of exactly this state that `UNEXERCISED — 0/2` and
-`PARTIALLY EXERCISED — 1/2 (minimum not met)` **both block release**. The abort record states its
-own consequence more narrowly: "Nothing is released on this record: the gate blocked at sample
-sufficiency … no pre-registered close claim attaches to them", which can be read as a bar on
-releasing ON that evidence, which is to say on making the Hit@1 claim, rather than on shipping a
-product that makes no such claim. The two are not co-equal either: C5.2 is a ratified criterion,
-while the abort record is the report of a run. **No ruling has been entered either way**, and this note does not enter one. It is
-an owner decision and it is open.)*
-
-So: one release, one withdrawn attempt that is over, and one gate whose disposition toward that
-release is recorded above as an open question.
-
-## 2. What has happened so far
-
-The work has proceeded as a sequence of updates toward the first release, each one triggered by
-what the previous one measured.
-
-**June 2026 — the candidate exists, publication is deferred.** `main` and the annotated `v0.1.0`
-tag were cut and bundled off-machine so that the publish decision could not be lost with a disk.
-The owner deferred the public push on 2026-06-21. That decision has not been revisited, and it is
-still the last step of the first release.
+**June 2026 — the candidate exists, publication is deferred.** `main` and an annotated `v0.1.0` tag
+were cut and bundled off-machine so the publish decision could not be lost with a disk. The owner
+deferred the public push on 2026-06-21. That June tag was never pushed and is superseded by the tag
+cut at this release.
 
 **July 2026 — a release attempt, and its withdrawal.** A `v0.2.0` cycle opened with a full audit
-sweep (`audit-2026-07.md`: secret scan over the public history, dependency licence check,
-marketplace file review, version-string baseline) and a preregistered recall pilot
-(`pilot-protocol.md`, with `pilot-manifest.json`, `pilot-oracle-mapping.json`, and the
-pre-execution `pilot-amendment-1.md` plus its two overlay artifacts). The pilot ran on 2026-07-21
-and 07-22. **It did not pass.** The registered 51-probe verdict is NOT MET permanently, and the
-conditional frozen-method Hit@1 gate failed at 27/28. The candidate was stood down on 2026-07-22
-and the identity reverted to `0.1.0`.
-
-That failure produced the governance the project still runs under. `gate-decision-2026-07-22.md`
-is **binding**, and in its own words *a future release* requires a prospectively preregistered
-protocol v2 (its chosen path (b)); the earlier protocol cannot be reused to make a recall-quality
-claim. The release that clause governs is the first one — `v0.1.0` — because that is the next
-release there is.
+sweep (`audit-2026-07.md`) and a preregistered recall pilot (`pilot-protocol.md` and its frozen
+inputs). The pilot ran on 2026-07-21/22 and did not pass: the registered 51-probe verdict is NOT MET
+permanently, and the conditional frozen-method gate failed at 27/28. The candidate was stood down.
+That failure produced the governance the project still runs under, in `gate-decision-2026-07-22.md`,
+which is binding.
 
 **Late July 2026 — deciding what "ready" means.** `readiness-criteria-2026-07.md` was ratified on
-2026-07-24 after every owner decision closed, including a domain-by-domain interview that mapped
-13 felt gaps onto criteria or accepted limitations. Its criteria drove the audits and drills that
-followed: `c3-audit-2026-07.md` (security-claim honesty, three independent auditors over disjoint
-`SECURITY.md` sections) and `c4-drills-2026-07.md` (install identity, data durability, maintainer
-recovery, executed against the installed artifact rather than the source).
+2026-07-24 and drove the audits and drills that followed: `c3-audit-2026-07.md` (security-claim
+honesty) and `c4-drills-2026-07.md` (install identity, data durability, maintainer recovery,
+executed against the installed artifact).
 
-**August 2026 — protocol v2 under a real freeze.** `v2-preregistration-2026-07.md` registers the
-second-edition method, and it is in force from the commit that carries its filled pin table. The
-method is frozen: a receipt pins the bytes, and the window is real-use verification of exactly
-those bytes.
+**August 2026 — protocol v2 under a real freeze, and its abort.** The method was frozen on
+2026-08-02, reset on 2026-08-13 under the preregistration's own reset clause because close-day
+tooling was built inside the window, and re-frozen on 2026-08-14 against a new candidate. The
+superseded receipt is kept, marked void by its filename and by every record that cites it — nothing
+inside that file says so — and must never be edited or deleted. The second window ended by owner
+abort on 2026-08-31, eleven days before its derived close.
 
-The first window was **reset** on 2026-08-13 under the preregistration's own reset clause, because
-close-day tooling was built inside it, and the method was re-frozen on 2026-08-14. The superseded
-receipt is kept, marked void, and must never be edited or deleted — a voided record that
-disappears is worse than no record. The open window runs to `2026-09-11T06:20:01.000Z`.
-
-*(Superseded 2026-09-02: that window never reached the instant this sentence names. The owner ended
-it on 2026-08-31 — `Abort A-2026-08-31`, T_abort `2026-08-31T10:02:21.000Z`, anchored at `ee35e41`,
-eleven days early; the record is `v2-close-report-2026-08.md`, which became the abort record. The
-receipt was NOT edited — its `payload.txClose` still reads `2026-09-11T06:20:01.000Z`, and that
-instant still governs the freeze guard's warn-only comparison against the working tree. What ended
-is the window, not the pins.)*
-
-**August 2026 — certifying the first release candidate.** `v0.1-certification-runsheet.md` is the
-execution record for certifying the release candidate itself, bound to the candidate named in
-`v0.1-candidate-receipt.json`. It is currently marked stale by design: the candidate moved on
-2026-08-20, and the run-sheet's own rule is that no verdict row survives changed bundle bytes. Its
-remaining blocks are now fixed to run *after* the post-close rebuild, because that rebuild moves
-the bundles again and would discard an earlier run.
-
-*(Updated 2026-09-03: that staleness is resolved. The rebuild happened first, the candidate was
-re-cut by `npm run cut-candidate` at `2d8dde1a83ea690125d3be736bce59e5f75e66e6`, and the run-sheet
-was executed again from the top. On 2026-09-02 all **74 of 74** verdict rows read MET and
-`npm run certify-gate` exits 0 — "the release is certified against its receipt". The staleness
-rule itself is unchanged and still governs: the next commit that moves `bin/` retires this
-certification, and the receipt is re-cut and re-run at the declaration.)*
+**September 2026 — certified, then retired, then released.** The candidate was re-cut and the
+certification run-sheet executed from the top: on 2026-09-02 all 74 verdict rows read MET and
+`npm run certify-gate` exited 0. Development then continued, and two rebuilds — `fa03865` and
+`2baf9c7` — moved `bin/`, which under the run-sheet's own staleness rule retired that certification.
+The release therefore re-cuts the candidate and runs the certification once more, after the cleanup
+this directory records, and then declares.
 
 ## 3. Where each document sits
 
-**Governing the first release**
+**Governing the release**
 
-- `gate-decision-2026-07-22.md` — binding gate-path decision. Any recall-quality claim is governed
-  by it. Byte-pinned by the freeze receipt. The window is over, so the old "do not edit while the
-  window is open" no longer bites — **but do not edit this file anyway.**
-  *(2026-09-03: its own update chain ends at 2026-08-14 and still describes the second window as
-  running to 2026-09-11. That window ended by `Abort A-2026-08-31`, and §1 above carries what the
-  abort left open. The file is deliberately NOT edited to say so, because it is the last
-  receipt-pinned document whose tracked bytes still equal their pin (`e51e2937…`), and that equality
-  is the only live evidence left of what the receipt pinned. D1–D5 are unchanged. The other pinned
-  document, `o67-class-rule-2026-07.md`, already diverged on 2026-09-02, and its pre-divergence
-  sha256 is cited in six tracked files here — which is the cost this bullet exists to avoid paying
-  twice.)*
-- `readiness-criteria-2026-07.md` — ratified service-readiness criteria and the roadmap its own
-  title calls a "redo roadmap". Read *redo* as redoing the release **attempt** that was withdrawn
-  in July, not as a second product version: its target is `v0.1.0`.
+- `gate-decision-2026-07-22.md` — binding gate-path decision (D1–D5). Any recall-quality claim is
+  governed by it. Byte-pinned by the freeze receipt, and its tracked bytes still equal that pin.
+  **Do not edit this file.**
+- `readiness-criteria-2026-07.md` — the ratified criteria, with the amendment record that carries the
+  2026-09-09 ruling in §14.
 - `o67-class-rule-2026-07.md` — the frozen offline classification rule for superset-competition
-  cases, without which the exercised/unexercised report the gate decision requires cannot be
-  produced. Byte-pinned by the freeze receipt; also read at runtime by `src/memory/retrieval.ts`.
-  *(2026-09-02: the pin is unchanged and still true of what it pinned — the blob at candidate
-  commit `94dd136`, sha256 `c1fe768ca0ec2b11…`, which is what the freeze guard re-hashes — but it
-  no longer describes this tracked file. Its three private-workspace citations were de-pathed that
-  day, each spec now named by date and title, so its bytes are sha256 `a074a2643dcdb7b0…` and the
-  working tree diverges from the pin permanently and by intent; the document's own §7 records why.
-  Editing it was possible because the window had already ended by abort on 2026-08-31.)*
+  cases. Byte-pinned by the freeze receipt, and **cited in a comment** by `src/memory/retrieval.ts`;
+  the code that reads it by literal path is `scripts/pilot/` and its tests. Its tracked bytes diverge
+  from the pin permanently and by intent since 2026-09-02, when three private-workspace citations
+  were de-pathed; the blob the pin was taken from, at candidate `94dd136`, is untouched, and that is
+  what the freeze guard re-hashes.
 
-**The withdrawn July attempt — kept because the first release inherits its governance**
+**The withdrawn July attempt — kept because the release inherits its governance**
 
-- `pilot-protocol.md` (historical), `pilot-amendment-1.md`, `pilot-manifest.json`,
-  `pilot-manifest-amended-1.json`, `pilot-oracle-mapping.json`,
-  `pilot-oracle-mapping-amended-1.json` — the first-edition method and its frozen inputs.
+- `pilot-protocol.md` (historical), `pilot-amendment-1.md` (§a–§e historical, §f still normative),
+  `pilot-manifest.json`, `pilot-manifest-amended-1.json`, `pilot-oracle-mapping.json`,
+  `pilot-oracle-mapping-amended-1.json` — the first-edition method and its frozen, hash-pinned
+  inputs. No code consumes the four JSON artifacts today.
 - `audit-2026-07.md` (historical) — the point-in-time release audit. Its findings stand; its
-  forward-looking statements describe the abandoned cycle.
+  forward-looking statements describe the abandoned cycle. Its exact path is allow-listed by
+  `scripts/scan-history-secrets.ts`, so it must not be moved.
 
 **Protocol v2 — the measurement, aborted 2026-08-31**
 
-*(2026-09-03: the entries below are written in the present tense of an open window. That window
-ended by `Abort A-2026-08-31`. The checklist is not a to-do list — read its own ABORT banner first —
-and the report is the abort record, with the values that could only exist at a close recorded as
-the abort's instead.)*
-
-- `v2-preregistration-2026-07.md` — the registered method, in force.
-- `v2-freeze-receipt-2026-08.json` — the signed pin set. Read by `src/memory/firewall.ts`, by the
-  freeze guard, and by tests, all by literal path.
-- `v2-freeze-runtime-pins-2026-08.txt` — the runtime pin list the guard compares against. The
-  guard itself, `scripts/freeze-runtime-check.sh`, is **RETIRED since 2026-09-05 and inert by
-  default**: the window it enforced ended by abort, its checks are anchored to the retired
-  candidate, and it now exits 0 with a notice unless `FRC_FORCE=1` is set. It is kept, not
-  deleted, because the close checklist, the deviation ledger and the abort record cite it. Both
-  files stay for that record; neither constrains the tree any more.
-- `v2-freeze-receipt-2026-08-02-void.json` — the superseded first-window receipt. **Never edit or
-  delete.**
+- `v2-preregistration-2026-07.md` — the registered method. Historical: the registration stands, the
+  window does not.
+- `v2-freeze-receipt-2026-08.json` — the signed pin set, read by `scripts/freeze-guard.ts` and its
+  test by literal path. Never edit.
+- `v2-freeze-receipt-2026-08-02-void.json` — the superseded first-window receipt. **Void by filename
+  and by external record only; nothing inside the file marks it.** Never edit or delete.
 - `v2-freeze-deviations-2026-08.md` — the deviation ledger: every departure from the frozen
   procedure, with its remediation and its disposition.
-- `v2-close-procedure-2026-08.md` — why the close chain runs from the tree it runs from.
-- `v2-close-checklist-2026-08.md` — the close-day run-sheet. Ticked and pasted into on the day.
-- `v2-close-report-2026-08.md` — the final report, pre-drafted so that close day is transcription
-  rather than authorship. Values that can only exist at the close are marked as fill sites.
+- `v2-close-report-2026-08.md` — the abort record, and the disposition of the window. Its appendices
+  carry the close-run evidence index and what moved after it was written.
+- `v2-close-checklist-2026-08.md` — the close-day run-sheet. It was **never executed**: 3 of its 112
+  boxes are ticked, and its banners say why. It survives as the record of the rehearsal measurements
+  the ledger and the abort record cite by line.
 
-**Certifying and shipping the release itself**
+`npm run freeze-guard` — `scripts/freeze-guard.ts`, which is neither the deleted shell script nor
+part of it — still runs in CI on every push. It re-hashes every pinned path out of the candidate
+commit and fails on a payload-seal mismatch, a missing candidate commit, a trimmed pin map, or a
+changed anchor, so it remains the standing check that this repository's history still holds what the
+receipt says it pinned. Its second output is warn-only working-tree divergence: more paths than the
+five some records name, and suppressed entirely once the receipt's `txClose` instant passes. Run it
+for the current list rather than quoting a number.
+
+**Certifying and shipping**
 
 - `v0.1-candidate-receipt.json` — the candidate's identity: commit, tree, bundle hashes, manifest
-  hashes, claim-set hashes, and the gate state at the cut.
-- `v0.1-certification-runsheet.md` — the certification execution record.
+  hashes, claim-set hashes, the certified row inventory, and the gate state at the cut. Produced and
+  verified by `npm run cut-candidate`; read by `npm run certify-gate`. Never hand-edit: the payload
+  is sha256-sealed, so an edit either fails its own verifier or has to forge the seal.
+- `v0.1-certification-runsheet.md` — the certification execution record. Its staleness rule governs:
+  the next commit that moves `bin/` retires every verdict row.
 - `deploy-runbook.md` — how to make installed bytes equal intended bytes. Every rule in it was
   learned from a live deploy failure.
-- `recovery-playbook.md` — what to do when a lifecycle operation needs undoing. There is no undo
-  command; these are the recipes, each executed against the shipped bundle rather than inferred.
-- `deps-audit-2026-08.md` — dependency advisory triage, with counts before and after the fix it
-  records.
+- `recovery-playbook.md` — what to do when a lifecycle operation needs undoing. Its path appears in a
+  user-visible tool response (`src/server/handlers.ts`) and is read by literal path in
+  `test/docs/shipped-claims.doc.test.ts`, and its blocks are claim-classified, so it cannot be
+  renamed without moving code, tests and the ledger together.
+- `deps-audit-2026-09.md` — dependency advisory triage at the release, with a measured
+  reachability verdict for every production advisory.
+- `c3-audit-2026-09.md` — the C3.1 security-claim sweep at the release candidate.
 
-## 4. What is still owed before the first release
+**Removed files.** These were deleted on 2026-09-09 because nothing was left for them to do. Records
+that cite them are correct about the past; recover the bytes with
+`git log --diff-filter=D --oneline -- <path>` and then `git show <commit>^:<path>`.
 
-- **The public push.** Deferred 2026-06-21 and still the owner's decision. It is the last step.
-  *(Re-deferred 2026-09-02, after the certification opened the gate: the owner ruled that this is
-  not the time to merge to `main`, and that development continues on `feat/helix-v1`. What is
-  deferred is the declaration, not the code's visibility — `feat/helix-v1` is already pushed to the
-  public origin at `395a973`, where it is the repository's default branch, so every certified commit
-  is public already. What has not happened is the merge to `main` and the publication of a tag: the
-  annotated `v0.1.0` tag cut in June still exists only as the local ref in the separate clone §1
-  describes, and origin carries no tags at all. Of the four items below, three are discharged and
-  one lapsed with its premise, which leaves this the only entry still owed — and it is a decision,
-  not a task.)*
-- **The pilot window closes 2026-09-11.** Until then the frozen bytes must not move.
-  *(Superseded 2026-09-02: neither half still holds, and this item is no longer owed. The owner
-  ended the window on 2026-08-31 (`Abort A-2026-08-31`), and on 2026-09-02 one of the two
-  receipt-pinned method documents — `o67-class-rule-2026-07.md` — was edited to de-path its three
-  private-workspace citations. Measured that day rather than reasoned: the freeze guard exits 0,
-  because it re-hashes the pins out of candidate commit `94dd136`, whose blobs are untouched, and
-  reports the working tree's divergence as an informational warning only;
-  `gate-decision-2026-07-22.md`, the other pinned document, still matches its pin; and
-  `scripts/pilot/input-pins.ts`, which re-derives the same hashes from this working tree, refuses
-  `method-drift` over five pins — four `src/memory/` tool pins that had already diverged through
-  post-candidate development, and now this method document as the fifth. The edit adds a name to a
-  refusal that already stood rather than causing it, and that refusal is inert either way because
-  the close it guarded was canceled. The receipt itself was not edited.)*
-- **Certification blocks re-run after the post-close rebuild**, per the run-sheet's own staleness
-  rule.
-  *(Discharged 2026-09-02: the rebuild landed first, and the run-sheet was then executed from the
-  top against candidate `2d8dde1`. 74 of 74 rows MET; `npm run certify-gate` exits 0. The staleness
-  rule is untouched and will retire that result the next time `bin/` moves.)*
-- **A post-close rebuild and redeploy.** Several fixes are complete in source but deliberately not
-  built, because rebuilding would move the frozen bytes. They ship together after the close.
-  *(Discharged 2026-09-02: built and deployed at `263f2a9`, version 0.1.0, at BOTH scopes — the
-  user scope and the local scope of the dogfood project — re-measured 2026-09-03 in the installed
-  plugin record. `bin/` at HEAD is byte-identical to the deployed bytes, so no redeploy is owed.)*
-- **A validated close receipt** that retires the freeze guard and restores the settings the freeze
-  turned off.
-  *(Discharged 2026-08-31, in a form this item did not anticipate: there is no close receipt and
-  there will not be one, because the window ended by `Abort A-2026-08-31` rather than by close.
-  `v2-close-report-2026-08.md` is the disposition; the freeze guard's WIRING was removed in the
-  abort run, while `npm run freeze-guard` itself still ships and still warns against the receipt when
-  run by hand; and the marketplace `autoUpdate` flags the freeze had set to false are `true` again —
-  recorded in the abort record and re-measured 2026-09-03 against the live settings and the retained
-  pre-close backup.)*
+| file | why it went |
+|---|---|
+| `v2-close-procedure-2026-08.md` | described why a close chain runs from the tree it runs from; no close chain will run |
+| `v2-close-evidence-index-2026-08.md` | its artifact table and its one open item moved into `v2-close-report-2026-08.md`, Appendix A |
+| `v2-freeze-runtime-pins-2026-08.txt` | the `sha256sum -c` input of the retired guard script |
+| `scripts/freeze-runtime-check.sh` | retired in place 2026-09-05, inert by default, anchored to a retired candidate, and citing a close receipt that will never exist |
+| `deps-audit-2026-08.md` | superseded by `deps-audit-2026-09.md`, which carries its dispositions forward |
 
-**And then the list ends.** Nothing on it is preparation for a version after `v0.1.0`, because no
-such version is planned. When the public push happens — and, on the first of the two readings §1
-records, only once the owner has ruled on what the aborted window costs — the work this directory
-records is done, and what follows is whatever the first release turns out to need, not a queued
-`v0.2.0`.
+## 4. What is still owed
 
-*(Updated 2026-09-03: one question stands outside this list rather than on it — §1's open item,
-whether the aborted pilot's `PARTIALLY EXERCISED — 1/2` Hit@1 leg bars the product or only the
-claim. It is not written here as owed work because nothing can be executed against it: it is a
-reading of two texts already written, and only the owner can settle it.)*
+- **The declaration.** Fast-forward `main` to the certified commit, cut and push an annotated
+  `v0.1.0` tag, publish the release notes. `origin` carries no tags today.
+- **Owner acts, on the machine that holds the deployment and the archives:**
+  - C4.6-Q4's separate-medium copy, which regressed to open on 2026-09-03 because the copy sits on
+    the same physical disk as its source.
+  - The durable second copy of the non-secret evidence chain (`v2-close-report-2026-08.md`,
+    Appendix A). It must not be discharged against the Q4 location, which has the same defect.
+  - C5.1 closure item 12, re-scoped: an off-machine bundle holding the release candidate and its tag.
+    Minted last, after certification, so a failed check cannot leave it stale.
+  - Redeploy the release there; that machine runs the `263f2a9` build.
+
+**And then the list ends.** Nothing on it is preparation for a version after `v0.1.0`.
 
 ## 5. Why this directory is not yet one file
 
-It should end as one release record, and it will. It cannot be collapsed today, for reasons that
-are mechanical rather than editorial:
+It should end as one release record, and it will. Two reasons still hold, both mechanical:
 
-1. **Two files are byte-pinned by the freeze receipt.** Editing either one during the open window
-   resets the window and discards the real-use verification accumulated so far — which has already
-   cost this project one window.
-   *(Superseded 2026-09-02: this reason has lapsed. There is no open window left to reset — the
-   second ended by abort on 2026-08-31 — and on 2026-09-02 `o67-class-rule-2026-07.md`, one of the
-   two, was edited with no reset and no verification discarded. The cost recorded above, the first
-   window reset on 2026-08-13, stands as history. What survives is narrower and blocks nothing: the
-   receipt remains evidence of what the candidate commit held, and that one file's tracked bytes no
-   longer match its pin. Reasons 2 and 3 are untouched by this.)*
-2. **Eleven files are read by literal path** from source, tests, and the freeze guard. Merging them
-   breaks the build, not just the prose.
-3. **Three files are close-day instruments**, not narrative: a run-sheet that gets ticked, a report
-   with fill sites, and a pin list a shell script compares against.
+1. **Files are read by literal path** from scripts and tests — the two receipts, the o67 class rule,
+   the candidate receipt, the recovery playbook, and `audit-2026-07.md`'s allow-listed path. Merging
+   them breaks the build, not just the prose.
+2. **The run-sheet is an instrument**, ticked and pasted into as it runs.
 
-The consolidation therefore belongs to the post-close cleanup, together with the citation cleanup
-that the vocabulary test already schedules for the same moment. Until then, this file carries the
-single narrative and each document keeps its own authority.
-
-*(Superseded 2026-09-02: the citation cleanup is done, and nothing schedules it any more. The
-vocabulary test's expiring allowlist — exactly three citations required in
-`o67-class-rule-2026-07.md` until the receipt's `txClose`, none permitted after — was retired that
-day and replaced by an unconditional rule: no tracked file may cite the private workspace, at any
-time, with neither a clock nor a receipt read. The three sites were de-pathed the same day, so the
-count is zero. Whether this directory is consolidated, and when, is a separate question this note
-does not settle.)*
+The first reason the earlier version of this file gave — an open freeze window that a merge would
+reset — lapsed with the abort. Consolidation belongs to the post-release cleanup.

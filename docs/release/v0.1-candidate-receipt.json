@@ -1,25 +1,25 @@
 {
  "payload": {
   "artifactKind": "v0.1-release-candidate",
-  "candidateCommit": "2d8dde1a83ea690125d3be736bce59e5f75e66e6",
-  "treeShaAtCut": "ec5b8deb6e44",
-  "cutAt": "2026-09-02T06:01:14.472Z",
+  "candidateCommit": "6110acb743d3314dfe55b5bdcaef21a0f8b7e9a7",
+  "treeShaAtCut": "229dd1dcc382",
+  "cutAt": "2026-09-09T06:25:59.937Z",
   "bundles": {
-   "bin/helix-mcp.mjs": "4a7f01efe4f371b5aee6db8ba448d6dcdd9a4a113537a63f78070e2c6cd5b51d",
-   "bin/helix-rebaseline.mjs": "4f8d1b874ef7f26762387608a40f3bf80ceeb086a8d4bc3cce6460669c60b182",
+   "bin/helix-mcp.mjs": "29e0da39a26d0d5d9e5208d34b0ed586ad66d52805ab97cc7ad59ff3b512f3af",
+   "bin/helix-rebaseline.mjs": "2feafc114963d6eccb2242fdf485d7bad9e16cd7db484efafacebf629dac60cb",
    "bin/helix-trigger.mjs": "2ab612990ab3c4e8339efd7e67695bad82191a9866445285511213a043787e5d",
-   "bin/helix-trust-resolve.mjs": "a5c027b20b65e4abf7ad5ecb321b29084120dfb60dfe090d3494f575a400d6f6",
+   "bin/helix-trust-resolve.mjs": "6deffe4a43b1718129772a75c2fa52e9f6d9fab93712d5342239f72d4c2a0248",
    "bin/hooks/session-end.mjs": "83d89a723a02030638e6be76995fa95f3a4dfe1987d3371c735443bf1585c675",
-   "bin/hooks/session-start.mjs": "b140fbf4ac699f3350a690de830e0cd23639883988c3e5dc55e422f14e077c48"
+   "bin/hooks/session-start.mjs": "b6d2bcf1a0d633499a7f13fa45e9affe1fcf1145aae012337223ca8364b857a4"
   },
   "manifest": {
-   ".claude-plugin/plugin.json": "5fccae10f7f420c733257a79ac8cebce3878073f32cceae4ff49e5acc39223ce",
-   ".claude-plugin/marketplace.json": "b36c52c1c0dc46cf9906eaf2924c10a1bfe152b8b837718081a7caf181987765",
+   ".claude-plugin/plugin.json": "24091985d94b9612720fdfd4d4ce92d0099c37693eec072240536b661f8e4657",
+   ".claude-plugin/marketplace.json": "5efb83e0a27c1d895e08443f1a6183c9c1f4a7f27b39624bab5246554a66de46",
    "hooks/hooks.json": "d135a67aa58b10fc805b46a959272099e01e5ed701c511d99319e4641b63bf02"
   },
   "claimSet": {
-   "data/inventory/surface.json": "a780b465c3b642a0b1e0095bd152807782269b1f6b79bc4c35c65da873d4de29",
-   "data/inventory/claims.json": "2f47517de4a584628b455ac6f60703fb0201b4fa2ce2e28508fa1759b4c402ac"
+   "data/inventory/surface.json": "bb46f6f282afdd4d531074890c5a5a30ab6f362b05b32c347a7905661c3b9cb4",
+   "data/inventory/claims.json": "37d13ae4c3651a9acbf1249c1dc33898f2bc89aa9671b3594cfe9f342f2773b2"
   },
   "rowIds": [
    "r001",
@@ -99,10 +99,10 @@
   ],
   "gateAtCut": {
    "typecheck": "exit 0",
-   "suite": "the full suite is re-run and recorded in the run-sheet after the ledger is rebound; at the cut the only failure was the committed-ledger multi-candidate check, which the rebinding clears",
-   "skippedAre": "the two metered Codex opt-in files, which need HELIX_REAL_CODEX=1 — both were RUN for Block D at this tree and passed",
-   "rebuildMovesBin": false
+   "suite": "exit 0 — Tests  2595 passed | 2 skipped (2597)",
+   "suiteFiles": "Test Files  205 passed | 2 skipped (207)",
+   "measuredAt": "2026-09-09T06:26:13.810Z"
   }
  },
- "payloadSha256": "8dd11e8e1f81778bc8c60f3f24405bdd5ce8b916bcfab42eb95ac761b00b854c"
+ "payloadSha256": "baabb112f0b26fefe45b63d1a028330643a91894259e08ff0397fede544ed78b"
 }

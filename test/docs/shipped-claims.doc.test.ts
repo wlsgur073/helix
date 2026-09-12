@@ -1123,3 +1123,51 @@ describe('SECURITY.md cites marker-erase routing that still exists', () => {
       .toMatch(/permanent/);
   });
 });
+
+// The trust-resolution section is the newest thing in SECURITY.md and, until this block, the least
+// held: the C3.1 re-run on 2026-09-09 found that nothing in this file mentioned the ceremony,
+// `trust-pending`, `--repair` or `--fresh`, so all fourteen of its claims could be reworded,
+// weakened or deleted with the suite fully green. Two of them are worth a lock in particular,
+// because they are what a reader relies on BEFORE running a command that sounds irreversible:
+// `--fresh` does not delete, and the compaction chokepoint is why it does not.
+describe('SECURITY.md states the trust-resolution ceremony the CLI actually offers', () => {
+  it('names the invocation the shipped CLI prints, recovered by executing it', () => {
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([k, v]) => v !== undefined && !k.startsWith('HELIX_') && k !== 'NODE_OPTIONS' && k !== 'NODE_DEBUG',
+      ),
+    ) as NodeJS.ProcessEnv;
+    const bare = spawnSync(process.execPath, [join(ROOT, 'bin', 'helix-trust-resolve.mjs')],
+      { encoding: 'utf8', env, timeout: 10_000 });
+    expect(bare.status, 'the trust-resolve CLI no longer refuses a bare invocation').toBe(2);
+
+    // Recovered from the run's own output, never copied from the document.
+    const usage = `${bare.stdout}${bare.stderr}`;
+    const flags = [...usage.matchAll(/--([a-z-]+)/g)].map((m) => m[1]).filter((f): f is string => f !== undefined);
+    expect(new Set(flags), 'the usage line no longer names the two resolution modes')
+      .toEqual(new Set(['scope', 'repair', 'fresh']));
+
+    const sec = doc('SECURITY.md');
+    for (const flag of flags) {
+      expect(sec, `SECURITY.md no longer names --${flag}`).toContain(`--${flag}`);
+    }
+    expect(sec, 'SECURITY.md no longer states that the ceremony needs a terminal')
+      .toMatch(/interactive terminal/i);
+  }, 30_000);
+
+  it('states that a rotation keeps the old rows, and why compaction cannot drop them', () => {
+    // The promise is a negative one — nothing is deleted — so the shortest load-bearing phrase is
+    // pinned rather than a value read out of code. Its MECHANISM is readable, though: compaction
+    // may drop a verify only when the resolved key proves a single lineage, and that conjunction is
+    // recovered from the source so the sentence cannot outlive it.
+    const ledger = readFileSync(join(ROOT, 'src/memory/ledger.ts'), 'utf8');
+    expect(ledger, 'the compaction drop-gate is no longer keyProven && singleLineage')
+      .toMatch(/mayDrop\s*=\s*keyProven\s*&&\s*singleLineage/);
+
+    const sec = doc('SECURITY.md');
+    expect(sec, 'SECURITY.md no longer promises that a rotation keeps the old rows')
+      .toContain('stay `Fresh` rather than being');
+    expect(sec, 'SECURITY.md no longer names single-lineage as what stops the drop')
+      .toMatch(/single lineage/i);
+  });
+});

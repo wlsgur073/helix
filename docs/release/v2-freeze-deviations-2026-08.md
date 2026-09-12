@@ -1816,3 +1816,21 @@ step 0.6 and G6 are SKIPPED for cause: the next timer elapse is 2026-09-01 00:00
 after the snapshot, so there is no run to suppress — the 0.6 lesson (a reason must be measured) is
 honoured by naming the elapse. (4) The owner in person: C1 (and the Q4 backup, same precondition),
 C8's adjudication, F3's push, F6's new CLI process, and every commit, per the standing approval rule.
+
+
+---
+
+## Dated notes — 2026-09-09 (nothing above is altered)
+
+- **`D-2026-08-15-autoupdate-second-window`, Instances 4 and 5.** Each names a fix "queued for
+  post-close" to `scripts/freeze-runtime-check.sh` — the `head -3` truncation, and widening the clone
+  check from 9 files to the pinned set. Neither was made, and both are now **CANCELLED**: the guard
+  was retired in place on 2026-09-05 and deleted on 2026-09-09. A queued fix to a deleted file is not
+  owed, and saying so is what stops it reading as an open obligation forever.
+- **`D-2026-08-18-in-window-product-rebuild`, the standing `bin/` instruction.** "bin/ on this branch
+  stays at the candidate bytes until txClose" lapsed with the abort. `bin/` was rebuilt at `263f2a9`,
+  `fa03865` and `2baf9c7`, each in its own commit, and again for the v0.1.0 candidate.
+- **`D-2026-08-25-rehearsal-triggered-run`.** Its one residue — the tinytask working tree, auto-filed
+  as ISSUE-0009 with no cause named — is **still open**, by the owner's decision of 2026-09-09. It is
+  recorded here as open rather than closed by silence, and it is not carried on the release's owed
+  list because nothing in the release depends on it.
