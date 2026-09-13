@@ -1114,9 +1114,10 @@ export class MemoryStore {
       if (kind !== null) hits.push({ ledger: c, kind });
     }
     // SOFT erases (the tool's only shape — it cannot pass a scope) prefer the one candidate holding a
-    // RECORD with this exact id over candidates whose only match is a family marker: every ledger that
-    // has ever been rewritten carries a witness fence, so a family-only hit is the ordinary state of the
-    // OTHER scope, not a second home for the record (final review, I-2). A permanent no-scope erase
+    // RECORD with this exact id over candidates whose matches are marker rows, family or exact-id: every
+    // ledger that has ever been rewritten carries a witness fence, so a marker-only hit is the ordinary
+    // state of the OTHER scope, not a second home for the record (final review, I-2), and a soft erase
+    // never tombstones a marker row, so preferring the record loses nothing. A permanent no-scope erase
     // with more than one hit stays refused — the operator passes an explicit scope.
     if (!permanent) {
       const recs = hits.filter((h) => h.kind === 'record');
