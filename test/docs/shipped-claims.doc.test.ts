@@ -1101,10 +1101,11 @@ describe('SECURITY.md states when the master signing key actually comes into exi
   });
 });
 
-// SECURITY.md describes the marker-erase routing and cites the implementing functions and a
-// committed probe by path. A citation can go stale, so all three names are checked to exist.
+// SECURITY.md describes the marker-erase routing and cites the implementing functions and two
+// committed probes by path. A citation can go stale — the paragraph kept naming a helper after the
+// helper was deleted — so every name and path it cites is checked to exist.
 describe('SECURITY.md cites marker-erase routing that still exists', () => {
-  it('the named resolver, family helper and committed probe are all present', () => {
+  it('the named resolver, family helper and both committed probes are all present', () => {
     const sec = doc('SECURITY.md');
     const store = readFileSync(join(ROOT, 'src/memory/store.ts'), 'utf8');
 
@@ -1121,6 +1122,13 @@ describe('SECURITY.md cites marker-erase routing that still exists', () => {
     expect(existsSync(join(ROOT, cited)), `SECURITY.md cites ${cited} but it does not exist`).toBe(true);
     expect(readFileSync(join(ROOT, cited), 'utf8'), 'the cited probe no longer exercises a project-scope marker erase')
       .toMatch(/permanent/);
+
+    // The row-shape probe the paragraph cites for the record/marker split.
+    const shape = 'test/memory/erase-marker-shape.test.ts';
+    expect(sec, 'SECURITY.md no longer cites the row-shape probe').toContain(shape);
+    expect(existsSync(join(ROOT, shape)), `SECURITY.md cites ${shape} but it does not exist`).toBe(true);
+    expect(readFileSync(join(ROOT, shape), 'utf8'), 'the cited row-shape probe no longer exercises the shared-id soft erase')
+      .toMatch(/SOFT erase tombstones the record/);
   });
 });
 

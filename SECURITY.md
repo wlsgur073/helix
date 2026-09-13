@@ -166,12 +166,17 @@ outside the agent's conversation (a script or REPL against `MemoryStore`) can.
 
 **Marker-erase routing; general non-live-id fallback (narrower residual).** A permanent erase
 of a *project* ledger's planted marker does not risk landing on the global ledger: `erase()` resolves
-its target through `resolveEraseTarget`, which recognizes a marker by its canonical family
-(`markerFamilyOf` + a family-prefix presence check in `presentIn`) rather than by live-projection
-membership, and the `scope` parameter (`erase(id, { permanent: true, scope: 'project' })`) lets a
-caller pin the ledger explicitly. A committed probe
-(`test/memory/provenance-audit/marker-erase-routing.test.ts`) confirms a project-ledger marker's
-permanent erase with `scope: 'project'` empties it from that ledger, not global.
+its target through `resolveEraseTarget`, which decides what an id names from the parsed rows rather
+than from the id alone. A row counts as a marker only when it is marker-shaped (`markerFamilyOf` over
+the record), so a non-marker row carrying the exact id is erased as a record even when that id wears
+a marker prefix, and an id carried by both a marker row and a record is never refused on that
+account: a soft erase tombstones the record, and a permanent erase purges every row carrying the id.
+The `scope` parameter (`erase(id, { permanent: true, scope: 'project' })`) lets a caller pin the
+ledger explicitly. Committed probes cover both halves: a project-ledger marker's permanent erase with
+`scope: 'project'` empties it from that ledger, not global
+(`test/memory/provenance-audit/marker-erase-routing.test.ts`), and a live row wearing a marker
+prefix, or sharing its id with a marker row, resolves as described here
+(`test/memory/erase-marker-shape.test.ts`).
 
 This does not retire every non-live-id routing question. `ledgerOf(id)` — the separate routine that
 resolves an *existing* target's ledger for `confirm`/`recheck` (signed-verify writes) and for

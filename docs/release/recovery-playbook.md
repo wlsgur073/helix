@@ -2,8 +2,8 @@
 
 Status: standing operational doc (accepted limitation **L2** of `readiness-criteria-2026-07.md`
 §9: *"No one-step undo for permanent lifecycle operations… a short recovery playbook is owed in
-docs"*). Every recipe below was executed against the shipped bundle on 2026-07-27 — no step is
-inferred from source alone.
+docs"*). Every recipe below was executed against the shipped bundle — no step is inferred from
+source alone — and the closing paragraph and the certification run-sheet record when each was run.
 
 **There is no undo command.** Helix has no `unerase`, no `restore`, no inverse of a supersede at
 the tool surface or in its API. Recovery means: *retrieve the old content, then re-commit it*.
@@ -30,7 +30,13 @@ hold the text.
 
 A caveat worth knowing before you panic or relax: `helix_memory_erase` answers `erased <id>`
 even for an id that does not exist or is already dead. A success message is not proof that
-anything was erased.
+anything was erased. It can also answer with a refusal instead. When the id is present in both
+scopes (global and the adopted project), the tool refuses unless exactly one of them holds it as a
+record, and only an operator call to `store.erase(id, { scope })` from a script or REPL can then
+pick the scope; that call with `scope: 'project'` refuses in turn when no project memory layer is
+active, rather than falling back to the global ledger. Erasing a record is also refused, like a
+commit or a confirm, while its scope has an interrupted rewrite pending (see the interrupted-rewrite
+entry under *Other cheap protections* in §6).
 
 ## 2. Is the undo window still open?
 
@@ -267,6 +273,17 @@ fixed quiet slot per week.
   clamped grades, and ordinary appends still land — so recovery by re-commit is available. What
   is refused is a *rewrite*: a permanent erase or a compaction on an alarmed scope, precisely so
   the alarm cannot be laundered away. Clear it with the re-baseline ceremony above.
+- **An interrupted ledger rewrite.** A read that prints `(a ledger rewrite for this scope was
+  interrupted; its records are excluded until the transition is re-driven or re-baselined)` means a
+  compaction, permanent erase or re-baseline of that ledger stopped part-way, typically because its
+  process was killed. The scope's records are withheld from every read, so it can look empty, but
+  they are not lost; every memory write to that scope is refused with `has an interrupted transition
+  pending — writes are blocked until it resolves`. Quit and restart Claude Code first (`/clear` is
+  not a restart): at startup the server retracts a rewrite that stopped before its new file was
+  renamed into place, which leaves exactly the bytes on disk, and the records come back. If the note
+  survives the restart, the bytes on disk cannot show whether the rewrite landed, so the server
+  leaves that decision to you: run the re-baseline ceremony above, which adopts the bytes on disk.
+  Do not edit the ledger by hand while the note stands.
 
 ## Related documents
 

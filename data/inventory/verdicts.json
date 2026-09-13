@@ -612,7 +612,7 @@
  {
   "rowId": "r062",
   "surfaceItem": "cross-cutting",
-  "claimId": "SECURITY.md#c9aeaffd8614",
+  "claimId": "SECURITY.md#7d28c699cc9e",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims: the resolver and family helper the document names are declared in store.ts, and the probe it cites by path exists and exercises a permanent erase; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
