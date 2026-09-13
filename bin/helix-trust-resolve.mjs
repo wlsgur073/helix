@@ -1386,8 +1386,11 @@ var WitnessBlockedError = class extends Error {
   constructor(op, message) {
     super(message);
     this.op = op;
+    this.name = "WitnessBlockedError";
   }
   op;
+  /** Marker `isWitnessBlockedError` reads — a property, never the class (see isWitnessAdvanceError). */
+  witnessBlocked = true;
 };
 function macKeyFor(scopeKey, master) {
   return Buffer.from(hkdfSync2("sha256", master, Buffer.from(scopeKey), "helix-witness-mac-v1", 32));
@@ -2012,6 +2015,7 @@ function normalizeUntrusted(s, maxChars) {
   return out;
 }
 var WITNESS_MISMATCH_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; elevated grades are clamped to Fresh until an authorized re-baseline)";
+var WITNESS_MISMATCH_ASOF_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; this as-of view preserves the reconstructed historical grades present in the available bytes, which may omit later corrections and are not a current-authority verdict)";
 var WITNESS_TRANSITION_NOTE = "(a ledger rewrite for this scope was interrupted; its records are excluded until the transition is re-driven or re-baselined)";
 var WITNESS_INIT_NOTE = "(rollback witness: scope not yet witnessed; the current head will be adopted trust-on-first-use at the next write)";
 function witnessNoteFor(verdict) {
@@ -2025,6 +2029,9 @@ function witnessNoteFor(verdict) {
     default:
       return null;
   }
+}
+function asOfWitnessNotes(notes) {
+  return notes.map((n) => n === WITNESS_MISMATCH_NOTE ? WITNESS_MISMATCH_ASOF_NOTE : n);
 }
 function collectWitnessNotes(verdicts) {
   const seen = /* @__PURE__ */ new Set();
@@ -2491,6 +2498,13 @@ var MAX_COMMIT_CONTENT_CHARS = 16384;
 var RECALL_RECENCY_APPENDIX_COUNT = 3;
 
 // src/memory/store.ts
+var EraseRefusedError = class extends Error {
+  eraseRefused = true;
+  constructor(message) {
+    super(message);
+    this.name = "EraseRefusedError";
+  }
+};
 var MemoryStore = class {
   constructor(global, opts) {
     this.global = global;
@@ -2657,7 +2671,7 @@ var MemoryStore = class {
     const p = this.opts.project;
     if (scope === "project" && !p) {
       throw new Error(
-        "commit: scope 'project' was requested but no project memory layer is active here. Adopt this project (helix_memory_adopt) or omit `scope` to use the contextual default \u2014 the write is refused rather than silently widened to the global ledger."
+        "commit: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started inside a directory holding a .helix folder). Omit `scope` to use the contextual default, or start Helix inside the project and adopt it (helix_memory_adopt) \u2014 the write is refused rather than silently widened to the global ledger."
       );
     }
     if (scope === "global" || !p) return this.global;
@@ -3017,7 +3031,7 @@ var MemoryStore = class {
    *  no self-race), applies read-side witness enforcement (clamp on mismatch / exclude on
    *  transition-interrupted), and emits the replay metric verifiedOf used to. It deliberately does NOT
    *  reuse scopedProjection()/verifiedOf(): those stay UNENFORCED for the write/routing paths
-   *  (commit/ledgerOf/presentIn/liveTarget), where a witness clamp must not change authority checks. */
+   *  (commit/ledgerOf/erase/liveTarget), where a witness clamp must not change authority checks. */
   currentView() {
     const disposition = this.projectDisposition();
     const home = this.homeDir();
@@ -3134,7 +3148,7 @@ var MemoryStore = class {
     addScope(this.global, "global");
     const p = this.opts.project;
     if (p && disposition === "owned") addScope(p.ledger, "project");
-    return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: collectWitnessNotes(verdicts) };
+    return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: asOfWitnessNotes(collectWitnessNotes(verdicts)) };
   }
   /** Explicitly adopt the active project ledger (trust its current contents). For team-shared
    *  ledgers. Throws if no project layer is active, or if `expectedRoot` names a different one.
@@ -3165,40 +3179,80 @@ var MemoryStore = class {
     const p = this.opts.project;
     return p ? trustStateOf(p.root, this.homeDir()) : "active";
   }
-  /** Which marker family an id belongs to, or null for a normal id. `integrity_marker`/
-   *  `horizon_marker` are single canonical fixpoint ids (exact match); a witness fence has no
-   *  single canonical id — one exists per epoch+nonce (witnessFenceRecord, ledger.ts) — so it
-   *  routes by PREFIX instead, the same way presentIn's family-prefix check (below) already
-   *  treats the other two families once matched. */
-  markerFamilyOf(id) {
+  /** The marker family a canonical id ADDRESSES, or null. `integrity_marker` / `horizon_marker` are
+   *  single canonical ids; a witness fence has one id per epoch+nonce, so ANY id wearing that prefix
+   *  addresses the family (C10 — a caller erasing "the fence" need not know the nonce). This is the
+   *  id-side half; `markerFamilyOf` below is the row-side half. */
+  familyPrefixOf(id) {
     if (id === "integrity_marker") return "integrity_";
     if (id === "horizon_marker") return "horizon_";
     if (id.startsWith("witness_fence_")) return "witness_fence_";
     return null;
   }
-  /** Is `id` present in `ledger` — family-prefix for a marker (C10), else live-or-raw. */
-  presentIn(ledger, id) {
-    const fam = this.markerFamilyOf(id);
-    const records = parseLedger(ledger);
-    if (fam) return records.some((r) => isMarkerShape(r) && r.id.startsWith(fam));
-    if (this.verifiedOf(ledger).live.has(id)) return true;
-    return records.some((r) => r.id === id);
+  /** The family of a marker-SHAPED row, or null for any row that is not a marker — whatever its id.
+   *  Takes the RECORD, not the id (R5(c)): a live assert wearing a marker prefix is a record.
+   *  Membership is by family PREFIX, mirroring ledger.ts's isIntegrityMarker / isHorizonMarker /
+   *  isWitnessFence (marker SHAPE + prefix): a marker row of a fixpoint family need NOT carry the
+   *  canonical id — anyone who can append an `integrity_`-prefixed marker row mints one (ledger.ts's
+   *  F5 residual), and clearing it is exactly what the C10 family match is for. Deliberately wider
+   *  than familyPrefixOf, which answers the narrower id-side question of what an id ADDRESSES. */
+  markerFamilyOf(r) {
+    if (!isMarkerShape(r)) return null;
+    if (r.id.startsWith("integrity_")) return "integrity_";
+    if (r.id.startsWith("horizon_")) return "horizon_";
+    if (r.id.startsWith("witness_fence_")) return "witness_fence_";
+    return null;
   }
-  /** Resolve the single ledger an erase acts on, or null for a clean-and-absent no-scope no-op. Throws
-   *  on: unowned project scope; explicit scope where the id is absent (C4/D7); a no-scope PERMANENT
-   *  erase over a ledger with any skipped line (C5/C6); or a no-scope id live/present in more than one
-   *  scope (D9). `permanent` gates the corruption check: a physical purge must not silently miss a
-   *  secret hiding in a skipped line, but a SOFT erase only tombstones (parseLedger tolerates a torn
-   *  line as §10 specifies), so an unrelated corrupt line must never brick it (finding 2). */
+  /** What `id` names in `ledger`, classified by the parsed ROWS (R5(c)):
+   *  - 'record'    a non-marker row with exactly this id (live or raw) — an exact id always wins
+   *                over a family-only marker match, so a live row wearing a marker prefix is erasable;
+   *  - 'marker'    only marker-shaped rows match: this exact id, or this id's family (C10);
+   *  - 'ambiguous' a record AND a marker row carry the SAME exact id — a SOFT erase tombstones the
+   *                record (marker rows are inert to a tombstone); a PERMANENT erase purges every row
+   *                carrying the id;
+   *  - 'absent'    nothing matches.
+   *  Snapshot-relative: computed before the mutation lock, exactly like the presence check it
+   *  replaces; a concurrent writer can create the ambiguity after this returns. */
+  findEraseTarget(ledger, id) {
+    const records = parseLedger(ledger);
+    const fam = this.familyPrefixOf(id);
+    const recordHit = records.some((r) => !isMarkerShape(r) && r.id === id);
+    const markerExact = records.some((r) => isMarkerShape(r) && r.id === id);
+    const markerFamily = fam !== null && records.some((r) => this.markerFamilyOf(r) === fam);
+    if (recordHit) return markerExact ? "ambiguous" : "record";
+    if (markerExact || markerFamily) return "marker";
+    return "absent";
+  }
+  /** Resolve the single ledger an erase acts on — and what the id names there — or null for a
+   *  clean-and-absent no-scope no-op. Throws on: unowned project scope; explicit scope where the id
+   *  is absent (C4/D7); a no-scope PERMANENT erase over a ledger with any skipped line (C5/C6); or a
+   *  no-scope id present in more than one scope (D9) — which a SOFT erase reaches only when no single
+   *  candidate holds a record with this exact id (I-2). `permanent` gates the corruption check: a
+   *  physical purge must not silently miss a secret hiding in a skipped line, but a SOFT erase only
+   *  tombstones (parseLedger tolerates a torn line as §10 specifies), so an unrelated corrupt line
+   *  must never brick it (finding 2). */
   resolveEraseTarget(id, scope, permanent) {
     const p = this.opts.project;
     const projectActive = !!p && isOwned(p.root, this.homeDir());
+    const classify = (ledger) => {
+      const kind = this.findEraseTarget(ledger, id);
+      if (kind === "ambiguous") {
+        return permanent ? "marker" : "record";
+      }
+      return kind === "absent" ? null : kind;
+    };
     if (scope) {
+      if (scope === "project" && !p) {
+        throw new EraseRefusedError(
+          "erase: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started inside a directory holding a .helix folder). Omit `scope`, or start Helix inside the project and adopt it (helix_memory_adopt) \u2014 the erase is refused rather than silently widened to the global ledger."
+        );
+      }
       const ledger = scope === "global" || !p ? this.global : projectActive ? p.ledger : (() => {
-        throw new Error("erase: project ledger not owned \u2014 adopt it (helix_memory_adopt) then erase, or remove it");
+        throw new EraseRefusedError("erase: project ledger not owned \u2014 adopt it (helix_memory_adopt) then erase, or remove it");
       })();
-      if (!this.presentIn(ledger, id)) throw new Error(`erase: id not found in scope ${scope}`);
-      return ledger;
+      const kind = classify(ledger);
+      if (kind === null) throw new EraseRefusedError(`erase: id not found in scope ${scope}`);
+      return { ledger, kind };
     }
     const candidates = [this.global, ...projectActive ? [p.ledger] : []];
     if (permanent) {
@@ -3211,61 +3265,73 @@ var MemoryStore = class {
           throw err;
         }
         if (parseLedgerHealth(text).skippedNonBlank > 0) {
-          throw new Error("erase: a ledger has skipped (corrupt/torn) lines \u2014 pass an explicit scope");
+          throw new EraseRefusedError("erase: a ledger has skipped (corrupt/torn) lines \u2014 pass an explicit scope");
         }
       }
     }
-    const hits = candidates.filter((c) => this.presentIn(c, id));
-    if (hits.length > 1) throw new Error("erase: id present in more than one scope \u2014 pass an explicit scope");
+    const hits = [];
+    for (const c of candidates) {
+      const kind = classify(c);
+      if (kind !== null) hits.push({ ledger: c, kind });
+    }
+    if (!permanent) {
+      const recs = hits.filter((h) => h.kind === "record");
+      if (recs.length === 1) return recs[0];
+    }
+    if (hits.length > 1) throw new EraseRefusedError("erase: id present in more than one scope \u2014 pass an explicit scope");
     return hits[0] ?? null;
   }
   /** Remove an item from the live projection. Soft by default (tombstone only — recoverable until
    *  compaction, so an erroneous/poisoned erase can be undone). `permanent` compacts immediately for
    *  genuine right-to-erasure. Scope-aware routing (D5/D7/C4/C10): never falls back to a ledger the id
    *  does not live in — an explicit scope must contain the id or this throws; with no scope, exactly
-   *  one candidate ledger may hold the id (else throws ambiguity), and a corrupt/torn line on ANY
-   *  candidate throws rather than silently risking a wrong-file compaction. */
+   *  one candidate ledger may hold the id (else throws the multi-scope refusal), and a corrupt/torn
+   *  line on ANY candidate throws rather than silently risking a wrong-file compaction. */
   erase(id, opts = {}) {
-    const ledger = this.resolveEraseTarget(id, opts.scope, opts.permanent ?? false);
-    if (ledger === null) {
+    const target = this.resolveEraseTarget(id, opts.scope, opts.permanent ?? false);
+    if (target === null) {
       this.rankCache = null;
       return;
     }
+    const { ledger, kind } = target;
     if (opts.permanent && readLedgerBytesWitnessed(ledger, this.homeDir(), this.scopeRootOf(ledger)).verdict.kind === "mismatch") {
       throw new WitnessBlockedError(
         "permanent-erase",
         `permanent-erase: scope for id '${id}' is in a MISMATCH (rollback-alarm) state \u2014 refusing a permanent erase that would launder the alarm; re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry (spec \xA74.2)`
       );
     }
-    const isMarker = this.markerFamilyOf(id) !== null;
-    const alreadyDead = !this.verifiedOf(ledger).live.has(id);
-    if (!isMarker && !alreadyDead) {
-      const ts = this.now();
-      appendWitnessed(ledger, {
-        id: this.id(),
-        tx: ts,
-        validFrom: ts,
-        validTo: null,
-        type: "erase",
-        content: "",
-        state: "Suspect",
-        provenance: { source: "user", sessionId: this.session() },
-        supersedes: id,
-        blastRadius: null,
-        reverifyTrigger: null,
-        classification: "normal"
-      }, this.homeDir(), this.scopeRootOf(ledger), "erase");
+    try {
+      const isMarker = kind === "marker";
+      const alreadyDead = !this.verifiedOf(ledger).live.has(id);
+      if (!isMarker && !alreadyDead) {
+        const ts = this.now();
+        appendWitnessed(ledger, {
+          id: this.id(),
+          tx: ts,
+          validFrom: ts,
+          validTo: null,
+          type: "erase",
+          content: "",
+          state: "Suspect",
+          provenance: { source: "user", sessionId: this.session() },
+          supersedes: id,
+          blastRadius: null,
+          reverifyTrigger: null,
+          classification: "normal"
+        }, this.homeDir(), this.scopeRootOf(ledger), "erase");
+      }
+      if (opts.permanent) {
+        const sk = this.subkeyForLedger(ledger);
+        compactLedger(ledger, {
+          erasedIds: /* @__PURE__ */ new Set([id]),
+          keepValidVerify: this.keepValidVerifyFor(sk),
+          provesKey: this.provesKeyFor(sk),
+          witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), this.scopeRootOf(ledger)), now: () => this.now(), kind: "erase" }
+        });
+      }
+    } finally {
+      this.rankCache = null;
     }
-    if (opts.permanent) {
-      const sk = this.subkeyForLedger(ledger);
-      compactLedger(ledger, {
-        erasedIds: /* @__PURE__ */ new Set([id]),
-        keepValidVerify: this.keepValidVerifyFor(sk),
-        provesKey: this.provesKeyFor(sk),
-        witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), this.scopeRootOf(ledger)), now: () => this.now(), kind: "erase" }
-      });
-    }
-    this.rankCache = null;
   }
   /** WRITE-side startup step (spec §4.9): complete any transition whose new bytes already landed
    *  before a crash (crash window B — verdict transition-heal) for every scope this store owns, so a
