@@ -1,14 +1,14 @@
 {
  "payload": {
   "artifactKind": "v0.1-release-candidate",
-  "candidateCommit": "6110acb743d3314dfe55b5bdcaef21a0f8b7e9a7",
-  "treeShaAtCut": "229dd1dcc382",
-  "cutAt": "2026-09-09T06:25:59.937Z",
+  "candidateCommit": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "treeShaAtCut": "8020ddc34548",
+  "cutAt": "2026-09-17T14:07:23.312Z",
   "bundles": {
-   "bin/helix-mcp.mjs": "29e0da39a26d0d5d9e5208d34b0ed586ad66d52805ab97cc7ad59ff3b512f3af",
+   "bin/helix-mcp.mjs": "d08197a4155cec34b2a922dcce367e560c93a37c566ae4cf5e23adc5cbc2a012",
    "bin/helix-rebaseline.mjs": "2feafc114963d6eccb2242fdf485d7bad9e16cd7db484efafacebf629dac60cb",
    "bin/helix-trigger.mjs": "2ab612990ab3c4e8339efd7e67695bad82191a9866445285511213a043787e5d",
-   "bin/helix-trust-resolve.mjs": "6deffe4a43b1718129772a75c2fa52e9f6d9fab93712d5342239f72d4c2a0248",
+   "bin/helix-trust-resolve.mjs": "e4aabdfdc31d43945783ce470ff93dc0880a93c375de3ace9dcfa12e01c90330",
    "bin/hooks/session-end.mjs": "83d89a723a02030638e6be76995fa95f3a4dfe1987d3371c735443bf1585c675",
    "bin/hooks/session-start.mjs": "b6d2bcf1a0d633499a7f13fa45e9affe1fcf1145aae012337223ca8364b857a4"
   },
@@ -19,7 +19,7 @@
   },
   "claimSet": {
    "data/inventory/surface.json": "bb46f6f282afdd4d531074890c5a5a30ab6f362b05b32c347a7905661c3b9cb4",
-   "data/inventory/claims.json": "37d13ae4c3651a9acbf1249c1dc33898f2bc89aa9671b3594cfe9f342f2773b2"
+   "data/inventory/claims.json": "3929b1e0aa497174d84b8788dfc6f5bd695298cd1c3c201c7de6d53607770fc5"
   },
   "rowIds": [
    "r001",
@@ -99,10 +99,10 @@
   ],
   "gateAtCut": {
    "typecheck": "exit 0",
-   "suite": "exit 0 — Tests  2595 passed | 2 skipped (2597)",
-   "suiteFiles": "Test Files  205 passed | 2 skipped (207)",
-   "measuredAt": "2026-09-09T06:26:13.810Z"
+   "suite": "exit 0 — Tests  2614 passed | 2 skipped (2616)",
+   "suiteFiles": "Test Files  207 passed | 2 skipped (209)",
+   "measuredAt": "2026-09-17T14:07:46.735Z"
   }
  },
- "payloadSha256": "baabb112f0b26fefe45b63d1a028330643a91894259e08ff0397fede544ed78b"
+ "payloadSha256": "e6d2ce849b0aa0d00fa3b1b2c5b8dca30fde4b1d9e9a9b9b1bcf8177607b89af"
 }
