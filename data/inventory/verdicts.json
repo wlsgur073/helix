@@ -2,7 +2,7 @@
  {
   "rowId": "r001",
   "surfaceItem": "tool:helix_codex_status",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "helix_codex_status called LIVE from inside a fresh Claude Code session on 2026-09-10 through the host's own MCP connection: codex-cli 0.154.0 found, logged in, dual-verify disabled, stakes floor high, timeout 1500000 ms, every egress leg and its value; the installed bundle's tools/list also listed it (B2, 2026-09-09).",
@@ -12,7 +12,7 @@
  {
   "rowId": "r002",
   "surfaceItem": "tool:helix_dual_verify",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 metered, RUN (not skipped) 2026-09-09 with codex-cli 0.153.4: dual-verify-real.e2e spawned Codex, returned a DATA-framed verdict and audit-logged the spawn (6183 ms); real-codex.e2e answered a prompt via stdin (5709 ms).",
@@ -22,7 +22,7 @@
  {
   "rowId": "r003",
   "surfaceItem": "tool:helix_memory_adopt",
-  "claimId": "CHANGELOG.md#e48f90a6c326",
+  "claimId": "CHANGELOG.md#9a43c3b66e9c",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Driven end to end through the INSTALLED bundle with a sequential MCP client, 2026-09-10: helix_memory_adopt {projectRoot} from the project cwd returned adopted; .helix/.owner was written and ~/.helix/projects.json named the path; the project ledger materialized on the first project-scope commit rather than at adopt.",
@@ -42,7 +42,7 @@
  {
   "rowId": "r005",
   "surfaceItem": "tool:helix_memory_confirm",
-  "claimId": "CHANGELOG.md#e48f90a6c326",
+  "claimId": "CHANGELOG.md#9a43c3b66e9c",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "C3 2026-09-09 through the installed bundle: confirm on a source=user item returned confirmed {state Verified}; on key loss the grade reverted to Fresh with content intact.",
@@ -62,7 +62,7 @@
  {
   "rowId": "r007",
   "surfaceItem": "tool:helix_memory_inspect",
-  "claimId": "CHANGELOG.md#e48f90a6c326",
+  "claimId": "CHANGELOG.md#9a43c3b66e9c",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Through the installed bundle 2026-09-09/10: inspect {} rendered DATA[Fresh:global]| and DATA[Fresh:project]| rows side by side; history rendered an erase interval; asOf reconstructed erased content; a fresh session's startup rendered the witness note.",
@@ -82,7 +82,7 @@
  {
   "rowId": "r009",
   "surfaceItem": "tool:helix_memory_recheck",
-  "claimId": "CHANGELOG.md#e48f90a6c326",
+  "claimId": "CHANGELOG.md#9a43c3b66e9c",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Driven end to end through the INSTALLED bundle 2026-09-10: a content-bound file-contains check whose file agreed returned recheck {state Corroborated}; after the file was changed to contradict, the same check returned {state Suspect} and recall flagged the row for re-verification.",
@@ -152,7 +152,7 @@
  {
   "rowId": "r016",
   "surfaceItem": "config:dualVerify.effort",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -162,7 +162,7 @@
  {
   "rowId": "r017",
   "surfaceItem": "config:dualVerify.egressPolicy.memoryEcho",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -172,7 +172,7 @@
  {
   "rowId": "r018",
   "surfaceItem": "config:dualVerify.egressPolicy.piiBulk",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -182,7 +182,7 @@
  {
   "rowId": "r019",
   "surfaceItem": "config:dualVerify.egressPolicy.piiHigh",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -192,7 +192,7 @@
  {
   "rowId": "r020",
   "surfaceItem": "config:dualVerify.egressPolicy.secretEntropy",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -202,7 +202,7 @@
  {
   "rowId": "r021",
   "surfaceItem": "config:dualVerify.egressPolicy.secretEntropyExempt",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -212,7 +212,7 @@
  {
   "rowId": "r022",
   "surfaceItem": "config:dualVerify.egressPolicy.secretHeuristic",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -222,7 +222,7 @@
  {
   "rowId": "r023",
   "surfaceItem": "config:dualVerify.enabled",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -232,7 +232,7 @@
  {
   "rowId": "r024",
   "surfaceItem": "config:dualVerify.logContent",
-  "claimId": "README.md#64f702ba04de",
+  "claimId": "README.md#7e9b7c36ce17",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -242,7 +242,7 @@
  {
   "rowId": "r025",
   "surfaceItem": "config:dualVerify.mode",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -252,7 +252,7 @@
  {
   "rowId": "r026",
   "surfaceItem": "config:dualVerify.model",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -262,7 +262,7 @@
  {
   "rowId": "r027",
   "surfaceItem": "config:dualVerify.stakesFloor",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -272,7 +272,7 @@
  {
   "rowId": "r028",
   "surfaceItem": "config:dualVerify.timeoutMs",
-  "claimId": "CHANGELOG.md#85d32c13f3e3",
+  "claimId": "CHANGELOG.md#0b29a4a58d00",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -332,7 +332,7 @@
  {
   "rowId": "r034",
   "surfaceItem": "env:OPENAI_API_KEY",
-  "claimId": "README.md#64f702ba04de",
+  "claimId": "README.md#7e9b7c36ce17",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -362,7 +362,7 @@
  {
   "rowId": "r037",
   "surfaceItem": "cli:bin/helix-rebaseline.mjs",
-  "claimId": "CHANGELOG.md#e48f90a6c326",
+  "claimId": "CHANGELOG.md#9a43c3b66e9c",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D1 2026-09-09 through the installed bundle: refused without a TTY (exit 2); under a pty printed scope, bytes, sha256, epoch 1 -> 2 and verdict mismatch, required the typed word bless, reported re-baselined global at epoch 2; the mismatch note was gone on the next read.",
@@ -372,7 +372,7 @@
  {
   "rowId": "r038",
   "surfaceItem": "cli:bin/helix-trigger.mjs",
-  "claimId": "README.md#61eed17d892c",
+  "claimId": "README.md#daccc52e7f2e",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 trigger-artifact-smoke re-run 2026-09-09; scripts/smoke-runtime-floor.mjs drove bin/helix-trigger.mjs bare: usage printed, exit 2.",
@@ -422,7 +422,7 @@
  {
   "rowId": "r043",
   "surfaceItem": "cross-cutting",
-  "claimId": "README.md#1afbb80c5cf8",
+  "claimId": "README.md#70bd9e86ed8b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "B2, TRANSCRIBED from inside a fresh Claude Code session started 2026-09-10 after the install (previously OWNER-ATTESTED): the helix SessionStart hook fired at startup with output '(rollback witness: scope not yet witnessed; the current head will be adopted trust-on-first-use at the next write)'; the host registered all nine mcp__plugin_helix_helix__* tools; helix_codex_status answered through the host's own MCP connection.",
@@ -592,7 +592,7 @@
  {
   "rowId": "r060",
   "surfaceItem": "cross-cutting",
-  "claimId": "SECURITY.md#6c3a0b7fdfc9",
+  "claimId": "SECURITY.md#b5dd2a9d52c3",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims: a hand-appended elevated assert clamps to Fresh while a tool-minted grade survives in the same run; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -612,7 +612,7 @@
  {
   "rowId": "r062",
   "surfaceItem": "cross-cutting",
-  "claimId": "SECURITY.md#7d28c699cc9e",
+  "claimId": "SECURITY.md#75bca90ad354",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims: the resolver and family helper the document names are declared in store.ts, and the probe it cites by path exists and exercises a permanent erase; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",
@@ -632,7 +632,7 @@
  {
   "rowId": "r064",
   "surfaceItem": "cross-cutting",
-  "claimId": "SECURITY.md#bce27476ac03",
+  "claimId": "SECURITY.md#21c6ba4b4bf1",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims: isIntegrityMarker/isHorizonMarker accept any prefixed marker-shaped row with no MAC; a different prefix is rejected; re-run 2026-09-09 (suite 2595 passed | 2 skipped, both later executed under D2).",

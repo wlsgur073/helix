@@ -280,9 +280,12 @@ fixed quiet slot per week.
   they are not lost; every memory write to that scope is refused with `has an interrupted transition
   pending — writes are blocked until it resolves`. Quit and restart Claude Code first (`/clear` is
   not a restart): at startup the server retracts a rewrite that stopped before its new file was
-  renamed into place, which leaves exactly the bytes on disk, and the records come back. If the note
-  survives the restart, the bytes on disk cannot show whether the rewrite landed, so the server
-  leaves that decision to you: run the re-baseline ceremony above, which adopts the bytes on disk.
+  renamed into place, provided its journal recorded the head it opened over and did not supersede an
+  earlier unresolved rewrite; that leaves exactly the bytes on disk, and the records come back. If
+  the note survives the restart, the server could not settle the interruption on its own — the
+  ledger is on the post-rewrite lineage, the journal recorded no head to compare against, or it
+  superseded an earlier unresolved rewrite — so it leaves that decision to you: run the re-baseline
+  ceremony above, which adopts the bytes on disk.
   Do not edit the ledger by hand while the note stands.
 
 ## Related documents

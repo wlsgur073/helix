@@ -22,12 +22,13 @@ First release.
   keyed by content identity — the ledger byte digest, the resolved MAC-subkey fingerprint, and the
   scope set — so repeated recalls in a session reuse the verified projection instead of replaying it.
 - Ledger HMAC: `Corroborated`/`Verified` are tamper-evident at the file surface. Trust is conferred
-  only by `verify` records, each HMAC-SHA256-authenticated with a key held only in `~/.helix`
-  (per-project HKDF subkey, never written to the repo ledger), so a forged or edited ledger record
-  replays as `Fresh`. **Unforgeable at the file surface against an adversary that cannot read
-  `~/.helix`** — and no further: a reader of `~/.helix` can mint valid MACs, trust is machine-local,
-  and `helix_memory_confirm` carries no enforceable human-approval signal, so do **not** allow-list
-  it.
+  only by `verify` records, and every one that confers a grade is HMAC-SHA256-authenticated with a
+  key held only in `~/.helix` (per-project HKDF subkey, never written to the repo ledger); the
+  unsigned, target-less markers a ledger rewrite writes confer nothing. A forged or edited ledger
+  record replays as `Fresh`. **Unforgeable at the file surface against an adversary that cannot read
+  `~/.helix`** — and no further: a reader of `~/.helix` can mint valid MACs, trust is local to one
+  trust store and, for a project ledger, to one project path, and `helix_memory_confirm` carries no
+  enforceable human-approval signal, so do **not** allow-list it.
 - Ledger MAC v2: `verify` records bind their system-time `tx` into the MAC, so a genuine
   verification's *timing* cannot be edited in place — authenticity, not clock accuracy. Reads
   dual-accept v1 signatures, so no grade is lost.
@@ -35,8 +36,9 @@ First release.
   the same master key) that detects a ledger forked from or behind the head it last saw — a
   regression the per-record MAC cannot catch, because a restored older ledger is itself validly
   signed. A mismatch clamps that scope's grades to `Fresh` on every live projection and renders a
-  disclosure note; reads and appends continue, and the witness never advances past a mismatch
-  without an explicit re-baseline. Armed from the first release, not opt-in.
+  disclosure note; reads and ordinary appends continue — an elevated `verify` (a `confirm` or a
+  passing `recheck`) is refused before anything is written — and the witness never advances past a
+  mismatch without an explicit re-baseline. Armed from the first release, not opt-in.
 - Operator re-baseline ceremony: `node bin/helix-rebaseline.mjs --scope global` (or
   `--scope <projectRoot>`), the only sanctioned way to clear a witness mismatch. Interactive and
   TTY-only, it displays the mismatched hash and target epoch, requires a typed confirmation, and
@@ -47,16 +49,20 @@ First release.
   enters when a registered path returns without its `.owner` stamp, where every read clamps to
   `Fresh` until a person decides. `--repair` keeps the lineage and re-elevates the earlier verifies;
   `--fresh` rotates the nonce so a reused path cannot inherit trust the new content never earned.
-- Neither ceremony is an MCP tool: no agent-suppliable parameter can invoke either, and nothing
-  invokes them automatically.
+- Neither ceremony is an MCP tool: no MCP tool parameter can invoke either, and nothing invokes them
+  automatically. Their terminal gate proves interface shape, not human presence: an agent that can
+  drive a shell can run either under a pty and type the confirmation.
 - Forensic point-in-time views: `helix_memory_inspect asOf=<ISO instant>` reconstructs which facts
   were live at a system-time and the evidence for each grade, and `history` reconstructs every
   fact's `[tx, txTo)` interval and what closed it (`supersede` / `invalidate` / `erase`). An
   unresolvable master key clamps every grade shown to `Fresh` with an explicit note.
 - Lock durability: the cross-process ledger lock is published atomically with its owner payload, a
   liveness matrix — never age — decides whether a recorded holder may be reclaimed, every reclaim is
-  serialized through a per-boot reaper gate, appends and compactions fsync both the data and its
-  directory before reporting success, and a hard-linked ledger (link count ≠ 1) is refused outright.
+  serialized through a reaper gate named per boot where the platform exposes a boot id (Linux; on
+  macOS and Windows one gate name serves every boot, so a reaper that crashed inside the gate blocks
+  automatic reclaim of that lock until the gate file is removed by hand), appends and compactions
+  fsync both the data and its directory before reporting success, and a hard-linked ledger (link
+  count ≠ 1) is refused outright.
 - Untrusted-content quarantine: NFKC / control / bidi normalization, per-line datamarking, and a
   per-call 128-bit nonce frame.
 
@@ -74,7 +80,9 @@ First release.
   low-entropy-chain token — a git SHA quoted in design prose — past the guard. On the write path the
   word-chain arm of that shape has its own key, `persistence.releaseWordChains` (default `true`), so
   a dated path or note slug persists verbatim while a hex-core token still redacts; a credential
-  keyword in the same statement vetoes the release on both paths. Provider-format credentials are
+  keyword within the 40 characters on either side of the token (a newline, `.` or `;` cuts that
+  window short) vetoes the release on both paths; one farther away, even in the same sentence, does
+  not. Provider-format credentials are
   override-proof: no policy value releases them.
 - An invalid value on `mode`, `stakesFloor`, `model` or `effort` is refused with a bounded
   single-line stderr warning and the default is kept, so a crafted newline cannot forge a second
@@ -167,7 +175,7 @@ First release.
   accuracy figure. A preregistered pilot was run to support one and did not reach its own minimum
   sample, so the claim was withdrawn rather than weakened. `docs/release/v2-close-report-2026-08.md`
   is the record.
-- **Cross-machine trust.** A `Verified` grade is machine-local and does not transfer.
+- **Trust beyond one trust store.** Elevated grades are local to one trust store (`HELIX_HOME`) and, for a project ledger, to one project path: they do not transfer to another machine, to a second `HELIX_HOME` on the same machine, or to the same project moved or cloned to another path.
 - **Compatibility before 1.0.** The ledger is append-only JSONL with no schema migrations to date,
   and no forward or backward compatibility is guaranteed across versions before 1.0.
 
