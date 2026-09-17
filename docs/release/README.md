@@ -62,12 +62,13 @@ superseded receipt is kept, marked void by its filename and by every record that
 inside that file says so — and must never be edited or deleted. The second window ended by owner
 abort on 2026-08-31, eleven days before its derived close.
 
-**September 2026 — certified, then retired, then released.** The candidate was re-cut and the
+**September 2026 — certified, retired, and certified again.** The candidate was re-cut and the
 certification run-sheet executed from the top: on 2026-09-02 all 74 verdict rows read MET and
-`npm run certify-gate` exited 0. Development then continued, and two rebuilds — `fa03865` and
-`2baf9c7` — moved `bin/`, which under the run-sheet's own staleness rule retired that certification.
-The release therefore re-cuts the candidate and runs the certification once more, after the cleanup
-this directory records, and then declares.
+`npm run certify-gate` exited 0. Two rebuilds — `fa03865` and `2baf9c7` — then moved `bin/`, which
+under the run-sheet's own staleness rule retired that certification. After the cleanup this directory
+records, the candidate was re-cut at `6110acb` and certified 74 of 74 on 2026-09-10; a further rebuild
+for the erase-routing fixes moved `bin/` again and retired that certification in turn, and the run was
+repeated at candidate `c181b3d`, 74 of 74, on 2026-09-17. Declaring the release is the step after it.
 
 ## 3. Where each document sits
 
