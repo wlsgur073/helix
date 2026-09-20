@@ -137,11 +137,19 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
     return { ran: false, attempted: false, outcome: 'skipped', reason: `${what} — lowest accepted: '${floor}' (dualVerify.stakesFloor in ~/.helix/config.json)`, gates: stoppedAt('stakesFloor') };
   }
 
-  // limits.ts declares schema AND core enforcement. In compare mode the core half used to be the
-  // egress scan limit over the joined pair; that fold no longer sees helixAnswer, so the core check
-  // lives here and binds every entry path, not only the MCP schema.
+  // Outbound egress firewall (S1): secret / PII / memory-echo legs. A NAMED secret blocks regardless of
+  // policy (deny-dominant); every other leg is gated per-leg by dualVerify.egressPolicy. Free, pre-spawn.
+  evaluated.push('egress');
+
+  // limits.ts declares schema AND core enforcement. Before this task, an oversized helixAnswer was
+  // refused HERE too -- by classifyEgress's own scan limit over the joined pair. Compare mode's
+  // `texts` no longer carries helixAnswer at all (below), so that fold can no longer see it there;
+  // this explicit check keeps the refusal attributed to the same 'egress' gate and binds every entry
+  // path, not only the MCP schema. Checked before the prompt is built (and before critique mode's
+  // buildCritiquePrompt would normalize the whole oversized string) so the refusal costs O(1), not
+  // the O(n) work normalizing an unbounded answer would otherwise spend before being discarded.
   if (params.helixAnswer.length > MAX_DV_ANSWER_CHARS) {
-    return { ran: false, attempted: false, outcome: 'skipped', reason: `helixAnswer exceeds ${MAX_DV_ANSWER_CHARS} characters`, gates: stoppedAt('stakesFloor') };
+    return { ran: false, attempted: false, outcome: 'skipped', reason: `helixAnswer exceeds ${MAX_DV_ANSWER_CHARS} characters`, gates: stoppedAt('egress') };
   }
 
   // Build the EXACT outbound payload first, then gate it. The gate must clear the bytes that actually
@@ -151,9 +159,6 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
     ? buildCritiquePrompt(params.question, params.helixAnswer)
     : normalizeUntrusted(params.question);
 
-  // Outbound egress firewall (S1): secret / PII / memory-echo legs. A NAMED secret blocks regardless of
-  // policy (deny-dominant); every other leg is gated per-leg by dualVerify.egressPolicy. Free, pre-spawn.
-  evaluated.push('egress');
   const ledger = deps.echo.mode === 'enforce' ? deps.echo.ledgerTexts() : null;
   // G1 applies to what is TRANSMITTED. Compare mode sends the normalized question alone, so gating
   // helixAnswer there blocks on bytes that never leave the machine; critique mode sends both fields

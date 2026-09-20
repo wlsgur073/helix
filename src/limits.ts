@@ -4,25 +4,26 @@
 // entry path does not have — but that rule is met by different mechanisms per constant, not by one
 // uniform pair of checks everywhere below.
 //
-// MAX_COMMIT_CONTENT_CHARS is the one constant enforced literally both ways: the MCP schema
-// (`helix-server.ts:75-78`) rejects an oversized `content` before the handler runs, and the store
-// (`store.ts:240-241`, `MemoryStore.commit`) rejects it again, so a caller into `store.commit` that
-// does not come through the MCP schema (hooks, CLI, tests) still cannot persist an oversized fact.
+// MAX_COMMIT_CONTENT_CHARS and MAX_DV_ANSWER_CHARS are the two constants enforced literally both ways:
+// the MCP schema (`helix-server.ts:75-78` / `:191`) rejects an oversized `content` / `helixAnswer`
+// before the handler runs, and a core check rejects it again — the store (`store.ts:240-241`,
+// `MemoryStore.commit`) for `content`, `dualVerify` (`src/verify/dual-verify.ts:151`) for
+// `helixAnswer` — so a caller that does not come through the MCP schema (hooks, CLI, tests, or a
+// direct `dualVerify()` call) still cannot get past either cap. `MAX_DV_ANSWER_CHARS` joined this
+// category with this task: before it, `helixAnswer`'s only core-side bound was the classifyEgress
+// joint scan limit described below, which compare mode no longer routes `helixAnswer` through at all.
 //
-// MAX_DV_QUESTION_CHARS/MAX_DV_ANSWER_CHARS and MAX_RECHECK_PATH_CHARS/MAX_RECHECK_PATTERN_CHARS are
-// schema-only — no core code reads these four constants — but each pair still has a core-side bound,
-// through a DIFFERENT, pre-existing mechanism at a DIFFERENT value, not a second read of the
-// constant. Dual-verify's `question` and `helixAnswer` are jointly bounded by `classifyEgress`
-// (`src/risk/trifecta.ts:269,273`, via `scannedForms`) ONLY IN CRITIQUE MODE, the only mode that
-// hands classifyEgress both fields (G1): the join compares their combined length against
-// classifyEgress's own 200,000-char scan limit, chosen independently of this table (see "Measured
-// cause" below for why the schema caps sit under 200,000 rather than at it — they pre-empt the
-// allocation, they do not duplicate the scan). Compare mode never transmits `helixAnswer`, so
-// classifyEgress never sees it there; its core-side bound instead comes from `dualVerify`
-// (`src/verify/dual-verify.ts`) rejecting an oversized `helixAnswer` directly against
-// MAX_DV_ANSWER_CHARS before either mode is chosen — schema AND core, the same dual-enforcement rule
-// as every other pair in this file, just via a mode-independent check rather than the egress scan.
-// Recheck's `path`/`pattern` are bounded TRANSITIVELY: `store.
+// MAX_DV_QUESTION_CHARS and MAX_RECHECK_PATH_CHARS/MAX_RECHECK_PATTERN_CHARS are schema-only — no core
+// code reads these three constants directly — but each still has a core-side bound, through a
+// DIFFERENT, pre-existing mechanism at a DIFFERENT value, not a second read of the constant. `question`
+// is bounded core-side ONLY IN CRITIQUE MODE, the only mode that hands `classifyEgress` both fields
+// (G1): there, `classifyEgress` (`src/risk/trifecta.ts:272,277`, via `scannedForms`) joins `question`
+// and `helixAnswer` with a newline and compares that combined length against its own 200,000-char scan
+// limit, chosen independently of this table (see "Measured cause" below for why the schema caps sit
+// under 200,000 rather than at it — they pre-empt the allocation, they do not duplicate the scan).
+// Compare mode never hands classifyEgress `helixAnswer` at all, so in that mode `question` alone
+// reaches the scan limit, with no joint bound to speak of. Recheck's `path`/`pattern` are bounded
+// TRANSITIVELY: `store.
 // recheck` (`store.ts:771-774`) runs `checkBinding(target.content, check)` before any file read, and
 // `checkBinding` (`src/memory/reality-check.ts:84-89`) refuses unless both strings are raw
 // substrings of the item's own `content` — so path and pattern can never exceed the 16,384-char
@@ -61,7 +62,8 @@ export const MAX_DV_QUESTION_CHARS = 65_536;
  *  MAX_DV_QUESTION_CHARS — see there. Compare mode never reaches that joint bound at all (G1:
  *  `helixAnswer` is never in classifyEgress's `texts` there), so in compare mode THIS constant is
  *  the only core-side cap — enforced on the schema and again directly in `dualVerify`
- *  (`src/verify/dual-verify.ts`), the same dual-enforcement rule every pair in this file follows. */
+ *  (`src/verify/dual-verify.ts:151`), joining MAX_COMMIT_CONTENT_CHARS as one of the two constants in
+ *  this file enforced literally both ways (see the header above). */
 export const MAX_DV_ANSWER_CHARS = 65_536;
 
 /** `helix_dual_verify`'s `quotedMemory` array (H6 proof-of-read declarations). Schema-only, like

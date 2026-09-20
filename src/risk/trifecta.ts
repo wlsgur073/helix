@@ -103,7 +103,11 @@ export function detectEcho(
 export type Leg = 'secret' | 'pii' | 'memory_echo';
 
 export interface EgressInput {
-  texts: string[];                 // [question, helixAnswer] — the RAW inputs
+  /** The RAW forms to scan for detection/audit. The CALLER decides what goes in here — it is not
+   *  necessarily what actually leaves the machine (see `outbound`). dual-verify passes `[question,
+   *  helixAnswer]` in CRITIQUE mode (both fields are transmitted, inside `buildCritiquePrompt`) and
+   *  `[question]` ALONE in compare mode, where `helixAnswer` is never transmitted (G1). */
+  texts: string[];
   /** The EXACT string the caller will transmit. The gate must clear the bytes that actually leave the
    *  machine, not a stand-in: the prompt builder normalizes on the way out (NFKC + control-strip +
    *  fence-break), so a confusable that is inert in the raw form can fold back into a live secret — or a

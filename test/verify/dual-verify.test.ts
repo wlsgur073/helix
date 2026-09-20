@@ -396,6 +396,9 @@ describe('A1: compare mode gates only what it transmits', () => {
     );
     expect(res.ran).toBe(false);
     expect(res.reason).toMatch(/helixAnswer exceeds/);
+    // Fix round 1 ruling: attributed to the EGRESS gate (where the joint classifyEgress scan limit
+    // used to catch this before this task), not the stakes-floor gate that already passed.
+    expect(res.gates).toEqual({ evaluated: ['enabled', 'stakesFloor', 'egress'], stoppedAt: 'egress' });
   });
 });
 
@@ -509,12 +512,20 @@ describe('G1: what the gate scanned is what the runner is sent', () => {
     expect(runnerSaw).toBeNull();            // today: the runner receives the reconstituted memory
   });
 
-  // Mutation-testing lock (task-2 Step 7, Isolate-B at the dual-verify caller level): compare mode's
-  // `outbound` is built from `question` ALONE (see dual-verify.ts) -- helixAnswer is never transmitted
-  // in that mode. A ZWSP-padded echo hidden ONLY in helixAnswer is therefore invisible to any
-  // outbound-only scan, by construction. This still must block: Helix treats `texts` (both fields)
-  // conservatively for detection/audit even though only `outbound` leaves the machine in this mode.
-  // Only the raw-form scan with the Cf-strip (normalizeForMatch) active can catch it here.
+  // Regression lock, CRITIQUE mode (was the Isolate-B mutation lock while this test lived in compare
+  // mode; see the A1 counterpart test below for where the compare-mode half of the original claim now
+  // lives -- still true there, since compare mode's `outbound` is built from `question` ALONE).
+  //
+  // In critique mode `outbound` is `buildCritiquePrompt(question, helixAnswer)`, which runs
+  // `normalizeUntrusted` over `helixAnswer` too -- so by the time `outbound` is built, the ZWSP padding
+  // is ALREADY stripped and the plain MEMO sits inside it. The original "outbound-only scanning is
+  // powerless here" claim is therefore FALSE in this mode: helixAnswer's (transformed) bytes ARE
+  // present in `outbound`, and detectEcho's own internal Cf-strip (normalizeForMatch) would find the
+  // echo in EITHER scanned form alone. So this test no longer isolates one defense the way its
+  // compare-mode ancestor did -- it and the A1 counterpart below together lock the MODE BOUNDARY Task 1
+  // introduced: critique mode must still transmit and scan `helixAnswer` (here), and compare mode must
+  // not (there). A regression either way -- critique mode stops carrying helixAnswer into `texts` AND
+  // `outbound`, or compare mode starts carrying it into either -- flips one half of this pair.
   it('critique mode blocks an echo hidden only in helixAnswer', async () => {
     const MEMO = 'PROJECT ORION LAUNCH CODE IS ALPHA';
     const zw = MEMO.split('').join('​');
