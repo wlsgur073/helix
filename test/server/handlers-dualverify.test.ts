@@ -7,7 +7,7 @@ import { DEFAULT_CONFIG, type HelixConfig } from '../../src/config.js';
 import type { EchoSource } from '../../src/verify/dual-verify.js';
 import { digestContent } from '../../src/memory/ledger-mac.js';
 import type { LedgerItem } from '../../src/risk/trifecta.js';
-import { MAX_ECHO_SPAN_IDS, MAX_ECHO_SPANS_PER_ID } from '../../src/limits.js';
+import { MAX_ECHO_SPAN_IDS, MAX_ECHO_SPANS_PER_ID, MAX_ECHO_SPAN_CHARS } from '../../src/limits.js';
 
 const NONCE = 'c'.repeat(32);
 const disabledEcho: EchoSource = { mode: 'disabled' };
@@ -517,6 +517,35 @@ describe('handleDualVerify egress audit', () => {
     for (const p of PHRASES.slice(0, MAX_ECHO_SPANS_PER_ID)) expect(spanOut).toContain(p);
     expect(spanOut).not.toContain(PHRASES[MAX_ECHO_SPANS_PER_ID]);
     expect(spanOut).toContain('"m_many": (1 more matched runs not shown)');
+  });
+
+  // Fix round 1, Important: the third cap (MAX_ECHO_SPAN_CHARS) had no end-to-end coverage — the test
+  // above only drives the id/span COUNT caps. This drives the full render path with a record longer
+  // than the char cap, echoed verbatim, and asserts what the CALLER actually sees: the rendered span
+  // is cut to the capped length (the tail past the cut is absent, and so is the full untruncated run)
+  // and carries the REAL U+2026 codepoint echoSpans (trifecta.ts) appends -- never the three-ASCII-dot
+  // fold a stray second normalizeUntrusted pass would produce, which is exactly the regression the
+  // normalize-once discipline in echoSpansBlock's docstring exists to prevent.
+  it('A2: a span longer than MAX_ECHO_SPAN_CHARS renders truncated with its U+2026 marker intact', async () => {
+    const memory = 'the release branch is feat/helix-v1 and the certification gate stays open, the '
+      + 'dogfood run keeps confirming green every single morning without fail today, and nobody '
+      + 'touches the freeze until the owner explicitly says so out loud';
+    expect(memory.length).toBeGreaterThan(MAX_ECHO_SPAN_CHARS); // sanity: the fixture exercises the cap
+    const d = deps({
+      echo: echoEnforce([item('m_1', memory)]),
+      runner: async () => { throw new Error('must not spawn'); },
+    });
+    const res = await handleDualVerify(
+      { question: `Given that ${memory}, should we tag now?`, helixAnswer: 'Not yet.', stakes: 'high' }, d);
+    const out = text(res);
+    const capped = memory.slice(0, MAX_ECHO_SPAN_CHARS);
+    expect(out).toContain('DATA| "m_1"');                       // the row still names the record
+    expect(out.includes('…')).toBe(true);                  // the real ellipsis codepoint is present
+    expect(out).toContain(`${capped}…`);                   // truncated at the cap, marker intact
+    expect(out).not.toContain(`${capped}...`);                  // NOT folded to three ASCII dots (H5)
+    // The tail past the cut, and the full untruncated run, must both be absent from the rendering.
+    expect(out).not.toContain(memory.slice(MAX_ECHO_SPAN_CHARS, MAX_ECHO_SPAN_CHARS + 40));
+    expect(out).not.toContain(memory);
   });
 });
 

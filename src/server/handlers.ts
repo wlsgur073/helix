@@ -633,18 +633,30 @@ function echoedMemoriesLine(v: EgressVerdict | undefined): string {
 /** A2: the matched runs, quarantined. Each span is the caller's OWN text, but it is content, so it
  *  goes inside a nonce frame with a datamark — never into the trusted advisory line above. Each row
  *  is composed from its RAW pieces (the id, not-yet-normalized, and the caller's own matched span
- *  text) and `normalizeUntrusted` runs ONCE over the composed line — mirroring `frameAsData`'s
- *  id+digest proof line in content-frame.ts, which composes first and normalizes the whole string
- *  once rather than normalizing the pieces separately (separate normalization would miss a fence run
- *  straddling the seam between them). `normalized: true` tells `makeDataFrame` to mark this
- *  pre-normalized text with `markLines` only: its default (`datamark`) path would normalize the line
- *  a SECOND time, and NFKC folds the U+2026 truncation marker `echoSpans` (trifecta.ts) appends into
- *  three ASCII dots, retiring the H5 ellipsis contract (see `markLines`' docstring). */
+ *  text) and `normalizeUntrusted` runs ONCE over the composed line: `presentId` returns a VALID id
+ *  VERBATIM — no NFKC, no fence-breaking (an id built entirely from `-`/`=`/`_` passes `isValidId`
+ *  and `presentId` returns it unchanged, since its own normalized form is still valid) — so
+ *  normalizing the id+span line together is what gives the id the SAME fence-break defence the span
+ *  gets, not a separately-normalized id left exposed.
+ *
+ *  The trailing U+2026 `echoSpans` (trifecta.ts) appends when it truncates is stripped off BEFORE
+ *  that one normalize call and reappended raw AFTER it -- never handed to `normalizeUntrusted` at
+ *  all. Calling it ONCE is not by itself enough here: unlike `normalizeUntrusted`'s OWN `maxChars`
+ *  truncation, which appends its marker AFTER its internal NFKC step (so a single call never sees its
+ *  own mark), `echoSpans`' marker is already sitting in `s.text` BEFORE this function ever runs -- so
+ *  the very FIRST call here would fold it via NFKC's compatibility decomposition into three ASCII
+ *  dots, retiring the H5 ellipsis contract (see `markLines`' docstring), exactly like a second pass
+ *  would. `normalized: true` then tells `makeDataFrame` to mark this pre-normalized text with
+ *  `markLines` only, so nothing downstream gets a further, unguarded chance to do the same. */
 function echoSpansBlock(d: DualVerifyResult['echoSpans'], deps: DualVerifyHandlerDeps): string {
   if (!d || d.entries.length === 0) return '';
   const nonce = (deps.genNonce ?? newNonce)();
-  const row = (text: string): { text: string; mark: string; normalized: true } =>
-    ({ text: normalizeUntrusted(text), mark: 'DATA| ', normalized: true });
+  const row = (text: string): { text: string; mark: string; normalized: true } => {
+    // echoSpans' own truncation marker -- never one THIS call would add, since no maxChars is passed.
+    const truncated = text.endsWith('…');
+    const normalized = normalizeUntrusted(truncated ? text.slice(0, -1) : text);
+    return { text: truncated ? `${normalized}…` : normalized, mark: 'DATA| ', normalized: true };
+  };
   const lines = d.entries.flatMap((e) => [
     ...e.spans.map((s) => row(`${JSON.stringify(presentId(e.id))}: ${s.text}`)),
     ...(e.omittedSpans > 0 ? [row(`${JSON.stringify(presentId(e.id))}: (${e.omittedSpans} more matched runs not shown)`)] : []),
