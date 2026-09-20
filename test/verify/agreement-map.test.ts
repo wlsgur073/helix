@@ -607,6 +607,22 @@ describe('agreement map', () => {
     expect(map.divergences).toContain('read [the spec](docs/release/spec.md) first');
   });
 
+  it('ordered-list numbering does not pair with itself', () => {
+    const helix = '1. The gate rejects the old reference style.\n2. Nine of ten citations resolved.';
+    const codex = '1. The approach is sound.\n2. Two limits are worth recording.';
+    const map = buildAgreementMap(helix, codex);
+    expect(map.agreements).toEqual([]);
+    expect(map.verdict).toBe('indeterminate');
+  });
+
+  it('fence markers do not pair with themselves', () => {
+    const helix = 'The check runs at commit time.\n```\nrun gate\n```';
+    const codex = 'A different concern entirely.\n```\nrun other\n```';
+    const map = buildAgreementMap(helix, codex);
+    expect(map.agreements).toEqual([]);
+    expect(map.verdict).toBe('indeterminate');
+  });
+
   // ─── The four cases below pin limits the header NAMED and this file tested NOWHERE (2026-08-16).
   // Every one asserts the CURRENT WRONG answer. They exist because a limit stated only in a comment
   // drifts silently: the header's own list was found to understate its class, and the reason it

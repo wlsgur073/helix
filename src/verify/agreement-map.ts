@@ -45,6 +45,16 @@ function jaccard(a: Set<string>, b: Set<string>): number {
  *  treated any rewording as divergence, so the verdict read 'diverge' for almost every real pair. */
 const SENTENCE_SIM = 0.5;
 
+/** A claim carries no lexical content to compare when its token set is EMPTY (a code fence, a rule)
+ *  or entirely NUMERALS (an ordered-list marker split off by sentences()). Both pair at jaccard 1.0
+ *  against their own kind — a coincidence of FORM, never a correspondence of claim: measured
+ *  2026-09-20, two such pairs flipped a comparison from 'indeterminate' to 'diverge' and rendered
+ *  `agreements: ["1","2"]`. The claim itself is KEPT in every list; only its eligibility as a
+ *  candidate is withdrawn, so `divergences` still carries every sentence of both answers. */
+function pairable(t: Set<string>): boolean {
+  return t.size > 0 && ![...t].every((x) => /^\d+$/.test(x));
+}
+
 /** Bare (non-hyphenated) un-prefixed negated adjectives worth matching as whole words. A blanket
  *  \bun[a-z]+\b scan was considered and rejected: "under", "until", "union", "unique", "united"
  *  are far more common in ordinary prose than genuine un-negated adjectives are, and each one that
@@ -385,6 +395,28 @@ function negationPolarity(s: string): number {
  *           each claim at most once, so both pairs now stand on their true counterparts and both are
  *           polarity-discordant — WHEN the true pairs outscore the cross pairs. See the pinned
  *           cross-pairing tests: one for the fixed shape, two for the shapes still open.
+ *   - UNPAIRED-CLAIMS ROUTE, a caveat on 'diverge' that is neither of the two directions above: once
+ *     PASS 1 finds ANY genuine candidate (anyCandidate true), PASS 3 leaves every claim PASS 2 could
+ *     not assign a counterpart to marked 'divergent' — the SAME status a polarity-discordant ASSIGNED
+ *     pair gets, see PASS 3 below — and the verdict step reads 'diverge' the moment that list is
+ *     non-empty. So two answers sharing one real claim but otherwise covering different ground read
+ *     'diverge' exactly like two answers that contradict each other; an uncorresponded claim and a
+ *     contradicted one are indistinguishable in the returned shape. This is the module's standing
+ *     verdict policy, not a bug of its own (see the 'one paired sentence plus unmatched remainder'
+ *     test), and it is NOT CLOSED here: telling "no counterpart" apart from "conflicting counterpart"
+ *     would need a status this module does not keep, not a rule over which claims may pair. What IS
+ *     closed (2026-09-20) is this route's CHEAPEST trigger: a claim with no lexical content to
+ *     compare — an empty token set (a code fence, a bare rule) or an all-NUMERAL one (an ordered-list
+ *     marker split off by sentences() as its own claim) — used to pair with another claim of the same
+ *     degenerate shape at jaccard 1.0, a coincidence of FORM that manufactured the "one genuine pair"
+ *     precondition out of nothing. Measured on real traffic: two such pairs (an ordered-list "1"/"2"
+ *     split from each side) flipped a comparison from 'indeterminate' to 'diverge' and rendered
+ *     `agreements: ["1","2"]` — form, not correspondence, reported as agreement. `pairable` (above)
+ *     withdraws CANDIDACY from degenerate-token claims in PASS 1; the claims themselves still reach
+ *     `divergences` when genuinely unpaired, so a comparison whose only prior candidates were
+ *     degenerate-form pairs now correctly reads 'indeterminate' instead. A comparison that also holds
+ *     one genuine, content-bearing pair is unaffected by this fix and still takes the unpaired-claims
+ *     route above; that residue stays open.
  * 'indeterminate' has TWO routes, and they mean the same thing at different depths — the module has
  * established no relationship it is willing to report:
  *   - No lexical candidates ANYWHERE (jaccard is symmetric, so zero one way implies zero the other):
@@ -417,6 +449,7 @@ export function buildAgreementMap(helixAnswer: string, codexAnswer: string): Agr
   const candidates: { i: number; j: number; sim: number }[] = [];
   for (let i = 0; i < helix.length; i++) {
     for (let j = 0; j < codex.length; j++) {
+      if (!pairable(helixTok[i]!) || !pairable(codexTok[j]!)) continue;
       const sim = jaccard(helixTok[i]!, codexTok[j]!);
       if (sim >= SENTENCE_SIM) candidates.push({ i, j, sim });
     }
