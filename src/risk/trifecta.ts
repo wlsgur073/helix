@@ -229,6 +229,16 @@ function scanText(text: string): Scan {
   };
 }
 
+/** THE derivation of the forms every leg scans. Exported because a second caller — the span
+ *  diagnosis in dual-verify.ts — must scan exactly what the gate scanned: a caller that rebuilds
+ *  this list is free to drift from it, which is the G1 defect (the gate clearing a stand-in) in a
+ *  new place. `raw` is the joined texts; the dedupe keeps a single scan when the outbound form is
+ *  byte-identical to it. */
+export function scannedForms(input: Pick<EgressInput, 'texts' | 'outbound'>): string[] {
+  const raw = input.texts.join('\n');
+  return input.outbound === raw ? [raw] : [raw, input.outbound];
+}
+
 /**
  * S1 egress classifier. Scans the payload, then applies the §6 decision table BLOCKED-DOMINANTLY
  * (any hit leg whose policy is 'block' blocks, whatever else is released; precedence only names the
@@ -244,14 +254,16 @@ function scanText(text: string): Scan {
  * zero-width confusables that fold back into a live card, API key, or VERBATIM MEMORY inside the
  * outbound prompt — a `pass` verdict on text that leaves as a working secret or an exfiltrated
  * memory. Scanning only the outbound form is not sound either: fence-breaking can destroy a token
- * the raw form reveals, and a caller whose outbound bytes are a strict subset of `texts` (e.g.
- * dual-verify's compare mode, where `helixAnswer` is scanned for audit but never transmitted) would
- * leave part of the payload unscanned. So both forms are scanned and the signals combined
- * CONSERVATIVELY (any-form hit ⇒ hit), while counts take the max per form — never the sum, which
- * would double-count an ASCII email that appears in both forms and could trip the bulk-PII floor on
- * a benign payload. detectEcho normalizes each form internally (normalizeForMatch), so the leg is
- * confusable-safe on WHATEVER forms it is given — but that only helps if the dangerous bytes are in
- * one of the scanned forms in the first place, which is exactly why both are required here.
+ * the raw form reveals, and a caller whose outbound bytes are a strict subset of `texts` would leave
+ * part of the payload unscanned (dual-verify no longer constructs that shape: since 2026-09-20
+ * compare mode's `texts` holds only the question it transmits, and critique mode's holds both
+ * fields, matching what `buildCritiquePrompt` sends — see dual-verify.ts). So both forms are still
+ * scanned here and the signals combined CONSERVATIVELY (any-form hit ⇒ hit), while counts take the
+ * max per form — never the sum, which would double-count an ASCII email that appears in both forms
+ * and could trip the bulk-PII floor on a benign payload. detectEcho normalizes each form internally
+ * (normalizeForMatch), so the leg is confusable-safe on WHATEVER forms it is given — but that only
+ * helps if the dangerous bytes are in one of the scanned forms in the first place, which is exactly
+ * why both are required here.
  */
 export function classifyEgress(input: EgressInput): EgressVerdict {
   const raw = input.texts.join('\n');
@@ -279,7 +291,7 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
   // Two-form, conservative (any-form hit => hit). Neither form alone is sound: the outbound form is
   // blind to a token that fence-breaking destroys, and the raw form is blind to a confusable that
   // normalization folds back into a live secret. Counts take the max per form, never the sum.
-  const forms = outbound === raw ? [raw] : [raw, outbound];
+  const forms = scannedForms(input);
   const scans = forms.map(scanText);
   const any = (f: (s: Scan) => boolean): boolean => scans.some(f);
 

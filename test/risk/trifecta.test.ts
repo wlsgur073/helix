@@ -577,12 +577,12 @@ describe('G1 mutation lock: each defense independently matters (not just redunda
   });
 
   it('Isolate-B: only the raw form (Cf-stripped) catches this — the echo never reaches outbound scope', () => {
-    // Mirrors dual-verify's compare mode, where `outbound` is built from the question ALONE (helixAnswer
-    // is never transmitted to Codex in that mode -- see dual-verify.ts). A ZWSP-padded memory hidden in
-    // the SECOND text element is invisible to any outbound-only scan, by construction: no fence-break, no
-    // Cf-strip upstream of `outbound` can reveal text that was never included in `outbound` at all. Only a
-    // raw-form scan with the Cf-strip (Defense B) active reconstructs it. This isolates Defense B on its
-    // own -- Defense A (scanning outbound) is powerless here no matter how it is implemented.
+    // Mirrors dual-verify's CRITIQUE mode, which scans both fields; compare mode passes only the
+    // question (2026-09-20). A ZWSP-padded memory hidden in the SECOND text element is invisible to
+    // any outbound-only scan, by construction: no fence-break, no Cf-strip upstream of `outbound` can
+    // reveal text that was never included in `outbound` at all. Only a raw-form scan with the
+    // Cf-strip (Defense B) active reconstructs it. This isolates Defense B on its own -- Defense A
+    // (scanning outbound) is powerless here no matter how it is implemented.
     const zw = MEMO.split('').join('​');
     const question = 'what do you think?';
     const v = classifyEgress({

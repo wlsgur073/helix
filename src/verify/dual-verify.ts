@@ -4,6 +4,7 @@ import { buildAgreementMap, type AgreementMap } from './agreement-map.js';
 import { normalizeUntrusted } from '../memory/content-frame.js';
 import { classifyEgress, type EgressVerdict, type LedgerItem, type QuotedMemory } from '../risk/trifecta.js';
 import type { CodexOutcome } from '../codex-log.js';
+import { MAX_DV_ANSWER_CHARS } from '../limits.js';
 
 /** Compile-time-required ledger source for the echo leg. No silent fail-open: a server that forgets
  *  to wire it fails to compile; a test that genuinely skips echo writes { mode: 'disabled' }. */
@@ -136,6 +137,13 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
     return { ran: false, attempted: false, outcome: 'skipped', reason: `${what} — lowest accepted: '${floor}' (dualVerify.stakesFloor in ~/.helix/config.json)`, gates: stoppedAt('stakesFloor') };
   }
 
+  // limits.ts declares schema AND core enforcement. In compare mode the core half used to be the
+  // egress scan limit over the joined pair; that fold no longer sees helixAnswer, so the core check
+  // lives here and binds every entry path, not only the MCP schema.
+  if (params.helixAnswer.length > MAX_DV_ANSWER_CHARS) {
+    return { ran: false, attempted: false, outcome: 'skipped', reason: `helixAnswer exceeds ${MAX_DV_ANSWER_CHARS} characters`, gates: stoppedAt('stakesFloor') };
+  }
+
   // Build the EXACT outbound payload first, then gate it. The gate must clear the bytes that actually
   // leave the machine (G1) -- scanning a stand-in is how the echo leg was bypassed.
   const mode = deps.config.dualVerify.mode;
@@ -147,8 +155,11 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
   // policy (deny-dominant); every other leg is gated per-leg by dualVerify.egressPolicy. Free, pre-spawn.
   evaluated.push('egress');
   const ledger = deps.echo.mode === 'enforce' ? deps.echo.ledgerTexts() : null;
+  // G1 applies to what is TRANSMITTED. Compare mode sends the normalized question alone, so gating
+  // helixAnswer there blocks on bytes that never leave the machine; critique mode sends both fields
+  // inside buildCritiquePrompt, so both are scanned. The audit row stays a record of the payload.
   const verdict = classifyEgress({
-    texts: [params.question, params.helixAnswer],
+    texts: mode === 'critique' ? [params.question, params.helixAnswer] : [params.question],
     outbound: prompt,
     ledger,
     policy: deps.config.dualVerify.egressPolicy,

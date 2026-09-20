@@ -494,9 +494,11 @@ describe('handleDualVerify: opt-in content log (logContent)', () => {
   });
 
   it('logContent:true + refused (secret) -> one metadata-only line, NO prompt/response, NO secret text', async () => {
-    const secretAnswer = 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34';
+    // A1: onConfig() is compare mode, which no longer transmits (or scans) helixAnswer -- the secret
+    // has to sit in `question` to still reach and stop at the egress gate.
+    const secretQuestion = 'is it live? key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34';
     const d = deps({ config: onConfig(), runner: async () => { throw new Error('must not spawn on a refused payload'); } });
-    await handleDualVerify({ stakes: 'high', question: 'is it live?', helixAnswer: secretAnswer }, d);
+    await handleDualVerify({ stakes: 'high', question: secretQuestion, helixAnswer: 'ok' }, d);
     const lines = readFileSync(d.codexLogPath, 'utf8').trim().split('\n');
     expect(lines).toHaveLength(1);
     const entry = JSON.parse(lines[0]!);

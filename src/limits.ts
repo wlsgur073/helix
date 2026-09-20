@@ -13,10 +13,16 @@
 // schema-only — no core code reads these four constants — but each pair still has a core-side bound,
 // through a DIFFERENT, pre-existing mechanism at a DIFFERENT value, not a second read of the
 // constant. Dual-verify's `question` and `helixAnswer` are jointly bounded by `classifyEgress`
-// (`src/risk/trifecta.ts:257,261`), which joins the two with a newline and compares that length
-// against its own 200,000-char scan limit, chosen independently of this table (see "Measured cause"
-// below for why the schema caps sit under 200,000 rather than at it — they pre-empt the allocation,
-// they do not duplicate the scan). Recheck's `path`/`pattern` are bounded TRANSITIVELY: `store.
+// (`src/risk/trifecta.ts:269,273`, via `scannedForms`) ONLY IN CRITIQUE MODE, the only mode that
+// hands classifyEgress both fields (G1): the join compares their combined length against
+// classifyEgress's own 200,000-char scan limit, chosen independently of this table (see "Measured
+// cause" below for why the schema caps sit under 200,000 rather than at it — they pre-empt the
+// allocation, they do not duplicate the scan). Compare mode never transmits `helixAnswer`, so
+// classifyEgress never sees it there; its core-side bound instead comes from `dualVerify`
+// (`src/verify/dual-verify.ts`) rejecting an oversized `helixAnswer` directly against
+// MAX_DV_ANSWER_CHARS before either mode is chosen — schema AND core, the same dual-enforcement rule
+// as every other pair in this file, just via a mode-independent check rather than the egress scan.
+// Recheck's `path`/`pattern` are bounded TRANSITIVELY: `store.
 // recheck` (`store.ts:771-774`) runs `checkBinding(target.content, check)` before any file read, and
 // `checkBinding` (`src/memory/reality-check.ts:84-89`) refuses unless both strings are raw
 // substrings of the item's own `content` — so path and pattern can never exceed the 16,384-char
@@ -40,15 +46,22 @@
 /** `helix_memory_commit`'s `content` field. */
 export const MAX_COMMIT_CONTENT_CHARS = 16_384;
 
-/** `helix_dual_verify`'s `question` field. `classifyEgress` (src/risk/trifecta.ts) joins `question`
- *  and `helixAnswer` with a newline into one string and compares THAT joined length against its
- *  200,000-char scan limit — so the pair is bounded JOINTLY, not just per field. This cap and
- *  MAX_DV_ANSWER_CHARS are chosen so both the individual field and their sum stay under 200,000
- *  (test/limits.test.ts asserts both). Raising either cap without re-checking the sum can turn every
- *  dual-verify call into a scan-limit refusal. */
+/** `helix_dual_verify`'s `question` field. In CRITIQUE mode, `classifyEgress` (src/risk/trifecta.ts)
+ *  joins `question` and `helixAnswer` with a newline into one string and compares THAT joined length
+ *  against its 200,000-char scan limit — so the pair is bounded JOINTLY there, not just per field.
+ *  Compare mode never hands classifyEgress `helixAnswer` (G1: it is never transmitted), so `question`
+ *  alone is what its scan limit sees in that mode. This cap and MAX_DV_ANSWER_CHARS are still chosen
+ *  so both the individual field and their sum stay under 200,000 (test/limits.test.ts asserts both) —
+ *  critique mode needs the sum headroom, and holding compare mode to the same bound costs nothing.
+ *  Raising either cap without re-checking the sum can turn every CRITIQUE-mode call into a
+ *  scan-limit refusal. */
 export const MAX_DV_QUESTION_CHARS = 65_536;
 
-/** `helix_dual_verify`'s `helixAnswer` field. Same reasoning as MAX_DV_QUESTION_CHARS — see there. */
+/** `helix_dual_verify`'s `helixAnswer` field. Same CRITIQUE-mode joint-bound reasoning as
+ *  MAX_DV_QUESTION_CHARS — see there. Compare mode never reaches that joint bound at all (G1:
+ *  `helixAnswer` is never in classifyEgress's `texts` there), so in compare mode THIS constant is
+ *  the only core-side cap — enforced on the schema and again directly in `dualVerify`
+ *  (`src/verify/dual-verify.ts`), the same dual-enforcement rule every pair in this file follows. */
 export const MAX_DV_ANSWER_CHARS = 65_536;
 
 /** `helix_dual_verify`'s `quotedMemory` array (H6 proof-of-read declarations). Schema-only, like

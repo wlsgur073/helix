@@ -4,6 +4,7 @@ import { DEFAULT_CONFIG, type HelixConfig } from '../../src/config.js';
 import type { CodexOutcome } from '../../src/codex-log.js';
 import { digestContent } from '../../src/memory/ledger-mac.js';
 import type { LedgerItem } from '../../src/risk/trifecta.js';
+import { MAX_DV_ANSWER_CHARS } from '../../src/limits.js';
 
 const disabledEcho: EchoSource = { mode: 'disabled' };
 
@@ -17,6 +18,10 @@ function deps(over: Partial<DualVerifyDeps>): DualVerifyDeps {
   };
 }
 const enabled = (): HelixConfig => ({ dualVerify: { enabled: true, mode: 'compare', stakesFloor: 'high', model: 'gpt-5.5', effort: 'high', timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, persistence: { releaseWordChains: true }, metrics: { enabled: true } });
+// The file's critique-mode deps helper (moved to module scope so it is usable outside the
+// 'critique mode' describe block too — e.g. by the A1 mode-gating tests and the H7 gate-trace test).
+const critiqueCfg = (): HelixConfig =>
+  ({ dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, persistence: { releaseWordChains: true }, metrics: { enabled: true } });
 
 describe('dualVerify', () => {
   it('forwards config.dualVerify.timeoutMs to the runner', async () => {
@@ -154,14 +159,24 @@ describe('dualVerify', () => {
       deps({ config: enabled() }));
     expect(belowFloor.gates).toEqual({ evaluated: ['enabled', 'stakesFloor'], stoppedAt: 'stakesFloor' });
 
+    // Critique mode: helixAnswer is transmitted (inside buildCritiquePrompt), so the secret in it
+    // still reaches and stops at the egress gate.
     const blocked = await dualVerify(
       { question: 'is this key live?', helixAnswer: 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34', stakes: 'high' },
-      deps({ config: enabled() }));
+      deps({ config: critiqueCfg() }));
     expect(blocked.gates).toEqual({ evaluated: ['enabled', 'stakesFloor', 'egress'], stoppedAt: 'egress' });
 
     const unavailable = await dualVerify({ question: 'q', helixAnswer: 'a', stakes: 'high' },
       deps({ config: enabled(), checkAvailable: async () => ({ available: false, reason: 'not logged in' }) }));
     expect(unavailable.gates)
+      .toEqual({ evaluated: ['enabled', 'stakesFloor', 'egress', 'available'], stoppedAt: 'available' });
+  });
+
+  it('A1: compare mode passes the egress gate on the same secret-in-helixAnswer payload (H7) — the secret never reaches transmission', async () => {
+    const comparePassesEgress = await dualVerify(
+      { question: 'is this key live?', helixAnswer: 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34', stakes: 'high' },
+      deps({ config: enabled(), checkAvailable: async () => ({ available: false, reason: 'not logged in' }) }));
+    expect(comparePassesEgress.gates)
       .toEqual({ evaluated: ['enabled', 'stakesFloor', 'egress', 'available'], stoppedAt: 'available' });
   });
 
@@ -180,15 +195,24 @@ describe('dualVerify', () => {
     expect(r.gates).toEqual({ evaluated: ['enabled', 'stakesFloor', 'egress', 'available', 'runner'], stoppedAt: 'runner' });
   });
 
-  it('refuses fail-closed when the payload contains a secret — never sends it to external Codex', async () => {
+  it('critique mode refuses fail-closed when the payload contains a secret — never sends it to external Codex', async () => {
     let called = false;
     const r = await dualVerify(
       { stakes: 'high', question: 'is this key live?', helixAnswer: 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34' },
-      deps({ config: enabled(), runner: async () => { called = true; return { ok: true, answer: 'x' }; } }));
+      deps({ config: critiqueCfg(), runner: async () => { called = true; return { ok: true, answer: 'x' }; } }));
     expect(r.ran).toBe(false);
     expect(r.attempted).toBe(false);
     expect(r.reason).toMatch(/secret/i);
     expect(called).toBe(false); // the secret must not leave the machine
+  });
+
+  it('A1: compare mode does not refuse on a secret confined to helixAnswer — it is never transmitted', async () => {
+    let called = false;
+    const r = await dualVerify(
+      { stakes: 'high', question: 'is this key live?', helixAnswer: 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34' },
+      deps({ config: enabled(), runner: async () => { called = true; return { ok: true, answer: 'x' }; } }));
+    expect(r.ran).toBe(true);
+    expect(called).toBe(true);
   });
 
   it('passes the configured model + effort to the runner', async () => {
@@ -202,9 +226,6 @@ describe('dualVerify', () => {
 });
 
 describe('critique mode', () => {
-  const critiqueCfg = (): HelixConfig =>
-    ({ dualVerify: { enabled: true, mode: 'critique', stakesFloor: 'high', model: null, effort: null, timeoutMs: 120_000, egressPolicy: { memoryEcho: 'block', piiHigh: 'block', piiBulk: 'block', secretHeuristic: 'block', secretEntropy: 'block', secretEntropyExempt: 'allow' }, logContent: false }, persistence: { releaseWordChains: true }, metrics: { enabled: true } });
-
   it('sends a critique prompt carrying the question and the data-framed answer', async () => {
     let prompt = '';
     await dualVerify({ stakes: 'high', question: 'which db?', helixAnswer: 'use postgres' },
@@ -264,15 +285,26 @@ describe('dualVerify egress gate (S1)', () => {
     expect(r.egress?.echoMemoryIds).toEqual(['m_1']);
   });
 
-  it('hard-blocks a secret under BOTH policies (override-proof)', async () => {
+  it('critique mode hard-blocks a secret under BOTH policies (override-proof)', async () => {
     const secret = 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34';
     for (const policy of ['block', 'allow'] as const) {
-      const cfg = enabled(); cfg.dualVerify.egressPolicy = { memoryEcho: policy, piiHigh: policy, piiBulk: policy, secretHeuristic: policy, secretEntropy: policy, secretEntropyExempt: 'allow' };
+      const cfg = critiqueCfg(); cfg.dualVerify.egressPolicy = { memoryEcho: policy, piiHigh: policy, piiBulk: policy, secretHeuristic: policy, secretEntropy: policy, secretEntropyExempt: 'allow' };
       const r = await dualVerify({ stakes: 'high', question: 'is this live?', helixAnswer: secret },
         deps({ config: cfg, echo: disabledEcho }));
       expect(r.ran).toBe(false);
       expect(r.egress?.decision).toBe('blocked');
       expect(r.egress?.legs).toContain('secret');
+    }
+  });
+
+  it('A1: compare mode does not hard-block a secret confined to helixAnswer, under either policy — it is never transmitted', async () => {
+    const secret = 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34';
+    for (const policy of ['block', 'allow'] as const) {
+      const cfg = enabled(); cfg.dualVerify.egressPolicy = { memoryEcho: policy, piiHigh: policy, piiBulk: policy, secretHeuristic: policy, secretEntropy: policy, secretEntropyExempt: 'allow' };
+      const r = await dualVerify({ stakes: 'high', question: 'is this live?', helixAnswer: secret },
+        deps({ config: cfg, echo: disabledEcho }));
+      expect(r.ran).toBe(true);
+      expect(r.egress?.decision).toBe('pass');
     }
   });
 
@@ -335,6 +367,38 @@ describe('dualVerify egress gate (S1)', () => {
   });
 });
 
+describe('A1: compare mode gates only what it transmits', () => {
+  it('compare mode does not gate a secret that lives only in helixAnswer (it is never transmitted)', async () => {
+    const called = { n: 0 };
+    const res = await dualVerify(
+      { question: 'Is the retry limit still three?', helixAnswer: 'Yes. aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', stakes: 'high' },
+      deps({ config: enabled(), runner: async () => { called.n += 1; return { ok: true, answer: 'Three.' }; } }),
+    );
+    expect(res.ran).toBe(true);
+    expect(called.n).toBe(1);
+    expect(res.egress?.decision).toBe('pass');
+  });
+
+  it('critique mode still gates the same secret, because it transmits helixAnswer', async () => {
+    const res = await dualVerify(
+      { question: 'Is the retry limit still three?', helixAnswer: 'Yes. aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', stakes: 'high' },
+      deps({ config: critiqueCfg() }),
+    );
+    expect(res.ran).toBe(false);
+    expect(res.outcome).toBe('refused');
+    expect(res.gates?.stoppedAt).toBe('egress');
+  });
+
+  it('the core bound refuses an oversized helixAnswer even when no schema validated it', async () => {
+    const res = await dualVerify(
+      { question: 'q', helixAnswer: 'x'.repeat(MAX_DV_ANSWER_CHARS + 1), stakes: 'high' },
+      deps({ config: enabled() }),
+    );
+    expect(res.ran).toBe(false);
+    expect(res.reason).toMatch(/helixAnswer exceeds/);
+  });
+});
+
 describe('dualVerify: outcome + promptSent (for opt-in content logging)', () => {
   const expectOutcome = (got: CodexOutcome | undefined, want: CodexOutcome) => expect(got).toBe(want);
 
@@ -350,12 +414,20 @@ describe('dualVerify: outcome + promptSent (for opt-in content logging)', () => 
     expect(r.promptSent).toBeUndefined();
   });
 
-  it('secret in payload -> outcome refused, no promptSent (the secret is never retained)', async () => {
+  it('critique mode: secret in payload -> outcome refused, no promptSent (the secret is never retained)', async () => {
+    const r = await dualVerify(
+      { stakes: 'high', question: 'is this key live?', helixAnswer: 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34' },
+      deps({ config: critiqueCfg() }));
+    expectOutcome(r.outcome, 'refused');
+    expect(r.promptSent).toBeUndefined();
+  });
+
+  it('A1: compare mode: a secret confined to helixAnswer -> outcome sent (never transmitted, never gated)', async () => {
     const r = await dualVerify(
       { stakes: 'high', question: 'is this key live?', helixAnswer: 'key is sk-ant-api03-Ab12Cd34Ef56Gh78Ij90Kl12Mn34' },
       deps({ config: enabled() }));
-    expectOutcome(r.outcome, 'refused');
-    expect(r.promptSent).toBeUndefined();
+    expectOutcome(r.outcome, 'sent');
+    expect(r.promptSent).toBe('is this key live?');
   });
 
   it('codex unavailable -> outcome unavailable, no promptSent', async () => {
@@ -443,7 +515,26 @@ describe('G1: what the gate scanned is what the runner is sent', () => {
   // outbound-only scan, by construction. This still must block: Helix treats `texts` (both fields)
   // conservatively for detection/audit even though only `outbound` leaves the machine in this mode.
   // Only the raw-form scan with the Cf-strip (normalizeForMatch) active can catch it here.
-  it('compare mode still blocks an echo hidden only in helixAnswer, though it is never sent', async () => {
+  it('critique mode blocks an echo hidden only in helixAnswer', async () => {
+    const MEMO = 'PROJECT ORION LAUNCH CODE IS ALPHA';
+    const zw = MEMO.split('').join('​');
+    let called = false;
+    const result = await dualVerify(
+      { stakes: 'high', question: 'what do you think?', helixAnswer: `echoing back: ${zw}` },
+      deps({
+        config: critiqueCfg(),   // mode: 'critique' -- helixAnswer IS transmitted (buildCritiquePrompt)
+        runner: async () => { called = true; return { ok: true, answer: 'ok' }; },
+        echo: { mode: 'enforce', ledgerTexts: () => [{ id: 'm_secret', content: MEMO, contentDigest: digestContent(MEMO) }] },
+      }),
+    );
+    expect(result.outcome).toBe('refused');
+    expect(called).toBe(false);
+    expect(result.egress?.echoMemoryIds).toEqual(['m_secret']);
+  });
+
+  // A1: compare mode's `texts` no longer carries helixAnswer at all (dual-verify.ts) -- an echo that
+  // exists only there is invisible to classifyEgress from this caller: not scanned, not blocked.
+  it('A1: compare mode does not block an echo that lives only in helixAnswer', async () => {
     const MEMO = 'PROJECT ORION LAUNCH CODE IS ALPHA';
     const zw = MEMO.split('').join('​');
     let called = false;
@@ -455,9 +546,9 @@ describe('G1: what the gate scanned is what the runner is sent', () => {
         echo: { mode: 'enforce', ledgerTexts: () => [{ id: 'm_secret', content: MEMO, contentDigest: digestContent(MEMO) }] },
       }),
     );
-    expect(result.outcome).toBe('refused');
-    expect(called).toBe(false);
-    expect(result.egress?.echoMemoryIds).toEqual(['m_secret']);
+    expect(result.outcome).toBe('sent');
+    expect(called).toBe(true);
+    expect(result.egress?.echoMemoryIds).toEqual([]);
   });
 
   // Regression lock for the "build once, never rebuild" invariant (8a3bb1a): the string handed to
