@@ -50,7 +50,28 @@ const SENTENCE_SIM = 0.5;
  *  against their own kind — a coincidence of FORM, never a correspondence of claim: measured
  *  2026-09-20, two such pairs flipped a comparison from 'indeterminate' to 'diverge' and rendered
  *  `agreements: ["1","2"]`. The claim itself is KEPT in every list; only its eligibility as a
- *  candidate is withdrawn, so `divergences` still carries every sentence of both answers. */
+ *  candidate is withdrawn, so `divergences` still carries every sentence of both answers.
+ *  THE TWO HALVES ARE NOT SYMMETRIC, measured 2026-09-20 in review. The EMPTY half only ever
+ *  changes an empty-vs-empty comparison: jaccard(∅, x) is 0 for any non-empty x, so an empty-token
+ *  claim was already below SENTENCE_SIM against ordinary prose before this guard existed, and
+ *  denying it candidacy here costs nothing beyond closing the empty-vs-empty coincidence this
+ *  function exists for. The NUMERAL half is WIDER than that, and the width is deliberate rather
+ *  than incidental: the call site below reads `!pairable(helixTok[i]!) || !pairable(codexTok[j]!)`,
+ *  so a numeral-only claim is denied candidacy against ANY partner, not only against another
+ *  numeral-only claim — and unlike an empty set, a numeral-only token set CAN score >= SENTENCE_SIM
+ *  against ordinary prose that happens to quote the same number (`buildAgreementMap('1', 'Step
+ *  1')`: tokens {1} vs {step,1}, jaccard = 1/2 = 0.5, a candidate before this guard). ACCEPTED
+ *  COST, not a bug, measured: two answers consisting of nothing but the same bare number now read
+ *  'indeterminate' where they read 'agree' before — `buildAgreementMap('42', '42')` was `{verdict:
+ *  'agree', agreements: ['42']}` and is now `{verdict: 'indeterminate', divergences:
+ *  ['42','42']}`. Narrowing the predicate to "both sides degenerate" would restore that pairing,
+ *  but it would also let a numeral-only claim keep pairing with ordinary prose on the strength of
+ *  one shared digit — the same coincidence of form this function exists to remove, only moved from
+ *  both sides to one. The trade is the standing one in this file: close a coincidence of form,
+ *  accept a visible abstention (see the False-'diverge' vs False-'agree' tradeoff in the header
+ *  above `buildAgreementMap`). The direction stays safe either way: a claim denied candidacy is
+ *  merely left unassigned, so it lands in `divergences` and no verdict can move TOWARD 'agree'
+ *  because of it. */
 function pairable(t: Set<string>): boolean {
   return t.size > 0 && ![...t].every((x) => /^\d+$/.test(x));
 }
@@ -283,6 +304,9 @@ function negationPolarity(s: string): number {
  *     leave the gap class to stop a negator reaching across a clause boundary. 'The lock is not
  *     "unsafe".' vs 'The lock is safe.' therefore reads 'diverge' although the two agree. Each of
  *     those trades a false-'agree' (dangerous) for a false-'diverge' (visible), the standing rule here.
+ *     A mechanically different route to this SAME over-flagging direction — claim-count asymmetry
+ *     rather than a negation marker — is the UNPAIRED-CLAIMS ROUTE bullet after the cross-pairing
+ *     hole below.
  *   - False 'agree' (under-flagging, THE MORE DANGEROUS DIRECTION): a real contradiction that the
  *     marker scan doesn't catch reads as silent agreement, which is the one failure mode that
  *     produces false confidence instead of visible doubt. Two instances of it are CLOSED and pinned:
@@ -395,11 +419,13 @@ function negationPolarity(s: string): number {
  *           each claim at most once, so both pairs now stand on their true counterparts and both are
  *           polarity-discordant — WHEN the true pairs outscore the cross pairs. See the pinned
  *           cross-pairing tests: one for the fixed shape, two for the shapes still open.
- *   - UNPAIRED-CLAIMS ROUTE, a caveat on 'diverge' that is neither of the two directions above: once
- *     PASS 1 finds ANY genuine candidate (anyCandidate true), PASS 3 leaves every claim PASS 2 could
- *     not assign a counterpart to marked 'divergent' — the SAME status a polarity-discordant ASSIGNED
- *     pair gets, see PASS 3 below — and the verdict step reads 'diverge' the moment that list is
- *     non-empty. So two answers sharing one real claim but otherwise covering different ground read
+ *   - UNPAIRED-CLAIMS ROUTE, a THIRD route to the False-'diverge' (over-flagging) direction above,
+ *     by a mechanism neither of the two paragraphs above names: not a negation marker, and not a
+ *     missed contradiction, but claim-count asymmetry. Once PASS 1 finds ANY genuine candidate
+ *     (anyCandidate true), PASS 3 leaves every claim PASS 2 could not assign a counterpart to
+ *     marked 'divergent' — the SAME status a polarity-discordant ASSIGNED pair gets, see PASS 3
+ *     below — and the verdict step reads 'diverge' the moment that list is non-empty. So two
+ *     answers sharing one real claim but otherwise covering different ground read
  *     'diverge' exactly like two answers that contradict each other; an uncorresponded claim and a
  *     contradicted one are indistinguishable in the returned shape. This is the module's standing
  *     verdict policy, not a bug of its own (see the 'one paired sentence plus unmatched remainder'
