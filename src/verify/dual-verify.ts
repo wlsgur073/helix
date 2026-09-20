@@ -2,9 +2,9 @@ import type { HelixConfig } from '../config.js';
 import type { Availability, CodexRunner } from './codex.js';
 import { buildAgreementMap, type AgreementMap } from './agreement-map.js';
 import { normalizeUntrusted } from '../memory/content-frame.js';
-import { classifyEgress, type EgressVerdict, type LedgerItem, type QuotedMemory } from '../risk/trifecta.js';
+import { classifyEgress, echoSpans, scannedForms, type EgressVerdict, type LedgerItem, type QuotedMemory } from '../risk/trifecta.js';
 import type { CodexOutcome } from '../codex-log.js';
-import { MAX_DV_ANSWER_CHARS } from '../limits.js';
+import { MAX_DV_ANSWER_CHARS, MAX_ECHO_SPAN_IDS, MAX_ECHO_SPANS_PER_ID } from '../limits.js';
 
 /** Compile-time-required ledger source for the echo leg. No silent fail-open: a server that forgets
  *  to wire it fails to compile; a test that genuinely skips echo writes { mode: 'disabled' }. */
@@ -66,10 +66,20 @@ export interface DualVerifyResult {
   codexAnswer?: string;   // raw Codex output — DATA, never executed
   agreement?: AgreementMap;
   critique?: string;      // critique mode: Codex's review of helixAnswer, verbatim (DATA)
-  /** S1 egress verdict (enum/ID/label only). Present on every return AFTER the egress gate. */
+  /** S1 egress verdict (enum/ID/label only). Present on every return once `classifyEgress` has
+   *  actually run -- NOT simply "every return past the egress gate": the oversized-`helixAnswer`
+   *  refusal below is checked BEFORE `classifyEgress` is called (it reports `gates:
+   *  stoppedAt('egress')` but nothing was classified yet), so that one return carries no verdict here. */
   egress?: EgressVerdict;
   /** H7 gate trace. Present on every return that did NOT run. */
   gates?: GateTrace;
+  /** A2 diagnosis for an echo block: per still-blocking record, the runs of the caller's own payload
+   *  that matched it. LIVE ONLY — never reaches audit.jsonl or codex-log.jsonl, whose reasons stay
+   *  content-free. */
+  echoSpans?: {
+    entries: ReadonlyArray<{ id: string; spans: ReadonlyArray<{ text: string; fullLength: number }>; omittedSpans: number }>;
+    omittedIds: number;
+  };
 }
 
 /**
@@ -163,15 +173,22 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
   // G1 applies to what is TRANSMITTED. Compare mode sends the normalized question alone, so gating
   // helixAnswer there blocks on bytes that never leave the machine; critique mode sends both fields
   // inside buildCritiquePrompt, so both are scanned. The audit row stays a record of the payload.
-  const verdict = classifyEgress({
+  // Hoisted into a const (rather than built inline) so the A2 span diagnosis below scans the
+  // IDENTICAL object classifyEgress just decided on, via scannedForms -- never a second,
+  // independently-assembled argument that could drift from what was actually gated.
+  const egressInput = {
     texts: mode === 'critique' ? [params.question, params.helixAnswer] : [params.question],
     outbound: prompt,
     ledger,
     policy: deps.config.dualVerify.egressPolicy,
     quoted: params.quotedMemory,
-  });
+  };
+  const verdict = classifyEgress(egressInput);
   if (verdict.decision === 'blocked') {
-    return { ran: false, attempted: false, outcome: 'refused', reason: verdict.reason, egress: verdict, gates: stoppedAt('egress') };
+    return {
+      ran: false, attempted: false, outcome: 'refused', reason: verdict.reason, egress: verdict,
+      gates: stoppedAt('egress'), echoSpans: spansFor(verdict, egressInput, ledger),
+    };
   }
 
   evaluated.push('available');
@@ -198,4 +215,25 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
   }
   const agreement = buildAgreementMap(params.helixAnswer, res.answer);
   return { ran: true, attempted: true, outcome: 'sent', promptSent: prompt, mode, codexAnswer: res.answer, agreement, egress: verdict };
+}
+
+/** Only for a block the echo leg decided, and only for records that STILL block: an exempted record
+ *  is one the caller already proved it read. Ids keep detectEcho's ledger order (global then
+ *  project), so the cap takes a stable prefix. */
+function spansFor(
+  verdict: EgressVerdict,
+  input: Parameters<typeof classifyEgress>[0],
+  ledger: LedgerItem[] | null,
+): DualVerifyResult['echoSpans'] {
+  if (verdict.decidedBy !== 'memoryEcho' || ledger === null) return undefined;
+  const exempt = new Set(verdict.echoExemptIds);
+  const blocking = verdict.echoMemoryIds.filter((id) => !exempt.has(id));
+  const forms = scannedForms(input);
+  const entries = blocking.slice(0, MAX_ECHO_SPAN_IDS).flatMap((id) => {
+    const item = ledger.find((l) => l.id === id);
+    if (item === undefined) return [];
+    const all = echoSpans(forms, item.content);
+    return [{ id, spans: all.slice(0, MAX_ECHO_SPANS_PER_ID), omittedSpans: Math.max(0, all.length - MAX_ECHO_SPANS_PER_ID) }];
+  });
+  return { entries, omittedIds: Math.max(0, blocking.length - MAX_ECHO_SPAN_IDS) };
 }

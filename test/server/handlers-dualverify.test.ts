@@ -305,7 +305,13 @@ describe('handleDualVerify egress audit', () => {
     expect(out).toContain(JSON.stringify(evil));                 // the memory that actually matched, quarantined
     expect(out, 'the id must re-enter as DATA (JSON-quoted), never as bare prose').not.toContain(`(not sent): ${evil}`);
     expect(out).not.toContain('m_2');              // and only that one
-    expect(out).not.toContain('blue cluster');     // the ID, never the content it stands for
+    // A2 (2026-09-20): the matched CONTENT now appears too, so "the ID, never the content" no longer
+    // holds of the response as a whole — but the trusted advisory line itself must still name only the
+    // id; the content is disclosed exclusively inside the quarantined ECHOED SPANS frame below it.
+    const advisoryLine = out.split('\n').find((l) => l.startsWith('echoed memories (not sent):'));
+    expect(advisoryLine).not.toContain('blue cluster');
+    expect(out).toContain('ECHOED SPANS');
+    expect(out).toContain(`DATA| ${JSON.stringify(evil)}: the deploy uses the blue cluster in us-east-1`);
   });
 
   // FIX ROUND 1 (review Important #2): `evil` above needs ZERO JSON escaping, so it cannot tell a
@@ -449,6 +455,24 @@ describe('handleDualVerify egress audit', () => {
       { stakes: 'high', question: `restate: ${memo}`, helixAnswer: 'ok',
         quotedMemory: [{ id: 'm_1', contentDigest: digestContent(memo) }] }, d);
     expect(text(res)).not.toContain('echoed memories (not sent):');
+  });
+
+  it('A2: an echo block names the spans inside a DATA frame and keeps the audit row content-free', async () => {
+    const memory = 'the release branch is feat/helix-v1 and the gate is open';
+    const d = deps({
+      echo: echoEnforce([item('m_1', memory)]),
+      runner: async () => { throw new Error('must not spawn'); },
+    });
+    const res = await handleDualVerify(
+      { question: `Given that ${memory}, should we tag now?`, helixAnswer: 'Not yet.', stakes: 'high' }, d);
+    const out = text(res);
+    expect(out).toContain('echoed memories (not sent)');
+    expect(out).toContain('ECHOED SPANS');
+    expect(out).toContain('DATA| "m_1"');
+    expect(out).toContain('the release branch is feat/helix-v1');
+    const row = JSON.parse(readFileSync(d.auditPath, 'utf8').trim().split('\n').pop()!);
+    expect(JSON.stringify(row)).not.toContain('release branch');
+    expect(row.reason).toBe('blocked: memory-echo (1 items)');
   });
 });
 

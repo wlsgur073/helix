@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  detectEcho, classifyEgress, classifyEmission, EGRESS_LEG_ORDER,
+  detectEcho, echoSpans, classifyEgress, classifyEmission, EGRESS_LEG_ORDER,
   type LedgerItem, type EgressInput, type EgressVerdict, type EmissionFlag,
 } from '../../src/risk/trifecta.js';
 import type { EgressPolicy, EgressLeg } from '../../src/config.js';
@@ -62,6 +62,35 @@ describe('detectEcho', () => {
     // MAX_LEDGER_SCAN instead, not by per-item truncation inside detectEcho.
     const ledger = [item('m_1', 'y'.repeat(50_000) + 'the deploy uses the blue cluster in us-east-1')];
     expect(detectEcho(['the deploy uses the blue cluster in us-east-1'], ledger).memoryIds).toEqual(['m_1']);
+  });
+});
+
+describe('echoSpans', () => {
+  const k = 24;
+  it('returns the whole matched run, not the first k-gram', () => {
+    const memory = 'the release branch is feat/helix-v1 and the gate is open';
+    const spans = echoSpans([`we agreed ${memory} today`], memory, { k });
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.text).toContain('the release branch is feat/helix-v1 and the gate is open');
+  });
+
+  it('merges adjacent runs and deduplicates across forms', () => {
+    const memory = 'compaction fsyncs its temp and the directory it renames into';
+    const payload = `note: ${memory}`;
+    const spans = echoSpans([payload, payload], memory, { k });
+    expect(spans).toHaveLength(1);
+  });
+
+  it('returns nothing for a record that does not echo', () => {
+    expect(echoSpans(['an unrelated sentence entirely'], 'the release branch is feat/helix-v1', { k })).toEqual([]);
+  });
+
+  it('truncates past the cap and reports the original length', () => {
+    const memory = 'x'.repeat(400);
+    const spans = echoSpans([memory], memory, { k, maxSpanChars: 160 });
+    expect(spans[0]!.text).toHaveLength(161);          // 160 + the ellipsis
+    expect(spans[0]!.text.endsWith('…')).toBe(true);
+    expect(spans[0]!.fullLength).toBe(400);
   });
 });
 

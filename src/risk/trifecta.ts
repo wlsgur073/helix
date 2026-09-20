@@ -6,6 +6,7 @@
 import { findSecrets, nearCredential } from '../memory/secret-scan.js';
 import { detectPII, type PiiKind } from '../memory/pii-scan.js';
 import type { EgressPolicy, EgressLeg } from '../config.js';
+import { MAX_ECHO_SPAN_CHARS } from '../limits.js';
 
 export interface LedgerItem {
   id: string;
@@ -98,6 +99,49 @@ export function detectEcho(
     }
   }
   return { memoryIds: ids };
+}
+
+/** Diagnosis for a BLOCKED echo: which run of the caller's own payload matched this record. Pure,
+ *  and deliberately separate from detectEcho, which answers a yes/no per record and stops at the
+ *  first hit. The runs are maximal: every k-gram hit is marked in the normalized form and adjacent
+ *  or overlapping marks merge, so a caller that rewords one window does not meet the same id again
+ *  on its next call. Never called for an exempted record, never persisted — the block reason stays
+ *  content-free. */
+export function echoSpans(
+  forms: string[],
+  content: string,
+  opts: DetectEchoOptions & { maxSpanChars?: number } = {},
+): Array<{ text: string; fullLength: number }> {
+  const k = opts.k ?? DEFAULT_K;
+  const maxScan = opts.maxScan ?? MAX_FORM_SCAN;
+  const cap = opts.maxSpanChars ?? MAX_ECHO_SPAN_CHARS;
+  const norm = normalizeForMatch(content);
+  if (norm.length < k) return [];
+  const grams = new Set<string>();
+  for (let i = 0; i + k <= norm.length; i++) grams.add(norm.slice(i, i + k));
+
+  const out: Array<{ text: string; fullLength: number }> = [];
+  const seen = new Set<string>();
+  for (const form of forms) {
+    const hay = normalizeForMatch(form).slice(0, maxScan);
+    let start = -1;
+    let end = -1;
+    for (let i = 0; i + k <= hay.length; i++) {
+      if (!grams.has(hay.slice(i, i + k))) continue;
+      if (start === -1) { start = i; end = i + k; continue; }
+      if (i <= end) { end = i + k; continue; }          // overlapping or adjacent -> same run
+      push(hay.slice(start, end));
+      start = i; end = i + k;
+    }
+    if (start !== -1) push(hay.slice(start, end));
+  }
+  return out;
+
+  function push(run: string): void {
+    if (seen.has(run)) return;
+    seen.add(run);
+    out.push({ text: run.length > cap ? `${run.slice(0, cap)}…` : run, fullLength: run.length });
+  }
 }
 
 export type Leg = 'secret' | 'pii' | 'memory_echo';

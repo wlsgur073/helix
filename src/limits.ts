@@ -17,7 +17,7 @@
 // code reads these three constants directly — but each still has a core-side bound, through a
 // DIFFERENT, pre-existing mechanism at a DIFFERENT value, not a second read of the constant. `question`
 // is bounded core-side ONLY IN CRITIQUE MODE, the only mode that hands `classifyEgress` both fields
-// (G1): there, `classifyEgress` (`src/risk/trifecta.ts:272,277`, via `scannedForms`) joins `question`
+// (G1): there, `classifyEgress` (`src/risk/trifecta.ts:317,321`, via `scannedForms`) joins `question`
 // and `helixAnswer` with a newline and compares that combined length against its own 200,000-char scan
 // limit, chosen independently of this table (see "Measured cause" below for why the schema caps sit
 // under 200,000 rather than at it — they pre-empt the allocation, they do not duplicate the scan).
@@ -73,6 +73,15 @@ export const MAX_DV_ANSWER_CHARS = 65_536;
  *  convention (12 items) and the largest observed echo set, far below anything that costs real
  *  resolution time (each pair is one Map lookup). */
 export const MAX_DV_QUOTED_ITEMS = 64;
+
+/** Echo-diagnosis caps (A2). The block names which records still block and, inside a DATA frame,
+ *  which run of the caller's OWN payload matched each one. Bounded so a large echo cannot turn a
+ *  refusal into a wall of text: at most this many records carry spans, this many spans each, and
+ *  this many characters per span (longer runs are truncated with U+2026 and their full length is
+ *  reported). */
+export const MAX_ECHO_SPAN_IDS = 10;
+export const MAX_ECHO_SPANS_PER_ID = 3;
+export const MAX_ECHO_SPAN_CHARS = 160;
 
 /** `helix_memory_recheck`'s `check.path` field. */
 export const MAX_RECHECK_PATH_CHARS = 4_096;

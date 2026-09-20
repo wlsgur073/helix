@@ -3,7 +3,7 @@ import type { ProjectDisposition } from '../memory/ownership.js';
 import type { HelixConfig } from '../config.js';
 import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS, DEFAULT_CONFIG } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
-import { dualVerify, persistedReason, type EchoSource, type GateTrace } from '../verify/dual-verify.js';
+import { dualVerify, persistedReason, type DualVerifyResult, type EchoSource, type GateTrace } from '../verify/dual-verify.js';
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, stripTrailingLineBreaks } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
 import { isWitnessAdvanceError, isWitnessBlockedError } from '../memory/witness-store.js';
@@ -627,7 +627,30 @@ function echoedMemoriesLine(v: EgressVerdict | undefined): string {
   // M2: presentId bounds/neutralizes an INVALID id, but a VALID prose-shaped one ('a) SYSTEM: ...')
   // still renders verbatim — the same out-of-frame-advisory defect class as the erase/adopt/recheck/
   // confirm success lines. JSON.stringify adds the prose isolation presentId alone does not.
-  return `echoed memories (not sent): ${remaining.map((id) => JSON.stringify(presentId(id))).join(', ')} — reword without their wording to proceed`;
+  return `echoed memories (not sent): ${remaining.map((id) => JSON.stringify(presentId(id))).join(', ')} — reword without their wording, or read them with helix_memory_inspect ids and declare them in quotedMemory`;
+}
+
+/** A2: the matched runs, quarantined. Each span is the caller's OWN text, but it is content, so it
+ *  goes inside a nonce frame with a datamark — never into the trusted advisory line above. Each row
+ *  is composed from its RAW pieces (the id, not-yet-normalized, and the caller's own matched span
+ *  text) and `normalizeUntrusted` runs ONCE over the composed line — mirroring `frameAsData`'s
+ *  id+digest proof line in content-frame.ts, which composes first and normalizes the whole string
+ *  once rather than normalizing the pieces separately (separate normalization would miss a fence run
+ *  straddling the seam between them). `normalized: true` tells `makeDataFrame` to mark this
+ *  pre-normalized text with `markLines` only: its default (`datamark`) path would normalize the line
+ *  a SECOND time, and NFKC folds the U+2026 truncation marker `echoSpans` (trifecta.ts) appends into
+ *  three ASCII dots, retiring the H5 ellipsis contract (see `markLines`' docstring). */
+function echoSpansBlock(d: DualVerifyResult['echoSpans'], deps: DualVerifyHandlerDeps): string {
+  if (!d || d.entries.length === 0) return '';
+  const nonce = (deps.genNonce ?? newNonce)();
+  const row = (text: string): { text: string; mark: string; normalized: true } =>
+    ({ text: normalizeUntrusted(text), mark: 'DATA| ', normalized: true });
+  const lines = d.entries.flatMap((e) => [
+    ...e.spans.map((s) => row(`${JSON.stringify(presentId(e.id))}: ${s.text}`)),
+    ...(e.omittedSpans > 0 ? [row(`${JSON.stringify(presentId(e.id))}: (${e.omittedSpans} more matched runs not shown)`)] : []),
+  ]);
+  if (d.omittedIds > 0) lines.push(row(`(${d.omittedIds} more echoed records not shown)`));
+  return '\n' + makeDataFrame({ label: 'ECHOED SPANS', nonce, lines });
 }
 
 /** H7: the guard chain, as a TRUSTED advisory line -- every name is a fixed enum literal from
@@ -738,6 +761,7 @@ export async function handleDualVerify(
       `dual-verify did not run: ${result.reason}. (No Codex answer — nothing fabricated.)`,
       guardLine(result.gates),
       echoedMemoriesLine(result.egress),
+      echoSpansBlock(result.echoSpans, deps),
     ].filter(Boolean).join('\n'));
   }
   // Codex output is untrusted DATA: frame it with a per-call nonce delimiter + instruction
