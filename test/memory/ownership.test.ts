@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, lstatSync, unlinkSync, cpSync, rmSync, linkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { isOwned, stampOwnership, projectLedgerPath, scopeNonce, globalScopeNonce } from '../../src/memory/ownership.js';
+import { isOwned, stampOwnership, projectLedgerPath, scopeNonce, globalScopeNonce, trustStateOf } from '../../src/memory/ownership.js';
 import { projectDispositionOf } from '../../src/memory/ownership.js';
+import * as fsOps from '../../src/memory/fs-ops.js';
 
 function dirs() {
   const home = mkdtempSync(join(tmpdir(), 'helix-home-'));
@@ -367,5 +368,33 @@ describe('ownership is decided by bytes the repo actually contains (F5/F7, read 
 
     expect(lstatSync(ownerPath).isFile(), 'the fixture is not a hard link — lstat sees a plain file').toBe(true);
     expect(isOwned(proj, home), 'ownership was decided by an inode the repo shares with an outside path').toBe(false);
+  });
+});
+
+// D-55: atomicWriteFile's directory fsync used to be a bare try/catch swallowing EVERY errno (EIO,
+// ENOSPC included), so a real durability failure on the registry or the .owner stamp was reported as
+// a successful adopt. It now routes through fs-ops.ts's fsyncDir, which keeps the platform-tolerance
+// swallow (win32 / EINVAL / EISDIR / ENOTSUP / EOPNOTSUPP / EPERM / EACCES) but propagates everything
+// else. The second case below also pins WHY stampOwnership writes the registry before .owner: see the
+// ORDER IS LOAD-BEARING comment at its call site.
+describe('atomicWriteFile propagates a genuine directory-fsync failure (D-55)', () => {
+  it('a genuine directory-fsync failure propagates out of an adopt', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-own-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-proj-'));
+    const spy = vi.spyOn(fsOps, 'fsyncDir').mockImplementationOnce(() => { const e: NodeJS.ErrnoException = new Error('EIO'); e.code = 'EIO'; throw e; });
+    try {
+      expect(() => stampOwnership(root, home, {})).toThrow(/EIO/);
+    } finally { spy.mockRestore(); }
+  });
+
+  it('an interrupted ambiguous re-adoption leaves the mismatch, so the retry reads pending', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-own-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-proj-'));
+    stampOwnership(root, home, {});                       // first adoption: active
+    writeFileSync(join(root, '.helix', '.owner'), 'a-different-stamp', { mode: 0o600 });
+    const spy = vi.spyOn(fsOps, 'fsyncDir').mockImplementationOnce(() => { const e: NodeJS.ErrnoException = new Error('EIO'); e.code = 'EIO'; throw e; });
+    try { expect(() => stampOwnership(root, home, {})).toThrow(/EIO/); } finally { spy.mockRestore(); }
+    stampOwnership(root, home, {});                       // retry
+    expect(trustStateOf(root, home)).toBe('pending');
   });
 });

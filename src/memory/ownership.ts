@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync,
 import { join, resolve, dirname, isAbsolute } from 'node:path';
 import { withFileLock, canonical } from './lock.js';
 import { ensureHelixDir } from './home-permissions.js';
+import { fsyncDir } from './fs-ops.js';
 
 /** The single predicate BOTH enforcement layers use (MemoryStore.adopt, and helix-server.ts's
  *  PROJECT_ROOT_SCHEMA via `z.string().refine(...)`) — one rule, not a zod chain that could drift
@@ -131,10 +132,10 @@ function atomicWriteFile(path: string, data: string, mode: number): void {
   try { writeAll(fd, data); fsyncSync(fd); } finally { closeSync(fd); }
   try { renameSync(tmp, path); }
   catch (e) { try { unlinkSync(tmp); } catch { /* orphan tmp — harmless */ } throw e; }
-  let dfd: number | undefined;
-  try { dfd = openSync(dirname(path), 'r'); fsyncSync(dfd); }
-  catch { /* directory fsync is best-effort (not all platforms permit it) */ }
-  finally { if (dfd !== undefined) { try { closeSync(dfd); } catch { /* ignore */ } } }
+  // D-55: a swallowed directory fsync hid EIO and ENOSPC behind a reported success. fsyncDir keeps
+  // the platform tolerance (win32 and unsupported return silently) and propagates everything else,
+  // so a caller learns that the rename it just made may not survive a power loss.
+  fsyncDir(dirname(path));
 }
 
 function atomicWriteRegistry(home: string, reg: Registry): void {
@@ -281,9 +282,16 @@ export function stampOwnership(
     const helixDir = join(projectRoot, '.helix');
     assertNotSymlink(helixDir, '.helix directory'); // a symlinked .helix parent would redirect the .owner (and ledger) write out of the repo
     mkdirSync(helixDir, { recursive: true });
-    atomicWriteOwner(projectRoot, stamp); // rename-based: never follows a symlinked .owner
+    // ORDER IS LOAD-BEARING (2026-09-20). The registry lands FIRST, because `.owner` is the evidence
+    // of an ambiguous re-adoption: writing it first overwrites the mismatch with the registry's own
+    // stamp, so a failure between the two writes leaves `pending` unrecorded AND the evidence gone,
+    // and the retry sees a matching stamp and reads `active` forever — the reused-path laundering
+    // C1.4-③ exists to stop. With the registry first, a failure leaves `.owner` still disagreeing,
+    // so the retry classifies the scope ambiguous and clamps it to `pending` for a human to resolve.
+    // Cost, accepted: an interrupted FIRST adoption also lands pending rather than unowned.
     reg[key] = { stamp, adoptedAt, macNonce, trustState };
     atomicWriteRegistry(home, reg);
+    atomicWriteOwner(projectRoot, stamp); // rename-based: never follows a symlinked .owner
   });
 }
 
