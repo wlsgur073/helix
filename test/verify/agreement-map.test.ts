@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildAgreementMap } from '../../src/verify/agreement-map.js';
+import { DOGFOOD_SPECIMENS } from './dogfood-specimens.js';
 
 describe('agreement map', () => {
   it('verdict is agree when the answers share their key claims (order-independent)', () => {
@@ -794,4 +795,24 @@ describe('agreement map', () => {
       'figures differ — "The retry limit is 3" cites 3; "The retry limit is documented" cites no figure',
     ]);
   });
+});
+
+// Task 6: every prior test in this file was built from an invented sentence. These three are real —
+// verbatim compare-mode pairs the dogfood agent actually exchanged with Codex (see
+// dogfood-specimens.ts for provenance and why only three of five calls are published here). Each one
+// is pinned to the SAME abstention the header above documents at length: zero lexical candidates, so
+// 'indeterminate' with no agreements and nothing withheld. This is not a claim that real traffic
+// always lands there — it is what these three specific answers measure, kept as a regression guard
+// against real prose rather than only against sentences written to probe one mechanism at a time. If
+// a future change makes any of them pair, that is a finding about the change, not a reason to relax
+// the assertion below.
+describe('real dogfood compare traffic', () => {
+  for (const s of DOGFOOD_SPECIMENS) {
+    it(`${s.label}: pairs nothing and abstains`, () => {
+      const map = buildAgreementMap(s.helixAnswer, s.codexAnswer);
+      expect(map.verdict).toBe('indeterminate');
+      expect(map.agreements).toEqual([]);
+      expect(map.withheldPairs).toBe(0);
+    });
+  }
 });
