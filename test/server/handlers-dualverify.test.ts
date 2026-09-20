@@ -7,6 +7,7 @@ import { DEFAULT_CONFIG, type HelixConfig } from '../../src/config.js';
 import type { EchoSource } from '../../src/verify/dual-verify.js';
 import { digestContent } from '../../src/memory/ledger-mac.js';
 import type { LedgerItem } from '../../src/risk/trifecta.js';
+import { MAX_ECHO_SPAN_IDS, MAX_ECHO_SPANS_PER_ID } from '../../src/limits.js';
 
 const NONCE = 'c'.repeat(32);
 const disabledEcho: EchoSource = { mode: 'disabled' };
@@ -473,6 +474,49 @@ describe('handleDualVerify egress audit', () => {
     const row = JSON.parse(readFileSync(d.auditPath, 'utf8').trim().split('\n').pop()!);
     expect(JSON.stringify(row)).not.toContain('release branch');
     expect(row.reason).toBe('blocked: memory-echo (1 items)');
+  });
+
+  // Spec verification checklist (2026-09-20-item6-design.md §2.2): "caps bite with a count" — not
+  // exercised by the brief's own Step 6 test (one id, one span). Both caps live in dual-verify.ts's
+  // spansFor, not in echoSpans itself, so this has to go through handleDualVerify to reach them.
+  it('A2: the id cap and the per-id span cap both bite, each reporting an omitted count', async () => {
+    // Cap 1: MAX_ECHO_SPAN_IDS+1 distinct records echo -> only the first MAX_ECHO_SPAN_IDS (ledger
+    // order) carry spans, and the excluded one is counted in omittedIds.
+    const manyIds = Array.from({ length: MAX_ECHO_SPAN_IDS + 1 }, (_, i) => `m_${i}`);
+    const phrase = (i: number) => `distinctive marker sequence alpha bravo charlie ${i} delta echo foxtrot`;
+    const idsLedger = manyIds.map((id, i) => item(id, phrase(i)));
+    const idsQuestion = manyIds.map((_, i) => phrase(i)).join(' | filler unrelated to any marker | ');
+    const idsRes = await handleDualVerify(
+      { question: idsQuestion, helixAnswer: 'ok', stakes: 'high' },
+      deps({ echo: echoEnforce(idsLedger), runner: async () => { throw new Error('must not spawn'); } }));
+    const idsOut = text(idsRes);
+    const shownIds = manyIds.slice(0, MAX_ECHO_SPAN_IDS);
+    const omittedId = manyIds[MAX_ECHO_SPAN_IDS]!;
+    for (const id of shownIds) expect(idsOut).toContain(`DATA| ${JSON.stringify(id)}`);
+    expect(idsOut).not.toContain(`DATA| ${JSON.stringify(omittedId)}`);
+    expect(idsOut).toContain('(1 more echoed records not shown)');
+
+    // Cap 2: one record whose content has MAX_ECHO_SPANS_PER_ID+1 distinct, well-separated matching
+    // runs in the payload -> only the first MAX_ECHO_SPANS_PER_ID spans render, and the remainder is
+    // counted per-id in omittedSpans. Four unrelated phrases (no shared vocabulary) so each occurrence
+    // forms its OWN run rather than deduplicating against another occurrence's identical text.
+    const PHRASES = [
+      'kilroy was near the harbor lighthouse today',
+      'a violet kite drifted past the orchard fence',
+      'seventeen crows gathered on the old stone wall',
+      'the brass compass pointed steadily toward dawn',
+    ];
+    const gapFiller = ' zzzz zzzz zzzz zzzz zzzz zzzz zzzz zzzz '.repeat(3);
+    const spanRes = await handleDualVerify(
+      { question: PHRASES.join(gapFiller), helixAnswer: 'ok', stakes: 'high' },
+      deps({
+        echo: echoEnforce([item('m_many', PHRASES.join(' '))]),
+        runner: async () => { throw new Error('must not spawn'); },
+      }));
+    const spanOut = text(spanRes);
+    for (const p of PHRASES.slice(0, MAX_ECHO_SPANS_PER_ID)) expect(spanOut).toContain(p);
+    expect(spanOut).not.toContain(PHRASES[MAX_ECHO_SPANS_PER_ID]);
+    expect(spanOut).toContain('"m_many": (1 more matched runs not shown)');
   });
 });
 
