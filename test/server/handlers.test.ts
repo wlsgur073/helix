@@ -54,6 +54,31 @@ describe('tool handlers', () => {
     expect(text(handleInspect(s, {}))).toContain('one fact');
   });
 
+  it('inspect ids returns only the named live records, with their proof lines', () => {
+    const s = store();
+    const a = s.commit({ content: 'staging runs Postgres 16 on port 5433', source: 'user' });
+    s.commit({ content: 'the release branch is feat/helix-v1', source: 'user' });
+    const out = text(handleInspect(s, { ids: [a.id] }));
+    expect(out).toContain(a.id);
+    expect(out).toContain('contentDigest: ');
+    expect(out).not.toContain('release branch');
+  });
+
+  it('inspect ids that resolve to nothing says so instead of claiming the ledger is empty', () => {
+    const s = store();
+    s.commit({ content: 'staging runs Postgres 16 on port 5433', source: 'user' });
+    const out = text(handleInspect(s, { ids: ['m_00000000-0000-4000-8000-000000000000'] }));
+    expect(out).not.toContain('(memory is empty)');
+    expect(out).toContain('no live memory');
+    expect(out).toContain('1');
+  });
+
+  it('inspect ids is mutually exclusive with history and asOf', () => {
+    const s = store();
+    expect(text(handleInspect(s, { ids: ['m_x'], history: true }))).toContain('mutually exclusive');
+    expect(text(handleInspect(s, { ids: ['m_x'], asOf: '2026-09-20T00:00:00.000Z' }))).toContain('mutually exclusive');
+  });
+
   it('handleErase removes an item (soft) and records the erase in the audit log', () => {
     const s = store();
     const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');

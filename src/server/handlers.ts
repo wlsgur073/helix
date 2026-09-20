@@ -8,7 +8,7 @@ import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAs
 import { isIsoInstant } from '../memory/history.js';
 import { isWitnessAdvanceError, isWitnessBlockedError } from '../memory/witness-store.js';
 import { appendAudit, type VerifyAudit, type EraseAudit } from '../audit.js';
-import type { MemoryState } from '../types.js';
+import type { MemoryState, ScopedRecord } from '../types.js';
 import { readFileSync } from 'node:fs';
 import { classifyEmission, type EgressVerdict, type Leg, type QuotedMemory } from '../risk/trifecta.js';
 import { appendCodexLog } from '../codex-log.js';
@@ -187,13 +187,86 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
   return ok(framedOut + trailingNotes);
 }
 
+/** Shared by handleInspect's two "live/current records" branches — the unfiltered listing at the
+ *  bottom of this function and the ids-filtered lookup below — so the two cannot drift into
+ *  rendering the same row shape two different ways. Frames `rows` through the SAME DATA quarantine
+ *  recall/SessionStart use (nonce frame + per-line datamark/normalizeUntrusted on the content) and
+ *  applies the M1 response-cap (`capRendered`) exactly once.
+ *
+ *  M1: total response bound — one record is one item; every row's extra `contentDigest` sub-line
+ *  rides along inside that SAME item's `text` (not restricted to Verified rows since 2026-09-02), so
+ *  it is never split from its own row.
+ *
+ *  `trailingNotes` must be the CALLER's own fully-composed advisory text (the ids branch folds its
+ *  missing-ids count into it) — its length is what sizes the remaining budget passed to
+ *  `capRendered`, and the caller appends it AFTER this return, never reordered ahead of it. */
+function renderCurrentRows(rows: ScopedRecord[], label: string, trailingNotes: string): string {
+  const { text: frame } = capRendered(
+    rows.length,
+    (n) => makeDataFrame({
+      label,
+      nonce: newNonce(),
+      lines: rows.slice(0, n).map(({ record, scope, contentDigest }) => ({
+        // The mark is the SAME known-enum `DATA[state:scope]| ` label recall/SessionStart use (mirrored
+        // byte-for-byte, not reinvented). The SANITIZED id is prepended to the datamarked content so
+        // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
+        // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
+        //
+        // The digest rides along on EVERY row, under its own name. It has two callers and they need it
+        // in different states: `commit` takes it back as `supersedesDigest` when replacing a VERIFIED
+        // fact (proof of read), and `helix_dual_verify` takes it in a `quotedMemory` pair to exempt a
+        // record from the memory-echo guard — and the records a caller quotes are overwhelmingly NOT
+        // verified. It was `Verified`-only until 2026-09-02, which made that second, documented escape
+        // impossible to assemble: the guard resolves a pair against a ledger that carries a digest for
+        // every record (`helix-server.ts` builds it with `contentDigest ?? digestContent(...)`), while
+        // the only surface publishing one withheld it from all but Verified rows. The dogfood channel
+        // measured the cost — 27 refused cross-checks across 22 sessions, each shipping UNVERIFIED.
+        //
+        // The label is `contentDigest` because that is the field's name in both tool descriptions;
+        // `supersedesDigest` is the PARAMETER a caller pastes it into, not the value's name, and the
+        // mismatch between the two was itself half of why the escape went unfound. The cost is 64 hex
+        // characters per row, which `capRendered` absorbs by showing fewer rows; it discloses nothing,
+        // since a reader holding this line already holds the content it digests.
+        //
+        // M-1: the digest branch strips the content's own trailing break(s) first (same reason as
+        // the asOf/history branches above); the no-digest branch is untouched -- no suffix to protect.
+        text: contentDigest !== undefined
+          ? `${presentId(record.id)} ${stripTrailingLineBreaks(record.content)}\n    contentDigest: ${contentDigest}`
+          : `${presentId(record.id)} ${record.content}`,
+        mark: `DATA[${record.state}:${scope}]| `,
+      })),
+    }),
+    RESPONSE_MAX_CHARS - trailingNotes.length,
+  );
+  return frame;
+}
+
 /** Inspect is a READ surface: both id and content of every row are attacker-controllable (a forged
  *  record in an owned ledger, parsed by a raw JSON.parse, can embed newlines). Route the rows through
  *  the SAME DATA quarantine recall/SessionStart use — nonce frame + per-line datamark/normalizeUntrusted
  *  on the content — with the id sanitized and the known-enum state/scope in the (trusted) datamark, so
- *  no single record can forge an extra labelled line or break out of the frame. */
-export function handleInspect(store: MemoryStore, args: { history?: boolean; asOf?: string }): ToolResult {
+ *  no single record can forge an extra labelled line or break out of the frame. `ids` is a fourth mode
+ *  alongside plain/history/asOf — the SAME quarantine and cap (renderCurrentRows above), narrowed to
+ *  the caller's own requested set instead of the whole store. */
+export function handleInspect(store: MemoryStore, args: { history?: boolean; asOf?: string; ids?: string[] }): ToolResult {
   const iso = (s: string): string => (isIsoInstant(s) ? s : '??');
+  if (args.ids !== undefined) {
+    if (args.history || args.asOf !== undefined) return ok('inspect: ids, history and asOf are mutually exclusive — pass one.');
+    for (const id of args.ids) assertValidId(id);
+    const wanted = new Set(args.ids);
+    const { records, projectDisposition, witnessNotes } = store.currentView();
+    const rows = records.filter((r) => wanted.has(r.record.id));
+    // Reported the SAME way whether some, none or all of the requested ids resolved: a caller reading
+    // records a dual-verify refusal named needs to know what came back short, not just an
+    // all-or-nothing signal.
+    const missing = wanted.size - new Set(rows.map((r) => r.record.id)).size;
+    const missingNote = missing > 0 ? `\n\n(${missing} of the requested ids have no live memory)` : '';
+    const trailingNotes = missingNote + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes);
+    // Never '(memory is empty)' here: that sentence is a true/false claim about the LEDGER, and it
+    // would be FALSE whenever the ledger holds records but none of them are the ones requested.
+    if (rows.length === 0) return ok('(no live memory for the requested ids)' + trailingNotes);
+    return ok(renderCurrentRows(rows, 'CURRENT MEMORY', trailingNotes) + trailingNotes);
+  }
   if (args.asOf !== undefined) {
     if (args.history) return ok('inspect: history and asOf are mutually exclusive — pass one.');
     if (!isIsoInstant(args.asOf)) return ok('inspect: as-of cursor must be a canonical ISO-8601 instant (e.g. 2026-07-04T00:00:00.000Z).');
@@ -277,47 +350,7 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
   const { records: rows, projectDisposition, witnessNotes } = store.currentView();
   if (rows.length === 0) return ok('(memory is empty)' + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
   const trailingNotes = unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes);
-  // M1: total response bound — one record is one item; every row's extra `contentDigest` sub-line
-  // rides along inside that SAME item's `text` (not restricted to Verified rows since 2026-09-02),
-  // so it is never split from its own row.
-  const { text: frame } = capRendered(
-    rows.length,
-    (n) => makeDataFrame({
-      label: 'CURRENT MEMORY',
-      nonce: newNonce(),
-      lines: rows.slice(0, n).map(({ record, scope, contentDigest }) => ({
-        // The mark is the SAME known-enum `DATA[state:scope]| ` label recall/SessionStart use (mirrored
-        // byte-for-byte, not reinvented). The SANITIZED id is prepended to the datamarked content so
-        // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
-        // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
-        //
-        // The digest rides along on EVERY row, under its own name. It has two callers and they need it
-        // in different states: `commit` takes it back as `supersedesDigest` when replacing a VERIFIED
-        // fact (proof of read), and `helix_dual_verify` takes it in a `quotedMemory` pair to exempt a
-        // record from the memory-echo guard — and the records a caller quotes are overwhelmingly NOT
-        // verified. It was `Verified`-only until 2026-09-02, which made that second, documented escape
-        // impossible to assemble: the guard resolves a pair against a ledger that carries a digest for
-        // every record (`helix-server.ts` builds it with `contentDigest ?? digestContent(...)`), while
-        // the only surface publishing one withheld it from all but Verified rows. The dogfood channel
-        // measured the cost — 27 refused cross-checks across 22 sessions, each shipping UNVERIFIED.
-        //
-        // The label is `contentDigest` because that is the field's name in both tool descriptions;
-        // `supersedesDigest` is the PARAMETER a caller pastes it into, not the value's name, and the
-        // mismatch between the two was itself half of why the escape went unfound. The cost is 64 hex
-        // characters per row, which `capRendered` absorbs by showing fewer rows; it discloses nothing,
-        // since a reader holding this line already holds the content it digests.
-        //
-        // M-1: the digest branch strips the content's own trailing break(s) first (same reason as
-        // the asOf/history branches above); the no-digest branch is untouched -- no suffix to protect.
-        text: contentDigest !== undefined
-          ? `${presentId(record.id)} ${stripTrailingLineBreaks(record.content)}\n    contentDigest: ${contentDigest}`
-          : `${presentId(record.id)} ${record.content}`,
-        mark: `DATA[${record.state}:${scope}]| `,
-      })),
-    }),
-    RESPONSE_MAX_CHARS - trailingNotes.length,
-  );
-  return ok(frame + trailingNotes);
+  return ok(renderCurrentRows(rows, 'CURRENT MEMORY', trailingNotes) + trailingNotes);
 }
 
 export interface EraseDeps {

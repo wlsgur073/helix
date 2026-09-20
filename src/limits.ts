@@ -74,6 +74,11 @@ export const MAX_DV_ANSWER_CHARS = 65_536;
  *  resolution time (each pair is one Map lookup). */
 export const MAX_DV_QUOTED_ITEMS = 64;
 
+/** `helix_memory_inspect`'s `ids` filter. A blocked dual-verify names the records that still block;
+ *  this is how a caller reads those records (and their digests) without dumping the whole store.
+ *  Sized above the largest observed echo set and far below the response cap. */
+export const MAX_INSPECT_IDS = 20;
+
 /** Echo-diagnosis caps (A2). The block names which records still block and, inside a DATA frame,
  *  which run of the caller's OWN payload matched each one. Bounded so a large echo cannot turn a
  *  refusal into a wall of text: at most this many records carry spans, this many spans each, and

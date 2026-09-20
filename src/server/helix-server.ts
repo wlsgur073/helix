@@ -9,6 +9,7 @@ import { MAX_QUERY_CHARS } from '../memory/retrieval.js';
 import {
   MAX_COMMIT_CONTENT_CHARS, MAX_DV_QUESTION_CHARS, MAX_DV_ANSWER_CHARS, MAX_DV_QUOTED_ITEMS,
   MAX_RECHECK_PATH_CHARS, MAX_RECHECK_PATTERN_CHARS, RECALL_MAX_ITEMS_CAP, RECALL_MAX_CHARS_CAP,
+  MAX_INSPECT_IDS,
 } from '../limits.js';
 import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, MAX_ID_CHARS, isValidId, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
@@ -132,8 +133,8 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   server.registerTool('helix_memory_inspect', {
     title: 'Inspect memory',
-    description: 'List current memory items (id, trust state, content). Pass history=true to also list closed items with their [tx, txTo) declared interval, OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive.',
-    inputSchema: { history: z.boolean().optional(), asOf: z.string().optional() },
+    description: 'List current memory items (id, trust state, content). Pass history=true to also list closed items with their [tx, txTo) declared interval, OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive. Pass ids=[...] to render only those records (with their contentDigest proof lines) instead of the whole store; ids, history and asOf are mutually exclusive.',
+    inputSchema: { history: z.boolean().optional(), asOf: z.string().optional(), ids: z.array(ID_SCHEMA).min(1).max(MAX_INSPECT_IDS).optional() },
   }, async (args) => m.runOp('helix_memory_inspect', () => handleInspect(store, args)));
 
   server.registerTool('helix_memory_erase', {
@@ -185,8 +186,12 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     inputSchema: {
       // H3: same bounded-input discipline as commit's content above -- an oversized question/answer
       // is refused by schema validation before the handler (and the JSON-parse allocation it would
-      // otherwise pay for) runs. classifyEgress's downstream 200,000-char joint scan limit (see
-      // limits.ts) is a separate, later gate; these caps exist to reject early, not to duplicate it.
+      // otherwise pay for) runs. classifyEgress's downstream 200,000-char scan limit (see limits.ts)
+      // is a separate, later gate; these caps exist to reject early, not to duplicate it. That scan
+      // limit joins question and helixAnswer JOINTLY only in critique mode, the only mode that hands
+      // classifyEgress both fields -- compare mode never transmits helixAnswer, so its scan sees
+      // question alone, and helixAnswer's own core-side bound there is the direct MAX_DV_ANSWER_CHARS
+      // check in dualVerify (src/verify/dual-verify.ts), not this scan limit.
       question: z.string().max(MAX_DV_QUESTION_CHARS).describe(`The question being verified (max ${MAX_DV_QUESTION_CHARS} characters).`),
       helixAnswer: z.string().max(MAX_DV_ANSWER_CHARS).describe(`Your answer to cross-validate (max ${MAX_DV_ANSWER_CHARS} characters).`),
       stakes: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
