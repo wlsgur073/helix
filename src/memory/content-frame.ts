@@ -48,12 +48,13 @@ export function normalizeUntrusted(s: string, maxChars?: number): string {
  *  every read surface (recall / inspect current+history+asOf / SessionStart hook) whenever the B1
  *  project-disposition snapshot is 'unadopted-present', empty or non-empty result alike.
  *  EXCEPTION (owner-adjudicated 2026-07-26): the dual-verify compare-mode zero-pair guidance line
- *  in server/handlers.ts ("— could not match claims (form mismatch or total disagreement); read
- *  both answers") is adversary-toggleable (a zero-overlap Codex answer forces the indeterminate
- *  verdict) and carries an imperative, and ships as-is by owner ruling: the string is a
- *  compile-time constant, no untrusted byte enters it, and the only action it directs is reading
- *  the already-rendered, still-datamarked answers below it. Any NEW trusted note must still
- *  satisfy the rule above. */
+ *  in server/handlers.ts ("— the aligner found no claim in either answer sharing at least half
+ *  its words with a claim in the other, which independently written answers rarely do; this is
+ *  not a disagreement, so read both answers") is adversary-toggleable (a zero-overlap Codex answer
+ *  forces the indeterminate verdict) and carries an imperative, and ships as-is by owner ruling:
+ *  the string is a compile-time constant, no untrusted byte enters it, and the only action it
+ *  directs is reading the already-rendered, still-datamarked answers below it. Any NEW trusted
+ *  note must still satisfy the rule above. */
 export const UNADOPTED_LEDGER_NOTE =
   '(an unadopted project memory file is present and excluded from results; adoption requires explicit user approval)';
 

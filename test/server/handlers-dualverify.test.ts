@@ -163,13 +163,25 @@ describe('handleDualVerify', () => {
     const res = await handleDualVerify({ stakes: 'high', question: 'q', helixAnswer: 'we should charge for the plugin' }, d);
     const t = text(res);
     expect(t).toContain('verdict: indeterminate (mode: compare)');
-    expect(t).toContain('— could not match claims (form mismatch or total disagreement); read both answers');
+    expect(t).toContain('— the aligner found no claim in either answer sharing at least half its words with a claim in the other, which independently written answers rarely do; this is not a disagreement, so read both answers');
     expect(t).toContain('no claim pairs found by aligner');
     expect(t).toContain('unmatched claims:');
     expect(t).not.toContain('no shared claims');
     expect(t).not.toContain('divergences:');
     const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
     expect(audit.verdict).toBe('indeterminate');
+  });
+
+  it('a zero-pair compare result reads as not compared, not as a finding', async () => {
+    const res = await handleDualVerify(
+      { question: 'Is the recovery method sound?', helixAnswer: 'Reading the row one revision earlier reconstructs the target.', stakes: 'high' },
+      deps({ runner: async () => ({ ok: true, answer: 'Numbered markdown about something else entirely.' }) }),
+    );
+    const out = text(res);
+    expect(out).toContain('verdict: indeterminate (mode: compare) — not compared');
+    expect(out).toContain('the aligner found no claim in either answer sharing at least half its words');
+    expect(out).not.toContain('form mismatch or total disagreement');
+    expect(out).toContain('no claim pairs found by aligner');
   });
 
   it('a throwing preflight audits a static content-free reason (raw exception text never lands in audit.jsonl)', async () => {

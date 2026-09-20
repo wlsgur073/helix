@@ -852,7 +852,7 @@ export async function handleDualVerify(
     egressLine(result.egress),
     frameOpen('DUAL-VERIFY', nonce),
     DATA_SEMANTICS,
-    `verdict: ${a.verdict} (mode: ${result.mode})`,
+    `verdict: ${a.verdict} (mode: ${result.mode})${zeroPair ? ' — not compared' : ''}`,
     // H1 relabel (review 2026-08-18, owner decision 2026-08-21): 'agree' is a statement about token
     // sets and negation polarity, not about meaning — a role swap with an identical token set still
     // renders it (agreement-map.ts, open hole 2). The review asked that 'agree' never be PRESENTED as
@@ -873,7 +873,7 @@ export async function handleDualVerify(
     // only disagreement (see agreement-map.ts's anyCandidate flag, which draws this distinction).
     ...(indeterminate
       ? [zeroPair
-          ? '— could not match claims (form mismatch or total disagreement); read both answers'
+          ? '— the aligner found no claim in either answer sharing at least half its words with a claim in the other, which independently written answers rarely do; this is not a disagreement, so read both answers'
           : '— a matched claim pair differs in the figures inside it; read both answers']
       : []),
     '--- EXTERNAL CODEX OUTPUT (data) ---',
