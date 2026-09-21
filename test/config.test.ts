@@ -167,8 +167,10 @@ describe('loadConfig', () => {
   });
 
   // Fail-closed, with ONE named exception. `secretEntropyExempt` ships 'allow' because the EH-4/C2.2
-  // hex/word-chain release it gates is a false-positive mitigation that fired twice on real artifact
-  // names — closing it by default would re-block design prose carrying a git SHA. That release
+  // hex/word-chain release it gates is a false-positive mitigation — the C2.2 word-chain arm fired
+  // twice on real artifact names, and the EH-4 hex arm shipped earlier for git SHAs and digests quoted
+  // in prose, with no two-firing record of its own — closing it by default would re-block that design
+  // prose. That release
   // already existed unconditionally inside the detector, where NO policy key could reach it; giving
   // it a leg did not open a hole, it made a standing one addressable. The assertion is written as
   // "exactly one leg defaults open, and it is this one" so a future leg cannot quietly ship open.

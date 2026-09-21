@@ -11,8 +11,9 @@ export type EgressLegPolicy = 'block' | 'allow';
  *  core is pure hex (git SHA / digest) or a chain of individually low-entropy segments (dated
  *  filenames, doc paths), with no credential keyword in the same statement. That release used to be
  *  applied inside the detector, so it sat OUTSIDE every policy key and no configuration could close
- *  it. It defaults to `allow` — the false-positive class it exists for fired twice on real artifact
- *  names — but an operator who wants hex-shaped tokens gated can now say so. */
+ *  it. It defaults to `allow` — the C2.2 word-chain arm's false-positive class fired twice on real
+ *  artifact names; the EH-4 hex arm shipped earlier for git SHAs and digests quoted in prose, with no
+ *  two-firing record of its own — but an operator who wants hex-shaped tokens gated can now say so. */
 export type EgressLeg = 'memoryEcho' | 'piiHigh' | 'piiBulk' | 'secretHeuristic' | 'secretEntropy' | 'secretEntropyExempt';
 export type EgressPolicy = Record<EgressLeg, EgressLegPolicy>;
 const EGRESS_LEGS: readonly EgressLeg[] = ['memoryEcho', 'piiHigh', 'piiBulk', 'secretHeuristic', 'secretEntropy', 'secretEntropyExempt'];

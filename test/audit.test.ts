@@ -9,7 +9,7 @@ function tmpAudit() { return join(mkdtempSync(join(tmpdir(), 'helix-audit-')), '
 // DEVIATION (documented, task-7-report.md): appendAudit has no injectable DurableFsOps seam of its
 // own — audit.jsonl is a single best-effort side channel, not one of the coordinated durable-write
 // paths (ledger/key/witness) that thread `fsOps` through for that purpose. To prove the deliberate
-// audit.ts exemption (task 7: a genuinely failed directory fsync on first creation must NOT abort an
+// audit.ts exemption (task 7: a genuinely failed directory fsync on every append must NOT abort an
 // already-succeeded primary operation) without adding a production-facing test hook, mock the ONE
 // function audit.ts imports from fs-ops.js and make it throw exactly once, on command — every other
 // test in this file exercises the real, unmocked fsyncDir via the pass-through below (vitest hoists
@@ -103,7 +103,7 @@ describe('appendAudit', () => {
   // NOT transactional, and no caller (handlers.ts) wraps appendAudit — by the time it runs, every
   // caller has already COMPLETED its primary operation (successfully in handleErase, handleAdopt and
   // the post-success appends of handleRecheck/handleConfirm, or having already FAILED in the catch
-  // blocks of handleRecheck/handleConfirm, about to re-throw its own real error). Fix round 1 (review
+  // blocks of handleRecheck/handleConfirm/handleErase, about to re-throw its own real error). Fix round 1 (review
   // Important 3): the primary operation is not always a SUCCESS that "already durably committed" —
   // see audit.ts's own docstring for the corrected, per-site breakdown. Fix round 2: that breakdown
   // itself first undercounted the success sites (three, not four — handleConfirm's own post-success
@@ -114,8 +114,8 @@ describe('appendAudit', () => {
   // REPLACE the real rejection error with a generic fsync error, masking it. Both are worse than
   // the audit row silently missing, which the
   // docstring already accepts. The row content itself (writeAll + fsyncSync(fd)) is UNCHANGED — still
-  // unconditional and still propagates — only the directory fsync on first creation is swallowed here.
-  it('a genuinely failed directory fsync on FIRST creation does not abort the audit append (best-effort by design)', () => {
+  // unconditional and still propagates — only the directory fsync on every append is swallowed here.
+  it('a genuinely failed directory fsync on every append does not abort the audit append (best-effort by design)', () => {
     const p = tmpAudit();
     throwOnNextFsyncDir = Object.assign(new Error('EIO fake (audit dir fsync)'), { code: 'EIO' });
     expect(() => appendAudit(p, { kind: 'adopt', ts: '2026-08-07T00:00:00.000Z', scope: '/x' })).not.toThrow();

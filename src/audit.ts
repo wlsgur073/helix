@@ -115,7 +115,7 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit | AdoptAudit
  *  parent dirs as needed. Completeness is best-effort, NOT transactional: the row is appended AFTER
  *  the action it records (the erase/verify, itself fsynced), so a crash in the narrow window between
  *  the two can leave the action durable with its audit row absent. Durable-once-written: the row bytes
- *  are fsync'd, and on FIRST creation the parent directory is fsync'd too, so the new file's directory
+ *  are fsync'd, and on EVERY append the parent directory is fsync'd too, so the file's directory
  *  entry is durable — not just its inode (a crash could otherwise lose the whole freshly-created file).
  *
  *  The directory fsync is swallowed UNCONDITIONALLY here — narrower than fs-ops.ts's own fsyncDir
@@ -153,8 +153,9 @@ export function appendAudit(path: string, event: AuditEvent, io: { fsyncDir: typ
     fsyncSync(fd);
   } finally { closeSync(fd); }
   // Unconditional call, unconditionally swallowed here — narrower than fs-ops.ts's own fsyncDir
-  // contract, which now propagates a genuinely failed attempt. See the docstring above: at the two
-  // reject sites this runs inside a catch, immediately before re-throwing the caller's real error,
-  // so an escaping fsync error would REPLACE that diagnosis rather than add to it.
+  // contract, which now propagates a genuinely failed attempt. See the docstring above: at the
+  // three reject sites — handleRecheck, handleConfirm and handleErase — this runs inside a catch,
+  // immediately before re-throwing the caller's real error, so an escaping fsync error would REPLACE
+  // that diagnosis rather than add to it.
   try { io.fsyncDir(dirname(path)); } catch { /* best-effort by design — see docstring above */ }
 }
