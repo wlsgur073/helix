@@ -55,6 +55,7 @@ describe('withFileLock (link-published)', () => {
       stateOf: () => 'S',           // sleeping, not a zombie
       bootId: () => realProbe.bootId(),
       pidNs: () => realProbe.pidNs(),
+      timeNs: () => realProbe.timeNs(),
       uptimeSec: () => realProbe.uptimeSec(),
       bootInstantMs: () => realProbe.bootInstantMs(),
     };

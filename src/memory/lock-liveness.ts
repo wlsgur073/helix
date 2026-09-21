@@ -4,8 +4,11 @@ import { uptime as osUptime } from 'node:os';
 
 /** Identity a lock holder records at acquisition, and everything a later waiter needs to decide
  *  dead / alive / cannot-know. startTicks is a DECIMAL STRING (proc stat field 22): exact, and a
- *  string dodges any numeric-precision debate. All-null identity fields = non-Linux platform. */
-export interface LockPayload { v: 1; token: string; pid: number; startTicks: string | null; bootId: string | null; pidNs: string | null; threadId: number; platform: string; uptimeSec: number | null; }
+ *  string dodges any numeric-precision debate. All-null identity fields = non-Linux platform.
+ *  timeNs is ADDITIVE, like uptimeSec before it: a payload written by an older build has none, so
+ *  it is optional here, and tryParsePayload normalizes an absent value to null — never treated as
+ *  a namespace match on its own (see sameTimeNamespace below). */
+export interface LockPayload { v: 1; token: string; pid: number; startTicks: string | null; bootId: string | null; pidNs: string | null; timeNs?: string | null; threadId: number; platform: string; uptimeSec: number | null; }
 
 export type HolderClass = 'dead' | 'alive' | 'alive-unknown' | 'reentrant-self';
 
@@ -15,6 +18,7 @@ export interface LivenessProbe {
   stateOf(pid: number): string | null;
   bootId(): string | null;
   pidNs(): string | null;
+  timeNs(): string | null;
   uptimeSec(): number | null;
   bootInstantMs(): number | null;
 }
@@ -63,6 +67,7 @@ export const realProbe: LivenessProbe = {
   },
   bootId() { try { return readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(); } catch { return null; } },
   pidNs() { try { return readlinkSync('/proc/self/ns/pid'); } catch { return null; } },
+  timeNs() { try { return readlinkSync('/proc/self/ns/time'); } catch { return null; } },
   uptimeSec() { return gatedUptimeSec(); },
   bootInstantMs() {
     // Reads the GATED value, not the raw one. Both consumers of this number turn it into a `dead`
@@ -81,7 +86,7 @@ export const realProbe: LivenessProbe = {
 };
 
 export function selfIdentity(token: string, probe: LivenessProbe = realProbe): LockPayload {
-  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform, uptimeSec: probe.uptimeSec() };
+  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), timeNs: probe.timeNs(), threadId, platform: process.platform, uptimeSec: probe.uptimeSec() };
 }
 
 /** A LockPayload identity field that must be `string | null`. A well-formed-JSON payload carrying a
@@ -106,7 +111,8 @@ export function tryParsePayload(raw: string): LockPayload | null {
     if (typeof p.token !== 'string' || typeof p.pid !== 'number' || typeof p.threadId !== 'number' || typeof p.platform !== 'string') return null;
     if (!isStringOrNull(p.startTicks) || !isStringOrNull(p.bootId) || !isStringOrNull(p.pidNs)) return null;
     if (!isFiniteNumberOrAbsent(p.uptimeSec)) return null;
-    return { ...p, uptimeSec: p.uptimeSec ?? null };
+    if (p.timeNs !== undefined && !isStringOrNull(p.timeNs)) return null;
+    return { ...p, uptimeSec: p.uptimeSec ?? null, timeNs: p.timeNs ?? null };
   } catch { return null; }
 }
 
@@ -128,7 +134,17 @@ const usableUptimeWitness = (recorded: LockPayload, self: LockPayload): boolean 
   recorded.platform === self.platform
   && UPTIME_WITNESS_PLATFORMS.has(recorded.platform)
   && typeof recorded.uptimeSec === 'number' && Number.isFinite(recorded.uptimeSec)
-  && recorded.pidNs === self.pidNs;
+  && recorded.pidNs === self.pidNs
+  && sameTimeNamespace(recorded, self);
+
+/** Linux reports BOTH /proc/uptime and a process's start ticks through the READING process's time
+ *  namespace, so two processes in namespaces with different boottime offsets read different values
+ *  for the same fact. Measured (D-28, 2026-09-20): a live holder in an offset namespace was proved
+ *  dead and its lock reclaimed — a double hold. Where the identities differ, or one side has none to
+ *  compare, the time-derived proofs are unavailable; uncertainty resolves to alive-unknown, never to
+ *  evidence. Both sides null (a kernel without time namespaces) is a MATCH, like pidNs. */
+const sameTimeNamespace = (recorded: LockPayload, self: LockPayload): boolean =>
+  (recorded.timeNs ?? null) === (self.timeNs ?? null);
 
 /** Spec Layer 2, precedence-fixed. EVERY uncertainty resolves to alive-unknown (never stolen);
  *  only positively-established death (or cross-boot impossibility) resolves to dead. */
@@ -161,7 +177,7 @@ export function classifyHolder(recorded: LockPayload, self: LockPayload, probe: 
   const k = probe.kill0(recorded.pid);                                                    // rule 4
   if (k === 'dead') return 'dead';
   if (k === 'unknown') return 'alive-unknown';
-  if (recorded.startTicks !== null) {
+  if (recorded.startTicks !== null && sameTimeNamespace(recorded, self)) {
     const cur = probe.startTicksOf(recorded.pid);
     if (cur !== null && cur !== recorded.startTicks) return 'dead';                       // recycled pid
     if (cur === null && k === 'alive') return 'alive-unknown';                            // cannot verify identity

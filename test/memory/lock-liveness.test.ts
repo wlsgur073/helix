@@ -363,3 +363,26 @@ describe('cross-boot uptime witness (contracts 3, 4, 5, 8)', () => {
     }))).toBe('alive-unknown');
   });
 });
+
+describe('time namespace guard (D-28): a holder in a different time namespace is never proved dead', () => {
+  it('a holder in a different time namespace is never proved dead by startTicks', () => {
+    const self = { ...mk({}), timeNs: 'time:[4026531834]' };
+    const recorded = { ...mk({}), pid: self.pid + 1, startTicks: '111', timeNs: 'time:[4026533333]' };
+    const probe = { ...realProbe, kill0: () => 'alive' as const, startTicksOf: () => '222', stateOf: () => 'S' };
+    expect(classifyHolder(recorded, self, probe)).toBe('alive');
+  });
+
+  it('a payload without timeNs is uncertainty when this process has one', () => {
+    const self = { ...mk({}), timeNs: 'time:[4026531834]', uptimeSec: 100 };
+    const recorded = { ...mk({}), pid: self.pid + 1, startTicks: null, uptimeSec: 900, timeNs: null };
+    const probe = { ...realProbe, kill0: () => 'alive' as const, uptimeSec: () => 100 };
+    expect(classifyHolder(recorded, self, probe)).toBe('alive-unknown');
+  });
+
+  it('an equal (or absent on both sides) time namespace keeps today verdicts', () => {
+    const self = mk({});
+    const recorded = { ...mk({}), pid: self.pid + 1, startTicks: '111' };
+    const probe = { ...realProbe, kill0: () => 'alive' as const, startTicksOf: () => '222', stateOf: () => 'S' };
+    expect(classifyHolder(recorded, self, probe)).toBe('dead');
+  });
+});

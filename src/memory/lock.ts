@@ -5,12 +5,18 @@ import { dirname, basename, join } from 'node:path';
 import { classifyHolder, selfIdentity, tryParsePayload, realProbe, type HolderClass, type LivenessProbe, type LockPayload } from './lock-liveness.js';
 
 // Cross-process advisory lock around the JSONL ledger. Concurrent helix-mcp processes (one per
-// agent session, same host, same user, ONE kernel/boot domain, and ONE Linux time namespace —
-// declared precondition) write the same ledger. The time namespace is named rather than left to
-// "one boot" because it virtualizes /proc/uptime and CLOCK_BOOTTIME alike: two processes inside a
-// single boot then read different uptimes, which would let the cross-boot witness call a LIVE
-// holder dead, and a containerised deployment sharing this lock across that boundary reads as
-// satisfying the sentence while violating the witness. The lock is a regular FILE published
+// agent session, same host, same user, ONE kernel/boot domain — declared precondition) write the
+// same ledger. A shared Linux time namespace is NOT a precondition: /proc/uptime and a process's
+// start ticks are both read through the READING process's time namespace, so two processes in
+// namespaces with different boottime offsets read different values for the same fact — the
+// situation a containerised deployment sharing this lock across that boundary produces. Rather
+// than assume the boundary away, classifyHolder (lock-liveness.ts) records each side's time
+// namespace identity and refuses both time-derived proofs where the identities differ or either
+// side has none to compare (D-28, 2026-09-20); that uncertainty resolves to alive-unknown, never
+// to evidence. The ONE residual is the malformed-payload litter path below (`st.mtimeMs <
+// probe.bootInstantMs()`): an unparseable payload carries no recorded identity to compare a
+// namespace against, and no namespace-independent boot instant exists, so that one path still
+// reads the file's mtime against THIS process's own boot instant. The lock is a regular FILE published
 // atomically WITH its owner payload via linkSync(sourceTmp, lockPath): the first instant the name
 // exists its payload is complete, so a LIVE creator can never present a malformed lock (write
 // completes and closes BEFORE link — the completeness invariant). Waiters classify the recorded
