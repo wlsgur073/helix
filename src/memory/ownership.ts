@@ -384,6 +384,9 @@ export function globalScopeNonce(home: string): string | null {
       return macNonce;
     });
   } catch {
+    // D-55 exception, deliberate: also absorbs the directory-fsync errno atomicWriteFile now propagates,
+    // so a genuine failure surfaces as null (clamps @global to Fresh) instead of throwing, since a recall
+    // must not break on it — the already-landed rename lets the fast path above return the nonce next time.
     return null; // lock unavailable/stuck -> fail closed rather than break a recall with a blind mint
   }
 }

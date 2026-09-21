@@ -394,6 +394,7 @@ describe('atomicWriteFile propagates a genuine directory-fsync failure (D-55)', 
     writeFileSync(join(root, '.helix', '.owner'), 'a-different-stamp', { mode: 0o600 });
     const spy = vi.spyOn(fsOps, 'fsyncDir').mockImplementationOnce(() => { const e: NodeJS.ErrnoException = new Error('EIO'); e.code = 'EIO'; throw e; });
     try { expect(() => stampOwnership(root, home, {})).toThrow(/EIO/); } finally { spy.mockRestore(); }
+    expect(readFileSync(join(root, '.helix', '.owner'), 'utf8')).toBe('a-different-stamp');
     stampOwnership(root, home, {});                       // retry
     expect(trustStateOf(root, home)).toBe('pending');
   });
