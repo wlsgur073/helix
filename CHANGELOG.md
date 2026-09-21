@@ -107,6 +107,16 @@ First release.
   pair whose figures differ cannot render `agree` — the verdict withholds and names both values.
   Every `agree` is labelled lexical agreement in the response itself: matched claims share tokens
   and polarity, and that is not a semantic check.
+- The egress guard scans what each mode actually transmits. `compare` sends the normalized
+  `question` alone, so `helixAnswer` — which never leaves the machine in that mode — is not scanned
+  against the ledger and cannot refuse a call over bytes that stay local; its own 65,536-character
+  cap is enforced directly in `dualVerify` instead, so no entry path escapes it.
+  `critique` sends both fields inside the prompt, and both are scanned.
+- A refusal the memory-echo leg decided names *where* it matched. For each record that still
+  blocks, the tool response quotes the runs of the caller's own payload that matched that record —
+  up to 10 records, 3 runs each, 160 characters per run, with a count of whatever was left out —
+  inside a datamarked DATA frame, because the runs are content rather than advisory prose. The
+  audit row stays content-free: it never receives a span.
 
 #### Automatic compaction — opt-in, default OFF
 
@@ -153,14 +163,21 @@ First release.
   `HELIX_LEDGER` moves the global ledger data file and nothing else.
 - Content-free replay metrics in `~/.helix/metrics.jsonl` (default on; `metrics.enabled: false`
   disables; the hook honours the global config only).
+- `helix_memory_inspect` takes an `ids` filter: up to 20 ids render only those records, each with
+  its `contentDigest` proof line, so a caller can read back exactly the records a dual-verify
+  refusal named and declare them in `quotedMemory`. `ids`, `history` and `asOf` are mutually
+  exclusive, and requested ids with no live record are reported as a count rather than dropped in
+  silence.
 
 ### Limits
 
 - `helix_memory_commit`'s `content` is capped at 16,384 characters, enforced by both the MCP schema
   and the store, so no non-MCP caller into the same store can bypass it.
-- `helix_dual_verify`'s `question` and `helixAnswer` are capped at 65,536 characters each — their
-  sum stays under the egress guard's 200,000-character joint scan limit — and
-  `helix_memory_recheck`'s `check.path` and `check.pattern` at 4,096 and 2,048.
+- `helix_dual_verify`'s `question` and `helixAnswer` are capped at 65,536 characters each, and
+  `helix_memory_recheck`'s `check.path` and `check.pattern` at 4,096 and 2,048. The two dual-verify
+  fields meet the egress guard's 200,000-character scan limit *jointly* only in `critique` mode, the
+  one that transmits both; `compare` transmits the question alone, so the limit sees that field by
+  itself there. Both caps are chosen so each field and their sum stay under 200,000 either way.
 - `helix_memory_recall` and `helix_memory_inspect` cap their rendered response at 262,144
   characters, dropping whole tail items rather than a partial one and appending an
   `N item(s) omitted (response cap)` note. `maxItems` (≤ 200) and `maxChars` (≤ 10,000) carry
@@ -178,6 +195,10 @@ First release.
 - **Trust beyond one trust store.** Elevated grades are local to one trust store (`HELIX_HOME`) and, for a project ledger, to one project path: they do not transfer to another machine, to a second `HELIX_HOME` on the same machine, or to the same project moved or cloned to another path.
 - **Compatibility before 1.0.** The ledger is append-only JSONL with no schema migrations to date,
   and no forward or backward compatibility is guaranteed across versions before 1.0.
+- **Erasure of the opt-in content log.** `~/.helix/codex-log.jsonl`, written only under
+  `dualVerify.logContent: true`, is outside every erase path: neither `helix_memory_erase` nor the
+  operator-only permanent erase touches it, so a memory's text that a logged call carried stays
+  there after the record is erased. Deleting the file is the remedy.
 
 ### Dependencies
 

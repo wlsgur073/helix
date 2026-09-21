@@ -28,6 +28,11 @@ removes it. To actually destroy it you must either enable compaction deliberatel
 namespace removal, not media sanitization: copies, snapshots and backups you already took still
 hold the text.
 
+One of those copies can be Helix's own. If `dualVerify.logContent` was on when a dual-verify call
+carried the fact's text, that text was written to `~/.helix/codex-log.jsonl`, and no erase reaches
+it — neither the tool's soft erase nor the operator-only permanent path, both of which act on the
+ledger. Deleting the file is the remedy.
+
 A caveat worth knowing before you panic or relax: `helix_memory_erase` answers `erased <id>`
 even for an id that does not exist or is already dead. A success message is not proof that
 anything was erased. It can also answer with a refusal instead. When the id is present in both
@@ -96,7 +101,9 @@ So:
 - **After a permanent erase** — none of the above exist. Restore from backup (§6), knowing that
   restoring an older ledger trips the rollback witness by design.
 
-`history` and `asOf` are mutually exclusive; passing both is refused.
+`history` and `asOf` are mutually exclusive, and `ids` — which renders only the records you name,
+with their `contentDigest` proof lines — excludes both in turn; passing any two of the three is
+refused.
 
 **Which ledger was it in?** The rendered rows tell you: `DATA[erase:global:…]` versus
 `DATA[erase:project:…]`. Both scopes are searched together, so run these calls from the same

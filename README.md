@@ -41,7 +41,7 @@ Nine MCP tools:
 |------|---------|
 | `helix_memory_commit` | Store a fact (secret-scanned, provenance recorded; content capped at 16,384 characters so one oversized fact cannot become a permanent per-read cost — split the fact or store a pointer) |
 | `helix_memory_recall` | Retrieve relevant memory as a quarantined DATA block (total response capped at 262,144 characters — `maxChars` bounds each item, not the total; items are dropped from the tail with an "N item(s) omitted (response cap)" note when the total would otherwise exceed it) |
-| `helix_memory_inspect` | List current memory items with their trust state (same total-response cap and omission note as recall — applies to the default, `history`, and `asOf` views alike) |
+| `helix_memory_inspect` | List current memory items with their trust state; `ids` (up to 20) renders only the records you name, with their `contentDigest` proof lines, and is mutually exclusive with `history` and `asOf` (same total-response cap and omission note as recall — applies to the default, `ids`, `history`, and `asOf` views alike) |
 | `helix_memory_recheck` | Re-check a fact against reality (content-bound file check) → `Corroborated` (machine-checked, never `Verified`) |
 | `helix_memory_confirm` | Promote a fact to `Verified` because you explicitly vouched for it (requires your approval; never self-confirm) |
 | `helix_memory_erase` | Erase an item from every live view (soft: tombstoned and audited, recoverable until a compaction) |
@@ -303,8 +303,11 @@ Helix keeps your memory on your machine, under `~/.helix/` and an owned `<projec
 
 `helix_dual_verify` spawns the external **Codex CLI** to cross-check an answer. It is **off by default** (`dualVerify.enabled`).
 
-- **Sent by Helix:** exactly the `question` + `helixAnswer` you pass to the tool. Helix composes the
-  payload and adds nothing to it — no memory, no file contents.
+- **Sent by Helix, per mode:** in `compare` (the default) Helix transmits the normalized `question`
+  alone — your `helixAnswer` never leaves the machine, and is compared locally against Codex's own
+  independent reply to build the agreement map. In `critique` Helix transmits both `question` and
+  `helixAnswer`, wrapped in four fixed instruction lines that frame the answer as data to review.
+  Beyond that framing Helix adds nothing to either payload — no memory, no file contents.
 - **What the CLI itself can still reach.** Codex is a separate program with its own model, and
   `-s read-only` sandboxes its *writes*, not its *reads*. Helix therefore starts it in an empty
   scratch directory, points its `--cd` there, and hands it a constructed environment rather than the
@@ -322,9 +325,9 @@ Helix keeps your memory on your machine, under `~/.helix/` and an owned `<projec
   locale, and a Windows platform block. Everything else in the server's environment is dropped.
   `helix_codex_status` also reads whether `OPENAI_API_KEY` is set — its presence, never its value —
   as a secondary signal when `codex login`'s own output does not say which route is in use.
-- **Blocked before sending:** an egress guard refuses the call if the payload contains a named provider credential (override-proof), a heuristic- or entropy-detected secret (blocked by default, per-leg overridable), high-severity or bulk PII, or a verbatim copy of a stored memory (a shared run of at least 24 characters with a live memory, compared after normalization — SECURITY.md states the exact rule; a shorter memory or a shorter shared run is never matched). One entropy subclass is **released** by default — a token whose stripped core is pure hex (git SHA, digest) or a chain of individually low-entropy segments, with no credential keyword within the 40 characters on either side of it (a newline, `.` or `;` cuts that window short; a keyword farther away, even in the same sentence, does not keep it blocked). Close it with the `secretEntropyExempt` leg; on the write path the word-chain half of the same shape is released under `persistence.releaseWordChains` (default `true`) while hex always redacts. See [SECURITY.md](./SECURITY.md) for why the exemption exists.
+- **Blocked before sending:** an egress guard refuses the call if the payload contains a named provider credential (override-proof), a heuristic- or entropy-detected secret (blocked by default, per-leg overridable), high-severity or bulk PII, or a verbatim copy of a stored memory (a shared run of at least 24 characters with a live memory, compared after normalization — SECURITY.md states the exact rule; a shorter memory or a shorter shared run is never matched). One entropy subclass is **released** by default — a token whose stripped core is pure hex (git SHA, digest) or a chain of individually low-entropy segments, with no credential keyword within the 40 characters on either side of it (a newline, `.` or `;` cuts that window short; a keyword farther away, even in the same sentence, does not keep it blocked). Close it with the `secretEntropyExempt` leg; on the write path the word-chain half of the same shape is released under `persistence.releaseWordChains` (default `true`) while hex always redacts. See [SECURITY.md](./SECURITY.md) for why the exemption exists. A block the memory-echo leg decided also tells you *where* it matched: for each record that still blocks, the refusal quotes the runs of your **own** payload text that matched it, inside a datamarked DATA frame (up to 10 records, 3 runs each, 160 characters per run, with a count of whatever was left out) — enough to reword the payload without opening the memory. The runs render in that tool response only; `audit.jsonl` never receives one.
 - **Refused rather than scanned:** the guard fails closed on size. A payload whose raw or outbound form is over 200,000 characters, or live memory whose content totals over 8,000,000 characters (every record the recall view serves, global plus an adopted project; erased and superseded rows do not count), is refused unscanned rather than sent, and a call the live-memory cap refuses names that cause (`ledger exceeds the egress scan limit`) — so a large enough call or a large enough live corpus makes dual-verify unavailable, which is the intended failure direction.
-- **Logging:** off by default. The exact prompt/response are written to `~/.helix/codex-log.jsonl` (`0o600`) only if you set `dualVerify.logContent: true`; the audit log stays content-free regardless.
+- **Logging:** off by default. The exact prompt/response are written to `~/.helix/codex-log.jsonl` (`0o600`) only if you set `dualVerify.logContent: true`; the audit log stays content-free regardless. An erase does not reach that file: `helix_memory_erase` acts on the ledger, so a memory whose text a logged call carried stays in `codex-log.jsonl` after the record is erased. Deleting the file is the remedy.
 - **Disable:** set `dualVerify.enabled: false` (the default) — or never create the config.
 
 ## Security & threat model

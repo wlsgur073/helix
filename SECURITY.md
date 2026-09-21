@@ -455,22 +455,36 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   serialized reaper gate, named per boot where the platform exposes a boot id — Linux; on macOS and
   Windows one gate name serves every boot, so a reaper that crashed inside the gate blocks automatic
   reclaim of that lock until the gate file is removed by hand). It does not defend against an
-  adversary with code execution, and it presumes ONE kernel/boot-id domain and ONE Linux time
-  namespace on a LOCAL filesystem — a ledger reached from two kernels (e.g. a path under /mnt/c used
-  by both WSL and native Windows), or by processes in different time namespaces (which read
-  different uptimes within one boot), is out of scope.
-- **On Linux, between processes that share one boot id and one time namespace, a lock is reclaimed
+  adversary with code execution, and it presumes ONE kernel/boot-id domain on a LOCAL filesystem — a
+  ledger reached from two kernels (e.g. a path under /mnt/c used by both WSL and native Windows) is
+  out of scope. A shared Linux time namespace is **not** a precondition. Two processes in namespaces
+  with different boot-time offsets read different values for the same fact, and rather than assume
+  that boundary away, the liveness classifier detects it and withholds the proofs that depend on it
+  — described in the next bullet, together with the one residual it leaves.
+- **On Linux, between processes that share one boot id, a lock is reclaimed
   only after its holder is proved dead, and a reused pid does not prevent that proof; on Windows and
   macOS a holder is proved dead whenever its recorded pid is no longer in use, but while that pid
   belongs to another live process the holder is proved dead on Windows only across a reboot and
   never on macOS.** A holder records its pid together with the process start time read
   from `/proc`, and a waiter reclaims the lock when that recorded start time differs from the one the
   pid carries now — positive proof the original process is gone. That proof, and the uptime
-  comparison described below, hold only inside one time namespace: Linux reports both a process's
-  start time and the system uptime through the reading process's time namespace, so a holder and a
-  waiter in namespaces with different boot-time offsets disagree on both values, and a waiter that
-  shares the holder's pid namespace proves the live holder dead and takes its lock (a waiter in a
-  different pid namespace classifies the holder `alive-unknown` and waits instead). Platforms without `/proc` (macOS,
+  comparison described below, are the two that read through a time namespace: Linux reports both a
+  process's start time and the system uptime through the *reading* process's namespace, so a holder
+  and a waiter in namespaces with different boot-time offsets disagree on both values — measured, a
+  live holder was proved dead that way and its lock taken. A holder therefore records its
+  time-namespace identity as well, and a waiter withholds **both** of those proofs whenever the
+  recorded identity and its own differ — which includes the case where only one of the two has an
+  identity at all, while neither having one is a match: the holder is then not classified dead on
+  their strength, and acquisition waits instead. The proofs that read no clock are
+  unaffected and still cross the boundary — a differing boot id, and a `kill 0` reporting the pid
+  gone, each establish death on their own — so what the boundary costs is same-boot pid-recycle
+  detection, and it is paid in waiting, never in a false reclaim. A mixed-build rollout degrades the
+  same way: an old bundle's holder records no time-namespace identity at all, so it never matches a
+  new waiter's and the recycled-pid proof cannot fire against it. **One residual:** a lock file whose
+  payload does not parse carries no recorded identity to compare, and no namespace-independent boot
+  instant exists to substitute, so both sites that clear such litter still compare the file's mtime
+  against the reading process's own boot instant. What bounds it is that a malformed lock is never a
+  live holder's — the payload is written and closed before the lock name exists. Platforms without `/proc` (macOS,
   Windows) expose no start time, so a dead holder whose pid is reused *within the same boot* by an
   unrelated live process still classifies `alive-unknown` there: acquisition waits out its full
   budget, then fails with guidance rather than stealing the lock. Windows closes the *cross-boot*
@@ -485,7 +499,10 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   fsyncs its temp AND the directory; a lock-losing compactor is fenced by orphan-temp sweeps so a
   stale snapshot cannot resurrect erased plaintext). It is NOT media sanitization: freed blocks,
   SSD remapping, filesystem snapshots, external backups/copies (`cp`, `ln`), and already-open file
-  descriptors are all outside any userspace design's reach.
+  descriptors are all outside any userspace design's reach. Those write paths are the ledger's, and
+  the opt-in Codex content log is not among them: where `dualVerify.logContent` was on when a call
+  carried a memory's text, that text stays in `~/.helix/codex-log.jsonl` after the record is erased.
+  Deleting the file is the remedy.
 - **Hard-linked ledgers are refused:** every write path throws when the ledger's link count is not
   one — two alias names would carry two independent locks (no mutual exclusion) and a compaction
   through one name would leave the other name holding the entire pre-rewrite plaintext.
@@ -511,15 +528,19 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   and their class) means the attempt was real and genuinely failed, and **propagates**: the append itself throws rather than reporting a
   success that isn't true, converting that rare disk-level failure into an availability failure on
   every write path (append, compaction's post-rename fsync, master-key mint, witness advance, orphan-tmp
-  sweep) at once — a deliberate trade against silently lying about durability. There are two
-  exceptions. The trust registry's atomic writes (`projects.json` in the home and the repo-side
-  `.helix/.owner` stamp) swallow every failure of their directory fsync, on the `open` leg and the
-  fsync leg alike and whatever the errno, `EIO`, `ENOSPC`, `EMFILE` and `ENOENT` included: a trust
-  resolution (`helix-trust-resolve`) reports success over such a failure, and so does the first
-  `@global` scope-nonce mint, which a read such as a recall or the SessionStart hook can perform, and
-  so does an adopt whenever the signing key already exists or only the repo-side `.helix` directory
-  fails (a first adoption in a home with no key reports the failure only because the key mint that
-  follows it propagates, after the registry entry and `.owner` are already written). The audit trail
+  sweep) at once — a deliberate trade against silently lying about durability. The trust registry's
+  atomic writes (`projects.json` in the home and the repo-side `.helix/.owner` stamp) are held to
+  that same rule: they route their directory fsync through the one shared helper every other write
+  path uses, so the errno split above governs them too, and a genuine failure **propagates**. A
+  trust resolution (`helix-trust-resolve`) and an adopt therefore report such a failure rather than
+  succeeding over it; an adopt that fails on the repo-side `.helix` directory throws with the
+  registry entry already renamed into place, because the registry is deliberately written before the
+  `.owner` stamp. There are two exceptions. The first `@global` scope-nonce mint — which a read such
+  as a recall or the SessionStart hook can perform — is one: it catches that propagated errno rather
+  than failing the read, but it does not report success either. It returns no nonce, which is the
+  key-absent case, so that one read clamps `@global` grades to `Fresh`; the rename it already made
+  lets a later read pick the nonce up, since what the failed fsync leaves in doubt is that rename's
+  durability, not its visibility. The audit trail
   (`audit.jsonl`) is the other: it is documented best-effort/non-transactional already (see its own
   docstring), and its directory fsync — attempted on every append, not only on the one that creates
   the file — stays unconditionally suppressed, so a failed directory fsync on that side channel never
@@ -555,7 +576,16 @@ control and format characters, lower-casing and whitespace collapsing. Tabs and 
 deleted rather than collapsed, so a copy with a line break or tab where the memory has a space (or
 the reverse) splits the run there; a memory whose normalized text is shorter than 24 characters is
 never matched; a shared run shorter than that passes; and a superseded or erased memory is not
-compared at all, even while its text is still in the ledger file.
+compared at all, even while its text is still in the ledger file. What the leg scans is what Helix
+actually transmits. In `compare` mode that is the question alone: `helixAnswer` is never sent, so it
+is never compared against the ledger and cannot block a call over bytes that stay on the machine. In
+`critique` mode both fields go inside the prompt, and both are scanned. When the leg does block, the
+refusal says where it matched: for each record that still blocks — an exempted record is one the
+caller already proved it read — the tool response quotes the runs of the caller's OWN payload that
+matched that record, bounded to 10 records, 3 runs each and 160 characters per run, and carried
+inside a datamarked DATA frame, because that text is content rather than advisory prose. Those runs
+render in that response only. `audit.jsonl` never receives a matched span; its row keeps counts, ids
+and labels, exactly as it does for every other leg.
 
 **The egress guard governs the payload Helix composes — it is not a sandbox around the
 Codex CLI.** The CLI is a separate program with its own model and its own connection to
@@ -593,4 +623,6 @@ not acceptable, run it under an OS-level sandbox or leave the feature off.
   already running keeps the value it loaded at startup and goes on logging — without deleting the
   file or what it already holds; it stores the exact prompt/response, is created `0o600`, and is
   capped. A
-  firewall-refused payload is never written there.
+  firewall-refused payload is never written there. No erase reaches this file: `helix_memory_erase`
+  and the operator-only permanent path both act on the ledger, so a memory whose text a logged call
+  carried survives here after that record is gone from memory. Deleting the file is the remedy.
