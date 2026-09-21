@@ -110,11 +110,11 @@ describe('tryParsePayload', () => {
     expect(tryParsePayload(JSON.stringify(me))).toEqual(me);
     for (const junk of ['', '{', 'null', '{"v":2,"token":"x"}', '{"v":1}']) expect(tryParsePayload(junk)).toBeNull();
   });
-  it('rejects a full-shaped payload whose startTicks/bootId/pidNs is NUMERIC (fail-CLOSED: string|null only — the lone fail-open cell)', () => {
+  it('rejects a full-shaped payload whose startTicks/bootId/pidNs/timeNs is NUMERIC (fail-CLOSED: string|null only — the lone fail-open cell)', () => {
     // A well-formed-JSON payload with a numeric startTicks (e.g. 42) passing here would later make
     // `cur !== recorded.startTicks` compare a /proc string against a number — always true — and
     // classify a LIVE holder 'dead', letting the gate steal it. Everything else fails closed (waits).
-    for (const field of ['startTicks', 'bootId', 'pidNs'] as const) {
+    for (const field of ['startTicks', 'bootId', 'pidNs', 'timeNs'] as const) {
       const payload = JSON.stringify({ ...selfIdentity('x'.repeat(32)), [field]: 42 });
       expect(tryParsePayload(payload), `${field}=42 must be rejected as malformed`).toBeNull();
     }
@@ -375,7 +375,7 @@ describe('time namespace guard (D-28): a holder in a different time namespace is
   it('a payload without timeNs is uncertainty when this process has one', () => {
     const self = { ...mk({}), timeNs: 'time:[4026531834]', uptimeSec: 100 };
     const recorded = { ...mk({}), pid: self.pid + 1, startTicks: null, uptimeSec: 900, timeNs: null };
-    const probe = { ...realProbe, kill0: () => 'alive' as const, uptimeSec: () => 100 };
+    const probe = { ...realProbe, kill0: () => 'alive' as const, uptimeSec: () => 100, stateOf: () => 'S' };
     expect(classifyHolder(recorded, self, probe)).toBe('alive-unknown');
   });
 

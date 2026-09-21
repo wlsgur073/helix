@@ -13,10 +13,18 @@ import { classifyHolder, selfIdentity, tryParsePayload, realProbe, type HolderCl
 // than assume the boundary away, classifyHolder (lock-liveness.ts) records each side's time
 // namespace identity and refuses both time-derived proofs where the identities differ or either
 // side has none to compare (D-28, 2026-09-20); that uncertainty resolves to alive-unknown, never
-// to evidence. The ONE residual is the malformed-payload litter path below (`st.mtimeMs <
-// probe.bootInstantMs()`): an unparseable payload carries no recorded identity to compare a
-// namespace against, and no namespace-independent boot instant exists, so that one path still
-// reads the file's mtime against THIS process's own boot instant. The lock is a regular FILE published
+// to evidence. The ONE residual is the malformed-payload litter check (`st.mtimeMs <
+// probe.bootInstantMs()`), present at both litter sites below — the classification branch in
+// acquireFileLock and the re-verify branch in stealUnderGate: an unparseable payload carries no
+// recorded identity to compare a namespace against, and no namespace-independent boot instant
+// exists, so both paths still read the file's mtime against THIS process's own boot instant.
+// During a mixed-build rollout (the launch barrier means a running process keeps its old bytes
+// until restarted), an old-build holder's payload carries no timeNs — absent, normalizes to null
+// — so it never matches a new-build waiter's real value and the recycled-pid proof cannot fire
+// against it; rule 2 (bootId, not namespaced) and rule 4 (kill0 reporting the pid gone) still
+// prove death on their own, and bootId already subsumes rule 2b's cross-boot case on Linux, so
+// the degradation is bounded to same-boot pid-recycle detection and resolves to waiting, never
+// to a false dead — the safe direction by design. The lock is a regular FILE published
 // atomically WITH its owner payload via linkSync(sourceTmp, lockPath): the first instant the name
 // exists its payload is complete, so a LIVE creator can never present a malformed lock (write
 // completes and closes BEFORE link — the completeness invariant). Waiters classify the recorded
