@@ -2,7 +2,7 @@
  {
   "rowId": "r001",
   "surfaceItem": "tool:helix_codex_status",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "helix_codex_status called LIVE from inside a fresh Claude Code session resumed 2026-09-17 after the reinstall, through the host's own MCP connection (host server started from the install path, bin/helix-mcp.mjs sha256 = receipt): codex-cli 0.154.0 found, logged in, stakes floor high, model, effort, timeout 1500000 ms and every egress leg with its value; the installed bundle's tools/list also listed it (B2, 2026-09-17).",
@@ -12,7 +12,7 @@
  {
   "rowId": "r002",
   "surfaceItem": "tool:helix_dual_verify",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 metered, RUN (not skipped) 2026-09-17 with codex-cli 0.154.0: HELIX_REAL_CODEX=1 over test/acceptance/ passed 7 of 7 files and 40 of 40 tests with none skipped, so both opt-in cases executed — dual-verify-real.e2e spawned Codex, returned a DATA-framed verdict and audit-logged spawned true; real-codex.e2e answered a prompt via stdin.",
@@ -32,7 +32,7 @@
  {
   "rowId": "r004",
   "surfaceItem": "tool:helix_memory_commit",
-  "claimId": "README.md#51d1cec94afe",
+  "claimId": "README.md#286e5235961c",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Through the INSTALLED bundle 2026-09-17 under temporary HELIX_HOMEs: global and project commits returned committed {id, state Fresh, classification normal}; every Block C and D journey was seeded this way.",
@@ -52,7 +52,7 @@
  {
   "rowId": "r006",
   "surfaceItem": "tool:helix_memory_erase",
-  "claimId": "README.md#51d1cec94afe",
+  "claimId": "README.md#286e5235961c",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "C4 2026-09-17 through the installed bundle: erase returned erased {id}; recall no longer served the row (no relevant memory); history rendered DATA[erase:global:tx..txTo] with content blanked; asOf inside that interval returned the content in full, and asOf after txTo returned an empty memory.",
@@ -152,7 +152,7 @@
  {
   "rowId": "r016",
   "surfaceItem": "config:dualVerify.effort",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -162,7 +162,7 @@
  {
   "rowId": "r017",
   "surfaceItem": "config:dualVerify.egressPolicy.memoryEcho",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -172,7 +172,7 @@
  {
   "rowId": "r018",
   "surfaceItem": "config:dualVerify.egressPolicy.piiBulk",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -182,7 +182,7 @@
  {
   "rowId": "r019",
   "surfaceItem": "config:dualVerify.egressPolicy.piiHigh",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -192,7 +192,7 @@
  {
   "rowId": "r020",
   "surfaceItem": "config:dualVerify.egressPolicy.secretEntropy",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -202,7 +202,7 @@
  {
   "rowId": "r021",
   "surfaceItem": "config:dualVerify.egressPolicy.secretEntropyExempt",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -212,7 +212,7 @@
  {
   "rowId": "r022",
   "surfaceItem": "config:dualVerify.egressPolicy.secretHeuristic",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -222,7 +222,7 @@
  {
   "rowId": "r023",
   "surfaceItem": "config:dualVerify.enabled",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -232,7 +232,7 @@
  {
   "rowId": "r024",
   "surfaceItem": "config:dualVerify.logContent",
-  "claimId": "README.md#7e9b7c36ce17",
+  "claimId": "README.md#0aa48bb45874",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -242,7 +242,7 @@
  {
   "rowId": "r025",
   "surfaceItem": "config:dualVerify.mode",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -252,7 +252,7 @@
  {
   "rowId": "r026",
   "surfaceItem": "config:dualVerify.model",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -262,7 +262,7 @@
  {
   "rowId": "r027",
   "surfaceItem": "config:dualVerify.stakesFloor",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -272,7 +272,7 @@
  {
   "rowId": "r028",
   "surfaceItem": "config:dualVerify.timeoutMs",
-  "claimId": "CHANGELOG.md#0b29a4a58d00",
+  "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -282,7 +282,7 @@
  {
   "rowId": "r029",
   "surfaceItem": "config:metrics.enabled",
-  "claimId": "CHANGELOG.md#aad55d40fb31",
+  "claimId": "CHANGELOG.md#5624aa251aed",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -292,7 +292,7 @@
  {
   "rowId": "r030",
   "surfaceItem": "env:HELIX_HOME",
-  "claimId": "CHANGELOG.md#aad55d40fb31",
+  "claimId": "CHANGELOG.md#5624aa251aed",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Every Block C/D journey and all three C5 drill variants (R, U, D) 2026-09-17 ran under their own temporary HELIX_HOME (/tmp/helix-cert-*, /tmp/helix-drill-*), and the store landed there: C3 deleted and re-minted ledger-mac-master.key in its temp home, the project journey's projects.json named the adopted root there, and B2's temp home came into existence at the first hook at mode 700 with sessions.jsonl at 600. The real ~/.helix memory.jsonl, audit.jsonl and witness.json kept their sizes and mtimes across the whole run.",
@@ -302,7 +302,7 @@
  {
   "rowId": "r031",
   "surfaceItem": "env:HELIX_LEDGER",
-  "claimId": "CHANGELOG.md#aad55d40fb31",
+  "claimId": "CHANGELOG.md#5624aa251aed",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -332,7 +332,7 @@
  {
   "rowId": "r034",
   "surfaceItem": "env:OPENAI_API_KEY",
-  "claimId": "README.md#7e9b7c36ce17",
+  "claimId": "README.md#0aa48bb45874",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
@@ -342,7 +342,7 @@
  {
   "rowId": "r035",
   "surfaceItem": "hook:SessionEnd",
-  "claimId": "CHANGELOG.md#aad55d40fb31",
+  "claimId": "CHANGELOG.md#5624aa251aed",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Installed bin/hooks/session-end.mjs driven with a real stdin payload 2026-09-17: exit 0, appended {kind session-end, sessionId cert-move2, reason other, ts} to sessions.jsonl at mode 600 under a temporary HELIX_HOME; A1 hooks.e2e.test.ts re-run 2026-09-17.",
@@ -352,7 +352,7 @@
  {
   "rowId": "r036",
   "surfaceItem": "hook:SessionStart",
-  "claimId": "CHANGELOG.md#aad55d40fb31",
+  "claimId": "CHANGELOG.md#5624aa251aed",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Installed bin/hooks/session-start.mjs driven from a project cwd 2026-09-17: exit 0, emitted ===HELIX <nonce> HELIX MEMORY (cross-session) — DATA … carrying DATA[Fresh:project], DATA[Fresh:global] and a flagged DATA[Suspect:project] row plus the verify-before-acting line.",
@@ -702,7 +702,7 @@
  {
   "rowId": "r072",
   "surfaceItem": "cross-cutting",
-  "claimId": "docs/release/recovery-playbook.md#90c85d93d1e3",
+  "claimId": "docs/release/recovery-playbook.md#a244a7848631",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims: history+asOf refused while each alone is served, recovered by execution; negative control on handlers.ts:263; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
