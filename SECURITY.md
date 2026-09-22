@@ -461,13 +461,13 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   with different boot-time offsets read different values for the same fact, and rather than assume
   that boundary away, the liveness classifier detects it and withholds the proofs that depend on it
   — described in the next bullet, together with the one residual it leaves.
-- **On Linux, between processes that share one boot id, a lock is reclaimed
-  only after its holder is proved dead, and a reused pid does not prevent that proof; on Windows and
-  macOS a holder is proved dead whenever its recorded pid is no longer in use, but while that pid
-  belongs to another live process the holder is proved dead on Windows only across a reboot and
-  never on macOS.** A holder records its pid together with the process start time read
-  from `/proc`, and a waiter reclaims the lock when that recorded start time differs from the one the
-  pid carries now — positive proof the original process is gone. That proof, and the uptime
+- **On Linux, between processes that share one boot id, a lock is reclaimed only after its holder is
+  proved dead, and — where holder and waiter share a time namespace — a reused pid does not prevent
+  that proof; on Windows and macOS a holder is proved dead whenever its recorded pid is no longer in
+  use, but while that pid belongs to another live process the holder is proved dead on Windows only
+  across a reboot and never on macOS.** A holder records its pid together with the process start time
+  read from `/proc`, and a waiter reclaims the lock when that recorded start time differs from the
+  one the pid carries now — positive proof the original process is gone. That proof, and the uptime
   comparison described below, are the two that read through a time namespace: Linux reports both a
   process's start time and the system uptime through the *reading* process's namespace, so a holder
   and a waiter in namespaces with different boot-time offsets disagree on both values — measured, a
@@ -475,26 +475,27 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   time-namespace identity as well, and a waiter withholds **both** of those proofs whenever the
   recorded identity and its own differ — which includes the case where only one of the two has an
   identity at all, while neither having one is a match: the holder is then not classified dead on
-  their strength, and acquisition waits instead. The proofs that read no clock are
-  unaffected and still cross the boundary — a differing boot id, and a `kill 0` reporting the pid
-  gone, each establish death on their own — so what the boundary costs is same-boot pid-recycle
-  detection, and it is paid in waiting, never in a false reclaim. A mixed-build rollout degrades the
-  same way: an old bundle's holder records no time-namespace identity at all, so it never matches a
-  new waiter's and the recycled-pid proof cannot fire against it. **One residual:** a lock file whose
-  payload does not parse carries no recorded identity to compare, and no namespace-independent boot
-  instant exists to substitute, so both sites that clear such litter still compare the file's mtime
-  against the reading process's own boot instant. What bounds it is that a malformed lock is never a
-  live holder's — the payload is written and closed before the lock name exists. Platforms without `/proc` (macOS,
-  Windows) expose no start time, so a dead holder whose pid is reused *within the same boot* by an
-  unrelated live process still classifies `alive-unknown` there: acquisition waits out its full
-  budget, then fails with guidance rather than stealing the lock. Windows closes the *cross-boot*
-  half of that gap by a second, independent measurement: a holder also records system uptime at
-  acquisition, and a waiter sampling a strictly lower uptime has proof the machine has rebooted since
-  — a process cannot outlive a reboot — so the lock is reclaimed without needing a start time. macOS
-  has no counterpart measurement and is unchanged. Age is deliberately NOT used as a substitute — it
-  cannot separate a suspended process from a dead one, and that misclassification is what resurrected
-  already-erased plaintext once before. The remaining same-boot gap is not Linux-specific in its
-  rule, only its measurement, and closes wherever a start time becomes readable.
+  their strength, and acquisition waits instead. The proofs that read no clock are unaffected and
+  still cross the boundary — a differing boot id, a `kill 0` reporting the pid gone, and a zombie
+  process state, each establish death on their own — so what the boundary costs is same-boot
+  pid-recycle detection, and it is paid in waiting, never in a false reclaim. A mixed-build rollout
+  degrades the same way: an old bundle's holder records no time-namespace identity at all, so it
+  never matches a waiter that has one and the recycled-pid proof cannot fire against it. **One
+  residual:** a lock file whose payload does not parse carries no recorded identity to compare, and
+  no namespace-independent boot instant exists to substitute, so both sites that clear such litter
+  still compare the file's mtime against the reading process's own boot instant. What bounds it is
+  that a malformed lock is never a live holder's — the payload is written and closed before the lock
+  name exists. Platforms without `/proc` (macOS, Windows) expose no start time, so a dead holder
+  whose pid is reused *within the same boot* by an unrelated live process still classifies
+  `alive-unknown` there: acquisition waits out its full budget, then fails with guidance rather than
+  stealing the lock. Windows closes the *cross-boot* half of that gap by a second, independent
+  measurement: a holder also records system uptime at acquisition, and a waiter sampling a strictly
+  lower uptime has proof the machine has rebooted since — a process cannot outlive a reboot — so the
+  lock is reclaimed without needing a start time. macOS has no counterpart measurement and is
+  unchanged. Age is deliberately NOT used as a substitute — it cannot separate a suspended process
+  from a dead one, and that misclassification is what resurrected already-erased plaintext once
+  before. The remaining same-boot gap is not Linux-specific in its rule, only its measurement, and
+  closes wherever a start time becomes readable.
 - **What erase guarantees:** durable namespace removal by helix's own write paths (compaction
   fsyncs its temp AND the directory; a lock-losing compactor is fenced by orphan-temp sweeps so a
   stale snapshot cannot resurrect erased plaintext). It is NOT media sanitization: freed blocks,
@@ -531,8 +532,8 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   sweep) at once — a deliberate trade against silently lying about durability. The trust registry's
   atomic writes (`projects.json` in the home and the repo-side `.helix/.owner` stamp) are held to
   that same rule: they route their directory fsync through the one shared helper every other write
-  path uses, so the errno split above governs them too, and a genuine failure **propagates**. A
-  trust resolution (`helix-trust-resolve`) and an adopt therefore report such a failure rather than
+  path uses, so the errno split above governs them too, and a genuine failure **propagates**. A trust
+  resolution (`helix-trust-resolve`) and an adopt therefore report such a failure rather than
   succeeding over it; an adopt that fails on the repo-side `.helix` directory throws with the
   registry entry already renamed into place, because the registry is deliberately written before the
   `.owner` stamp. There are two exceptions. The first `@global` scope-nonce mint — which a read such
@@ -540,15 +541,14 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   than failing the read, but it does not report success either. It returns no nonce, which is the
   key-absent case, so that one read clamps `@global` grades to `Fresh`; the rename it already made
   lets a later read pick the nonce up, since what the failed fsync leaves in doubt is that rename's
-  durability, not its visibility. The audit trail
-  (`audit.jsonl`) is the other: it is documented best-effort/non-transactional already (see its own
-  docstring), and its directory fsync — attempted on every append, not only on the one that creates
-  the file — stays unconditionally suppressed, so a failed directory fsync on that side channel never
-  reports an already-succeeded operation as failed — or, at a rejection site, replaces the real
-  rejection error with an unrelated one on its way out. The suppression covers the directory fsync
-  only: the line's own open, write and fsync still propagate, so a failure there (`ENOSPC`, `EIO`)
-  makes the handler throw after its operation already succeeded, and at a rejection site replaces
-  the rejection error.
+  durability, not its visibility. The audit trail (`audit.jsonl`) is the other: it is documented
+  best-effort/non-transactional already (see its own docstring), and its directory fsync — attempted
+  on every append, not only on the one that creates the file — stays unconditionally suppressed, so a
+  failed directory fsync on that side channel never reports an already-succeeded operation as failed
+  — or, at a rejection site, replaces the real rejection error with an unrelated one on its way out.
+  The suppression covers the directory fsync only: the line's own open, write and fsync still
+  propagate, so a failure there (`ENOSPC`, `EIO`) makes the handler throw after its operation already
+  succeeded, and at a rejection site replaces the rejection error.
 - **Rollout launch barrier (normative):** old bundles age-steal locks and do not sweep — while any
   old helix-mcp process runs, the new guarantees do not hold. Upgrade procedure: close every Claude
   session and pause anything that starts one on a schedule (for example a timer running
