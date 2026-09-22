@@ -183,7 +183,7 @@
     },
     {
       "name": "helix_memory_inspect",
-      "description": "List current memory items (id, trust state, content). Pass history=true to also list closed items with their [tx, txTo) declared interval, OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive.",
+      "description": "List current memory items (id, trust state, content). Pass history=true to also list closed items with their [tx, txTo) declared interval, OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive. Pass ids=[...] to render only those records (with their contentDigest proof lines) instead of the whole store; ids, history and asOf are mutually exclusive.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -192,6 +192,14 @@
           },
           "asOf": {
             "type": "string"
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 20
           }
         },
         "additionalProperties": false,

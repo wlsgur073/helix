@@ -1,5 +1,5 @@
 // src/hooks/session-start.ts
-import { writeSync as writeSync2 } from "node:fs";
+import { writeSync as writeSync3 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join8 } from "node:path";
 
@@ -22,7 +22,7 @@ import { dirname as dirname6, join as join6 } from "node:path";
 
 // src/memory/ownership.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3, renameSync, unlinkSync as unlinkSync2, lstatSync as lstatSync3, openSync, writeSync, fsyncSync, closeSync } from "node:fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync3, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
 import { join as join3, resolve, dirname as dirname3, isAbsolute } from "node:path";
 
 // src/memory/lock.ts
@@ -89,6 +89,13 @@ var realProbe = {
       return null;
     }
   },
+  timeNs() {
+    try {
+      return readlinkSync("/proc/self/ns/time");
+    } catch {
+      return null;
+    }
+  },
   uptimeSec() {
     return gatedUptimeSec();
   },
@@ -98,7 +105,7 @@ var realProbe = {
   }
 };
 function selfIdentity(token, probe = realProbe) {
-  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform, uptimeSec: probe.uptimeSec() };
+  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), timeNs: probe.timeNs(), threadId, platform: process.platform, uptimeSec: probe.uptimeSec() };
 }
 var isStringOrNull = (x) => x === null || typeof x === "string";
 var isFiniteNumberOrAbsent = (x) => x === void 0 || x === null || typeof x === "number" && Number.isFinite(x);
@@ -109,12 +116,14 @@ function tryParsePayload(raw) {
     if (typeof p.token !== "string" || typeof p.pid !== "number" || typeof p.threadId !== "number" || typeof p.platform !== "string") return null;
     if (!isStringOrNull(p.startTicks) || !isStringOrNull(p.bootId) || !isStringOrNull(p.pidNs)) return null;
     if (!isFiniteNumberOrAbsent(p.uptimeSec)) return null;
-    return { ...p, uptimeSec: p.uptimeSec ?? null };
+    if (p.timeNs !== void 0 && !isStringOrNull(p.timeNs)) return null;
+    return { ...p, uptimeSec: p.uptimeSec ?? null, timeNs: p.timeNs ?? null };
   } catch {
     return null;
   }
 }
-var usableUptimeWitness = (recorded, self) => recorded.platform === self.platform && UPTIME_WITNESS_PLATFORMS.has(recorded.platform) && typeof recorded.uptimeSec === "number" && Number.isFinite(recorded.uptimeSec) && recorded.pidNs === self.pidNs;
+var usableUptimeWitness = (recorded, self) => recorded.platform === self.platform && UPTIME_WITNESS_PLATFORMS.has(recorded.platform) && typeof recorded.uptimeSec === "number" && Number.isFinite(recorded.uptimeSec) && recorded.pidNs === self.pidNs && sameTimeNamespace(recorded, self);
+var sameTimeNamespace = (recorded, self) => (recorded.timeNs ?? null) === (self.timeNs ?? null);
 function classifyHolder(recorded, self, probe) {
   if (recorded.platform !== self.platform) return "alive-unknown";
   if (recorded.bootId !== null && self.bootId !== null && recorded.bootId !== self.bootId) return "dead";
@@ -131,7 +140,7 @@ function classifyHolder(recorded, self, probe) {
   const k = probe.kill0(recorded.pid);
   if (k === "dead") return "dead";
   if (k === "unknown") return "alive-unknown";
-  if (recorded.startTicks !== null) {
+  if (recorded.startTicks !== null && sameTimeNamespace(recorded, self)) {
     const cur = probe.startTicksOf(recorded.pid);
     if (cur !== null && cur !== recorded.startTicks) return "dead";
     if (cur === null && k === "alive") return "alive-unknown";
@@ -362,6 +371,28 @@ function ensureHelixDir(dir) {
   }
 }
 
+// src/memory/fs-ops.ts
+import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, renameSync, unlinkSync as unlinkSync2, linkSync as linkSync2, fchmodSync, readdirSync as readdirSync3 } from "node:fs";
+var realDirFsyncSyscalls = { openSync, fsyncSync, closeSync };
+var DIR_FSYNC_UNSUPPORTED = /* @__PURE__ */ new Set(["EINVAL", "EISDIR", "ENOTSUP", "EOPNOTSUPP", "EPERM", "EACCES"]);
+var isUnsupported = (e) => DIR_FSYNC_UNSUPPORTED.has(e?.code ?? "");
+function fsyncDir(dir, sys = realDirFsyncSyscalls, platform = process.platform) {
+  let dfd;
+  try {
+    dfd = sys.openSync(dir, "r");
+  } catch (e) {
+    if (platform === "win32" || isUnsupported(e)) return;
+    throw e;
+  }
+  try {
+    sys.fsyncSync(dfd);
+  } catch (e) {
+    if (!(platform === "win32" || isUnsupported(e))) throw e;
+  } finally {
+    sys.closeSync(dfd);
+  }
+}
+
 // src/memory/ownership.ts
 function canonicalRoot(projectRoot) {
   try {
@@ -431,39 +462,27 @@ function assertNotSymlink(path, what) {
 }
 function writeAll(fd, data) {
   const buf = Buffer.from(data, "utf8");
-  for (let off = 0; off < buf.length; ) off += writeSync(fd, buf, off, buf.length - off);
+  for (let off = 0; off < buf.length; ) off += writeSync2(fd, buf, off, buf.length - off);
 }
 function atomicWriteFile(path, data, mode) {
   const tmp = `${path}.${randomBytes2(8).toString("hex")}.tmp`;
-  const fd = openSync(tmp, "wx", mode);
+  const fd = openSync2(tmp, "wx", mode);
   try {
     writeAll(fd, data);
-    fsyncSync(fd);
+    fsyncSync2(fd);
   } finally {
-    closeSync(fd);
+    closeSync2(fd);
   }
   try {
-    renameSync(tmp, path);
+    renameSync2(tmp, path);
   } catch (e) {
     try {
-      unlinkSync2(tmp);
+      unlinkSync3(tmp);
     } catch {
     }
     throw e;
   }
-  let dfd;
-  try {
-    dfd = openSync(dirname3(path), "r");
-    fsyncSync(dfd);
-  } catch {
-  } finally {
-    if (dfd !== void 0) {
-      try {
-        closeSync(dfd);
-      } catch {
-      }
-    }
-  }
+  fsyncDir(dirname3(path));
 }
 function atomicWriteRegistry(home, reg) {
   const path = registryPath(home);
@@ -526,7 +545,7 @@ function globalScopeNonce(home) {
 
 // src/memory/ledger-mac.ts
 import { createHash, createHmac, hkdfSync, randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync4, linkSync as linkSync2, unlinkSync as unlinkSync3, statSync, chmodSync as chmodSync2 } from "node:fs";
+import { openSync as openSync3, fsyncSync as fsyncSync3, closeSync as closeSync3, readFileSync as readFileSync4, linkSync as linkSync3, unlinkSync as unlinkSync4, statSync, chmodSync as chmodSync2 } from "node:fs";
 import { dirname as dirname4, join as join4 } from "node:path";
 var ACCEPTED_MAC_VERSIONS = /* @__PURE__ */ new Set([1, 2]);
 var ILL_FORMED_TAG = Buffer.from([255, 1]);
@@ -1107,6 +1126,9 @@ function reverifyFlag(r) {
   return NON_VERIFYING_FLAG[r.source] ?? "(non-authoritative \u2014 confirm before use) ";
 }
 
+// src/limits.ts
+var HOOK_STDIN_MAX_BYTES = 1048576;
+
 // src/risk/trifecta.ts
 var EGRESS_VERB = /\b(send|post|upload|email|exfiltrate|transmit|leak|forward|fetch)\b/;
 var SENSITIVE_REF = /(contents of|read\s+~?\/|password|passwords|secret|api[ _-]?key|\b(?:private|ssh|access|signing|encryption)[ _-]?keys?\b|all your\b|credentials?)/;
@@ -1331,9 +1353,6 @@ function metricsEnabledFromGlobalConfig(home) {
   return m && typeof m === "object" && typeof m.enabled === "boolean" ? m.enabled : true;
 }
 
-// src/limits.ts
-var HOOK_STDIN_MAX_BYTES = 1048576;
-
 // src/hooks/session-record.ts
 async function readStdinCapped(stream, maxBytes) {
   const chunks = [];
@@ -1388,13 +1407,13 @@ async function main() {
     const globalLedger = process.env.HELIX_LEDGER ?? join8(home, "memory.jsonl");
     const stray = strayTrustFiles(home, globalLedger);
     if (stray.length > 0) {
-      writeSync2(1, `helix: NOTE - trust-store files (${stray.join(", ")}) sit next to the ledger instead of under HELIX_HOME (${home}); if memory tools are not working, this is why. Run the MCP server directly to see whether it refuses to start or just warns, and the full instructions either way.
+      writeSync3(1, `helix: NOTE - trust-store files (${stray.join(", ")}) sit next to the ledger instead of under HELIX_HOME (${home}); if memory tools are not working, this is why. Run the MCP server directly to see whether it refuses to start or just warns, and the full instructions either way.
 `);
     }
     let cwd;
     const stdinText = await readStdinCapped(process.stdin, HOOK_STDIN_MAX_BYTES);
     if (stdinText === null) {
-      writeSync2(2, `helix: NOTE - stdin exceeded ${HOOK_STDIN_MAX_BYTES} bytes; proceeding as if stdin were {} (global scope only).
+      writeSync3(2, `helix: NOTE - stdin exceeded ${HOOK_STDIN_MAX_BYTES} bytes; proceeding as if stdin were {} (global scope only).
 `);
     } else {
       try {
@@ -1410,7 +1429,7 @@ async function main() {
       witnessNotes,
       unionRows: unionPhysicalRows(replays)
     });
-    if (text !== "") writeSync2(1, text + "\n");
+    if (text !== "") writeSync3(1, text + "\n");
     const sink = createMetricsSink(join8(home, "metrics.jsonl"), metricsEnabledFromGlobalConfig(home));
     for (const rp of replays) {
       sink.emitReplay({

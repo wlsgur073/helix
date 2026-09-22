@@ -13769,6 +13769,13 @@ var realProbe = {
       return null;
     }
   },
+  timeNs() {
+    try {
+      return readlinkSync("/proc/self/ns/time");
+    } catch {
+      return null;
+    }
+  },
   uptimeSec() {
     return gatedUptimeSec();
   },
@@ -13778,7 +13785,7 @@ var realProbe = {
   }
 };
 function selfIdentity(token, probe = realProbe) {
-  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform, uptimeSec: probe.uptimeSec() };
+  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), timeNs: probe.timeNs(), threadId, platform: process.platform, uptimeSec: probe.uptimeSec() };
 }
 var isStringOrNull = (x) => x === null || typeof x === "string";
 var isFiniteNumberOrAbsent = (x) => x === void 0 || x === null || typeof x === "number" && Number.isFinite(x);
@@ -13789,12 +13796,14 @@ function tryParsePayload(raw) {
     if (typeof p.token !== "string" || typeof p.pid !== "number" || typeof p.threadId !== "number" || typeof p.platform !== "string") return null;
     if (!isStringOrNull(p.startTicks) || !isStringOrNull(p.bootId) || !isStringOrNull(p.pidNs)) return null;
     if (!isFiniteNumberOrAbsent(p.uptimeSec)) return null;
-    return { ...p, uptimeSec: p.uptimeSec ?? null };
+    if (p.timeNs !== void 0 && !isStringOrNull(p.timeNs)) return null;
+    return { ...p, uptimeSec: p.uptimeSec ?? null, timeNs: p.timeNs ?? null };
   } catch {
     return null;
   }
 }
-var usableUptimeWitness = (recorded, self) => recorded.platform === self.platform && UPTIME_WITNESS_PLATFORMS.has(recorded.platform) && typeof recorded.uptimeSec === "number" && Number.isFinite(recorded.uptimeSec) && recorded.pidNs === self.pidNs;
+var usableUptimeWitness = (recorded, self) => recorded.platform === self.platform && UPTIME_WITNESS_PLATFORMS.has(recorded.platform) && typeof recorded.uptimeSec === "number" && Number.isFinite(recorded.uptimeSec) && recorded.pidNs === self.pidNs && sameTimeNamespace(recorded, self);
+var sameTimeNamespace = (recorded, self) => (recorded.timeNs ?? null) === (self.timeNs ?? null);
 function classifyHolder(recorded, self, probe) {
   if (recorded.platform !== self.platform) return "alive-unknown";
   if (recorded.bootId !== null && self.bootId !== null && recorded.bootId !== self.bootId) return "dead";
@@ -13811,7 +13820,7 @@ function classifyHolder(recorded, self, probe) {
   const k = probe.kill0(recorded.pid);
   if (k === "dead") return "dead";
   if (k === "unknown") return "alive-unknown";
-  if (recorded.startTicks !== null) {
+  if (recorded.startTicks !== null && sameTimeNamespace(recorded, self)) {
     const cur = probe.startTicksOf(recorded.pid);
     if (cur !== null && cur !== recorded.startTicks) return "dead";
     if (cur === null && k === "alive") return "alive-unknown";
@@ -14614,19 +14623,7 @@ function atomicWriteFile(path, data, mode) {
     }
     throw e;
   }
-  let dfd;
-  try {
-    dfd = openSync3(dirname5(path), "r");
-    fsyncSync3(dfd);
-  } catch {
-  } finally {
-    if (dfd !== void 0) {
-      try {
-        closeSync3(dfd);
-      } catch {
-      }
-    }
-  }
+  fsyncDir(dirname5(path));
 }
 function atomicWriteRegistry(home2, reg) {
   const path = registryPath(home2);
@@ -14680,9 +14677,9 @@ function stampOwnership(projectRoot2, home2, opts = {}) {
     const helixDir = join5(projectRoot2, ".helix");
     assertNotSymlink(helixDir, ".helix directory");
     mkdirSync3(helixDir, { recursive: true });
-    atomicWriteOwner(projectRoot2, stamp);
     reg[key] = { stamp, adoptedAt, macNonce, trustState };
     atomicWriteRegistry(home2, reg);
+    atomicWriteOwner(projectRoot2, stamp);
   });
 }
 function trustStateOf(projectRoot2, home2) {
@@ -15858,6 +15855,10 @@ var MAX_COMMIT_CONTENT_CHARS = 16384;
 var MAX_DV_QUESTION_CHARS = 65536;
 var MAX_DV_ANSWER_CHARS = 65536;
 var MAX_DV_QUOTED_ITEMS = 64;
+var MAX_INSPECT_IDS = 20;
+var MAX_ECHO_SPAN_IDS = 10;
+var MAX_ECHO_SPANS_PER_ID = 3;
+var MAX_ECHO_SPAN_CHARS = 160;
 var MAX_RECHECK_PATH_CHARS = 4096;
 var MAX_RECHECK_PATTERN_CHARS = 2048;
 var RECALL_MAX_ITEMS_CAP = 200;
@@ -25134,6 +25135,9 @@ function jaccard(a, b) {
   return union2 === 0 ? 1 : inter / union2;
 }
 var SENTENCE_SIM = 0.5;
+function pairable(t) {
+  return t.size > 0 && ![...t].every((x) => /^\d+$/.test(x));
+}
 var UNPREFIXED_NEGATIONS = ["unsafe", "unavailable", "unreachable"];
 var NEGATOR_ALTERNATIVES = String.raw`\bnot\b|n['’ʼ]t\b|\bno\b|\bnever\b|\bcannot\b`;
 var NEGATOR_RE = new RegExp(NEGATOR_ALTERNATIVES, "i");
@@ -25170,6 +25174,7 @@ function buildAgreementMap(helixAnswer, codexAnswer) {
   const candidates = [];
   for (let i = 0; i < helix.length; i++) {
     for (let j = 0; j < codex.length; j++) {
+      if (!pairable(helixTok[i]) || !pairable(codexTok[j])) continue;
       const sim = jaccard(helixTok[i], codexTok[j]);
       if (sim >= SENTENCE_SIM) candidates.push({ i, j, sim });
     }
@@ -25327,6 +25332,44 @@ function detectEcho(forms, ledger, opts = {}) {
   }
   return { memoryIds: ids };
 }
+function echoSpans(forms, content, opts = {}) {
+  const k = opts.k ?? DEFAULT_K;
+  const maxScan = opts.maxScan ?? MAX_FORM_SCAN;
+  const cap = opts.maxSpanChars ?? MAX_ECHO_SPAN_CHARS;
+  const norm = normalizeForMatch(content);
+  if (norm.length < k) return [];
+  const grams = /* @__PURE__ */ new Set();
+  for (let i = 0; i + k <= norm.length; i++) grams.add(norm.slice(i, i + k));
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const form of forms) {
+    const hay = normalizeForMatch(form).slice(0, maxScan);
+    let start = -1;
+    let end = -1;
+    for (let i = 0; i + k <= hay.length; i++) {
+      if (!grams.has(hay.slice(i, i + k))) continue;
+      if (start === -1) {
+        start = i;
+        end = i + k;
+        continue;
+      }
+      if (i <= end) {
+        end = i + k;
+        continue;
+      }
+      push(hay.slice(start, end));
+      start = i;
+      end = i + k;
+    }
+    if (start !== -1) push(hay.slice(start, end));
+  }
+  return out;
+  function push(run) {
+    if (seen.has(run)) return;
+    seen.add(run);
+    out.push({ text: run.length > cap ? `${run.slice(0, cap)}\u2026` : run, fullLength: run.length });
+  }
+}
 var EGRESS_LEG_ORDER = ["memoryEcho", "piiHigh", "secretHeuristic", "secretEntropy", "secretEntropyExempt", "piiBulk"];
 var AUDIT_LEG_ORDER = ["secret", "pii", "memory_echo"];
 var BULK_PII_N = 3;
@@ -25353,6 +25396,10 @@ function scanText(text) {
     highPii: highHits.length > 0,
     lowPiiCount: piiHits.filter((h) => h.severity === "low").length
   };
+}
+function scannedForms(input) {
+  const raw = input.texts.join("\n");
+  return input.outbound === raw ? [raw] : [raw, input.outbound];
 }
 function classifyEgress(input) {
   const raw = input.texts.join("\n");
@@ -25389,7 +25436,7 @@ function classifyEgress(input) {
       };
     }
   }
-  const forms = outbound === raw ? [raw] : [raw, outbound];
+  const forms = scannedForms(input);
   const scans = forms.map(scanText);
   const any = (f) => scans.some(f);
   const secretHit = any((s) => s.secretHit);
@@ -25505,19 +25552,31 @@ async function dualVerify(params, deps) {
     const what = params.stakes ? `stakes '${params.stakes}' below configured floor '${floor}'` : `stakes not declared (treated as '${declared}'), below configured floor '${floor}'`;
     return { ran: false, attempted: false, outcome: "skipped", reason: `${what} \u2014 lowest accepted: '${floor}' (dualVerify.stakesFloor in ~/.helix/config.json)`, gates: stoppedAt("stakesFloor") };
   }
+  evaluated.push("egress");
+  if (params.helixAnswer.length > MAX_DV_ANSWER_CHARS) {
+    return { ran: false, attempted: false, outcome: "skipped", reason: `helixAnswer exceeds ${MAX_DV_ANSWER_CHARS} characters`, gates: stoppedAt("egress") };
+  }
   const mode = deps.config.dualVerify.mode;
   const prompt = mode === "critique" ? buildCritiquePrompt(params.question, params.helixAnswer) : normalizeUntrusted(params.question);
-  evaluated.push("egress");
   const ledger = deps.echo.mode === "enforce" ? deps.echo.ledgerTexts() : null;
-  const verdict = classifyEgress({
-    texts: [params.question, params.helixAnswer],
+  const egressInput = {
+    texts: mode === "critique" ? [params.question, params.helixAnswer] : [params.question],
     outbound: prompt,
     ledger,
     policy: deps.config.dualVerify.egressPolicy,
     quoted: params.quotedMemory
-  });
+  };
+  const verdict = classifyEgress(egressInput);
   if (verdict.decision === "blocked") {
-    return { ran: false, attempted: false, outcome: "refused", reason: verdict.reason, egress: verdict, gates: stoppedAt("egress") };
+    return {
+      ran: false,
+      attempted: false,
+      outcome: "refused",
+      reason: verdict.reason,
+      egress: verdict,
+      gates: stoppedAt("egress"),
+      echoSpans: spansFor(verdict, egressInput, ledger)
+    };
   }
   evaluated.push("available");
   const avail = await deps.checkAvailable();
@@ -25539,6 +25598,19 @@ async function dualVerify(params, deps) {
   }
   const agreement = buildAgreementMap(params.helixAnswer, res.answer);
   return { ran: true, attempted: true, outcome: "sent", promptSent: prompt, mode, codexAnswer: res.answer, agreement, egress: verdict };
+}
+function spansFor(verdict, input, ledger) {
+  if (verdict.decidedBy !== "memoryEcho" || ledger === null) return void 0;
+  const exempt = new Set(verdict.echoExemptIds);
+  const blocking = verdict.echoMemoryIds.filter((id) => !exempt.has(id));
+  const forms = scannedForms(input);
+  const entries = blocking.slice(0, MAX_ECHO_SPAN_IDS).flatMap((id) => {
+    const item = ledger.find((l) => l.id === id);
+    if (item === void 0) return [];
+    const all = echoSpans(forms, item.content);
+    return [{ id, spans: all.slice(0, MAX_ECHO_SPANS_PER_ID), omittedSpans: Math.max(0, all.length - MAX_ECHO_SPANS_PER_ID) }];
+  });
+  return { entries, omittedIds: Math.max(0, blocking.length - MAX_ECHO_SPAN_IDS) };
 }
 
 // src/audit.ts
@@ -25653,84 +25725,11 @@ function handleRecall(store2, args) {
   );
   return ok(framedOut + trailingNotes);
 }
-function handleInspect(store2, args) {
-  const iso = (s) => isIsoInstant(s) ? s : "??";
-  if (args.asOf !== void 0) {
-    if (args.history) return ok("inspect: history and asOf are mutually exclusive \u2014 pass one.");
-    if (!isIsoInstant(args.asOf)) return ok("inspect: as-of cursor must be a canonical ISO-8601 instant (e.g. 2026-07-04T00:00:00.000Z).");
-    const { facts, keyAvailable, truncated, projectDisposition: projectDisposition2, witnessNotes: witnessNotes2 } = store2.asOfView(args.asOf);
-    if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + unadoptedNote(projectDisposition2) + witnessNotesText(witnessNotes2));
-    const notes = ["\n\n(as-of snapshot \u2014 membership and timing are declared, not authenticated; only auth=Y verify timing is MAC-bound)"];
-    if (!keyAvailable) notes.push("\n\n(integrity verification unavailable \u2014 trust grades shown are unverified)");
-    if (facts.some((f) => f.integrity === "compromised")) notes.push(`
-
-(integrity conflict \u2014 equal-generation verify mismatch or duplicate fact id: ${facts.filter((f) => f.integrity === "compromised").map((f) => safeId(f.record.id)).join(", ")})`);
-    if (facts.some((f) => f.evidence.some((e) => !e.txAuthenticated))) notes.push("\n\n(verify timing marked auth=N is declared, not authenticated \u2014 v1/legacy)");
-    if (truncated) notes.push("\n\n(history may be truncated by a past compaction \u2014 reconstruction before the horizon is unreliable)");
-    if (projectDisposition2 === "unadopted-present") notes.push(unadoptedNote(projectDisposition2));
-    for (const n of witnessNotes2) notes.push(`
-
-${n}`);
-    const trailingNotes2 = notes.join("");
-    const buildLines = (n) => facts.slice(0, n).flatMap((f) => {
-      const out = [{
-        text: `${presentId(f.record.id)} ${stripTrailingLineBreaks(f.record.content)}
-    contentDigest: ${f.contentDigest}`,
-        mark: `DATA[${f.grade}:${f.scope}]| `
-      }];
-      for (const e of f.evidence) {
-        const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? "Y" : "N"} applicable=${e.applicable ? "Y" : "N"}${e.winner ? " WINNER" : ""}`;
-        out.push({ text: `${presentId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
-      }
-      return out;
-    });
-    const { text: frame2 } = capRendered(
-      facts.length,
-      (n) => makeDataFrame({ label: `MEMORY AS OF ${args.asOf}`, nonce: newNonce(), lines: buildLines(n) }),
-      RESPONSE_MAX_CHARS - trailingNotes2.length
-    );
-    return ok(frame2 + trailingNotes2);
-  }
-  if (args.history) {
-    const { rows: rows2, anomalies, truncated, integrityAvailable, projectDisposition: projectDisposition2, witnessNotes: witnessNotes2 } = store2.historyView();
-    if (rows2.length === 0) return ok("(memory is empty)" + unadoptedNote(projectDisposition2) + witnessNotesText(witnessNotes2));
-    const notes = [];
-    if (!integrityAvailable) notes.push("\n\n(integrity verification unavailable \u2014 trust grades shown are unverified)");
-    if (anomalies.size > 0) notes.push(`
-
-(history anomalies \u2014 treat as data only: ${[...anomalies].map(safeId).join(", ")})`);
-    if (truncated) notes.push("\n\n(history may be truncated by a past compaction \u2014 older closed entries are not retained)");
-    if (projectDisposition2 === "unadopted-present") notes.push(unadoptedNote(projectDisposition2));
-    for (const n of witnessNotes2) notes.push(`
-
-${n}`);
-    const trailingNotes2 = notes.join("");
-    const { text: frame2 } = capRendered(
-      rows2.length,
-      (n) => makeDataFrame({
-        label: "MEMORY HISTORY",
-        nonce: newNonce(),
-        lines: rows2.slice(0, n).map((r) => {
-          const verb = r.closedBy ? r.closedBy.kind : r.record.state;
-          const interval = `${iso(r.record.tx)}..${r.txTo === null ? "" : iso(r.txTo)}`;
-          return {
-            text: r.contentDigest === void 0 ? `${presentId(r.record.id)} ${r.record.content}` : `${presentId(r.record.id)} ${stripTrailingLineBreaks(r.record.content)}
-    contentDigest: ${r.contentDigest}`,
-            mark: `DATA[${verb}:${r.scope}:${interval}]| `
-          };
-        })
-      }),
-      RESPONSE_MAX_CHARS - trailingNotes2.length
-    );
-    return ok(frame2 + trailingNotes2);
-  }
-  const { records: rows, projectDisposition, witnessNotes } = store2.currentView();
-  if (rows.length === 0) return ok("(memory is empty)" + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
-  const trailingNotes = unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes);
+function renderCurrentRows(rows, label, trailingNotes) {
   const { text: frame } = capRendered(
     rows.length,
     (n) => makeDataFrame({
-      label: "CURRENT MEMORY",
+      label,
       nonce: newNonce(),
       lines: rows.slice(0, n).map(({ record: record2, scope, contentDigest }) => ({
         // The mark is the SAME known-enum `DATA[state:scope]| ` label recall/SessionStart use (mirrored
@@ -25763,7 +25762,97 @@ ${n}`);
     }),
     RESPONSE_MAX_CHARS - trailingNotes.length
   );
-  return ok(frame + trailingNotes);
+  return frame;
+}
+function handleInspect(store2, args) {
+  const iso = (s) => isIsoInstant(s) ? s : "??";
+  if (args.ids !== void 0) {
+    if (args.history || args.asOf !== void 0) return ok("inspect: ids, history and asOf are mutually exclusive \u2014 pass one.");
+    for (const id of args.ids) assertValidId(id);
+    const wanted = new Set(args.ids);
+    const { records, projectDisposition: projectDisposition2, witnessNotes: witnessNotes2 } = store2.currentView();
+    const rows2 = records.filter((r) => wanted.has(r.record.id));
+    const missing = wanted.size - new Set(rows2.map((r) => r.record.id)).size;
+    const missingNote = missing > 0 ? `
+
+(${missing} of the requested ids have no live memory)` : "";
+    const trailingNotes2 = missingNote + unadoptedNote(projectDisposition2) + witnessNotesText(witnessNotes2);
+    if (rows2.length === 0) return ok("(no live memory for the requested ids)" + trailingNotes2);
+    return ok(renderCurrentRows(rows2, "CURRENT MEMORY", trailingNotes2) + trailingNotes2);
+  }
+  if (args.asOf !== void 0) {
+    if (args.history) return ok("inspect: history and asOf are mutually exclusive \u2014 pass one.");
+    if (!isIsoInstant(args.asOf)) return ok("inspect: as-of cursor must be a canonical ISO-8601 instant (e.g. 2026-07-04T00:00:00.000Z).");
+    const { facts, keyAvailable, truncated, projectDisposition: projectDisposition2, witnessNotes: witnessNotes2 } = store2.asOfView(args.asOf);
+    if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + unadoptedNote(projectDisposition2) + witnessNotesText(witnessNotes2));
+    const notes = ["\n\n(as-of snapshot \u2014 membership and timing are declared, not authenticated; only auth=Y verify timing is MAC-bound)"];
+    if (!keyAvailable) notes.push("\n\n(integrity verification unavailable \u2014 trust grades shown are unverified)");
+    if (facts.some((f) => f.integrity === "compromised")) notes.push(`
+
+(integrity conflict \u2014 equal-generation verify mismatch or duplicate fact id: ${facts.filter((f) => f.integrity === "compromised").map((f) => safeId(f.record.id)).join(", ")})`);
+    if (facts.some((f) => f.evidence.some((e) => !e.txAuthenticated))) notes.push("\n\n(verify timing marked auth=N is declared, not authenticated \u2014 v1/legacy)");
+    if (truncated) notes.push("\n\n(history may be truncated by a past compaction \u2014 reconstruction before the horizon is unreliable)");
+    if (projectDisposition2 === "unadopted-present") notes.push(unadoptedNote(projectDisposition2));
+    for (const n of witnessNotes2) notes.push(`
+
+${n}`);
+    const trailingNotes2 = notes.join("");
+    const buildLines = (n) => facts.slice(0, n).flatMap((f) => {
+      const out = [{
+        text: `${presentId(f.record.id)} ${stripTrailingLineBreaks(f.record.content)}
+    contentDigest: ${f.contentDigest}`,
+        mark: `DATA[${f.grade}:${f.scope}]| `
+      }];
+      for (const e of f.evidence) {
+        const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? "Y" : "N"} applicable=${e.applicable ? "Y" : "N"}${e.winner ? " WINNER" : ""}`;
+        out.push({ text: `${presentId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
+      }
+      return out;
+    });
+    const { text: frame } = capRendered(
+      facts.length,
+      (n) => makeDataFrame({ label: `MEMORY AS OF ${args.asOf}`, nonce: newNonce(), lines: buildLines(n) }),
+      RESPONSE_MAX_CHARS - trailingNotes2.length
+    );
+    return ok(frame + trailingNotes2);
+  }
+  if (args.history) {
+    const { rows: rows2, anomalies, truncated, integrityAvailable, projectDisposition: projectDisposition2, witnessNotes: witnessNotes2 } = store2.historyView();
+    if (rows2.length === 0) return ok("(memory is empty)" + unadoptedNote(projectDisposition2) + witnessNotesText(witnessNotes2));
+    const notes = [];
+    if (!integrityAvailable) notes.push("\n\n(integrity verification unavailable \u2014 trust grades shown are unverified)");
+    if (anomalies.size > 0) notes.push(`
+
+(history anomalies \u2014 treat as data only: ${[...anomalies].map(safeId).join(", ")})`);
+    if (truncated) notes.push("\n\n(history may be truncated by a past compaction \u2014 older closed entries are not retained)");
+    if (projectDisposition2 === "unadopted-present") notes.push(unadoptedNote(projectDisposition2));
+    for (const n of witnessNotes2) notes.push(`
+
+${n}`);
+    const trailingNotes2 = notes.join("");
+    const { text: frame } = capRendered(
+      rows2.length,
+      (n) => makeDataFrame({
+        label: "MEMORY HISTORY",
+        nonce: newNonce(),
+        lines: rows2.slice(0, n).map((r) => {
+          const verb = r.closedBy ? r.closedBy.kind : r.record.state;
+          const interval = `${iso(r.record.tx)}..${r.txTo === null ? "" : iso(r.txTo)}`;
+          return {
+            text: r.contentDigest === void 0 ? `${presentId(r.record.id)} ${r.record.content}` : `${presentId(r.record.id)} ${stripTrailingLineBreaks(r.record.content)}
+    contentDigest: ${r.contentDigest}`,
+            mark: `DATA[${verb}:${r.scope}:${interval}]| `
+          };
+        })
+      }),
+      RESPONSE_MAX_CHARS - trailingNotes2.length
+    );
+    return ok(frame + trailingNotes2);
+  }
+  const { records: rows, projectDisposition, witnessNotes } = store2.currentView();
+  if (rows.length === 0) return ok("(memory is empty)" + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
+  const trailingNotes = unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes);
+  return ok(renderCurrentRows(rows, "CURRENT MEMORY", trailingNotes) + trailingNotes);
 }
 function handleErase(store2, args, deps) {
   assertValidId(args.id);
@@ -25915,7 +26004,22 @@ function echoedMemoriesLine(v) {
   const exempt = new Set(v.echoExemptIds);
   const remaining = v.echoMemoryIds.filter((id) => !exempt.has(id));
   if (remaining.length === 0) return "";
-  return `echoed memories (not sent): ${remaining.map((id) => JSON.stringify(presentId(id))).join(", ")} \u2014 reword without their wording to proceed`;
+  return `echoed memories (not sent): ${remaining.map((id) => JSON.stringify(presentId(id))).join(", ")} \u2014 reword without their wording, or read them with helix_memory_inspect ids and declare them in quotedMemory`;
+}
+function echoSpansBlock(d, deps) {
+  if (!d || d.entries.length === 0) return "";
+  const nonce = (deps.genNonce ?? newNonce)();
+  const row = (text) => {
+    const truncated = text.endsWith("\u2026");
+    const normalized = normalizeUntrusted(truncated ? text.slice(0, -1) : text);
+    return { text: truncated ? `${normalized}\u2026` : normalized, mark: "DATA| ", normalized: true };
+  };
+  const lines = d.entries.flatMap((e) => [
+    ...e.spans.map((s) => row(`${JSON.stringify(presentId(e.id))}: ${s.text}`)),
+    ...e.omittedSpans > 0 ? [row(`${JSON.stringify(presentId(e.id))}: (${e.omittedSpans} more matched runs not shown)`)] : []
+  ]);
+  if (d.omittedIds > 0) lines.push(row(`(${d.omittedIds} more echoed records not shown)`));
+  return "\n" + makeDataFrame({ label: "ECHOED SPANS", nonce, lines });
 }
 function guardLine(g) {
   if (!g) return "";
@@ -25986,7 +26090,8 @@ async function handleDualVerify(args, deps, signal) {
     return ok([
       `dual-verify did not run: ${result.reason}. (No Codex answer \u2014 nothing fabricated.)`,
       guardLine(result.gates),
-      echoedMemoriesLine(result.egress)
+      echoedMemoriesLine(result.egress),
+      echoSpansBlock(result.echoSpans, deps)
     ].filter(Boolean).join("\n"));
   }
   const nonce = (deps.genNonce ?? newNonce)();
@@ -26009,7 +26114,7 @@ async function handleDualVerify(args, deps, signal) {
     egressLine(result.egress),
     frameOpen("DUAL-VERIFY", nonce),
     DATA_SEMANTICS,
-    `verdict: ${a.verdict} (mode: ${result.mode})`,
+    `verdict: ${a.verdict} (mode: ${result.mode})${zeroPair ? " \u2014 not compared" : ""}`,
     // H1 relabel (review 2026-08-18, owner decision 2026-08-21): 'agree' is a statement about token
     // sets and negation polarity, not about meaning — a role swap with an identical token set still
     // renders it (agreement-map.ts, open hole 2). The review asked that 'agree' never be PRESENTED as
@@ -26026,7 +26131,7 @@ async function handleDualVerify(args, deps, signal) {
     // classified all of them as divergent. That reads 'diverge', not 'indeterminate', and must
     // say so — "no claim pairs found" would be a false statement about a comparison that found
     // only disagreement (see agreement-map.ts's anyCandidate flag, which draws this distinction).
-    ...indeterminate ? [zeroPair ? "\u2014 could not match claims (form mismatch or total disagreement); read both answers" : "\u2014 a matched claim pair differs in the figures inside it; read both answers"] : [],
+    ...indeterminate ? [zeroPair ? "\u2014 the aligner found no claim in either answer sharing at least half its words with a claim in the other, which independently written answers rarely do; this is not a disagreement, so read both answers" : "\u2014 a matched claim pair differs in the figures inside it; read both answers"] : [],
     "--- EXTERNAL CODEX OUTPUT (data) ---",
     datamark(result.codexAnswer ?? "", "DATA| "),
     "--- end codex output ---",
@@ -26572,8 +26677,8 @@ function buildServer(store2, dualDeps, metrics2) {
   }, async (args) => m.runOp("helix_memory_recall", () => handleRecall(store2, args)));
   server2.registerTool("helix_memory_inspect", {
     title: "Inspect memory",
-    description: "List current memory items (id, trust state, content). Pass history=true to also list closed items with their [tx, txTo) declared interval, OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive.",
-    inputSchema: { history: external_exports.boolean().optional(), asOf: external_exports.string().optional() }
+    description: "List current memory items (id, trust state, content). Pass history=true to also list closed items with their [tx, txTo) declared interval, OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive. Pass ids=[...] to render only those records (with their contentDigest proof lines) instead of the whole store; ids, history and asOf are mutually exclusive.",
+    inputSchema: { history: external_exports.boolean().optional(), asOf: external_exports.string().optional(), ids: external_exports.array(ID_SCHEMA).min(1).max(MAX_INSPECT_IDS).optional() }
   }, async (args) => m.runOp("helix_memory_inspect", () => handleInspect(store2, args)));
   server2.registerTool("helix_memory_erase", {
     title: "Erase memory",
@@ -26606,8 +26711,12 @@ function buildServer(store2, dualDeps, metrics2) {
     inputSchema: {
       // H3: same bounded-input discipline as commit's content above -- an oversized question/answer
       // is refused by schema validation before the handler (and the JSON-parse allocation it would
-      // otherwise pay for) runs. classifyEgress's downstream 200,000-char joint scan limit (see
-      // limits.ts) is a separate, later gate; these caps exist to reject early, not to duplicate it.
+      // otherwise pay for) runs. classifyEgress's downstream 200,000-char scan limit (see limits.ts)
+      // is a separate, later gate; these caps exist to reject early, not to duplicate it. That scan
+      // limit joins question and helixAnswer JOINTLY only in critique mode, the only mode that hands
+      // classifyEgress both fields -- compare mode never transmits helixAnswer, so its scan sees
+      // question alone, and helixAnswer's own core-side bound there is the direct MAX_DV_ANSWER_CHARS
+      // check in dualVerify (src/verify/dual-verify.ts), not this scan limit.
       question: external_exports.string().max(MAX_DV_QUESTION_CHARS).describe(`The question being verified (max ${MAX_DV_QUESTION_CHARS} characters).`),
       helixAnswer: external_exports.string().max(MAX_DV_ANSWER_CHARS).describe(`Your answer to cross-validate (max ${MAX_DV_ANSWER_CHARS} characters).`),
       stakes: external_exports.enum(["low", "medium", "high", "xhigh"]).optional(),

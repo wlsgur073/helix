@@ -433,6 +433,13 @@ var realProbe = {
       return null;
     }
   },
+  timeNs() {
+    try {
+      return readlinkSync("/proc/self/ns/time");
+    } catch {
+      return null;
+    }
+  },
   uptimeSec() {
     return gatedUptimeSec();
   },
@@ -442,7 +449,7 @@ var realProbe = {
   }
 };
 function selfIdentity(token, probe = realProbe) {
-  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), threadId, platform: process.platform, uptimeSec: probe.uptimeSec() };
+  return { v: 1, token, pid: process.pid, startTicks: probe.startTicksOf(process.pid), bootId: probe.bootId(), pidNs: probe.pidNs(), timeNs: probe.timeNs(), threadId, platform: process.platform, uptimeSec: probe.uptimeSec() };
 }
 var isStringOrNull = (x) => x === null || typeof x === "string";
 var isFiniteNumberOrAbsent = (x) => x === void 0 || x === null || typeof x === "number" && Number.isFinite(x);
@@ -453,12 +460,14 @@ function tryParsePayload(raw) {
     if (typeof p.token !== "string" || typeof p.pid !== "number" || typeof p.threadId !== "number" || typeof p.platform !== "string") return null;
     if (!isStringOrNull(p.startTicks) || !isStringOrNull(p.bootId) || !isStringOrNull(p.pidNs)) return null;
     if (!isFiniteNumberOrAbsent(p.uptimeSec)) return null;
-    return { ...p, uptimeSec: p.uptimeSec ?? null };
+    if (p.timeNs !== void 0 && !isStringOrNull(p.timeNs)) return null;
+    return { ...p, uptimeSec: p.uptimeSec ?? null, timeNs: p.timeNs ?? null };
   } catch {
     return null;
   }
 }
-var usableUptimeWitness = (recorded, self) => recorded.platform === self.platform && UPTIME_WITNESS_PLATFORMS.has(recorded.platform) && typeof recorded.uptimeSec === "number" && Number.isFinite(recorded.uptimeSec) && recorded.pidNs === self.pidNs;
+var usableUptimeWitness = (recorded, self) => recorded.platform === self.platform && UPTIME_WITNESS_PLATFORMS.has(recorded.platform) && typeof recorded.uptimeSec === "number" && Number.isFinite(recorded.uptimeSec) && recorded.pidNs === self.pidNs && sameTimeNamespace(recorded, self);
+var sameTimeNamespace = (recorded, self) => (recorded.timeNs ?? null) === (self.timeNs ?? null);
 function classifyHolder(recorded, self, probe) {
   if (recorded.platform !== self.platform) return "alive-unknown";
   if (recorded.bootId !== null && self.bootId !== null && recorded.bootId !== self.bootId) return "dead";
@@ -475,7 +484,7 @@ function classifyHolder(recorded, self, probe) {
   const k = probe.kill0(recorded.pid);
   if (k === "dead") return "dead";
   if (k === "unknown") return "alive-unknown";
-  if (recorded.startTicks !== null) {
+  if (recorded.startTicks !== null && sameTimeNamespace(recorded, self)) {
     const cur = probe.startTicksOf(recorded.pid);
     if (cur !== null && cur !== recorded.startTicks) return "dead";
     if (cur === null && k === "alive") return "alive-unknown";
@@ -1231,19 +1240,7 @@ function atomicWriteFile(path, data, mode) {
     }
     throw e;
   }
-  let dfd;
-  try {
-    dfd = openSync3(dirname5(path), "r");
-    fsyncSync3(dfd);
-  } catch {
-  } finally {
-    if (dfd !== void 0) {
-      try {
-        closeSync3(dfd);
-      } catch {
-      }
-    }
-  }
+  fsyncDir(dirname5(path));
 }
 function atomicWriteRegistry(home, reg) {
   const path = registryPath(home);
@@ -1297,9 +1294,9 @@ function stampOwnership(projectRoot, home, opts = {}) {
     const helixDir = join5(projectRoot, ".helix");
     assertNotSymlink(helixDir, ".helix directory");
     mkdirSync3(helixDir, { recursive: true });
-    atomicWriteOwner(projectRoot, stamp);
     reg[key] = { stamp, adoptedAt, macNonce, trustState };
     atomicWriteRegistry(home, reg);
+    atomicWriteOwner(projectRoot, stamp);
   });
 }
 function resolveTrust(projectRoot, home, resolution, opts = {}) {
