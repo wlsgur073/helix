@@ -15,6 +15,15 @@ export interface AgreementMap {
    *  A count, not a flag re-derived from the note text: `divergences` carries untrusted answer bytes,
    *  so any string test over it is a rule an adversary can aim at. */
   withheldPairs: number;
+  /** How many claim pairs the aligner ASSIGNED (item 7). Zero exactly when no candidate cleared
+   *  SENTENCE_SIM — the zero-pair route — so a caller tells the three 'indeterminate' routes apart by
+   *  `pairs` and `withheldPairs` alone. A COUNT: it carries no bytes from either answer. */
+  pairs: number;
+  /** Claims with no counterpart on the other side (item 7, DIVERGE-UNPAIRED): Helix side first, then
+   *  Codex side, each in original order. MOVED out of `divergences`, not added: before item 7 these
+   *  sat there with the SAME status as a contradicted pair, so two answers covering different ground
+   *  read 'diverge'. Carries untrusted answer bytes — render it datamarked; never branch on its text. */
+  unmatched: string[];
 }
 
 /** Split an answer into trimmed claim-sentences, preserving original casing for display.
@@ -50,28 +59,28 @@ const SENTENCE_SIM = 0.5;
  *  against their own kind — a coincidence of FORM, never a correspondence of claim: measured
  *  2026-09-20, two such pairs flipped a comparison from 'indeterminate' to 'diverge' and rendered
  *  `agreements: ["1","2"]`. The claim itself is KEPT in every list; only its eligibility as a
- *  candidate is withdrawn, so `divergences` still carries every sentence of both answers.
- *  THE TWO HALVES ARE NOT SYMMETRIC, measured 2026-09-20 in review. The EMPTY half only ever
- *  changes an empty-vs-empty comparison: jaccard(∅, x) is 0 for any non-empty x, so an empty-token
- *  claim was already below SENTENCE_SIM against ordinary prose before this guard existed, and
- *  denying it candidacy here costs nothing beyond closing the empty-vs-empty coincidence this
- *  function exists for. The NUMERAL half is WIDER than that, and the width is deliberate rather
- *  than incidental: the call site below reads `!pairable(helixTok[i]!) || !pairable(codexTok[j]!)`,
- *  so a numeral-only claim is denied candidacy against ANY partner, not only against another
- *  numeral-only claim — and unlike an empty set, a numeral-only token set CAN score >= SENTENCE_SIM
- *  against ordinary prose that happens to quote the same number (`buildAgreementMap('1', 'Step
- *  1')`: tokens {1} vs {step,1}, jaccard = 1/2 = 0.5, a candidate before this guard). ACCEPTED
- *  COST, not a bug, measured: two answers consisting of nothing but the same bare number now read
- *  'indeterminate' where they read 'agree' before — `buildAgreementMap('42', '42')` was `{verdict:
- *  'agree', agreements: ['42']}` and is now `{verdict: 'indeterminate', divergences:
- *  ['42','42']}`. Narrowing the predicate to "both sides degenerate" would restore that pairing,
- *  but it would also let a numeral-only claim keep pairing with ordinary prose on the strength of
- *  one shared digit — the same coincidence of form this function exists to remove, only moved from
- *  both sides to one. The trade is the standing one in this file: close a coincidence of form,
- *  accept a visible abstention (see the False-'diverge' vs False-'agree' tradeoff in the header
- *  above `buildAgreementMap`). The direction stays safe either way: a claim denied candidacy is
- *  merely left unassigned, so it lands in `divergences` and no verdict can move TOWARD 'agree'
- *  because of it. */
+ *  candidate is withdrawn, so `divergences` and `unmatched` together still carry every sentence of
+ *  both answers. THE TWO HALVES ARE NOT SYMMETRIC, measured 2026-09-20 in review. The EMPTY half
+ *  only ever changes an empty-vs-empty comparison: jaccard(∅, x) is 0 for any non-empty x, so an
+ *  empty-token claim was already below SENTENCE_SIM against ordinary prose before this guard
+ *  existed, and denying it candidacy here costs nothing beyond closing the empty-vs-empty
+ *  coincidence this function exists for. The NUMERAL half is WIDER than that, and the width is
+ *  deliberate rather than incidental: the call site below reads `!pairable(helixTok[i]!) ||
+ *  !pairable(codexTok[j]!)`, so a numeral-only claim is denied candidacy against ANY partner, not
+ *  only against another numeral-only claim — and unlike an empty set, a numeral-only token set CAN
+ *  score >= SENTENCE_SIM against ordinary prose that happens to quote the same number
+ *  (`buildAgreementMap('1', 'Step 1')`: tokens {1} vs {step,1}, jaccard = 1/2 = 0.5, a candidate
+ *  before this guard). ACCEPTED COST, not a bug, measured: two answers consisting of nothing but
+ *  the same bare number now read 'indeterminate' where they read 'agree' before —
+ *  `buildAgreementMap('42', '42')` was `{verdict: 'agree', agreements: ['42']}` and is now
+ *  `{verdict: 'indeterminate', divergences: [], unmatched: ['42','42'], pairs: 0}`. Narrowing the
+ *  predicate to "both sides degenerate" would restore that pairing, but it would also let a
+ *  numeral-only claim keep pairing with ordinary prose on the strength of one shared digit — the
+ *  same coincidence of form this function exists to remove, only moved from both sides to one. The
+ *  trade is the standing one in this file: close a coincidence of form, accept a visible abstention
+ *  (see the False-'diverge' vs False-'agree' tradeoff in the header above `buildAgreementMap`). The
+ *  direction stays safe either way: a claim denied candidacy is merely left unassigned, so it lands
+ *  in `unmatched` and no verdict can move TOWARD 'agree' because of it. */
 function pairable(t: Set<string>): boolean {
   return t.size > 0 && ![...t].every((x) => /^\d+$/.test(x));
 }
@@ -419,46 +428,33 @@ function negationPolarity(s: string): number {
  *           each claim at most once, so both pairs now stand on their true counterparts and both are
  *           polarity-discordant — WHEN the true pairs outscore the cross pairs. See the pinned
  *           cross-pairing tests: one for the fixed shape, two for the shapes still open.
- *   - UNPAIRED-CLAIMS ROUTE, a THIRD route to the False-'diverge' (over-flagging) direction above,
- *     by a mechanism neither of the two paragraphs above names: not a negation marker, and not a
- *     missed contradiction, but claim-count asymmetry. Once PASS 1 finds ANY genuine candidate
- *     (anyCandidate true), PASS 3 leaves every claim PASS 2 could not assign a counterpart to
- *     marked 'divergent' — the SAME status a polarity-discordant ASSIGNED pair gets, see PASS 3
- *     below — and the verdict step reads 'diverge' the moment that list is non-empty. So two
- *     answers sharing one real claim but otherwise covering different ground read
- *     'diverge' exactly like two answers that contradict each other; an uncorresponded claim and a
- *     contradicted one are indistinguishable in the returned shape. This is the module's standing
- *     verdict policy, not a bug of its own (see the 'one paired sentence plus unmatched remainder'
- *     test), and it is NOT CLOSED here: telling "no counterpart" apart from "conflicting counterpart"
- *     would need a status this module does not keep, not a rule over which claims may pair. What IS
- *     closed (2026-09-20) is this route's CHEAPEST trigger: a claim with no lexical content to
- *     compare — an empty token set (a code fence, a bare rule) or an all-NUMERAL one (an ordered-list
- *     marker split off by sentences() as its own claim) — used to pair with another claim of the same
- *     degenerate shape at jaccard 1.0, a coincidence of FORM that manufactured the "one genuine pair"
- *     precondition out of nothing. Measured on real traffic: two such pairs (an ordered-list "1"/"2"
- *     split from each side) flipped a comparison from 'indeterminate' to 'diverge' and rendered
- *     `agreements: ["1","2"]` — form, not correspondence, reported as agreement. `pairable` (above)
- *     withdraws CANDIDACY from degenerate-token claims in PASS 1; the claims themselves still reach
- *     `divergences` when genuinely unpaired, so a comparison whose only prior candidates were
- *     degenerate-form pairs now correctly reads 'indeterminate' instead. A comparison that also holds
- *     one genuine, content-bearing pair is unaffected by this fix and still takes the unpaired-claims
- *     route above; that residue stays open.
- * 'indeterminate' has TWO routes, and they mean the same thing at different depths — the module has
- * established no relationship it is willing to report:
- *   - No lexical candidates ANYWHERE (jaccard is symmetric, so zero one way implies zero the other):
- *     no comparability at all (empty inputs included; they must not read as vacuous agreement).
+ *   - UNPAIRED-CLAIMS ROUTE — CLOSED 2026-09-23 (item 7, DIVERGE-UNPAIRED). It used to be a THIRD route
+ *     to the False-'diverge' direction: once PASS 1 found ANY candidate, every claim PASS 2 could not
+ *     assign a counterpart to kept the status 'divergent' — the same status a polarity-discordant
+ *     assigned pair gets — so two answers sharing one real claim but otherwise covering different
+ *     ground read 'diverge' like two answers that contradict each other. An unassigned claim now
+ *     carries its own status, 'unpaired', and lands in `unmatched`, never in `divergences`; a
+ *     comparison whose pairs all agree but which leaves claims unmatched reads 'indeterminate'
+ *     (server/handlers.ts renders it "partially compared"). The 2026-09-20 fix to its cheapest
+ *     trigger stays: `pairable` still withdraws candidacy from empty and all-numeral claims. WHAT
+ *     STAYS OPEN, measured: a real contradiction the aligner cannot see ("safe" / "dangerous", open
+ *     hole 2's class) paired with an unrelated unmatched sentence used to read 'diverge' by accident;
+ *     it now reads 'indeterminate' with the contradicted pair under `agreements`, and the renderer's
+ *     partial-route line says the pairs agree lexically only.
+ * 'indeterminate' has THREE routes, all abstentions — the module reports no relationship it is
+ * willing to stand behind:
+ *   - No lexical candidates ANYWHERE (`pairs` = 0; jaccard is symmetric, so zero one way implies zero
+ *     the other): no comparability at all (empty inputs included; they must not read as agreement).
  *   - At least one pair had its figures WITHHELD by the clamp and no pair diverged (H1):
- *     comparability was established, the relationship was not. Note the "at least one" — a pair may
- *     have AGREED alongside the withheld one, so `agreements` can be NON-EMPTY under 'indeterminate'.
- *     A caller that renders this verdict must not describe it as "no pair agreed".
- * Both are distinct from having candidates that are all polarity-discordant — that IS comparability
- * AND a genuine finding, so it reads 'diverge'. A comparison carrying both a real divergence and a
- * withheld pair reads 'diverge' too: the real finding outranks the abstention, and the withheld
- * pair's note travels in `divergences` beside it either way.
- * NOTE FOR CALLERS that branch on 'indeterminate' to explain themselves: the two routes are NOT
- * distinguishable from the returned shape when the withheld pair is the only pair, so text reading
- * "no claim pairs were found" is false on the second route. See server/handlers.ts, which words its
- * abstention line to cover both.
+ *     comparability was established, the relationship was not. A pair may have AGREED alongside the
+ *     withheld one, so `agreements` can be NON-EMPTY here; never describe it as "no pair agreed".
+ *   - Every assigned pair agreed but claims were left unmatched (item 7): the answers overlap and
+ *     otherwise cover different ground.
+ * All three are distinct from a polarity-discordant pair — that IS a finding, so it reads 'diverge',
+ * and it outranks both a withheld pair and unmatched claims.
+ * NOTE FOR CALLERS: the routes are distinguishable from the returned shape — `pairs === 0` is the
+ * first, `withheldPairs > 0` the second, otherwise the third. Branch on those counts, never on the
+ * text of `divergences` or `unmatched`, which carry untrusted answer bytes.
  */
 export function buildAgreementMap(helixAnswer: string, codexAnswer: string): AgreementMap {
   const helix = sentences(helixAnswer);
@@ -525,14 +521,20 @@ export function buildAgreementMap(helixAnswer: string, codexAnswer: string): Agr
   // verdict is clamped away from 'agree'. Deliberately NOT recorded as an ordinary divergence: doing
   // so would drive the verdict to 'diverge' and assert a conflict this module has no evidence for,
   // which is the same over-claiming, in the other direction, that H1 is about.
-  type ClaimStatus = 'agreed' | 'divergent' | 'figures-differ';
-  const helixStatus = new Array<ClaimStatus>(helix.length).fill('divergent');
-  const codexStatus = new Array<ClaimStatus>(codex.length).fill('divergent');
+  type ClaimStatus = 'agreed' | 'divergent' | 'figures-differ' | 'unpaired';
+  const helixStatus = new Array<ClaimStatus>(helix.length).fill('unpaired');
+  const codexStatus = new Array<ClaimStatus>(codex.length).fill('unpaired');
   const figureNotes: string[] = [];
+  let pairs = 0;
   for (let i = 0; i < helix.length; i++) {
     const j = partnerOfHelix[i]!;
     if (j < 0) continue;
-    if (helixPolarity[i]! !== codexPolarity[j]!) continue;
+    pairs++;
+    if (helixPolarity[i]! !== codexPolarity[j]!) {
+      helixStatus[i] = 'divergent';
+      codexStatus[j] = 'divergent';
+      continue;
+    }
     const helixFigures = figuresOf(helix[i]!);
     const codexFigures = figuresOf(codex[j]!);
     if (sameFigures(helixFigures, codexFigures)) {
@@ -542,38 +544,28 @@ export function buildAgreementMap(helixAnswer: string, codexAnswer: string): Agr
     }
     helixStatus[i] = 'figures-differ';
     codexStatus[j] = 'figures-differ';
-    // Both claims and both figure sets go in the note: the figures are what differ, but the caller
-    // needs the sentences to judge whether the difference is a conflict. A side that quotes no
-    // figure at all reads "cites no figure" rather than an empty gap.
     figureNotes.push(
-      `figures differ \u2014 "${helix[i]}" cites ${cites(helixFigures)}; "${codex[j]}" cites ${cites(codexFigures)}`,
+      `figures differ — "${helix[i]}" cites ${cites(helixFigures)}; "${codex[j]}" cites ${cites(codexFigures)}`,
     );
   }
 
   const agreements = helix.filter((_, i) => helixStatus[i] === 'agreed');
-  // Withheld pairs are NOT here — that is what keeps them out of the 'diverge' branch below.
   const trueDivergences = [
     ...helix.filter((_, i) => helixStatus[i] === 'divergent'),
     ...codex.filter((_, j) => codexStatus[j] === 'divergent'),
   ];
+  const unmatched = [
+    ...helix.filter((_, i) => helixStatus[i] === 'unpaired'),
+    ...codex.filter((_, j) => codexStatus[j] === 'unpaired'),
+  ];
   const divergences = [...trueDivergences, ...figureNotes];
 
-  // Zero candidates is a failure to COMPARE, not a finding of disagreement (2026-07-26 dogfood
-  // specimen: a prose paragraph vs a bulleted list reaching the same conclusion paired nothing
-  // and rendered 'diverge'). With no anchor the heuristic has no evidence for agree OR diverge.
-  // Candidates that exist but are all polarity-discordant DO have evidence — hence branching on
-  // anyCandidate, not on agreements.length as the pre-polarity version did.
-  // A withheld figure pair is the SECOND route to 'indeterminate' and it is deliberate: comparability
-  // was established (the claims paired) but the relationship was not (see the clamp above). It ranks
-  // BELOW a true divergence — a comparison carrying both a real divergence and a withheld pair reads
-  // 'diverge', because the real finding is the one the caller must act on, and the note travels with
-  // it in `divergences` either way.
   const verdict: AgreementMap['verdict'] = !anyCandidate
     ? 'indeterminate'
     : trueDivergences.length > 0
       ? 'diverge'
-      : figureNotes.length > 0
+      : figureNotes.length > 0 || unmatched.length > 0
         ? 'indeterminate'
         : 'agree';
-  return { verdict, agreements, divergences, withheldPairs: figureNotes.length };
+  return { verdict, agreements, divergences, withheldPairs: figureNotes.length, pairs, unmatched };
 }
