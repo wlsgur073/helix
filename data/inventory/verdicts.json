@@ -375,7 +375,7 @@
   "claimId": "README.md#daccc52e7f2e",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "scripts/smoke-runtime-floor.mjs drove bin/helix-trigger.mjs bare on 2026-09-22: usage printed, exit 2, on this box's Node. A1 trigger-artifact-smoke re-run in the same suite. NOT re-measured this run: the CI leg on an older Node — no CI run was triggered for this candidate.",
+  "evidence": "scripts/smoke-runtime-floor.mjs drove bin/helix-trigger.mjs bare: usage printed, exit 2, on node v24.17.0 locally on 2026-09-22 and on node v20.20.2 with no npm install in the runtime-floor job of CI run 35740243626 on the candidate edeb57f (all five jobs of that run succeeded, as did run 35837222666 on bbe57ec; read back from the job log 2026-09-23). A1 trigger-artifact-smoke re-run in the same suite.",
   "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
@@ -575,7 +575,7 @@
   "claimId": "README.md#f18afc82d1c4",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Node floor: scripts/smoke-runtime-floor.mjs drove all SIX shipped bundles on 2026-09-22 — three CLIs refuse a bare invocation with usage (exit 2), two hooks accept a payload (exit 0), helix-mcp initializes as helix 0.1.0, lists 9 tools and exits 0 when stdin closes — all ok, exit 0, on this box's Node. NOT re-measured this run: the second Node version in CI — no CI run was triggered for this candidate.",
+  "evidence": "Node floor: scripts/smoke-runtime-floor.mjs drives all SIX shipped bundles — three CLIs refuse a bare invocation with usage (exit 2), two hooks accept a payload (exit 0), helix-mcp initializes as helix 0.1.0, lists 9 tools and exits 0 when stdin closes — all eight ok on node v24.17.0 locally on 2026-09-22, and all eight ok on node v20.20.2 with no npm install in the runtime-floor job of CI run 35740243626 on the candidate edeb57f (all five jobs of that run succeeded, as did run 35837222666 on bbe57ec; read back from the job log 2026-09-23).",
   "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
@@ -705,7 +705,7 @@
   "claimId": "docs/release/recovery-playbook.md#a244a7848631",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims: history+asOf refused while each alone is served, recovered by execution; negative control on handlers.ts:263; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "evidence": "shipped-claims: history+asOf refused while each alone is served, recovered by execution against the refusal at src/server/handlers.ts:271 ('inspect: history and asOf are mutually exclusive — pass one.'); the ids pairs are refused at :254 ('inspect: ids, history and asOf are mutually exclusive — pass one.') and pinned by test/server/handlers.test.ts:76 ('inspect ids is mutually exclusive with history and asOf'); re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
   "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
