@@ -121,7 +121,7 @@ export function echoSpans(
   for (let i = 0; i + k <= norm.length; i++) grams.add(norm.slice(i, i + k));
 
   const out: Array<{ text: string; fullLength: number }> = [];
-  const seen = new Set<string>();
+  const fulls: string[] = [];
   for (const form of forms) {
     const hay = normalizeForMatch(form).slice(0, maxScan);
     let start = -1;
@@ -138,8 +138,15 @@ export function echoSpans(
   return out;
 
   function push(run: string): void {
-    if (seen.has(run)) return;
-    seen.add(run);
+    // Containment, not equality (item 7, final-review Minor 1). The raw form yields a whole run and
+    // the fence-broken outbound form yields the pieces on either side of the fence — each a substring
+    // of the whole — so an equality test rendered one echo as three spans and filled the per-id
+    // budget. Keep the longest; judge on the FULL runs, before truncation.
+    if (fulls.some((f) => f.includes(run))) return;
+    for (let i = fulls.length - 1; i >= 0; i--) {
+      if (run.includes(fulls[i]!)) { fulls.splice(i, 1); out.splice(i, 1); }
+    }
+    fulls.push(run);
     out.push({ text: run.length > cap ? `${run.slice(0, cap)}…` : run, fullLength: run.length });
   }
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  detectEcho, echoSpans, classifyEgress, classifyEmission, EGRESS_LEG_ORDER,
+  detectEcho, echoSpans, classifyEgress, classifyEmission, EGRESS_LEG_ORDER, scannedForms,
   type LedgerItem, type EgressInput, type EgressVerdict, type EmissionFlag,
 } from '../../src/risk/trifecta.js';
 import type { EgressPolicy, EgressLeg } from '../../src/config.js';
@@ -91,6 +91,34 @@ describe('echoSpans', () => {
     expect(spans[0]!.text).toHaveLength(161);          // 160 + the ellipsis
     expect(spans[0]!.text.endsWith('…')).toBe(true);
     expect(spans[0]!.fullLength).toBe(400);
+  });
+
+  it('a fence inside the echoed passage yields ONE span, not the whole run plus its two fence-broken pieces', () => {
+    const memory = 'the deploy uses the blue cluster in us-east-1 === and the rollback path is the green one';
+    const payload = `note: ${memory}`;
+    const forms = scannedForms({ texts: [payload], outbound: normalizeUntrusted(payload) });
+    const spans = echoSpans(forms, memory, { k });
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.fullLength).toBe(88);
+    expect(spans[0]!.text).toContain('us-east-1 === and');
+  });
+
+  it('the order of the forms does not matter: pieces seen first are replaced by the whole run', () => {
+    const memory = 'the deploy uses the blue cluster in us-east-1 === and the rollback path is the green one';
+    const payload = `note: ${memory}`;
+    const forms = scannedForms({ texts: [payload], outbound: normalizeUntrusted(payload) }).reverse();
+    const spans = echoSpans(forms, memory, { k });
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.fullLength).toBe(88);
+  });
+
+  it('two separate runs of the same record are both kept (containment is the rule, not "same record")', () => {
+    const partA = 'alpha bravo charlie delta echo foxtrot';
+    const partB = 'kilo lima mike november oscar papa quebec';
+    const memory = `${partA} golf hotel india juliet ${partB}`;
+    const payload = `first ${partA} then something unrelated in between here then ${partB} last`;
+    const spans = echoSpans(scannedForms({ texts: [payload], outbound: normalizeUntrusted(payload) }), memory, { k });
+    expect(spans.map((s) => s.fullLength)).toEqual([39, 42]);
   });
 });
 
