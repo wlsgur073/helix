@@ -369,6 +369,7 @@ describe('handleDualVerify egress audit', () => {
     expect(raw).not.toContain('us-east-1');
     // the user-facing result also reports the block without a Codex answer.
     expect(text(res)).toMatch(/did not run/i);
+    expect(text(res)).not.toMatch(/\(\d+ chars\)/);
   });
 
   it('a memory-echo block names WHICH memories matched, so the caller can reword (H6)', async () => {
@@ -627,6 +628,7 @@ describe('handleDualVerify egress audit', () => {
     expect(out).toContain('DATA| "m_1"');                       // the row still names the record
     expect(out.includes('…')).toBe(true);                  // the real ellipsis codepoint is present
     expect(out).toContain(`${capped}…`);                   // truncated at the cap, marker intact
+    expect(out).toContain(`${capped}… (${memory.length} chars)`);   // fullLength, measured 228
     expect(out).not.toContain(`${capped}...`);                  // NOT folded to three ASCII dots (H5)
     // The tail past the cut, and the full untruncated run, must both be absent from the rendering.
     expect(out).not.toContain(memory.slice(MAX_ECHO_SPAN_CHARS, MAX_ECHO_SPAN_CHARS + 40));

@@ -684,14 +684,18 @@ function echoedMemoriesLine(v: EgressVerdict | undefined): string {
 function echoSpansBlock(d: DualVerifyResult['echoSpans'], deps: DualVerifyHandlerDeps): string {
   if (!d || d.entries.length === 0) return '';
   const nonce = (deps.genNonce ?? newNonce)();
-  const row = (text: string): { text: string; mark: string; normalized: true } => {
+  const row = (text: string, trustedSuffix = ''): { text: string; mark: string; normalized: true } => {
     // echoSpans' own truncation marker -- never one THIS call would add, since no maxChars is passed.
     const truncated = text.endsWith('…');
     const normalized = normalizeUntrusted(truncated ? text.slice(0, -1) : text);
-    return { text: truncated ? `${normalized}…` : normalized, mark: 'DATA| ', normalized: true };
+    // The suffix is a COUNT this code computed, appended AFTER normalization so the marker survives
+    // (a suffix inside normalizeUntrusted's input would stop the text ending in the marker, and NFKC
+    // would fold the marker to three dots -- the H5 regression the normalize-once rule prevents).
+    return { text: (truncated ? `${normalized}…` : normalized) + trustedSuffix, mark: 'DATA| ', normalized: true };
   };
   const lines = d.entries.flatMap((e) => [
-    ...e.spans.map((s) => row(`${JSON.stringify(presentId(e.id))}: ${s.text}`)),
+    ...e.spans.map((s) => row(`${JSON.stringify(presentId(e.id))}: ${s.text}`,
+      s.text.endsWith('…') ? ` (${s.fullLength} chars)` : '')),
     ...(e.omittedSpans > 0 ? [row(`${JSON.stringify(presentId(e.id))}: (${e.omittedSpans} more matched runs not shown)`)] : []),
   ]);
   if (d.omittedIds > 0) lines.push(row(`(${d.omittedIds} more echoed records not shown)`));
