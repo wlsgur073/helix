@@ -544,12 +544,17 @@ export function buildAgreementMap(helixAnswer: string, codexAnswer: string): Agr
     }
     helixStatus[i] = 'figures-differ';
     codexStatus[j] = 'figures-differ';
+    // Both claims and both figure sets go in the note: the figures are what differ, but the caller
+    // needs the sentences to judge whether the difference is a conflict. A side that quotes no
+    // figure at all reads "cites no figure" rather than an empty gap.
     figureNotes.push(
       `figures differ — "${helix[i]}" cites ${cites(helixFigures)}; "${codex[j]}" cites ${cites(codexFigures)}`,
     );
   }
 
   const agreements = helix.filter((_, i) => helixStatus[i] === 'agreed');
+  // Withheld pairs are NOT here — that is what keeps them out of the 'diverge' branch below. Unpaired
+  // claims are not here either (item 7) — they land in `unmatched`, not `divergences`.
   const trueDivergences = [
     ...helix.filter((_, i) => helixStatus[i] === 'divergent'),
     ...codex.filter((_, j) => codexStatus[j] === 'divergent'),
@@ -560,6 +565,18 @@ export function buildAgreementMap(helixAnswer: string, codexAnswer: string): Agr
   ];
   const divergences = [...trueDivergences, ...figureNotes];
 
+  // Zero candidates is a failure to COMPARE, not a finding of disagreement (2026-07-26 dogfood
+  // specimen: a prose paragraph vs a bulleted list reaching the same conclusion paired nothing
+  // and rendered 'diverge'). With no anchor the heuristic has no evidence for agree OR diverge.
+  // Candidates that exist but are all polarity-discordant DO have evidence — hence branching on
+  // anyCandidate, not on agreements.length as the pre-polarity version did.
+  // A withheld figure pair is the SECOND route to 'indeterminate' and it is deliberate: comparability
+  // was established (the claims paired) but the relationship was not (see the clamp above). It ranks
+  // BELOW a true divergence — a comparison carrying both a real divergence and a withheld pair reads
+  // 'diverge', because the real finding is the one the caller must act on, and the note travels with
+  // it in `divergences` either way. Every assigned pair agreeing while claims are left unmatched is
+  // the THIRD route (item 7): it too ranks below a true divergence, and the unmatched claims travel
+  // in `unmatched` rather than `divergences`.
   const verdict: AgreementMap['verdict'] = !anyCandidate
     ? 'indeterminate'
     : trueDivergences.length > 0
