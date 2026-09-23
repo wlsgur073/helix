@@ -5,8 +5,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "helix_codex_status called LIVE from inside a fresh Claude Code session resumed 2026-09-17 after the reinstall, through the host's own MCP connection (host server started from the install path, bin/helix-mcp.mjs sha256 = receipt): codex-cli 0.154.0 found, logged in, stakes floor high, model, effort, timeout 1500000 ms and every egress leg with its value; the installed bundle's tools/list also listed it (B2, 2026-09-17).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "helix_codex_status called LIVE on 2026-09-23 from a Claude Code session started AFTER the Block B reinstall, through the host's own MCP connection: codex-cli 0.156.1 found, logged in, ChatGPT subscription inferred, stakes floor high, model gpt-6-astra inherited from the codex config, effort max as a helix override, timeout 1500000 ms, every egress leg with its value, content log OFF. The serving process was verified, not assumed: the only helix-mcp.mjs processes running were started 2026-09-23 17:16 from ~/.claude/plugins/cache/helix/helix/0.1.0/bin/helix-mcp.mjs, whose sha256 equals the receipt's bundle entry.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -15,8 +15,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "D2 metered, RUN (not skipped) 2026-09-17 with codex-cli 0.154.0: HELIX_REAL_CODEX=1 over test/acceptance/ passed 7 of 7 files and 40 of 40 tests with none skipped, so both opt-in cases executed — dual-verify-real.e2e spawned Codex, returned a DATA-framed verdict and audit-logged spawned true; real-codex.e2e answered a prompt via stdin.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "D2 metered, RUN (not skipped) 2026-09-22 with codex-cli 0.156.1: HELIX_REAL_CODEX=1 over test/acceptance/ passed 7 of 7 files and 40 of 40 tests, and grep for 'skipped' over the run log counts zero, so both opt-in cases executed rather than being reported as skips. Those two are the same pair the ordinary suite reports as '2 skipped'.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -25,8 +25,8 @@
   "claimId": "CHANGELOG.md#9a43c3b66e9c",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Driven end to end through the INSTALLED bundle with a sequential MCP client, 2026-09-17: helix_memory_adopt {projectRoot} returned adopted; .helix/.owner was written and projects.json under the temporary HELIX_HOME named the path; a scope: project commit then returned Fresh.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Driven end to end through the INSTALLED bundle with a sequential MCP client, 2026-09-22: helix_memory_adopt {projectRoot} returned adopted; .helix/.owner was written and projects.json under the temporary HELIX_HOME named the path; a scope: project commit then returned Fresh.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -35,8 +35,8 @@
   "claimId": "README.md#286e5235961c",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Through the INSTALLED bundle 2026-09-17 under temporary HELIX_HOMEs: global and project commits returned committed {id, state Fresh, classification normal}; every Block C and D journey was seeded this way.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Through the INSTALLED bundle 2026-09-22 under temporary HELIX_HOMEs: global and project commits returned committed {id, state Fresh, classification normal}; every Block C and D journey was seeded this way.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -45,8 +45,8 @@
   "claimId": "CHANGELOG.md#9a43c3b66e9c",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "C3 2026-09-17 through the installed bundle: confirm on a source=user item returned confirmed {state Verified} and inspect rendered DATA[Verified:global]; after only ledger-mac-master.key was deleted the row rendered DATA[Fresh:global] with content and contentDigest unchanged.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "C3 2026-09-22 through the installed bundle: confirm on a source=user item returned confirmed {state Verified} and inspect rendered DATA[Verified:global]; after only ledger-mac-master.key was deleted the row rendered DATA[Fresh:global] with content and contentDigest unchanged.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -55,8 +55,8 @@
   "claimId": "README.md#286e5235961c",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "C4 2026-09-17 through the installed bundle: erase returned erased {id}; recall no longer served the row (no relevant memory); history rendered DATA[erase:global:tx..txTo] with content blanked; asOf inside that interval returned the content in full, and asOf after txTo returned an empty memory.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "C4 2026-09-22 through the installed bundle: erase returned erased {id}; recall no longer served the row; history rendered DATA[erase:global:tx..txTo] with content blanked; asOf inside that interval returned the content in full, and asOf after txTo returned an empty memory.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -65,8 +65,8 @@
   "claimId": "CHANGELOG.md#9a43c3b66e9c",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Through the installed bundle 2026-09-17: inspect {} rendered DATA[Fresh:global]| and DATA[Fresh:project]| rows side by side; history rendered an erase interval; asOf reconstructed erased content; inspect carried the rollback-witness mismatch note (C2, D1) and the not-yet-witnessed note (C3).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Through the installed bundle 2026-09-22: inspect {} rendered DATA[Fresh:global]| and DATA[Fresh:project]| rows side by side; history rendered an erase interval; asOf reconstructed erased content; inspect carried the rollback-witness mismatch note (C2, D1) and the not-yet-witnessed note (C3).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -75,8 +75,8 @@
   "claimId": "CHANGELOG.md#c64202754de4",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Through the installed bundle 2026-09-17: recall served committed rows, dropped an erased one (C4), flagged a Suspect row with (re-verify — reality may have changed) and a needs-re-verify line, and appended the recency appendix; C2's inspect served the two intact rows around a torn line with the mismatch note; the installed SessionStart hook injected recall output as a nonce-framed block from a project cwd.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Through the installed bundle 2026-09-22: recall served committed rows, dropped an erased one (C4), flagged a Suspect row with (re-verify — reality may have changed) and a needs-re-verify line, and appended the recency appendix; C2's inspect served the two intact rows around a torn line with the mismatch note; the installed SessionStart hook injected recall output as a nonce-framed block from a project cwd.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -85,8 +85,8 @@
   "claimId": "CHANGELOG.md#9a43c3b66e9c",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Driven end to end through the INSTALLED bundle 2026-09-17: a file-contains check whose file agreed returned recheck {state Corroborated}; after the file was changed to contradict, the same check returned {state Suspect} and recall flagged the row for re-verification.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Driven end to end through the INSTALLED bundle 2026-09-22: a file-contains check whose file agreed returned recheck {state Corroborated}; after the file was changed to contradict, the same check returned {state Suspect} and recall flagged the row for re-verification.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -95,8 +95,8 @@
   "claimId": "CHANGELOG.md#c64202754de4",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -105,8 +105,8 @@
   "claimId": "CHANGELOG.md#c64202754de4",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -115,8 +115,8 @@
   "claimId": "CHANGELOG.md#c64202754de4",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -125,8 +125,8 @@
   "claimId": "CHANGELOG.md#c64202754de4",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -135,8 +135,8 @@
   "claimId": "CHANGELOG.md#c64202754de4",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -145,8 +145,8 @@
   "claimId": "CHANGELOG.md#c64202754de4",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -155,8 +155,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -165,8 +165,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -175,8 +175,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -185,8 +185,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -195,8 +195,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -205,8 +205,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -215,8 +215,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -225,8 +225,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -235,8 +235,8 @@
   "claimId": "README.md#0aa48bb45874",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -245,8 +245,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -255,8 +255,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -265,8 +265,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -275,8 +275,8 @@
   "claimId": "CHANGELOG.md#d0980326595b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -285,8 +285,8 @@
   "claimId": "CHANGELOG.md#5624aa251aed",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -295,8 +295,8 @@
   "claimId": "CHANGELOG.md#5624aa251aed",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Every Block C/D journey and all three C5 drill variants (R, U, D) 2026-09-17 ran under their own temporary HELIX_HOME (/tmp/helix-cert-*, /tmp/helix-drill-*), and the store landed there: C3 deleted and re-minted ledger-mac-master.key in its temp home, the project journey's projects.json named the adopted root there, and B2's temp home came into existence at the first hook at mode 700 with sessions.jsonl at 600. The real ~/.helix memory.jsonl, audit.jsonl and witness.json kept their sizes and mtimes across the whole run.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Every Block C/D journey and all three C5 drill variants (R, U, D) ran 2026-09-22 under their own temporary HELIX_HOME with every HELIX_* stripped from the inherited environment, and the store landed there. Measured afterwards rather than asserted: the real ~/.helix still shows memory.jsonl last modified 2026-09-11, audit.jsonl 2026-09-22 21:44 and witness.json 2026-09-22 21:46 — all BEFORE the journeys and drill ran at 23:4x — so the run wrote nothing there.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -305,8 +305,8 @@
   "claimId": "CHANGELOG.md#5624aa251aed",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -315,8 +315,8 @@
   "claimId": "README.md#59500db26e28",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -325,8 +325,8 @@
   "claimId": "README.md#59500db26e28",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -335,8 +335,8 @@
   "claimId": "README.md#0aa48bb45874",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -345,8 +345,8 @@
   "claimId": "CHANGELOG.md#5624aa251aed",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Installed bin/hooks/session-end.mjs driven with a real stdin payload 2026-09-17: exit 0, appended {kind session-end, sessionId cert-move2, reason other, ts} to sessions.jsonl at mode 600 under a temporary HELIX_HOME; A1 hooks.e2e.test.ts re-run 2026-09-17.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Installed bin/hooks/session-end.mjs driven with a real stdin payload 2026-09-22: exit 0, appended a session-end row to sessions.jsonl at mode 600 under a temporary HELIX_HOME. A1 hooks.e2e re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -355,8 +355,8 @@
   "claimId": "CHANGELOG.md#5624aa251aed",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Installed bin/hooks/session-start.mjs driven from a project cwd 2026-09-17: exit 0, emitted ===HELIX <nonce> HELIX MEMORY (cross-session) — DATA … carrying DATA[Fresh:project], DATA[Fresh:global] and a flagged DATA[Suspect:project] row plus the verify-before-acting line.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Installed bin/hooks/session-start.mjs driven from a project cwd 2026-09-22: exit 0, emitted ===HELIX <nonce> HELIX MEMORY (cross-session) — DATA … carrying DATA[Fresh:project], DATA[Fresh:global] and a flagged DATA[Suspect:project] row plus the verify-before-acting line.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -365,8 +365,8 @@
   "claimId": "CHANGELOG.md#9a43c3b66e9c",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "D1 2026-09-17 through the installed bundle: refused without a TTY (exit 2, rebaseline requires an interactive terminal); under a pty printed scope, bytes, sha256, epoch 1 -> 2 and verdict mismatch; typed yes -> exit 1, nothing written, note kept; typed bless -> exit 0, re-baselined global at epoch 2, and the next read rendered DATA[Verified:global] with no mismatch note. In the C5 drill (U2) the same installed ceremony, typed bless under a pty, cleared an interrupted transition: verdict transition-interrupted, epoch 1 -> 3, exit 0, and after a restart the journal was gone and writes succeeded.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "D1 2026-09-22 through the installed bundle: helix-rebaseline refused without a terminal (exit 2); under a pty a typed 'yes' was refused as a negative control (exit 1) with nothing written; the ceremony's own keyword path re-baselined and the next read rendered the row with no mismatch note. In the C5 drill the same installed ceremony cleared an interrupted transition, and after a restart the journal was gone and writes succeeded.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -375,8 +375,8 @@
   "claimId": "README.md#daccc52e7f2e",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 trigger-artifact-smoke re-run 2026-09-17; scripts/smoke-runtime-floor.mjs drove bin/helix-trigger.mjs bare: usage printed, exit 2, on node v24.17.0 locally and node v20.20.2 in CI run 35231254956.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "scripts/smoke-runtime-floor.mjs drove bin/helix-trigger.mjs bare on 2026-09-22: usage printed, exit 2, on this box's Node. A1 trigger-artifact-smoke re-run in the same suite. NOT re-measured this run: the CI leg on an older Node — no CI run was triggered for this candidate.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -385,8 +385,8 @@
   "claimId": "CHANGELOG.md#c64202754de4",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims: a config outside the global home cannot enable compaction while the same content in the global home can; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims: a config outside the global home cannot enable compaction while the same content in the global home can; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -395,8 +395,8 @@
   "claimId": "CHANGELOG.md#1bd44f318627",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "CHANGELOG.md holds exactly one [0.1.0] section (grep count 1, dated 2026-09-09); package.json, .claude-plugin/plugin.json and .claude-plugin/marketplace.json all read 0.1.0 (measured at d5f722d, candidate c181b3d, 2026-09-17).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Measured 2026-09-23 at candidate edeb57f79369a1611cc39be25563c0f9747e8eea: CHANGELOG.md holds exactly one [0.1.0] section (grep count 1), and package.json, .claude-plugin/plugin.json and .claude-plugin/marketplace.json all read 0.1.0.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -405,8 +405,8 @@
   "claimId": "README.md#01fbf6da7011",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims re-run 2026-09-17 recovers the registry and hook declarations; the installed bundle's tools/list returned the nine names and hooks.json declares SessionStart and SessionEnd (B2, 2026-09-17).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files) recovers the registry and hook declarations; the installed bundle answered a tools listing with 9 tools in the certification journeys, and hooks.json declares SessionStart and SessionEnd.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -415,8 +415,8 @@
   "claimId": "README.md#5d58fb60beb0",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "helix_codex_status printed every leg and value LIVE in a fresh session 2026-09-17 (memoryEcho=block piiHigh=block piiBulk=block secretHeuristic=block secretEntropy=block secretEntropyExempt=allow); A1 pins the table to DEFAULT_CONFIG, re-run 2026-09-17.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "helix_codex_status printed every leg and its value LIVE through the host's own MCP connection 2026-09-23: memoryEcho=block piiHigh=block piiBulk=block secretHeuristic=block secretEntropy=block secretEntropyExempt=allow. A1 pins the table to DEFAULT_CONFIG, re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -425,8 +425,8 @@
   "claimId": "README.md#70bd9e86ed8b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "TRANSCRIBED 2026-09-17 after the Block B reinstall of both scopes (user, and local from the dogfood project root) and a full quit and resume of Claude Code: the only helix-mcp.mjs process started after the resume from ~/.claude/plugins/cache/helix/helix/0.1.0 with bin/helix-mcp.mjs sha256 equal to the receipt; the host registered all nine mcp__plugin_helix_helix__* tools; helix_codex_status answered through the host's own MCP connection; every helix@helix entry carried gitCommitSha d5f722d; claude plugin update at the same version reported already at the latest version (0.1.0). The host injected no helix SessionStart text at resume, as expected for a global ledger with no live record and no project layer in that cwd.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Observed 2026-09-23 after the Block B reinstall of both scopes (user, and local from the dogfood project root) and a full quit and resume of Claude Code: the only helix-mcp.mjs processes running were started 2026-09-23 17:16 from ~/.claude/plugins/cache/helix/helix/0.1.0/bin/helix-mcp.mjs, whose sha256 equals the receipt's entry; the host registered the helix tools and helix_codex_status answered through the host's own MCP connection; every helix@helix entry carried gitCommitSha 2d32a8bfdd29ac6eeb08363fdcae9ee7fc8bd883. The loaded helix_memory_inspect schema carried the `ids` argument, which only the new bundle exposes — independent proof that the launch barrier was crossed rather than assumed.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -435,8 +435,8 @@
   "claimId": "README.md#8e86a2b5e676",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims and config.test.ts re-run 2026-09-17 (A1): DEFAULT_CONFIG ships dual-verify disabled; memory carried across server processes in every Block C journey and all three C5 drill variants. The live helix_codex_status of 2026-09-17 reported dual-verify enabled, mode=compare, on a machine with a global ~/.helix/config.json in place, so it is not evidence of the default.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims and config.test.ts re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files): DEFAULT_CONFIG ships dual-verify disabled; memory carried across server processes in every Block C journey and all three C5 drill variants. The live helix_codex_status of 2026-09-23 reported dual-verify enabled, mode=compare, on a machine with a global ~/.helix/config.json in place, so it is not evidence of the default.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -445,8 +445,8 @@
   "claimId": "README.md#4ea079373a06",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "inspect {} through the installed bundle 2026-09-17 rendered DATA[Fresh:global]| and DATA[Fresh:project]| rows together after an adopt and one commit per scope.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "inspect {} through the installed bundle 2026-09-22 rendered DATA[Fresh:global]| and DATA[Fresh:project]| rows together after an adopt and one commit per scope.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -455,8 +455,8 @@
   "claimId": "README.md#54778b5b55b8",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims: compactionConfigFromGlobal returns auto=false on an untouched home, and true when the global config says so; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims: compactionConfigFromGlobal returns auto=false on an untouched home, and true when the global config says so; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -465,8 +465,8 @@
   "claimId": "README.md#59184dbb51ae",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "C1 2026-09-17 through the installed bundle: three facts, the whole home copied then restored into an empty directory; every id identical before and after (3 ids), no witness mismatch note after the consistent restore.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "C1 2026-09-22 through the installed bundle: three facts, the whole home copied then restored into an empty directory; every id identical before and after (3 ids), no witness mismatch note after the consistent restore.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -475,8 +475,8 @@
   "claimId": "README.md#6950a5bee471",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Project journey 2026-09-17: the installed SessionStart hook driven from a project cwd whose .helix carries the .owner stamp injected DATA[Fresh:project] alongside DATA[Fresh:global] — the project layer activates from the cwd.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Project journey 2026-09-22: the installed SessionStart hook driven from a project cwd whose .helix carries the .owner stamp injected DATA[Fresh:project] alongside DATA[Fresh:global] — the project layer activates from the cwd.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -485,8 +485,8 @@
   "claimId": "README.md#b27b3d1fb743",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Block B + journeys 2026-09-17: the store files landed under a temporary HELIX_HOME in every journey and drill; claude plugin uninstall left ~/.helix untouched (names, sizes and mtimes of 8 files identical, key files excluded from the listing); trust-store-home and project-ledger e2e re-run in A1.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Block B + journeys 2026-09-22: the store files landed under a temporary HELIX_HOME in every journey and drill. The uninstall of both scopes left ~/.helix untouched — measured afterwards, its memory.jsonl still carries its 2026-09-11 mtime and witness.json its 2026-09-22 21:46 mtime, both predating the uninstall at 23:0x. trust-store-home and project-ledger e2e re-run in the suite (suite 2643 passed | 2 skipped (2645), 207 files).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -495,8 +495,8 @@
   "claimId": "README.md#7bec4d59640f",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts re-run 2026-09-17 pins disabled as the default and that a project .helix/config.json is not consulted. The live helix_codex_status of 2026-09-17 reported dual-verify enabled, mode=compare, on a machine whose global ~/.helix/config.json exists and whose session cwd has no project .helix, so the enabling setting came from the global file.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files) pins disabled as the default and that a project .helix/config.json is not consulted. The live helix_codex_status of 2026-09-23 reported dual-verify enabled, mode=compare, on a machine whose global ~/.helix/config.json exists and whose session cwd has no project .helix, so the enabling setting came from the global file.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -505,8 +505,8 @@
   "claimId": "README.md#80ec9072aea9",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Block B 2026-09-17 (NOT a pristine profile: both scopes had been installed at 2baf9c7 and ~/.helix was live): marketplace update to d5f722d, claude plugin install helix@helix (user) and --scope local from the dogfood project root, no npm install; 9 of 9 pinned files byte-identical across receipt, checkout and install; the installed hooks and MCP server answered (B2, fresh session).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Block B 2026-09-22 (NOT a pristine profile: both scopes had been installed at d5f722d and ~/.helix was live): uninstall user, uninstall local from the dogfood project root with --scope local, marketplace update to 2d32a8b, then install at both scopes; no npm install. All three of the runbook's shas are equal — both helix@helix entries, the marketplace clone HEAD and origin/feat/helix-v1 read 2d32a8bfdd29ac6eeb08363fdcae9ee7fc8bd883. 9 of 9 pinned files byte-identical across receipt, checkout and install; the installed hooks and MCP server answered.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -515,8 +515,8 @@
   "claimId": "README.md#bfa0596f656b",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "the four named controls are each exercised by the suite, an Out of scope paragraph directly follows the list, and SECURITY.md states the bounds; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "the four named controls are each exercised by the suite, an Out of scope paragraph directly follows the list, and SECURITY.md states the bounds; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -525,8 +525,8 @@
   "claimId": "README.md#8dc69654e271",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "C3 2026-09-17 through the installed bundle: deleting only ledger-mac-master.key (content never read) reverted a confirmed Verified grade to Fresh with the content intact; a key existed again after the next write.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "C3 2026-09-22 through the installed bundle: deleting only ledger-mac-master.key (content never read) reverted a confirmed Verified grade to Fresh with the content intact; a key existed again after the next write.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -535,8 +535,8 @@
   "claimId": "README.md#b0bdb28c26b9",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 config.test.ts drives invalid/out-of-range values and keeps defaults; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 config.test.ts drives invalid/out-of-range values and keeps defaults; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -545,8 +545,8 @@
   "claimId": "README.md#b2969ded6cd3",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Block B 2026-09-17: claude plugin uninstall helix left ~/.helix untouched (8 files, names, sizes and mtimes identical); reinstall served the nine receipt-pinned bytes; a same-version claude plugin update reported already at the latest version (0.1.0), the documented cache behaviour.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Block B 2026-09-22: uninstalling both scopes left ~/.helix untouched (its files still carry mtimes predating the uninstall); the reinstall served the nine receipt-pinned bytes, verified by hashing each in three places. NOT re-measured this run: the same-version `claude plugin update` cache behaviour — the redeploy used the runbook's uninstall+install path instead, which is what the runbook requires.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -555,8 +555,8 @@
   "claimId": "README.md#b4d00a74ad9f",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 shipped-claims recovers every HELIX_ read from the bundles and requires README to name it; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 shipped-claims recovers every HELIX_ read from the bundles and requires README to name it; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -565,8 +565,8 @@
   "claimId": "README.md#b73e2e56dc39",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "A1 bundle.e2e.test.ts re-run 2026-09-17 asserts the nine names against the shipped bundle; the installed bundle's tools/list returned the same nine (B2) and the fresh host session registered nine mcp__plugin_helix_helix__* tools.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "A1 bundle.e2e.test.ts re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files) asserts the nine names against the shipped bundle; the installed bundle reported 9 tools in the certification journeys, and the host session of 2026-09-23 registered the helix tools through its own MCP connection.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -575,8 +575,8 @@
   "claimId": "README.md#f18afc82d1c4",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Node floor: scripts/smoke-runtime-floor.mjs drives all SIX shipped bundles — three CLIs refuse a bare invocation with usage (exit 2), two hooks accept a payload (exit 0), helix-mcp initializes as helix 0.1.0, lists 9 tools and exits 0 when stdin closes — all eight ok on node v24.17.0 locally on 2026-09-17, and all eight ok on node v20.20.2 with no npm install in the runtime-floor job of CI run 35231254956 on c181b3d.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Node floor: scripts/smoke-runtime-floor.mjs drove all SIX shipped bundles on 2026-09-22 — three CLIs refuse a bare invocation with usage (exit 2), two hooks accept a payload (exit 0), helix-mcp initializes as helix 0.1.0, lists 9 tools and exits 0 when stdin closes — all ok, exit 0, on this box's Node. NOT re-measured this run: the second Node version in CI — no CI run was triggered for this candidate.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -585,8 +585,8 @@
   "claimId": "README.md#ebc5da41b84c",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "Project journey 2026-09-17 through the installed bundle: adopt wrote .owner and registered the path; a scope: project commit returned Fresh and inspect rendered DATA[Fresh:project].",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "Project journey 2026-09-22 through the installed bundle: adopt wrote .owner and registered the path; a scope: project commit returned Fresh and inspect rendered DATA[Fresh:project].",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -595,8 +595,8 @@
   "claimId": "SECURITY.md#b5dd2a9d52c3",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims: a hand-appended elevated assert clamps to Fresh while a tool-minted grade survives in the same run; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims: a hand-appended elevated assert clamps to Fresh while a tool-minted grade survives in the same run; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -605,8 +605,8 @@
   "claimId": "SECURITY.md#4b70331445b5",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims: the shipped series is recovered from the plugin manifest and required to be marked supported; the table must still mark something unsupported; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims: the shipped series is recovered from the plugin manifest and required to be marked supported; the table must still mark something unsupported; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -615,8 +615,8 @@
   "claimId": "SECURITY.md#75bca90ad354",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2): the resolver and family helper SECURITY.md names are declared in store.ts, and BOTH probes it cites exist, one exercising a permanent erase and one the shared-id soft erase.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, the 2 skips later executed under D2): the resolver and family helper SECURITY.md names are declared in store.ts, and BOTH probes it cites exist, one exercising a permanent erase and one the shared-id soft erase.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -625,8 +625,8 @@
   "claimId": "SECURITY.md#c56f2d9e8c47",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims: an empty home plus one commit and no verify already materializes ledger-mac-master.key; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims: an empty home plus one commit and no verify already materializes ledger-mac-master.key; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -635,8 +635,8 @@
   "claimId": "SECURITY.md#21c6ba4b4bf1",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims: isIntegrityMarker/isHorizonMarker accept any prefixed marker-shaped row with no MAC; a different prefix is rejected; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims: isIntegrityMarker/isHorizonMarker accept any prefixed marker-shaped row with no MAC; a different prefix is rejected; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -645,8 +645,8 @@
   "claimId": "SECURITY.md#ed14167461da",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims: a compaction that drops a forged verify mints a content-free unsigned marker at the constant id; one that drops nothing mints none; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims: a compaction that drops a forged verify mints a content-free unsigned marker at the constant id; one that drops nothing mints none; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": true
  },
  {
@@ -655,8 +655,8 @@
   "claimId": "docs/release/recovery-playbook.md#0064b2696d1f",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "C4 2026-09-17: the tool erase was soft — the row stayed in the ledger and was recoverable through asOf inside its interval.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "C4 2026-09-22: the tool erase was soft — the row stayed in the ledger and was recoverable through asOf inside its interval.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -665,8 +665,8 @@
   "claimId": "docs/release/recovery-playbook.md#118ca105e459",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "C4 2026-09-17: no undo command exists; recovery went through inspect asOf at an instant inside the fact's [tx, txTo) interval, exactly the playbook's route.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "C4 2026-09-22: no undo command exists; recovery went through inspect asOf at an instant inside the fact's [tx, txTo) interval, exactly the playbook's route.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -675,8 +675,8 @@
   "claimId": "docs/release/recovery-playbook.md#2dacbae5af3a",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims: the erased text stays in the file after a soft erase and is gone after a compaction; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims: the erased text stays in the file after a soft erase and is gone after a compaction; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -685,8 +685,8 @@
   "claimId": "docs/release/recovery-playbook.md#3f634b1c30db",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims: a cross-scope supersede raises the quoted refusal while a same-scope one does not; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims: a cross-scope supersede raises the quoted refusal while a same-scope one does not; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -695,8 +695,8 @@
   "claimId": "docs/release/recovery-playbook.md#90716eb2c539",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "C4 2026-09-17: history blanked the erased content while asOf inside the interval returned it in full, through the installed bundle.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "C4 2026-09-22: history blanked the erased content while asOf inside the interval returned it in full, through the installed bundle.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -705,8 +705,8 @@
   "claimId": "docs/release/recovery-playbook.md#a244a7848631",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims: history+asOf refused while each alone is served, recovered by execution; negative control on handlers.ts:263; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims: history+asOf refused while each alone is served, recovered by execution; negative control on handlers.ts:263; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -715,8 +715,8 @@
   "claimId": "docs/release/recovery-playbook.md#9cae2460fad9",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "shipped-claims: after erase and re-commit the text returns while the id changes and the grade drops to Fresh from a real Verified; re-run 2026-09-17 (suite 2614 passed | 2 skipped, both later executed under D2).",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "shipped-claims: after erase and re-commit the text returns while the id changes and the grade drops to Fresh from a real Verified; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -725,8 +725,8 @@
   "claimId": "docs/release/recovery-playbook.md#31984b6c27f3",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "C4 2026-09-17: the history row carried DATA[erase:global:…] naming its scope.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "C4 2026-09-22: the history row carried DATA[erase:global:…] naming its scope.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  },
  {
@@ -735,8 +735,8 @@
   "claimId": "docs/release/recovery-playbook.md#d1c91b7614cb",
   "verdict": "MET",
   "repairTarget": null,
-  "evidence": "C4 2026-09-17: the rendered interval [2026-09-17T14:11:21.170Z, 2026-09-17T14:11:22.690Z) matched the documented [tx, txTo) shape.",
-  "candidate": "c181b3de40fec6594a4364de713776f8a10e3520",
+  "evidence": "C4 2026-09-22: the rendered interval matched the documented [tx, txTo) shape.",
+  "candidate": "edeb57f79369a1611cc39be25563c0f9747e8eea",
   "securityBoundary": false
  }
 ]

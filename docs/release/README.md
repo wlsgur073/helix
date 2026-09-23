@@ -68,7 +68,13 @@ certification run-sheet executed from the top: on 2026-09-02 all 74 verdict rows
 under the run-sheet's own staleness rule retired that certification. After the cleanup this directory
 records, the candidate was re-cut at `6110acb` and certified 74 of 74 on 2026-09-10; a further rebuild
 for the erase-routing fixes moved `bin/` again and retired that certification in turn, and the run was
-repeated at candidate `c181b3d`, 74 of 74, on 2026-09-17. Declaring the release is the step after it.
+repeated at candidate `c181b3d`, 74 of 74, on 2026-09-17. Item 6's batch — the echo diagnosis, the
+compare verdict and the C3.1 follow-ups — moved `bin/` once more and retired that certification too;
+the candidate was re-cut at `edeb57f7` and certified 74 of 74 on 2026-09-23. That run is the first to
+span two days on purpose: its verdict rows include observations made through the host's own MCP
+connection, and the launch barrier means a session started before the reinstall still serves the old
+bytes, so the rebinding waited for a restarted session rather than carrying evidence the run had not
+produced. Declaring the release is the step after it.
 
 ## 3. Where each document sits
 
