@@ -512,6 +512,21 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   latches it and neither `dogfood-postrun.sh` nor `dogfood-watch.sh` reads it — so the
   observability gap the bullet above records for external adopters applies to this project's own
   runs as well. The latch and the surfacing ride with the same batch as the preload.
+- **RE-MEASURED 2026-09-23 — the preload meets the bar, so Stage 1 stays unbuilt on measurement.**
+  Item 5 move 1 shipped the preload (`cdb4628`: the asset is warmed after the transport connects,
+  before the first message is read) and, in place of a latch, a consumer that derives the fired
+  history from the existing sink (`dogfood-postrun.sh`, `dogfood-watch.sh`, `6942cf1`); both were
+  deployed at both scopes on 2026-09-07. The re-measure ran on the shipped bundle at `4b69f01`, with
+  the 2026-09-03 probe and the same server-committed fixture (61 rows / 193,299 bytes): cold first
+  recall is **60.1 ms** median over three fresh processes (56.7-65.7) and 62.6 ms over five, against
+  107.3 ms before the preload and the 100 ms bar. An EMPTY ledger's first recall now costs 8.0 ms, so
+  the fixed cost has left the request path; the asset load still runs, between `connect` and the
+  first message. Live runs agree: the 13 dogfood recalls since the deploy have a median of 71.3 ms,
+  and none exceeds 150 ms. Trigger-2 is still not evaluable, because its first post-preload window
+  needs 20 recalls and has 13. The latency arm itself keeps reading `fired`: it counts slow recalls
+  among the trailing 200, the five pre-preload ones are still inside that window, and at the dogfood
+  rate it clears only after about 175 more recalls. Whether the consumer should mark a fire that has
+  been dispositioned is an open owner decision.
 
 ## 7. Owner decisions (ratification gate)
 
