@@ -162,7 +162,8 @@ describe('handleDualVerify', () => {
     const d = deps({ runner: async () => ({ ok: true, answer: '- ship the API first\n- benchmark afterwards' }) });
     const res = await handleDualVerify({ stakes: 'high', question: 'q', helixAnswer: 'we should charge for the plugin' }, d);
     const t = text(res);
-    expect(t).toContain('verdict: indeterminate (mode: compare)');
+    // FLIPPED 2026-09-23 (item 7): the route word is now 'not compared', not the bare enum value.
+    expect(t).toContain('verdict: not compared (mode: compare)');
     expect(t).toContain('— the aligner found no claim in either answer sharing at least half its words with a claim in the other, which independently written answers rarely do; this is not a disagreement, so read both answers');
     expect(t).toContain('no claim pairs found by aligner');
     expect(t).toContain('unmatched claims:');
@@ -178,7 +179,9 @@ describe('handleDualVerify', () => {
       deps({ runner: async () => ({ ok: true, answer: 'Numbered markdown about something else entirely.' }) }),
     );
     const out = text(res);
-    expect(out).toContain('verdict: indeterminate (mode: compare) — not compared');
+    // FLIPPED 2026-09-23 (item 7): the route word replaces the appended " — not compared" suffix.
+    expect(out).toContain('verdict: not compared (mode: compare)');
+    expect(out).not.toContain(' — not compared');
     expect(out).toContain('the aligner found no claim in either answer sharing at least half its words');
     expect(out).not.toContain('form mismatch or total disagreement');
     expect(out).toContain('no claim pairs found by aligner');
@@ -197,7 +200,8 @@ describe('handleDualVerify', () => {
     const d = deps({ runner: async () => ({ ok: true, answer: '' }) });
     const res = await handleDualVerify({ stakes: 'high', question: 'q', helixAnswer: '' }, d);
     const t = text(res);
-    expect(t).toContain('verdict: indeterminate (mode: compare)');
+    // FLIPPED 2026-09-23 (item 7): the route word is now 'not compared', not the bare enum value.
+    expect(t).toContain('verdict: not compared (mode: compare)');
     expect(t).toContain('no claim pairs found by aligner');
     expect(t).toContain('no unmatched claims');
     expect(t).not.toContain('no divergences');
@@ -250,14 +254,20 @@ describe('handleDualVerify', () => {
     // agreements empty the renderer used to say "every claim pair the aligner found is discordant" —
     // false here, because the one pair it found was WITHHELD, which is precisely a pair it did not
     // find discordant. This is the state the aligner's own flipped fixture produces.
-    const d = deps({ runner: async () => ({ ok: true, answer: 'The retry limit is 30.' }) });
+    // FLIPPED 2026-09-23 (item 7): the old fixture's second sentence ("The cache directory is
+    // purged on startup") is now UNPAIRED under Task 1's aligner change, so it no longer reads
+    // 'diverge' -- that fixture's new behaviour is exercised by the "withheld pair beside an
+    // unmatched claim" test above. This test keeps its original purpose (a withheld pair beside a
+    // REAL divergence, on the diverge route) on a fixture whose second sentence still pairs and
+    // still contradicts.
+    const d = deps({ runner: async () => ({ ok: true, answer: 'The retry limit is 30. The lock is not safe.' }) });
     const res = await handleDualVerify(
-      { stakes: 'high', question: 'q', helixAnswer: 'The retry limit is 3. The cache directory is purged on startup.' }, d);
+      { stakes: 'high', question: 'q', helixAnswer: 'The retry limit is 3. The lock is safe.' }, d);
     const t = text(res);
     expect(t).toContain('verdict: diverge (mode: compare)');
     expect(t).toContain('no agreements \u2014 every claim pair the aligner found is discordant or withheld');
     expect(t).toContain('divergences and withheld claim pairs:');
-    expect(t).toContain('The cache directory is purged on startup');
+    expect(t).toContain('The lock is not safe');
     expect(t).toContain('figures differ');
     // The unqualified sentence must not appear: it is the false one on this route.
     expect(t).not.toContain('no agreements \u2014 every claim pair the aligner found is discordant\n');
@@ -273,6 +283,69 @@ describe('handleDualVerify', () => {
     expect(t).not.toContain('could not match claims');
     const audit = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
     expect(audit.verdict).toBe('diverge');
+  });
+
+  describe('item 7: the verdict line says what was compared', () => {
+    const run = (helixAnswer: string, answer: string) => {
+      const d = deps({ runner: async () => ({ ok: true, answer }) });
+      return handleDualVerify({ stakes: 'high', question: 'q', helixAnswer }, d).then((res) => ({ t: text(res), d }));
+    };
+
+    it('partial reads "partially compared", lists the unmatched claims, and persists indeterminate', async () => {
+      const { t, d } = await run('Use SQLite for storage. Ship it tomorrow.', 'Use SQLite for storage. Benchmark it next week.');
+      expect(t).toContain('verdict: partially compared (mode: compare)');
+      expect(t).toContain('— some claims in either answer have no counterpart in the other; the matched pairs agree lexically, which is not a semantic check');
+      expect(t).toContain('agreements:');
+      expect(t).toContain('no divergences');
+      expect(t).toContain('unmatched claims:');
+      expect(t).toContain('Ship it tomorrow');
+      expect(t).toContain('Benchmark it next week');
+      expect(t).not.toContain('no claim pairs found by aligner');
+      expect(JSON.parse(readFileSync(d.auditPath, 'utf8').trim()).verdict).toBe('indeterminate');
+    });
+
+    it('the antonym specimen reads partially compared and says the agreement is lexical only', async () => {
+      const { t } = await run(
+        'The migration is safe to apply. The cache directory is purged on startup.',
+        'The migration is dangerous to apply.',
+      );
+      expect(t).toContain('verdict: partially compared (mode: compare)');
+      expect(t).toContain('agree lexically, which is not a semantic check');
+      expect(t).not.toContain('verdict: agree');
+    });
+
+    it('a conflict with an unmatched claim reads diverge and lists the claim under unmatched, after divergences', async () => {
+      const { t } = await run('The lock is safe. Ship it tomorrow.', 'The lock is not safe.');
+      expect(t).toContain('verdict: diverge (mode: compare)');
+      const div = t.indexOf('divergences:');
+      const un = t.indexOf('unmatched claims:');
+      expect(div).toBeGreaterThan(-1);
+      expect(un).toBeGreaterThan(div);
+      expect(t.slice(un)).toContain('Ship it tomorrow');
+      expect(t.slice(div, un)).not.toContain('Ship it tomorrow');
+    });
+
+    it('a withheld pair beside an unmatched claim reads indeterminate with both blocks (the old diverge fixture)', async () => {
+      const { t } = await run('The retry limit is 3. The cache directory is purged on startup.', 'The retry limit is 30.');
+      expect(t).toContain('verdict: indeterminate (mode: compare)');
+      expect(t).toContain('— a matched claim pair differs in the figures inside it; read both answers');
+      expect(t).toContain('withheld claim pairs:');
+      expect(t).toContain('unmatched claims:');
+      expect(t).toContain('The cache directory is purged on startup');
+    });
+
+    it('the zero-pair wording is absent on the agree, conflict and withheld routes (Minor 3(d))', async () => {
+      for (const [h, c] of [
+        ['The answer is 4.', 'The answer is 4.'],
+        ['The migration is safe to apply.', 'The migration is not safe to apply.'],
+        ['The retry limit is 3.', 'The retry limit is 30.'],
+      ] as const) {
+        const { t } = await run(h, c);
+        expect(t).not.toContain('not compared');
+        expect(t).not.toContain('no claim pairs found by aligner');
+        expect(t).not.toContain('the aligner found no claim');
+      }
+    });
   });
 });
 

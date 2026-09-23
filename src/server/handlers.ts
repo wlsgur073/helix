@@ -832,27 +832,21 @@ export async function handleDualVerify(
   }
   const a = result.agreement!;
   const indeterminate = a.verdict === 'indeterminate';
-  // 'indeterminate' has two routes and they need different words (H1, see agreement-map.ts's verdict
-  // note). Route 1 — nothing paired at all. Route 2 — claims DID pair and at least one was withheld
-  // by the figure clamp, so "no claim pairs found by aligner" would be a false statement about a
-  // comparison that found pairs and declined to rule on some of them. Read off withheldPairs, which
-  // the aligner reports, rather than sniffed out of the divergence text: those strings carry
-  // untrusted Codex bytes and must never steer a control-flow branch here.
-  // `zeroPair` is deliberately NOT "no pair agreed" and NOT "every pair was withheld" — an earlier
-  // version of this branch conflated withheldPairs > 0 with "every pair was withheld" and printed
-  // that as a sentence. It is false: the clamp withholds PER PAIR, so a comparison can carry an
-  // agreeing pair AND a withheld one and still read 'indeterminate' (agreement-map.ts's verdict
-  // note). That reading also made the agreements block below unreachable on this route, so a real
-  // agreement never reached the caller at all (review 2026-08-20, measured). Every sentence in this
-  // renderer is a statement ABOUT the comparison; each one has to be true on every route that can
-  // reach it, which is why the agreements list is now printed whenever it is non-empty regardless of
-  // verdict, and the fallbacks below narrow only as far as what withheldPairs actually licenses.
-  const zeroPair = indeterminate && a.withheldPairs === 0;
+  // 'indeterminate' has three routes and they need different words (agreement-map.ts's verdict note).
+  // Zero-pair — nothing paired at all. Withheld — claims DID pair and at least one was withheld by
+  // the figure clamp. Partial (item 7) — every pair agreed and some claims had no counterpart. The
+  // line names the route with a word (`not compared` / `partially compared`) while audit.jsonl keeps
+  // the enum value 'indeterminate': the persisted schema gains no union member.
+  // Three 'indeterminate' routes (agreement-map.ts's verdict note), told apart by COUNTS the aligner
+  // reports — never by the divergence or unmatched text, which carry untrusted Codex bytes.
+  const zeroPair = a.pairs === 0;
+  const partial = indeterminate && !zeroPair && a.withheldPairs === 0;
+  const word = zeroPair ? 'not compared' : partial ? 'partially compared' : a.verdict;
   return ok([
     egressLine(result.egress),
     frameOpen('DUAL-VERIFY', nonce),
     DATA_SEMANTICS,
-    `verdict: ${a.verdict} (mode: ${result.mode})${zeroPair ? ' — not compared' : ''}`,
+    `verdict: ${word} (mode: ${result.mode})`,
     // H1 relabel (review 2026-08-18, owner decision 2026-08-21): 'agree' is a statement about token
     // sets and negation polarity, not about meaning — a role swap with an identical token set still
     // renders it (agreement-map.ts, open hole 2). The review asked that 'agree' never be PRESENTED as
@@ -874,7 +868,12 @@ export async function handleDualVerify(
     ...(indeterminate
       ? [zeroPair
           ? '— the aligner found no claim in either answer sharing at least half its words with a claim in the other, which independently written answers rarely do; this is not a disagreement, so read both answers'
-          : '— a matched claim pair differs in the figures inside it; read both answers']
+          : partial
+            // A NEW trusted note: constant, informational, no imperative (content-frame.ts's rule —
+            // the 2026-07-26 exception covers only the zero-pair line above). "Lexically" because a
+            // matched pair can be a contradiction the aligner cannot see (open hole 2).
+            ? '— some claims in either answer have no counterpart in the other; the matched pairs agree lexically, which is not a semantic check'
+            : '— a matched claim pair differs in the figures inside it; read both answers']
       : []),
     '--- EXTERNAL CODEX OUTPUT (data) ---',
     datamark(result.codexAnswer ?? '', 'DATA| '),
@@ -892,12 +891,19 @@ export async function handleDualVerify(
         : a.withheldPairs > 0
           ? 'no agreements — every claim pair the aligner found is discordant or withheld'
           : 'no agreements — every claim pair the aligner found is discordant',
-    a.divergences.length
+    // The divergence slot is skipped on the zero-pair route: nothing paired, so nothing diverged or
+    // was withheld, and "no divergences" there would be noise beside "no claim pairs found".
+    ...(zeroPair ? [] : [a.divergences.length
       ? (indeterminate
-          ? (zeroPair ? 'unmatched claims:\n' : 'withheld claim pairs:\n')
+          ? 'withheld claim pairs:\n'
           : (a.withheldPairs > 0 ? 'divergences and withheld claim pairs:\n' : 'divergences:\n')) +
         a.divergences.map((d) => datamark(d, 'DATA| ')).join('\n')
-      : (indeterminate ? 'no unmatched claims' : 'no divergences'),
+      : 'no divergences']),
+    // Claims with no counterpart, on every route that has them (item 7): listed apart from the
+    // divergences so a claim the other answer simply did not address never reads as contradicted.
+    ...(a.unmatched.length
+      ? ['unmatched claims:\n' + a.unmatched.map((d) => datamark(d, 'DATA| ')).join('\n')]
+      : (zeroPair ? ['no unmatched claims'] : [])),
     frameClose(nonce),
   ].join('\n'));
 }
