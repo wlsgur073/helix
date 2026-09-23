@@ -78,11 +78,16 @@ describe('dualVerify', () => {
     expect(r.agreement?.verdict).toBe('indeterminate');
   });
 
-  it('flags divergence when an anchored pair leaves differing remainders', async () => {
+  // FLIPPED 2026-09-23 (item 7): was 'flags divergence when an anchored pair leaves differing
+  // remainders', asserting `expect(r.agreement?.verdict).toBe('diverge');`. The differing remainders
+  // are unpaired, not contradicted, and the one real pair ("Use postgres for the store") agrees — the
+  // UNPAIRED-CLAIMS ROUTE bug item 7 closes (see agreement-map.ts's module doc).
+  it('an anchored pair with unrelated remainders surfaces as indeterminate through the pipeline (item 7)', async () => {
     const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'Use postgres for the store. Add an index today.' },
       deps({ config: enabled(), runner: async () => ({ ok: true, answer: 'Use postgres for the store. Skip the index for now.' }) }));
     expect(r.ran).toBe(true);
-    expect(r.agreement?.verdict).toBe('diverge');
+    expect(r.agreement?.verdict).toBe('indeterminate');
+    expect(r.agreement?.unmatched).toEqual(['Add an index today', 'Skip the index for now']);
   });
 
   it('degrades without any metered call when stakes are below the floor (free gate first)', async () => {

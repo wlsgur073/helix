@@ -22,12 +22,20 @@ describe('J4 audit — agreement-map now matches paraphrases (J4-1 FIXED)', () =
     const m = buildAgreementMap('Use Postgres for storage', 'Use Redis as the cache');
     expect(m.verdict).toBe('indeterminate');
   });
-  it('an anchored pair with unrelated remainders still diverges', () => {
+  // FLIPPED 2026-09-23 (item 7): was 'an anchored pair with unrelated remainders still diverges',
+  // asserting `expect(m.verdict).toBe('diverge');`. The unrelated remainders are unpaired, not
+  // contradicted, and the one real pair ("Use Postgres for storage") agrees — this was the
+  // UNPAIRED-CLAIMS ROUTE bug item 7 closes (see agreement-map.ts's module doc), characterized here
+  // as current behavior before the fix and now updated to characterize the fix.
+  it('an anchored pair with unrelated remainders now reads indeterminate, the remainders unmatched', () => {
     const m = buildAgreementMap(
       'Use Postgres for storage. Cache reads in memory.',
       'Use Postgres for storage. Evict with an LRU policy.',
     );
-    expect(m.verdict).toBe('diverge');
+    expect(m.verdict).toBe('indeterminate');
+    expect(m.agreements).toEqual(['Use Postgres for storage']);
+    expect(m.divergences).toEqual([]);
+    expect(m.unmatched).toEqual(['Cache reads in memory', 'Evict with an LRU policy']);
   });
 });
 
