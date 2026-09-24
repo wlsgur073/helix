@@ -511,7 +511,12 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   instead: that project runs without its project layer, its reads leave the layer out with a note,
   its commits to that layer are refused, and an erase never reaches the other project's file (an id
   that lives only there is unknown to that project), so one file is never written under two project
-  scopes.
+  scopes. This check does not yet catch links it cannot resolve the way the kernel does: a `..`
+  after a symlinked directory inside the other project's own ledger link, a link that climbs out
+  through a directory tree deeper than the path limit, or a link or directory name that is not
+  valid UTF-8; the separate check against the global ledger does not yet resolve a `..` after a
+  symlinked directory either. Each shape needs links or directories planted inside an adopted
+  project's own tree.
 - **Appends are durable:** every append fsyncs the line before success is reported; a torn tail
   (power cut mid-append) is isolated by the next writer's tail repair and counted by parse health,
   and a complete-but-unacknowledged record commits (at-least-once). The **directory** fsync that
