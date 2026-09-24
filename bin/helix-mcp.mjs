@@ -14654,15 +14654,31 @@ function isOwned(projectRoot2, home2) {
   const stamp = readOwner(projectRoot2);
   return stamp !== null && stamp === entry.stamp;
 }
-function aliasesAdoptedLedger(project2) {
-  let real;
-  try {
-    real = lstatSync3(project2.ledger).isSymbolicLink() ? canonicalRoot(resolve(dirname5(project2.ledger), readlinkSync2(project2.ledger))) : canonicalRoot(project2.ledger);
-  } catch {
-    real = canonicalRoot(project2.ledger);
+var MAX_SYMLINK_HOPS = 40;
+function ledgerDestination(ledger) {
+  let p = ledger;
+  for (let hops = 0; ; hops++) {
+    let st;
+    try {
+      st = lstatSync3(p);
+    } catch (e) {
+      return e.code === "ENOENT" ? canonicalRoot(p) : canonicalRoot(ledger);
+    }
+    if (!st.isSymbolicLink()) return canonicalRoot(p);
+    if (hops === MAX_SYMLINK_HOPS) return canonicalRoot(ledger);
+    let target;
+    try {
+      target = readlinkSync2(p);
+    } catch {
+      return canonicalRoot(ledger);
+    }
+    p = resolve(canonicalRoot(dirname5(p)), target);
   }
+}
+function aliasesAdoptedLedger(project2) {
+  const real = ledgerDestination(project2.ledger);
   const ownKey = canonicalRoot(project2.root);
-  if (real === join5(ownKey, ".helix", "memory.jsonl")) return false;
+  if (real === projectLedgerPath(ownKey)) return false;
   for (const key of Object.keys(readRegistry(project2.home))) {
     if (key === GLOBAL_KEY || key === ownKey) continue;
     if (canonicalRoot(projectLedgerPath(key)) === real) return true;
@@ -16758,7 +16774,8 @@ var MemoryStore = class {
   /** WRITE-side startup step (spec §4.9): complete any transition whose new bytes already landed
    *  before a crash (crash window B — verdict transition-heal) for every scope this store owns, so a
    *  half-finished rewrite is resolved before the first read rather than lingering as a pending
-   *  journal. Global always; project only when owned (the same disposition gate every read path uses).
+   *  journal. Global always; project only when its disposition is 'owned' (the same gate every read
+   *  path uses, so an aliased layer — whose ledger leads to another project's file — is left alone).
    *  Each scope's heal runs under that scope's LEDGER lock; completeTransition then nests the witness
    *  lock (a different path — legal). BEST-EFFORT: a scope that is interrupted, stale, or mismatched is
    *  LEFT as-is (it re-surfaces as transition-interrupted / blocked on the next witnessed write, Task
@@ -16768,7 +16785,7 @@ var MemoryStore = class {
   healWitness() {
     const p = this.opts.project;
     const scopes = [{ ledger: this.global, root: void 0 }];
-    if (p && isOwned(p.root, this.homeDir())) scopes.push({ ledger: p.ledger, root: p.root });
+    if (p && this.projectDisposition() === "owned") scopes.push({ ledger: p.ledger, root: p.root });
     const home2 = this.homeDir();
     for (const s of scopes) {
       if (!existsSync4(dirname9(s.ledger))) continue;

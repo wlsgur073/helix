@@ -142,15 +142,31 @@ function isOwned(projectRoot, home) {
   const stamp = readOwner(projectRoot);
   return stamp !== null && stamp === entry.stamp;
 }
-function aliasesAdoptedLedger(project) {
-  let real;
-  try {
-    real = lstatSync2(project.ledger).isSymbolicLink() ? canonicalRoot(resolve(dirname2(project.ledger), readlinkSync(project.ledger))) : canonicalRoot(project.ledger);
-  } catch {
-    real = canonicalRoot(project.ledger);
+var MAX_SYMLINK_HOPS = 40;
+function ledgerDestination(ledger) {
+  let p = ledger;
+  for (let hops = 0; ; hops++) {
+    let st;
+    try {
+      st = lstatSync2(p);
+    } catch (e) {
+      return e.code === "ENOENT" ? canonicalRoot(p) : canonicalRoot(ledger);
+    }
+    if (!st.isSymbolicLink()) return canonicalRoot(p);
+    if (hops === MAX_SYMLINK_HOPS) return canonicalRoot(ledger);
+    let target;
+    try {
+      target = readlinkSync(p);
+    } catch {
+      return canonicalRoot(ledger);
+    }
+    p = resolve(canonicalRoot(dirname2(p)), target);
   }
+}
+function aliasesAdoptedLedger(project) {
+  const real = ledgerDestination(project.ledger);
   const ownKey = canonicalRoot(project.root);
-  if (real === join2(ownKey, ".helix", "memory.jsonl")) return false;
+  if (real === projectLedgerPath(ownKey)) return false;
   for (const key of Object.keys(readRegistry(project.home))) {
     if (key === GLOBAL_KEY || key === ownKey) continue;
     if (canonicalRoot(projectLedgerPath(key)) === real) return true;
@@ -410,6 +426,9 @@ function validateAcknowledgementLine(line) {
   if (!legs || !isLegShape(legs.rows) || !isLegShape(legs.bytes) || !isLegShape(legs.latency)) fail("legs");
   return parsed;
 }
+function tsOf(line) {
+  return /"ts":"([^"]*)"/.exec(line)?.[1] ?? "";
+}
 function acknowledgeLatest(deps = {}) {
   const env = deps.env ?? process.env;
   const readFile = deps.readFile ?? ((p) => readFileSync4(p));
@@ -421,12 +440,21 @@ function acknowledgeLatest(deps = {}) {
   } catch {
     return { ok: false, reason: "no trigger sink to acknowledge" };
   }
-  const last = text.split("\n").filter((l) => l.includes('"kind":"evaluation"')).at(-1);
+  const lines = text.split("\n");
+  const evaluations = lines.filter((l) => l.includes('"kind":"evaluation"'));
+  const last = evaluations.at(-1);
   if (last === void 0) return { ok: false, reason: "no evaluation to acknowledge" };
-  const evaluation = validateRecordLine(last);
-  if (evaluation.overall !== "fired") {
-    return { ok: false, reason: `the latest evaluation reads ${evaluation.overall}, not fired -- nothing to acknowledge` };
+  if (!evaluations.some((l) => l.includes('"overall":"fired"'))) {
+    return { ok: false, reason: "no evaluation has ever fired -- nothing to acknowledge" };
   }
+  const latestAck = lines.filter((l) => l.includes('"kind":"acknowledgement"')).at(-1);
+  if (latestAck !== void 0) {
+    const ackTs = tsOf(latestAck);
+    if (!evaluations.some((l) => tsOf(l) > ackTs)) {
+      return { ok: false, reason: "no evaluation since the latest acknowledgement -- nothing new to acknowledge" };
+    }
+  }
+  const evaluation = validateRecordLine(last);
   const record = {
     v: 1,
     policy: POLICY,

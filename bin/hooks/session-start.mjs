@@ -507,15 +507,31 @@ function isOwned(projectRoot, home) {
   const stamp = readOwner(projectRoot);
   return stamp !== null && stamp === entry.stamp;
 }
-function aliasesAdoptedLedger(project) {
-  let real;
-  try {
-    real = lstatSync3(project.ledger).isSymbolicLink() ? canonicalRoot(resolve(dirname3(project.ledger), readlinkSync2(project.ledger))) : canonicalRoot(project.ledger);
-  } catch {
-    real = canonicalRoot(project.ledger);
+var MAX_SYMLINK_HOPS = 40;
+function ledgerDestination(ledger) {
+  let p = ledger;
+  for (let hops = 0; ; hops++) {
+    let st;
+    try {
+      st = lstatSync3(p);
+    } catch (e) {
+      return e.code === "ENOENT" ? canonicalRoot(p) : canonicalRoot(ledger);
+    }
+    if (!st.isSymbolicLink()) return canonicalRoot(p);
+    if (hops === MAX_SYMLINK_HOPS) return canonicalRoot(ledger);
+    let target;
+    try {
+      target = readlinkSync2(p);
+    } catch {
+      return canonicalRoot(ledger);
+    }
+    p = resolve(canonicalRoot(dirname3(p)), target);
   }
+}
+function aliasesAdoptedLedger(project) {
+  const real = ledgerDestination(project.ledger);
   const ownKey = canonicalRoot(project.root);
-  if (real === join3(ownKey, ".helix", "memory.jsonl")) return false;
+  if (real === projectLedgerPath(ownKey)) return false;
   for (const key of Object.keys(readRegistry(project.home))) {
     if (key === GLOBAL_KEY || key === ownKey) continue;
     if (canonicalRoot(projectLedgerPath(key)) === real) return true;
@@ -1166,9 +1182,9 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   const maxChars = opts.maxChars ?? 4e3;
   const maxItemChars = opts.maxItemChars ?? 240;
   const integrityAvailable = opts.integrityAvailable ?? true;
-  const unadoptedNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : opts.aliasedPresent ? ALIASED_LEDGER_NOTE : null;
+  const projectLayerNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : opts.aliasedPresent ? ALIASED_LEDGER_NOTE : null;
   const scaleNote = opts.unionRows !== void 0 && opts.unionRows >= SCALE_ADVISORY_ROWS ? scaleAdvisoryNote(opts.unionRows) : null;
-  const trailer = [unadoptedNote, ...opts.witnessNotes ?? [], scaleNote].filter((n) => n !== null && n !== "");
+  const trailer = [projectLayerNote, ...opts.witnessNotes ?? [], scaleNote].filter((n) => n !== null && n !== "");
   const usable = records.filter(({ record }) => record.content.trim() !== "").sort((a, b) => STATE_ORDER[a.record.state] - STATE_ORDER[b.record.state] || b.record.tx.localeCompare(a.record.tx));
   if (usable.length === 0) return trailer.length > 0 ? trailer.join("\n") : "";
   const top = usable.slice(0, maxItems);

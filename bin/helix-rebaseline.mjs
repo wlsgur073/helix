@@ -596,15 +596,31 @@ function readRegistry(home) {
   const r = loadRegistry(home);
   return r.kind === "ok" ? r.reg : {};
 }
-function aliasesAdoptedLedger(project) {
-  let real;
-  try {
-    real = lstatSync3(project.ledger).isSymbolicLink() ? canonicalRoot(resolve(dirname5(project.ledger), readlinkSync2(project.ledger))) : canonicalRoot(project.ledger);
-  } catch {
-    real = canonicalRoot(project.ledger);
+var MAX_SYMLINK_HOPS = 40;
+function ledgerDestination(ledger) {
+  let p = ledger;
+  for (let hops = 0; ; hops++) {
+    let st;
+    try {
+      st = lstatSync3(p);
+    } catch (e) {
+      return e.code === "ENOENT" ? canonicalRoot(p) : canonicalRoot(ledger);
+    }
+    if (!st.isSymbolicLink()) return canonicalRoot(p);
+    if (hops === MAX_SYMLINK_HOPS) return canonicalRoot(ledger);
+    let target;
+    try {
+      target = readlinkSync2(p);
+    } catch {
+      return canonicalRoot(ledger);
+    }
+    p = resolve(canonicalRoot(dirname5(p)), target);
   }
+}
+function aliasesAdoptedLedger(project) {
+  const real = ledgerDestination(project.ledger);
   const ownKey = canonicalRoot(project.root);
-  if (real === join5(ownKey, ".helix", "memory.jsonl")) return false;
+  if (real === projectLedgerPath(ownKey)) return false;
   for (const key of Object.keys(readRegistry(project.home))) {
     if (key === GLOBAL_KEY || key === ownKey) continue;
     if (canonicalRoot(projectLedgerPath(key)) === real) return true;
