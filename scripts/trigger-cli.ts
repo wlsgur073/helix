@@ -56,8 +56,9 @@ const toNullable = (s: string | undefined): string | null => (s === undefined ||
  *  a reporter crash somewhere in validate/append/print; exit 0 = a validated record was appended AND
  *  printed, including the all-legs-unavailable case (a valid record). `--acknowledge` (item 7) carries
  *  its own meaning under the same three codes: exit 0 = a validated acknowledgement appended and
- *  printed, exit 2 = refused (a reason on stderr, nothing appended), exit 1 = a crash, e.g. a
- *  malformed latest evaluation. */
+ *  printed; exit 2 = refused, with a reason on stderr and nothing appended — no sink, no evaluation,
+ *  no evaluation that ever fired, or no evaluation since the latest acknowledgement (ruling R23);
+ *  exit 1 = a crash, e.g. a malformed latest evaluation. */
 export function main(argv: string[], deps: CliDeps = {}): number {
   const exit = deps.exit ?? ((code: number): void => { process.exitCode = code; });
   const parsed = parseArgs(argv);

@@ -299,7 +299,8 @@ export function appendToSink(home: string, line: string, fs: DurableFsOps = real
  *  (single writer per record kind), content-free, and it changes nothing about how an evaluation is
  *  computed — policy, thresholds and the evaluation record are untouched. The fired-history readers
  *  (both copies of trigger_fired_summary) go quiet after it until a later evaluation shows NEW
- *  evidence. `legs` copies the acknowledged evaluation's legs, the baseline a re-arm compares against. */
+ *  evidence. `evaluationTs` and `legs` copy the LATEST evaluation when the acknowledgement is taken,
+ *  whatever that evaluation reads (acknowledgeLatest says why): the baseline a re-arm compares against. */
 export interface AcknowledgementRecord {
   v: 1;
   policy: typeof POLICY;
@@ -324,9 +325,32 @@ export function validateAcknowledgementLine(line: string): AcknowledgementRecord
   return parsed as unknown as AcknowledgementRecord;
 }
 
-/** Acknowledge the LATEST evaluation, iff it reads 'fired'. Refuses — returns a reason and appends
- *  nothing — when the sink is absent, holds no evaluation, or its latest evaluation is not 'fired'. A
- *  malformed latest evaluation throws (validateRecordLine), which the CLI turns into exit 1. */
+/** The first `"ts":"..."` value on a sink line, '' when there is none — the extraction both shell
+ *  readers make (`grep -o '"ts":"[^"]*"' | head -n 1 | cut -d'"' -f4`). `ts` is serialized before any
+ *  free-form field of either record kind, and an acknowledgement's `"evaluationTs":"` cannot match
+ *  (the needle is a quote followed by a lowercase `ts`). */
+function tsOf(line: string): string {
+  return /"ts":"([^"]*)"/.exec(line)?.[1] ?? '';
+}
+
+/** Acknowledge a Trigger-1 fire (ruling R23). Lines are selected exactly as the fired-history readers
+ *  (both copies of trigger_fired_summary) select them, by fixed strings over JSON.stringify output
+ *  (no spaces after colons, every '"' inside a string escaped, so each needle can occur only as its
+ *  field): an evaluation contains `"kind":"evaluation"`, a fire is an evaluation containing
+ *  `"overall":"fired"`, the latest acknowledgement is the LAST line containing
+ *  `"kind":"acknowledgement"`, and "later" is the readers' strict `>` on fixed-width ISO `ts` strings.
+ *
+ *  Refuses — returns a reason and appends nothing — when the sink is absent, holds no evaluation, holds
+ *  no evaluation that ever read fired (nothing to acknowledge), or holds an acknowledgement with no
+ *  evaluation later than it (nothing new since). Otherwise appends one record copying the LATEST
+ *  evaluation's `ts` and legs, whatever it reads. The readers compare every later evaluation with the
+ *  acknowledged reading, so the baseline must be the current state: with the latest FIRED reading as
+ *  the baseline (latency min 6, say), a new slow recall lifting the current min from 2 to 3 would be
+ *  missed, and a re-arm caused by a rise below the threshold could never be acknowledged at all. The
+ *  earlier rule — the latest evaluation itself must read fired — was a dead end: once a leg fell back
+ *  under threshold, the summary kept alarming on the fire in its history while this refused (final
+ *  review I-2, probe c10). A malformed latest evaluation throws (validateRecordLine), which the CLI
+ *  turns into exit 1. */
 export function acknowledgeLatest(deps: MeasureDeps = {}): { ok: true; line: string } | { ok: false; reason: string } {
   const env = deps.env ?? process.env;
   const readFile = deps.readFile ?? ((p: string): Buffer => readFileSync(p));
@@ -335,12 +359,21 @@ export function acknowledgeLatest(deps: MeasureDeps = {}): { ok: true; line: str
   let text: string;
   try { text = readFile(join(home, SINK_FILE)).toString('utf8'); }
   catch { return { ok: false, reason: 'no trigger sink to acknowledge' }; }
-  const last = text.split('\n').filter((l) => l.includes('"kind":"evaluation"')).at(-1);
+  const lines = text.split('\n');
+  const evaluations = lines.filter((l) => l.includes('"kind":"evaluation"'));
+  const last = evaluations.at(-1);
   if (last === undefined) return { ok: false, reason: 'no evaluation to acknowledge' };
-  const evaluation = validateRecordLine(last);
-  if (evaluation.overall !== 'fired') {
-    return { ok: false, reason: `the latest evaluation reads ${evaluation.overall}, not fired -- nothing to acknowledge` };
+  if (!evaluations.some((l) => l.includes('"overall":"fired"'))) {
+    return { ok: false, reason: 'no evaluation has ever fired -- nothing to acknowledge' };
   }
+  const latestAck = lines.filter((l) => l.includes('"kind":"acknowledgement"')).at(-1);
+  if (latestAck !== undefined) {
+    const ackTs = tsOf(latestAck);
+    if (!evaluations.some((l) => tsOf(l) > ackTs)) {
+      return { ok: false, reason: 'no evaluation since the latest acknowledgement -- nothing new to acknowledge' };
+    }
+  }
+  const evaluation = validateRecordLine(last);
   const record: AcknowledgementRecord = {
     v: 1, policy: POLICY, kind: 'acknowledgement', ts: now(), evaluationTs: evaluation.ts, legs: evaluation.legs,
   };

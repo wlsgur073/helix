@@ -168,6 +168,12 @@ describe('T1-STICKY: an acknowledged fire stays quiet until new evidence (item 7
     quiet(history(E('2026-09-24T09:00:00.000Z', null), E('2026-09-25T09:00:00.000Z', 5))));
   it('acknowledged with rows false, later rows true -> re-armed', () =>
     rearmed(history(E('2026-09-24T09:00:00.000Z', 5, 'true'))));
+  it('acknowledged at 5, later 6 then 2 (probe c10), then a SECOND acknowledgement of the 2 reading -> quiet (R23)', () =>
+    quiet(history(
+      E('2026-09-24T09:00:00.000Z', 6),
+      E('2026-09-25T09:00:00.000Z', 2),
+      ackLine('2026-09-25T12:00:00.000Z', '2026-09-25T09:00:00.000Z', legsWith(2)),
+    )));
   it('acknowledged with rows true and latency min null (unavailable), later latency min 50 (status true), rows unchanged -> re-armed (R19: a leg not true at ack, true after, re-arms even from a null baseline)', () =>
     rearmed([
       E('2026-09-20T09:00:00.000Z', 5),
