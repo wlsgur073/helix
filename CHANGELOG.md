@@ -163,7 +163,7 @@ First release.
   `HELIX_LEDGER` moves the global ledger data file and nothing else.
 - Content-free replay metrics in `~/.helix/metrics.jsonl` (default on; `metrics.enabled: false`
   disables; the hook honours the global config only).
-- `helix_memory_inspect` takes an `ids` filter: up to 20 ids render only those records, each with
+- `helix_memory_inspect` takes an `ids` filter: up to 32 ids render only those records, each with
   its `contentDigest` proof line, so a caller can read back exactly the records a dual-verify
   refusal named and declare them in `quotedMemory`. `ids`, `history` and `asOf` are mutually
   exclusive, and requested ids with no live record are reported as a count rather than dropped in
