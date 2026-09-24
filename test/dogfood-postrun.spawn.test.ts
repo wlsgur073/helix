@@ -369,4 +369,18 @@ describe('Trigger-1 fired-history summary (Task 12 derived reporter)', () => {
     expect(status).toBe(0);
     expect(stdout).toContain('Trigger-1 has fired since 2026-08-01T09:00:00.000Z; 9 of the last 14 evaluations fired.');
   });
+
+  it('an acknowledged fire -> the adapter logs the acknowledged line (item 7)', () => {
+    const { scriptPath } = buildTree(STUB_OK);
+    const home = mkdtempSync(join(tmpdir(), 'helix-postrun-home-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-postrun-root-'));
+    const off = { min: 1, max: 1, threshold: 2500, status: 'false' as const };
+    const legs = { rows: off, bytes: { ...off, threshold: 4194304 }, latency: { min: 5, max: 5, threshold: 3, status: 'true' as const } };
+    const ack = JSON.stringify({ v: 1, policy: 'T1-2026-07-11', kind: 'acknowledgement', ts: '2026-09-23T12:00:00.000Z', evaluationTs: '2026-09-23T08:30:18.147Z', legs });
+    writeFileSync(join(home, 'trigger.jsonl'), [evalLine('2026-09-23T08:30:18.147Z', 'fired', 'r1'), ack].join('\n') + '\n');
+    const env = { ...baseEnv(home), INVOCATION_ID: 'inv-ack', SERVICE_RESULT: 'success', EXIT_CODE: '0', EXIT_STATUS: '0/SUCCESS' };
+    const { status, stdout } = runAdapter(scriptPath, root, env);
+    expect(status).toBe(0);
+    expect(stdout).toContain('Acknowledged 2026-09-23T12:00:00.000Z: no new slow recall or size crossing since.');
+  });
 });

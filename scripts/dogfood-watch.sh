@@ -2,7 +2,9 @@
 # Terminal-riding watchdog for the helix dogfood runner.
 # Silent when healthy. Banners (max once per calendar day, each on its own stamp) when the schedule
 # mechanism is dead, no run completion has been recorded for >= 2 days, or Trigger-1 has ever fired
-# in the sink's history (a standing disclosure, independent of the two health banners above).
+# in the sink's history (a standing disclosure, independent of the two health banners above, that
+# goes quiet once a fire is acknowledged with `helix-trigger --acknowledge` and returns once a later
+# evaluation shows new evidence that re-arms it).
 # Spec: the dogfood schedule-reliability design (local operating notes)
 # Contract: never break shell startup - no set -e, every path neutralized,
 # always exit 0. Env seams exist so drills never touch live state.
@@ -40,7 +42,40 @@ trigger_fired_summary() {
   n=$(grep -c '"kind":"evaluation"' "$f" 2>/dev/null)
   w=$(( n < 14 ? n : 14 ))                 # the window never claims more evaluations than exist
   recent=$(grep '"kind":"evaluation"' "$f" 2>/dev/null | tail -n 14 | grep -c '"overall":"fired"')
-  printf 'Trigger-1 has fired since %s; %s of the last %s evaluations fired.\n' "$first" "$recent" "$w"
+  msg="Trigger-1 has fired since $first; $recent of the last $w evaluations fired."
+  # T1-STICKY (item 7): the LATEST acknowledgement (helix-trigger --acknowledge) quiets the alarm
+  # until a later evaluation shows NEW evidence: the latency arm's definite slow count (`min`) RISING
+  # between consecutive readings, starting from the acknowledged reading (a fall is an old slow
+  # recall leaving the window; a null reading is skipped), or a row/byte arm reading "true" that did
+  # not at the acknowledgement. Known limit: a new slow recall entering in the same interval an old
+  # one leaves nets zero and is missed. Returns 10 alarm, 11 acknowledged, 0 nothing to report.
+  ack=$(grep '"kind":"acknowledgement"' "$f" 2>/dev/null | tail -n 1)
+  if [ -z "$ack" ]; then
+    printf '%s\n' "$msg"
+    return 10
+  fi
+  ack_ts=$(printf '%s' "$ack" | grep -o '"ts":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+  prev=$(printf '%s' "$ack" | grep -o '"latency":{"min":[0-9]*' | head -n 1 | grep -o '[0-9]*$')
+  rows0=$(printf '%s' "$ack" | grep -o '"rows":{[^}]*}' | head -n 1 | grep -o '"status":"[a-z]*"' | cut -d'"' -f4)
+  bytes0=$(printf '%s' "$ack" | grep -o '"bytes":{[^}]*}' | head -n 1 | grep -o '"status":"[a-z]*"' | cut -d'"' -f4)
+  rearmed=0
+  while IFS= read -r line; do
+    ts=$(printf '%s' "$line" | grep -o '"ts":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+    [[ "$ts" > "$ack_ts" ]] || continue
+    cur=$(printf '%s' "$line" | grep -o '"latency":{"min":[0-9]*' | head -n 1 | grep -o '[0-9]*$')
+    if [ -n "$cur" ] && [ -n "$prev" ] && [ "$cur" -gt "$prev" ]; then rearmed=1; fi
+    [ -n "$cur" ] && prev="$cur"
+    rows=$(printf '%s' "$line" | grep -o '"rows":{[^}]*}' | head -n 1 | grep -o '"status":"[a-z]*"' | cut -d'"' -f4)
+    bytes=$(printf '%s' "$line" | grep -o '"bytes":{[^}]*}' | head -n 1 | grep -o '"status":"[a-z]*"' | cut -d'"' -f4)
+    if [ "$rows" = true ] && [ "$rows0" != true ]; then rearmed=1; fi
+    if [ "$bytes" = true ] && [ "$bytes0" != true ]; then rearmed=1; fi
+  done < <(grep '"kind":"evaluation"' "$f" 2>/dev/null)
+  if [ "$rearmed" = 1 ]; then
+    printf '%s Re-armed after the acknowledgement of %s: a new slow recall or a size crossing since.\n' "$msg" "$ack_ts"
+    return 10
+  fi
+  printf '%s Acknowledged %s: no new slow recall or size crossing since.\n' "$msg" "$ack_ts"
+  return 11
 }
 
 trigger_fired_banner() {
@@ -51,7 +86,8 @@ trigger_fired_banner() {
   # stamp keeps this disclosure from competing with banner()'s single daily slot below: printing this
   # first must never suppress a same-day timer/gap banner, and vice versa.
   msg=$(trigger_fired_summary "$TRIGGER_FILE")
-  [ -n "$msg" ] || return 0
+  rc=$?
+  [ "$rc" = 10 ] && [ -n "$msg" ] || return 0          # 11 = acknowledged: quiet, by design (T1-STICKY)
   [ -f "$TRIGGER_STAMP_FILE" ] && [ "$(cat "$TRIGGER_STAMP_FILE" 2>/dev/null)" = "$(today)" ] && return 0
   mkdir -p "$(dirname "$TRIGGER_STAMP_FILE")" 2>/dev/null
   today > "$TRIGGER_STAMP_FILE" 2>/dev/null

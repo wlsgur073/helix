@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { EvaluationRecord } from '../scripts/trigger-measure.js';
+import type { AcknowledgementRecord } from '../scripts/trigger-measure.js';
 import type { Leg } from '../scripts/trigger-eval.js';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,13 +20,13 @@ const POSTRUN = join(repoRoot, 'scripts', 'dogfood-postrun.sh');
 
 /** Same construction as test/dogfood-postrun.spawn.test.ts's evalLine: the REAL EvaluationRecord type
  *  through JSON.stringify, so the fixture has the sink's exact byte shape (no spaces after colons). */
-function evalLine(ts: string, overall: EvaluationRecord['overall'], run: string): string {
+function evalLine(ts: string, overall: EvaluationRecord['overall'], run: string, legs?: EvaluationRecord['legs']): string {
   const leg: Leg = { min: null, max: null, threshold: 0, status: 'unavailable' };
   const record: EvaluationRecord = {
     v: 1, policy: 'T1-2026-07-11', kind: 'evaluation',
     ts, run,
     service_result: null, exit_code: null, exit_status: null,
-    legs: { rows: leg, bytes: leg, latency: leg },
+    legs: legs ?? { rows: leg, bytes: leg, latency: leg },
     latencyN: null, overall,
     project: 'owned', metricsState: 'present', unknownLines: 0, unknownMaxOps: 0,
   };
@@ -120,4 +121,51 @@ describe('the two copies of trigger_fired_summary are byte-identical', () => {
   it('dogfood-watch.sh and dogfood-postrun.sh carry the same function text', () => {
     expect(reporterBody(WATCH)).toBe(reporterBody(POSTRUN));
   });
+});
+
+const legsWith = (latencyMin: number | null, rows: Leg['status'] = 'false'): EvaluationRecord['legs'] => ({
+  rows: { min: 78, max: 78, threshold: 2500, status: rows },
+  bytes: { min: 1, max: 1, threshold: 4194304, status: 'false' },
+  latency: { min: latencyMin, max: latencyMin, threshold: 3, status: latencyMin !== null && latencyMin >= 3 ? 'true' : 'false' },
+});
+function ackLine(ts: string, evaluationTs: string, legs: EvaluationRecord['legs']): string {
+  const r: AcknowledgementRecord = { v: 1, policy: 'T1-2026-07-11', kind: 'acknowledgement', ts, evaluationTs, legs };
+  return JSON.stringify(r);
+}
+
+describe('T1-STICKY: an acknowledged fire stays quiet until new evidence (item 7)', () => {
+  const E = (ts: string, lat: number | null, rows: Leg['status'] = 'false'): string =>
+    evalLine(ts, (lat !== null && lat >= 3) || rows === 'true' ? 'fired' : 'not-fired', 'r', legsWith(lat, rows));
+  const ACK_TS = '2026-09-23T12:00:00.000Z';
+  const history = (...later: string[]): string => [
+    E('2026-09-20T09:00:00.000Z', 5),
+    E('2026-09-23T08:30:18.147Z', 5),
+    ackLine(ACK_TS, '2026-09-23T08:30:18.147Z', legsWith(5)),
+    ...later,
+  ].join('\n') + '\n';
+  const quiet = (sink: string): void => {
+    const t = buildTree();
+    writeFileSync(t.sink, sink);
+    const r = runWatch(t);
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toContain('Trigger-1 has fired');
+  };
+  const rearmed = (sink: string): void => {
+    const t = buildTree();
+    writeFileSync(t.sink, sink);
+    const r = runWatch(t);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`Re-armed after the acknowledgement of ${ACK_TS}`);
+  };
+
+  it('acknowledged, no later evaluation -> quiet', () => quiet(history()));
+  it('acknowledged at 5, later 5 then 4 (an old slow recall left) -> quiet', () =>
+    quiet(history(E('2026-09-24T09:00:00.000Z', 5), E('2026-09-25T09:00:00.000Z', 4))));
+  it('acknowledged at 5, later 4 then 5 (a rise from 4 is a new slow recall) -> re-armed', () =>
+    rearmed(history(E('2026-09-24T09:00:00.000Z', 4), E('2026-09-25T09:00:00.000Z', 5))));
+  it('acknowledged at 5, later 6 -> re-armed', () => rearmed(history(E('2026-09-24T09:00:00.000Z', 6))));
+  it('acknowledged at 5, later null then 5 -> quiet (null neither re-arms nor resets)', () =>
+    quiet(history(E('2026-09-24T09:00:00.000Z', null), E('2026-09-25T09:00:00.000Z', 5))));
+  it('acknowledged with rows false, later rows true -> re-armed', () =>
+    rearmed(history(E('2026-09-24T09:00:00.000Z', 5, 'true'))));
 });
