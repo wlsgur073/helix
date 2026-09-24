@@ -15,6 +15,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { MemoryStore } from '../../src/memory/store.js';
 import { buildServer } from '../../src/server/helix-server.js';
 import { MAX_QUERY_CHARS } from '../../src/memory/retrieval.js';
+import { MAX_INSPECT_IDS } from '../../src/limits.js';
 import type { MetricsSink } from '../../src/metrics.js';
 
 /** Counts every handler entry. runOp still runs the handler, so behaviour is unchanged. */
@@ -60,5 +61,40 @@ describe('the recall query bound is declared at the MCP boundary (N2-QUERY-DOS.c
     // The point of the leg: dropping .max() from the schema leaves the store's throw as the only
     // guard, and the handler — with its metrics and audit side effects — runs before it fires.
     expect(ops, 'the handler ran, so the bound was enforced inside rather than at the boundary').not.toContain('helix_memory_recall');
+  }, 30_000);
+});
+
+async function inspectWithIds(n: number): Promise<{ ops: string[]; failed: boolean }> {
+  const home = mkdtempSync(join(tmpdir(), 'helix-insp-'));
+  const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1' });
+  const sink = countingSink();
+  const server = buildServer(store, undefined, sink);
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'insp', version: '0' });
+  await Promise.all([client.connect(ct), server.connect(st)]);
+  const ids = Array.from({ length: n }, (_, i) => `m_${String(i).padStart(4, '0')}`);
+  let failed = false;
+  try {
+    const res = await client.callTool({ name: 'helix_memory_inspect', arguments: { ids } });
+    failed = res.isError === true;
+  } catch { failed = true; }
+  return { ops: sink.ops, failed };
+}
+
+describe('the inspect ids bound is declared at the MCP boundary (item 7)', () => {
+  it('covers the largest echo block on record (23 ids, 2026-09-22) in one call', () => {
+    expect(MAX_INSPECT_IDS).toBeGreaterThanOrEqual(23);
+  });
+
+  it('ids at the limit reach the handler', async () => {
+    const { ops, failed } = await inspectWithIds(MAX_INSPECT_IDS);
+    expect(failed).toBe(false);
+    expect(ops).toContain('helix_memory_inspect');
+  }, 30_000);
+
+  it('one id over the limit is refused WITHOUT entering the handler', async () => {
+    const { ops, failed } = await inspectWithIds(MAX_INSPECT_IDS + 1);
+    expect(failed).toBe(true);
+    expect(ops).not.toContain('helix_memory_inspect');
   }, 30_000);
 });

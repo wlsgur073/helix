@@ -76,14 +76,20 @@ export const MAX_DV_QUOTED_ITEMS = 64;
 
 /** `helix_memory_inspect`'s `ids` filter. A blocked dual-verify names the records that still block;
  *  this is how a caller reads those records (and their digests) without dumping the whole store.
- *  Sized above the largest observed echo set and far below the response cap. */
-export const MAX_INSPECT_IDS = 20;
+ *  Sized above the largest echo block on record — 23 ids on 2026-09-22 (`memory-echo (23 items)` in
+ *  the dogfood audit) — so one call reads every named record, and far below the response cap.
+ *  Schema-only, like the recall caps: the handler has no second check, and the response it shapes
+ *  is bounded by RESPONSE_MAX_CHARS. */
+export const MAX_INSPECT_IDS = 32;
 
 /** Echo-diagnosis caps (A2). The block names which records still block and, inside a DATA frame,
  *  which run of the caller's OWN payload matched each one. Bounded so a large echo cannot turn a
  *  refusal into a wall of text: at most this many records carry spans, this many spans each, and
  *  this many characters per span (longer runs are truncated with U+2026 and their full length is
- *  reported). */
+ *  reported).
+ *  MAX_ECHO_SPAN_IDS is a DISPLAY bound, not a coverage claim: a block naming more records shows the
+ *  first ten with their spans and counts the rest, and the caller reads any of them with
+ *  `helix_memory_inspect` `ids`. */
 export const MAX_ECHO_SPAN_IDS = 10;
 export const MAX_ECHO_SPANS_PER_ID = 3;
 export const MAX_ECHO_SPAN_CHARS = 160;
