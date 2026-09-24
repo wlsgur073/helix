@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, readlinkSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
 import { join, resolve, dirname, isAbsolute } from 'node:path';
 import { withFileLock, canonical } from './lock.js';
 import { ensureHelixDir } from './home-permissions.js';
@@ -193,19 +193,53 @@ export function isOwned(projectRoot: string, home: string): boolean {
   return stamp !== null && stamp === entry.stamp;
 }
 
-/** A project layer's read-side participation state (B1/B2). 'unadopted-present' is the disclosure
+/** A project layer's read-side participation state (B1/B2). 'unadopted-present' is a disclosure
  *  trigger: a foreign, un-owned ledger file sits where Helix would read one, and is excluded from
- *  every read surface. */
-export type ProjectDisposition = 'inactive' | 'owned' | 'unadopted-present';
+ *  every read surface. 'aliased' (item 7) is the second disclosure trigger: an OWNED project whose
+ *  ledger leads to another adopted project's ledger file, excluded from every read surface the same
+ *  way, with its own constant note. */
+export type ProjectDisposition = 'inactive' | 'owned' | 'unadopted-present' | 'aliased';
 
-/** Shared, side-effect-free tri-state snapshot of a project layer's disposition — the SAME predicate
+/** ALIAS-P2P (item 7): does this project's ledger lead to ANOTHER adopted project's ledger file?
+ *  The global rule (scope-target.ts aliasesGlobalLedger) compares a project ledger with the global
+ *  ledger only, so project A's `memory.jsonl` symlinked to project B's file was witnessed under two
+ *  scope keys against one inode. Hard links are refused at the write layer by link count and are not
+ *  this rule's business. Realpath, like the global rule, with ONE symlink hop followed by hand:
+ *  `canonical` returns a DANGLING link's own location, so without the hop a link into another
+ *  project's not-yet-created ledger reads as this project's own file and the first append creates
+ *  the file inside the other project. The project whose ledger path IS the real file is never
+ *  aliased by this rule — the linking side is, and both sides are when both lead to a third file.
+ *  Pure reads, never throws: registry via readRegistry (absent/corrupt → no other roots). */
+export function aliasesAdoptedLedger(project: { root: string; home: string; ledger: string }): boolean {
+  let real: string;
+  try {
+    real = lstatSync(project.ledger).isSymbolicLink()
+      ? canonicalRoot(resolve(dirname(project.ledger), readlinkSync(project.ledger)))
+      : canonicalRoot(project.ledger);
+  } catch {
+    real = canonicalRoot(project.ledger);
+  }
+  const ownKey = canonicalRoot(project.root);
+  if (real === join(ownKey, '.helix', 'memory.jsonl')) return false;
+  for (const key of Object.keys(readRegistry(project.home))) {
+    if (key === GLOBAL_KEY || key === ownKey) continue;
+    if (canonicalRoot(projectLedgerPath(key)) === real) return true;
+  }
+  return false;
+}
+
+/** Shared, side-effect-free four-state snapshot of a project layer's disposition — the SAME predicate
  *  MemoryStore (read paths) and the SessionStart hook (which does not go through MemoryStore) both
- *  route through, so the two surfaces can never disagree about what 'unadopted-present' means. Pure:
- *  two file reads (isOwned's registry+.owner, then existsSync), no writes, never throws (isOwned
- *  already swallows its own read errors; existsSync never throws).
+ *  route through, so the two surfaces can never disagree about what 'unadopted-present' or 'aliased'
+ *  means. Pure: isOwned's registry+.owner reads, then existsSync, and — for an owned project —
+ *  aliasesAdoptedLedger's own registry read and at most one symlink hop; no writes, never throws
+ *  (isOwned and aliasesAdoptedLedger already swallow their own read errors; existsSync never throws).
  *
  *  - 'owned': isOwned(project.root, project.home) — true regardless of whether the ledger FILE exists
  *    yet (an owned project with no ledger file still participates).
+ *  - 'aliased' (item 7): owned, but its ledger leads to another adopted project's ledger file
+ *    (aliasesAdoptedLedger). Excluded from every read like 'unadopted-present', with its own constant
+ *    note; writes are refused in store.ts.
  *  - 'unadopted-present': a descriptor is given, NOT owned, and a ledger file exists at project.ledger
  *    — the exact condition MemoryStore's targetLedger() throws the adopt-hint error on for commit.
  *  - 'inactive': no descriptor (no project layer configured), OR configured but neither owned nor a
@@ -217,7 +251,7 @@ export function projectDispositionOf(
   project: { root: string; home: string; ledger: string } | undefined,
 ): ProjectDisposition {
   if (!project) return 'inactive';
-  if (isOwned(project.root, project.home)) return 'owned';
+  if (isOwned(project.root, project.home)) return aliasesAdoptedLedger(project) ? 'aliased' : 'owned';
   return existsSync(project.ledger) ? 'unadopted-present' : 'inactive';
 }
 
