@@ -1,16 +1,16 @@
 {
  "payload": {
   "artifactKind": "v0.1-release-candidate",
-  "candidateCommit": "edeb57f79369a1611cc39be25563c0f9747e8eea",
-  "treeShaAtCut": "f45c48bf7840",
-  "cutAt": "2026-09-22T14:33:24.870Z",
+  "candidateCommit": "8abd9845a96e3e4f89a46a0b0c1abb1610b920c2",
+  "treeShaAtCut": "6bc767039fc5",
+  "cutAt": "2026-09-24T11:17:47.514Z",
   "bundles": {
-   "bin/helix-mcp.mjs": "04de64e3e5f88ace10964412228f11f694e0ebd8971038068d88ec9bbf6159f1",
-   "bin/helix-rebaseline.mjs": "facf4d020538289a8fe85785fe0d3d244c636c603c9d75573247bf02b70f7ad6",
-   "bin/helix-trigger.mjs": "2ab612990ab3c4e8339efd7e67695bad82191a9866445285511213a043787e5d",
-   "bin/helix-trust-resolve.mjs": "2990857de7d0fafe98d2bff8a6b64a815199f279a159100b0a582152adc1b166",
+   "bin/helix-mcp.mjs": "78797f0568c492fa05911fefba4364e2319589ddf5dea6e6c4209a7619573c09",
+   "bin/helix-rebaseline.mjs": "df45a64e6316e8f9ef58dc3d03c76b4889a2f38d677274d72a9cb570018e9637",
+   "bin/helix-trigger.mjs": "e0761b2857b2aab9e25fddd8b193c6befab4bc68877fb9dee456a3aa549f691b",
+   "bin/helix-trust-resolve.mjs": "88edf8687b71aad0c8999f8180f0996747e8c645c039890d7a2b0b2b90f1822f",
    "bin/hooks/session-end.mjs": "83d89a723a02030638e6be76995fa95f3a4dfe1987d3371c735443bf1585c675",
-   "bin/hooks/session-start.mjs": "24fe52d1244376601c04e2e41e9547d73f8374f0d73e827ae27af57fc31a0a92"
+   "bin/hooks/session-start.mjs": "99d6e6b90931f539c247ade0e86a9baa16d57677bbf0138731337fe219ef31e8"
   },
   "manifest": {
    ".claude-plugin/plugin.json": "24091985d94b9612720fdfd4d4ce92d0099c37693eec072240536b661f8e4657",
@@ -18,8 +18,8 @@
    "hooks/hooks.json": "d135a67aa58b10fc805b46a959272099e01e5ed701c511d99319e4641b63bf02"
   },
   "claimSet": {
-   "data/inventory/surface.json": "21748ac2931c5eb8c95fc3cdf54e65204aef5ee30864a43e07abc5fa12a4b2e4",
-   "data/inventory/claims.json": "4de864bc914a3a282a23c6449d9433dfe7fd1c7b11a15ff34be3a6dd44449ebe"
+   "data/inventory/surface.json": "90358efed65f6c6da8a09d8aeb7b4cd674b08b518ede7884d4217df80201b2e8",
+   "data/inventory/claims.json": "84eacb8433b80bd64c5c467cf8c2ab52c2213dbb66c5c2fb4b3e2762d9daa768"
   },
   "rowIds": [
    "r001",
@@ -99,10 +99,10 @@
   ],
   "gateAtCut": {
    "typecheck": "exit 0",
-   "suite": "exit 0 — Tests  2643 passed | 2 skipped (2645)",
-   "suiteFiles": "Test Files  207 passed | 2 skipped (209)",
-   "measuredAt": "2026-09-22T14:33:51.533Z"
+   "suite": "exit 0 — Tests  2729 passed | 2 skipped (2731)",
+   "suiteFiles": "Test Files  210 passed | 2 skipped (212)",
+   "measuredAt": "2026-09-24T11:18:15.898Z"
   }
  },
- "payloadSha256": "916dbf0c2b09e34e0c9232292a8cb890208c80427683f8473100d4ed774ab19a"
+ "payloadSha256": "f27480bfd36e3b6adc22138d828826db08fdc17246e2256bd6f1549150616f6d"
 }
