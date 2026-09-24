@@ -39,9 +39,9 @@ export interface GatherResult {
   integrityAvailable: boolean;
   /** Per-scope replay decomposition, in read order. Pure data — main() decides to emit. */
   replays: Array<{ scope: MemoryScope } & ReplayStats>;
-  /** B2: this call's single project-disposition snapshot (the SAME shared tri-state predicate
-   *  MemoryStore's read paths use — see ownership.ts's projectDispositionOf), for the caller's
-   *  unadopted-ledger disclosure note. 'inactive' when no cwd was given. */
+  /** B2 + item 7: this call's single project-disposition snapshot (the SAME shared four-state
+   *  predicate MemoryStore's read paths use — see ownership.ts's projectDispositionOf), for the
+   *  caller's unadopted/aliased-ledger disclosure note. 'inactive' when no cwd was given. */
   projectDisposition: ProjectDisposition;
   /** W-T7: ordered, deduped rollback-witness disclosure notes for the read scopes (mismatch/
    *  interrupted/first-contact). Threaded into formatSessionStartContext, rendered OUTSIDE the frame
@@ -83,7 +83,7 @@ export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): G
     // gates both the disposition snapshot and the read below, so the two can never disagree.
     if (!aliasesGlobalLedger(projLedger, globalLedger)) { // one physical file is never two scopes -- see scope-target.ts
       try {
-        // B2: the SAME shared tri-state predicate the store uses, from the same descriptor shape —
+        // B2 + item 7: the SAME shared four-state predicate the store uses, from the same descriptor shape —
         // computed ONCE and reused to gate the read immediately below (mirrors store.ts's
         // projectDisposition()-then-route pattern: one evaluation per call, never a second isOwned
         // read for the same decision). projectDispositionOf never throws (isOwned/existsSync are
@@ -140,7 +140,8 @@ async function main(): Promise<void> {
 
     const { records, integrityAvailable, replays, projectDisposition, witnessNotes } = gatherScopedRecords({ home, globalLedger, cwd });
     const text = formatSessionStartContext(records, newNonce(), {
-      integrityAvailable, unadoptedPresent: projectDisposition === 'unadopted-present', witnessNotes,
+      integrityAvailable, unadoptedPresent: projectDisposition === 'unadopted-present',
+      aliasedPresent: projectDisposition === 'aliased', witnessNotes,
       unionRows: unionPhysicalRows(replays),
     });
     // Synchronous write to fd 1: process exit must not drop a buffered async pipe write on

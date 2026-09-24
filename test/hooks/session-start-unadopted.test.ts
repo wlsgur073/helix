@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gatherScopedRecords } from '../../src/hooks/session-start.js';
 import { formatSessionStartContext } from '../../src/hooks/format-context.js';
-import { UNADOPTED_LEDGER_NOTE } from '../../src/memory/content-frame.js';
+import { UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE } from '../../src/memory/content-frame.js';
 import type { MemoryRecord, ScopedRecord } from '../../src/types.js';
 
 const N = 'd'.repeat(32); // fixed test nonce
@@ -137,5 +137,9 @@ describe('SessionStart hook unadopted-ledger disclosure (B2)', () => {
       }
       expect(text).toBeNull(); // nothing would reach writeSync — no output, exit 0
     } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('renders the aliased note ALONE on empty memory when aliasedPresent is set (item 7)', () => {
+    expect(formatSessionStartContext([], N, { aliasedPresent: true })).toBe(ALIASED_LEDGER_NOTE);
   });
 });

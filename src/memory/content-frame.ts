@@ -58,6 +58,13 @@ export function normalizeUntrusted(s: string, maxChars?: number): string {
 export const UNADOPTED_LEDGER_NOTE =
   '(an unadopted project memory file is present and excluded from results; adoption requires explicit user approval)';
 
+/** ALIAS-P2P (item 7): the same constraints as UNADOPTED_LEDGER_NOTE — whoever can plant a symlink in
+ *  an adopted project controls WHETHER this appears, so it is a constant: informational only, no
+ *  imperative, no interpolation, no path. Rendered wherever the unadopted note is, iff the per-call
+ *  project-disposition snapshot is 'aliased'. */
+export const ALIASED_LEDGER_NOTE =
+  "(this project's memory file resolves to another adopted project's memory file and is excluded from results)";
+
 // Rollback-witness disclosure notes (spec 2026-07-17-high-water-counter-decision §4). Like
 // UNADOPTED_LEDGER_NOTE these are TRUSTED, CONSTANT strings rendered OUTSIDE the DATA frame: an
 // adversary who can roll back / fork / interrupt a ledger controls WHETHER each note appears, so the

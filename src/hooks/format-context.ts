@@ -1,5 +1,5 @@
 import type { MemoryState, ScopedRecord } from '../types.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, reverifyFlag, safeId, UNADOPTED_LEDGER_NOTE } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS, reverifyFlag, safeId, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE } from '../memory/content-frame.js';
 import { classifyEmission } from '../risk/trifecta.js';
 import { isVerifyingSource } from '../memory/firewall.js';
 
@@ -21,6 +21,9 @@ export interface FormatOptions {
    *  exists" and "one exists but isn't trusted") — and is reserved outside the maxChars truncation
    *  accounting so the budget can never drop it. Default false (no note, backward-compatible). */
   unadoptedPresent?: boolean;
+  /** Item 7: true iff this call's disposition snapshot is 'aliased'. Same treatment as unadoptedPresent:
+   *  the constant note always renders and is reserved outside the maxChars accounting. */
+  aliasedPresent?: boolean;
   /** W-T7: ordered, deduped rollback-witness notes (mismatch/interrupted/first-contact). Appended
    *  AFTER the unadopted note, OUTSIDE the maxChars budget (same reservation as unadoptedPresent), and
    *  STILL printed on the empty-records early return — a transition-interrupted scope that excludes
@@ -52,22 +55,23 @@ const RESERVE = 6; // floor of item slots guaranteed to current-authoritative re
 /**
  * Render the live projection as a SessionStart context block: nonce-delimited, semantics-headed,
  * per-line DATA[state:scope]| datamarked, most-trusted first, re-verify flags surfaced, bounded in
- * items and characters. Empty memory renders '' (inject nothing) UNLESS `unadoptedPresent` is set, in
- * which case the constant disclosure note renders alone (B2 — the empty auto-load IS the misdiagnosis
- * surface an attacker-planted-but-unadopted ledger would otherwise hide behind). `nonce` is supplied
- * by the caller.
+ * items and characters. Empty memory renders '' (inject nothing) UNLESS `unadoptedPresent` or
+ * `aliasedPresent` is set, in which case the matching constant disclosure note renders alone (B2/item 7
+ * — the empty auto-load IS the misdiagnosis surface an attacker-planted-but-unadopted or aliased ledger
+ * would otherwise hide behind). `nonce` is supplied by the caller.
  */
 export function formatSessionStartContext(records: ScopedRecord[], nonce: string, opts: FormatOptions = {}): string {
   const maxItems = opts.maxItems ?? 30;
   const maxChars = opts.maxChars ?? 4000;
   const maxItemChars = opts.maxItemChars ?? 240;
   const integrityAvailable = opts.integrityAvailable ?? true;
-  const unadoptedNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : null;
+  const unadoptedNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE
+    : opts.aliasedPresent ? ALIASED_LEDGER_NOTE : null;
   const scaleNote = opts.unionRows !== undefined && opts.unionRows >= SCALE_ADVISORY_ROWS
     ? scaleAdvisoryNote(opts.unionRows) : null;
-  // Trusted out-of-band trailer: unadopted note FIRST, then the witness notes (ordered, deduped by
-  // the caller), then the scale advisory (least security-critical last). Reserved outside the
-  // maxChars budget below, like the unadopted note.
+  // Trusted out-of-band trailer: the project-layer note (unadopted or aliased) FIRST, then the witness
+  // notes (ordered, deduped by the caller), then the scale advisory (least security-critical last).
+  // Reserved outside the maxChars budget below, like the project-layer note.
   const trailer = [unadoptedNote, ...(opts.witnessNotes ?? []), scaleNote].filter((n): n is string => n !== null && n !== '');
 
   const usable = records
