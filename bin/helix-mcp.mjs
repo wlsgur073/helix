@@ -14533,8 +14533,8 @@ import { dirname as dirname6, join as join6 } from "node:path";
 
 // src/memory/ownership.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync3, readlinkSync as readlinkSync2, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
-import { join as join5, resolve, dirname as dirname5, isAbsolute } from "node:path";
+import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync3, readlinkSync as readlinkSync2, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3, realpathSync as realpathSync2 } from "node:fs";
+import { join as join5, resolve, dirname as dirname5, basename as basename3, isAbsolute } from "node:path";
 function isReviewableRoot(projectRoot2) {
   return isAbsolute(projectRoot2);
 }
@@ -14655,6 +14655,17 @@ function isOwned(projectRoot2, home2) {
   return stamp !== null && stamp === entry.stamp;
 }
 var MAX_SYMLINK_HOPS = 40;
+function physicalPath(p) {
+  try {
+    return realpathSync2.native(p);
+  } catch {
+  }
+  try {
+    return join5(realpathSync2.native(dirname5(p)), basename3(p));
+  } catch {
+    return resolve(p);
+  }
+}
 function ledgerDestination(ledger) {
   let p = ledger;
   for (let hops = 0; ; hops++) {
@@ -14662,9 +14673,9 @@ function ledgerDestination(ledger) {
     try {
       st = lstatSync3(p);
     } catch (e) {
-      return e.code === "ENOENT" ? canonicalRoot(p) : canonicalRoot(ledger);
+      return e.code === "ENOENT" ? physicalPath(p) : canonicalRoot(ledger);
     }
-    if (!st.isSymbolicLink()) return canonicalRoot(p);
+    if (!st.isSymbolicLink()) return physicalPath(p);
     if (hops === MAX_SYMLINK_HOPS) return canonicalRoot(ledger);
     let target;
     try {
@@ -14672,7 +14683,8 @@ function ledgerDestination(ledger) {
     } catch {
       return canonicalRoot(ledger);
     }
-    p = resolve(canonicalRoot(dirname5(p)), target);
+    const q2 = isAbsolute(target) ? target : `${physicalPath(dirname5(p))}/${target}`;
+    p = join5(physicalPath(dirname5(q2)), basename3(q2));
   }
 }
 function aliasesAdoptedLedger(project2) {

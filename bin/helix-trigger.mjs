@@ -52,8 +52,8 @@ function writeAll(fs, fd, data) {
 }
 
 // src/memory/ownership.ts
-import { existsSync, mkdirSync, readFileSync as readFileSync2, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync2, readlinkSync, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
-import { join as join2, resolve, dirname as dirname2, isAbsolute } from "node:path";
+import { existsSync, mkdirSync, readFileSync as readFileSync2, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync2, readlinkSync, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, realpathSync as realpathSync2 } from "node:fs";
+import { join as join2, resolve, dirname as dirname2, basename as basename2, isAbsolute } from "node:path";
 
 // src/memory/lock.ts
 import { readFileSync, writeFileSync, unlinkSync as unlinkSync2, linkSync as linkSync2, lstatSync, realpathSync, rmSync, readdirSync as readdirSync2 } from "node:fs";
@@ -143,6 +143,17 @@ function isOwned(projectRoot, home) {
   return stamp !== null && stamp === entry.stamp;
 }
 var MAX_SYMLINK_HOPS = 40;
+function physicalPath(p) {
+  try {
+    return realpathSync2.native(p);
+  } catch {
+  }
+  try {
+    return join2(realpathSync2.native(dirname2(p)), basename2(p));
+  } catch {
+    return resolve(p);
+  }
+}
 function ledgerDestination(ledger) {
   let p = ledger;
   for (let hops = 0; ; hops++) {
@@ -150,9 +161,9 @@ function ledgerDestination(ledger) {
     try {
       st = lstatSync2(p);
     } catch (e) {
-      return e.code === "ENOENT" ? canonicalRoot(p) : canonicalRoot(ledger);
+      return e.code === "ENOENT" ? physicalPath(p) : canonicalRoot(ledger);
     }
-    if (!st.isSymbolicLink()) return canonicalRoot(p);
+    if (!st.isSymbolicLink()) return physicalPath(p);
     if (hops === MAX_SYMLINK_HOPS) return canonicalRoot(ledger);
     let target;
     try {
@@ -160,7 +171,8 @@ function ledgerDestination(ledger) {
     } catch {
       return canonicalRoot(ledger);
     }
-    p = resolve(canonicalRoot(dirname2(p)), target);
+    const q = isAbsolute(target) ? target : `${physicalPath(dirname2(p))}/${target}`;
+    p = join2(physicalPath(dirname2(q)), basename2(q));
   }
 }
 function aliasesAdoptedLedger(project) {
