@@ -56,3 +56,52 @@ describe('an aliased project layer (ALIAS-P2P, item 7)', () => {
     expect(() => store.erase(g.id)).not.toThrow();
   });
 });
+
+// Fix round 1 (2026-09-24): the supersede pre-check (commit()'s `if (input.supersedes)` block) and the
+// verify router (writeVerify, via ledgerOf) used to read THROUGH the alias — ledgerOf gated its project
+// branch on raw isOwned, which is true for an aliased layer too — before the write-side refusal above
+// ever fired. B's OWN store (a separate MemoryStore instance whose project layer is B's own, un-aliased
+// ledger) commits a real fact so B's file holds a known, live id to attempt superseding from A.
+describe('the supersede pre-check and the verify router never read through an aliased layer (item 7 fix round 1)', () => {
+  it("a project-routed commit superseding B's id throws the ALIAS-P2P message, not the Tier-1 accident guard", () => {
+    const { home, b, store } = aliasedPair();
+    const bStore = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's2', project: { root: b, ledger: projectLedgerPath(b) } });
+    const bFact = bStore.commit({ content: "B's own fact", source: 'user' });
+    // Omitted scope: project-routed. Were this the Tier-1 accident guard, the message would name
+    // "human-authored or verified"; it must instead be the alias refusal, thrown before ledgerOf(id)
+    // (and therefore before the target's provenance is ever read) runs at all.
+    expect(() => store.commit({ content: 'x', source: 'agent-inference', supersedes: bFact.id }))
+      .toThrow(/resolves to another adopted project/);
+  });
+
+  it("an explicit global-scope supersede of B's id throws the SAME message as superseding an unknown id, and never touches B's file", () => {
+    const { home, b, store } = aliasedPair();
+    const bStore = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's2', project: { root: b, ledger: projectLedgerPath(b) } });
+    const bFact = bStore.commit({ content: "B's own fact", source: 'user' });
+    const before = readFileSync(projectLedgerPath(b), 'utf8');
+
+    let messageForB: string | null = null;
+    try {
+      store.commit({ content: 'x', source: 'user', scope: 'global', supersedes: bFact.id });
+    } catch (e) { messageForB = (e as Error).message; }
+
+    let messageForUnknown: string | null = null;
+    try {
+      store.commit({ content: 'x', source: 'user', scope: 'global', supersedes: 'm_does-not-exist' });
+    } catch (e) { messageForUnknown = (e as Error).message; }
+
+    // No existence or class oracle: superseding B's REAL id and superseding a made-up id are
+    // indistinguishable from the outside — both read as "not found", never "found but refused".
+    expect(messageForB).not.toBeNull();
+    expect(messageForB).toBe(messageForUnknown);
+    expect(readFileSync(projectLedgerPath(b), 'utf8')).toBe(before);
+  });
+
+  it('confirm on a global id still succeeds and writes only to the global ledger, never touching B', () => {
+    const { b, store } = aliasedPair();
+    const before = readFileSync(projectLedgerPath(b), 'utf8');
+    const g = store.commit({ content: 'a global fact to confirm', source: 'user', scope: 'global' });
+    expect(() => store.confirm(g.id)).not.toThrow();
+    expect(readFileSync(projectLedgerPath(b), 'utf8')).toBe(before);
+  });
+});

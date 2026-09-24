@@ -255,6 +255,18 @@ export class MemoryStore {
     if (!canCommit({ provenance: { source, sessionId: this.session() } })) {
       throw new Error('commit: missing provenance');
     }
+    // ALIAS-P2P (item 7, fix round 1): refused HERE, before the supersede pre-check below ever calls
+    // ledgerOf(input.supersedes) — that call used to read through the alias (pulling the OTHER
+    // project's live record into this scope, and its Tier-1/Tier-2 guards could then leak whether
+    // that record exists and is human-authored) before targetLedger()'s own refusal fired at the very
+    // end of this method. "Project-routed" = a project layer is configured and the caller did not
+    // explicitly ask for 'global' (explicit 'project', or an omitted scope — the same set
+    // targetLedger() below eventually routes to the project ledger for). An explicit scope:'global'
+    // commit is untouched here: its supersede target resolves through the (now alias-excluding)
+    // ledgerOf below, never through this check.
+    if (input.scope !== 'global' && this.opts.project) {
+      this.refuseAliasedProjectWrite(this.opts.project);
+    }
     if (input.supersedes) {
       const targetLedger = this.ledgerOf(input.supersedes);
       const target = this.verifiedOf(targetLedger).live.get(input.supersedes);
@@ -267,7 +279,12 @@ export class MemoryStore {
       // M-3: one cell now diverges on purpose rather than mirrors it — an explicit 'project' scope
       // with no active project layer, which targetLedger() REFUSES outright, this line still routes
       // to global. Harmless: that refusal fires at the real targetLedger() call below, before any
-      // write, so this mirror's routing choice for that one cell never reaches disk either way.)
+      // write, so this mirror's routing choice for that one cell never reaches disk either way.
+      // ALIAS-P2P (item 7, fix round 1): the alias case is NOT part of this mirror at all — a
+      // project-routed commit on an aliased layer is refused by the early check above, before this
+      // block ever runs, so `writeLedger` here is never resolved against an aliased ledger; ledgerOf
+      // above is also alias-excluding on its own (gated on disposition === 'owned'), so an explicit
+      // scope:'global' supersede of an aliased-project-only id resolves to global, not the alias.)
       const writeLedger = input.scope === 'global' || !this.opts.project ? this.global : this.opts.project.ledger;
       if (targetLedger !== writeLedger) {
         throw new Error('commit: cannot supersede across scopes (target lives in a different ledger)');
@@ -359,6 +376,23 @@ export class MemoryStore {
     return record;
   }
 
+  /** ALIAS-P2P (item 7, fix round 1): the single condition + message for refusing a project-routed
+   *  write on an owned layer whose ledger leads to ANOTHER adopted project's file — shared by
+   *  commit()'s early pre-check (fired before the supersede block ever calls ledgerOf, which used to
+   *  read through the alias) and by targetLedger()'s own routing below, so the two call sites can
+   *  never carry different wording or drift out of sync. Side-effect free: only isOwned /
+   *  aliasesAdoptedLedger reads, no ownership stamping — a write about to be refused must never first
+   *  claim or create a ledger. Throws iff aliased; otherwise returns without side effect. */
+  private refuseAliasedProjectWrite(p: { root: string; ledger: string }): void {
+    if (isOwned(p.root, this.homeDir()) && aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger })) {
+      throw new Error(
+        "commit: this project's memory file resolves to another adopted project's memory file, so the " +
+        "project layer is disabled here — the write is refused rather than written into the other " +
+        "project's memory. Pass scope 'global', or replace the link with the project's own file.",
+      );
+    }
+  }
+
   /** Resolve the ledger to write to. Project scope claims ownership on first use and refuses a
    *  pre-existing unowned (foreign) ledger. With no project layer active, an OMITTED scope falls
    *  back to global — the contextual default — while an EXPLICIT 'project' is REFUSED rather than
@@ -381,13 +415,7 @@ export class MemoryStore {
     if (scope === 'global' || !p) return this.global;
     // ALIAS-P2P (item 7): an owned layer whose ledger leads to ANOTHER adopted project's file is
     // refused, never written through — and never silently widened to the global ledger either.
-    if (isOwned(p.root, this.homeDir()) && aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger })) {
-      throw new Error(
-        "commit: this project's memory file resolves to another adopted project's memory file, so the " +
-        "project layer is disabled here — the write is refused rather than written into the other " +
-        "project's memory. Pass scope 'global', or replace the link with the project's own file.",
-      );
-    }
+    this.refuseAliasedProjectWrite(p);
     if (!isOwned(p.root, this.homeDir())) {
       if (existsSync(p.ledger)) {
         throw new Error(
@@ -733,13 +761,17 @@ export class MemoryStore {
     };
   }
 
-  /** Which ledger currently holds `id` (project iff owned and present); defaults to global.
-   *  D9: an id live in BOTH scopes at once (only reachable via a hand-planted/forged ledger row)
-   *  is ambiguous — silently binding global would ignore the project duplicate. Throw instead. */
+  /** Which ledger currently holds `id` (project iff the per-call disposition snapshot is 'owned' —
+   *  item 7 fix round 1: gating on the shared four-state predicate, not raw isOwned, excludes an
+   *  ALIASED layer here too, so neither of this method's callers (commit()'s supersede pre-check,
+   *  writeVerify) ever reads through the alias into the other project's real ledger file) and
+   *  present; defaults to global. D9: an id live in BOTH scopes at once (only reachable via a
+   *  hand-planted/forged ledger row) is ambiguous — silently binding global would ignore the project
+   *  duplicate. Throw instead. */
   private ledgerOf(id: string): LedgerPath {
     const p = this.opts.project;
     const inGlobal = this.verifiedOf(this.global).live.has(id);
-    const inProject = !!p && isOwned(p.root, this.homeDir()) && this.verifiedOf(p.ledger).live.has(id);
+    const inProject = !!p && this.projectDisposition() === 'owned' && this.verifiedOf(p.ledger).live.has(id);
     if (inGlobal && inProject) throw new Error('ledgerOf: id live in more than one scope — ambiguous');
     if (inProject) return p!.ledger;
     return this.global; // global, or fall through for a non-live id (callers re-gate liveness and throw)
