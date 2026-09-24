@@ -1238,7 +1238,8 @@ export class MemoryStore {
   /** WRITE-side startup step (spec §4.9): complete any transition whose new bytes already landed
    *  before a crash (crash window B — verdict transition-heal) for every scope this store owns, so a
    *  half-finished rewrite is resolved before the first read rather than lingering as a pending
-   *  journal. Global always; project only when owned (the same disposition gate every read path uses).
+   *  journal. Global always; project only when its disposition is 'owned' (the same gate every read
+   *  path uses, so an aliased layer — whose ledger leads to another project's file — is left alone).
    *  Each scope's heal runs under that scope's LEDGER lock; completeTransition then nests the witness
    *  lock (a different path — legal). BEST-EFFORT: a scope that is interrupted, stale, or mismatched is
    *  LEFT as-is (it re-surfaces as transition-interrupted / blocked on the next witnessed write, Task
@@ -1248,7 +1249,7 @@ export class MemoryStore {
   healWitness(): void {
     const p = this.opts.project;
     const scopes: Array<{ ledger: LedgerPath; root: string | undefined }> = [{ ledger: this.global, root: undefined }];
-    if (p && isOwned(p.root, this.homeDir())) scopes.push({ ledger: p.ledger, root: p.root });
+    if (p && this.projectDisposition() === 'owned') scopes.push({ ledger: p.ledger, root: p.root });
     const home = this.homeDir();
     for (const s of scopes) {
       if (!existsSync(dirname(s.ledger))) continue;   // no scope dir => no witness state => nothing to heal

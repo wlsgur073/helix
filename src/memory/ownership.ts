@@ -200,27 +200,56 @@ export function isOwned(projectRoot: string, home: string): boolean {
  *  way, with its own constant note. */
 export type ProjectDisposition = 'inactive' | 'owned' | 'unadopted-present' | 'aliased';
 
+/** Linux's MAXSYMLINKS: the most links one path resolution follows before the kernel answers ELOOP. */
+const MAX_SYMLINK_HOPS = 40;
+
+/** Where an append through `ledger` lands: the symlink chain, followed by hand (bounded), then
+ *  canonicalRoot. `canonical` returns a DANGLING link's own location, so it cannot answer this for a
+ *  link — or a chain of links — into a file that does not exist yet, and following only the first
+ *  link was not enough (final review I-1: `A/.helix/memory.jsonl -> A/.helix/hop -> B's absent
+ *  ledger` read as A's own file, and the first commit created B's ledger holding A's record). The
+ *  walk stops at a non-link, or at a path that does not exist — the path a write would create.
+ *
+ *  A relative link target is resolved from the link's PHYSICAL directory
+ *  (`canonicalRoot(dirname(p))`), the directory the kernel resolves it from and the one realpath
+ *  uses, so an existing destination reads exactly as `canonical` reads it. From the textual
+ *  `dirname(p)`, a relative target that climbs (`..`) out of a directory reached through a
+ *  directory link lands one level off the kernel's write (measured 2026-09-24: `A/.helix/dl ->
+ *  A/x/y/z` plus `A/x/y/z/hop -> ../../../../<B>/.helix/memory.jsonl` read as owned while the append
+ *  landed in B's file).
+ *
+ *  Never throws: after MAX_SYMLINK_HOPS links (a loop, or a chain the kernel itself refuses), or on
+ *  any lstat/readlink error other than "does not exist", it falls back to canonicalRoot(ledger);
+ *  canonicalRoot never throws. */
+function ledgerDestination(ledger: string): string {
+  let p = ledger;
+  for (let hops = 0; ; hops++) {
+    let st;
+    try { st = lstatSync(p); }
+    catch (e) { return (e as NodeJS.ErrnoException).code === 'ENOENT' ? canonicalRoot(p) : canonicalRoot(ledger); }
+    if (!st.isSymbolicLink()) return canonicalRoot(p);
+    if (hops === MAX_SYMLINK_HOPS) return canonicalRoot(ledger);
+    let target: string;
+    try { target = readlinkSync(p); } catch { return canonicalRoot(ledger); }
+    p = resolve(canonicalRoot(dirname(p)), target);
+  }
+}
+
 /** ALIAS-P2P (item 7): does this project's ledger lead to ANOTHER adopted project's ledger file?
  *  The global rule (scope-target.ts aliasesGlobalLedger) compares a project ledger with the global
  *  ledger only, so project A's `memory.jsonl` symlinked to project B's file was witnessed under two
  *  scope keys against one inode. Hard links are refused at the write layer by link count and are not
- *  this rule's business. Realpath, like the global rule, with ONE symlink hop followed by hand:
- *  `canonical` returns a DANGLING link's own location, so without the hop a link into another
- *  project's not-yet-created ledger reads as this project's own file and the first append creates
- *  the file inside the other project. The project whose ledger path IS the real file is never
- *  aliased by this rule — the linking side is, and both sides are when both lead to a third file.
- *  Pure reads, never throws: registry via readRegistry (absent/corrupt → no other roots). */
+ *  this rule's business. Realpath, like the global rule, with the symlink chain followed by hand
+ *  (bounded) — ledgerDestination: without the walk a link into another project's not-yet-created
+ *  ledger reads as this project's own file and the first append creates the file inside the other
+ *  project. The project whose ledger path IS the real file is never aliased by this rule — the
+ *  linking side is, and both sides are when both lead to a third file. Pure reads, never throws: the
+ *  walk falls back on every error, and the registry comes through readRegistry (absent/corrupt → no
+ *  other roots). */
 export function aliasesAdoptedLedger(project: { root: string; home: string; ledger: string }): boolean {
-  let real: string;
-  try {
-    real = lstatSync(project.ledger).isSymbolicLink()
-      ? canonicalRoot(resolve(dirname(project.ledger), readlinkSync(project.ledger)))
-      : canonicalRoot(project.ledger);
-  } catch {
-    real = canonicalRoot(project.ledger);
-  }
+  const real = ledgerDestination(project.ledger);
   const ownKey = canonicalRoot(project.root);
-  if (real === join(ownKey, '.helix', 'memory.jsonl')) return false;
+  if (real === projectLedgerPath(ownKey)) return false;
   for (const key of Object.keys(readRegistry(project.home))) {
     if (key === GLOBAL_KEY || key === ownKey) continue;
     if (canonicalRoot(projectLedgerPath(key)) === real) return true;
@@ -232,8 +261,9 @@ export function aliasesAdoptedLedger(project: { root: string; home: string; ledg
  *  MemoryStore (read paths) and the SessionStart hook (which does not go through MemoryStore) both
  *  route through, so the two surfaces can never disagree about what 'unadopted-present' or 'aliased'
  *  means. Pure: isOwned's registry+.owner reads, then existsSync, and — for an owned project —
- *  aliasesAdoptedLedger's own registry read and at most one symlink hop; no writes, never throws
- *  (isOwned and aliasesAdoptedLedger already swallow their own read errors; existsSync never throws).
+ *  aliasesAdoptedLedger's own registry read and the symlink chain, followed by hand (bounded); no
+ *  writes, never throws (isOwned and aliasesAdoptedLedger already swallow their own read errors;
+ *  existsSync never throws).
  *
  *  - 'owned': isOwned(project.root, project.home) — true regardless of whether the ledger FILE exists
  *    yet (an owned project with no ledger file still participates).

@@ -1,11 +1,12 @@
-import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync, symlinkSync, existsSync, readFileSync } from 'node:fs';
+import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, writeFileSync, symlinkSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { stampOwnership, projectLedgerPath } from '../../src/memory/ownership.js';
 import { handleRecall, handleInspect } from '../../src/server/handlers.js';
 import { ALIASED_LEDGER_NOTE } from '../../src/memory/content-frame.js';
+import * as ledgerMod from '../../src/memory/ledger.js';
 
 const text = (res: { content: Array<{ text?: string }> }) => res.content.map((c) => c.text ?? '').join('');
 
@@ -103,5 +104,43 @@ describe('the supersede pre-check and the verify router never read through an al
     const g = store.commit({ content: 'a global fact to confirm', source: 'user', scope: 'global' });
     expect(() => store.confirm(g.id)).not.toThrow();
     expect(readFileSync(projectLedgerPath(b), 'utf8')).toBe(before);
+  });
+});
+
+// Final review I-1 (ruling R24): a dangling chain of TWO links, both inside A's own tree, used to pass
+// the one-link rule — the first commit created B's ledger holding A's record (probe B case 3).
+describe('a dangling symlink chain inside the linking project (item 7, final review I-1)', () => {
+  it("the omitted-scope commit is refused with the alias message and B's .helix gains no memory.jsonl", () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-p2pe-home-'));
+    const a = mkdtempSync(join(tmpdir(), 'helix-p2pe-proj-'));
+    const b = mkdtempSync(join(tmpdir(), 'helix-p2pe-proj-'));
+    stampOwnership(a, home, {});
+    stampOwnership(b, home, {});
+    const hop = join(a, '.helix', 'hop');
+    symlinkSync(projectLedgerPath(b), hop);          // A/.helix/hop -> B/.helix/memory.jsonl (absent)
+    symlinkSync(hop, projectLedgerPath(a));          // A/.helix/memory.jsonl -> A/.helix/hop
+    const store = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's1', project: { root: a, ledger: projectLedgerPath(a) } });
+    expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves to another adopted project/);
+    expect(existsSync(projectLedgerPath(b))).toBe(false);
+    expect(readdirSync(join(b, '.helix'))).toEqual(['.owner']);
+  });
+});
+
+// Final review M-1: healWitness gated the project layer on raw isOwned — true for an aliased layer
+// too — so the startup heal took B's ledger lock and read B's bytes under A's scope key. It now uses
+// the disposition gate every read path uses.
+describe('healWitness leaves an aliased project layer alone (item 7, final review M-1)', () => {
+  it("witness.json and B's bytes are unchanged, and the heal never reads through the alias", () => {
+    const { home, a, b, store } = aliasedPair();
+    store.commit({ content: 'a global fact before the heal', source: 'user', scope: 'global' });
+    const witnessBefore = readFileSync(join(home, 'witness.json'));
+    const bBefore = readFileSync(projectLedgerPath(b));
+    const readSpy = vi.spyOn(ledgerMod, 'readLedgerBytes');
+    try {
+      store.healWitness();
+      expect(readSpy.mock.calls.map((c) => c[0])).not.toContain(projectLedgerPath(a));
+    } finally { readSpy.mockRestore(); }
+    expect(readFileSync(join(home, 'witness.json')).equals(witnessBefore)).toBe(true);
+    expect(readFileSync(projectLedgerPath(b)).equals(bBefore)).toBe(true);
   });
 });
