@@ -1,5 +1,5 @@
 // Real compare-mode pairs from the dogfood channel, transcribed verbatim from
-// .superpowers/item6-design/specimens/specimens-to-ship.json, produced by that directory's
+// .superpowers/sdd/2026-09-20-item6/specimens-to-ship.json, produced by that directory's
 // extract.mjs from the agent's own transcripts — see that path for provenance.
 //
 // Five compare calls exist as of 2026-09-20. Only three are published here. The other two (09-12,

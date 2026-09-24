@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, lstatSync, unlinkSync, cpSync, rmSync, linkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { isOwned, stampOwnership, projectLedgerPath, scopeNonce, globalScopeNonce, trustStateOf } from '../../src/memory/ownership.js';
+import { isOwned, stampOwnership, projectLedgerPath, scopeNonce, globalScopeNonce, trustStateOf, resolveTrust } from '../../src/memory/ownership.js';
 import { projectDispositionOf } from '../../src/memory/ownership.js';
 import * as fsOps from '../../src/memory/fs-ops.js';
 
@@ -397,5 +397,28 @@ describe('atomicWriteFile propagates a genuine directory-fsync failure (D-55)', 
     expect(readFileSync(join(root, '.helix', '.owner'), 'utf8')).toBe('a-different-stamp');
     stampOwnership(root, home, {});                       // retry
     expect(trustStateOf(root, home)).toBe('pending');
+  });
+
+  it('a genuine directory-fsync failure propagates out of resolveTrust', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-own-'));
+    const root = mkdtempSync(join(tmpdir(), 'helix-proj-'));
+    stampOwnership(root, home, {});
+    writeFileSync(join(root, '.helix', '.owner'), 'a-different-stamp', { mode: 0o600 });
+    stampOwnership(root, home, {});                       // ambiguous re-adoption: pending
+    expect(trustStateOf(root, home)).toBe('pending');
+    const spy = vi.spyOn(fsOps, 'fsyncDir').mockImplementationOnce(() => { const e: NodeJS.ErrnoException = new Error('EIO'); e.code = 'EIO'; throw e; });
+    try { expect(() => resolveTrust(root, home, 'repair')).toThrow(/EIO/); } finally { spy.mockRestore(); }
+  });
+
+  it('the global nonce mint absorbs it instead (the documented D-55 exception): null now, the landed nonce next read', () => {
+    // null means key-absent, which clamps that read to Fresh — pinned by test/memory/asof.test.ts
+    // ("key-absent: every fact clamps Fresh") and test/memory/store-asof.test.ts.
+    const home = mkdtempSync(join(tmpdir(), 'helix-own-'));
+    const spy = vi.spyOn(fsOps, 'fsyncDir').mockImplementationOnce(() => { const e: NodeJS.ErrnoException = new Error('EIO'); e.code = 'EIO'; throw e; });
+    let first: string | null = 'unset';
+    try { first = globalScopeNonce(home); } finally { spy.mockRestore(); }
+    expect(first).toBeNull();
+    const reg = JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')) as Record<string, { macNonce: string }>;
+    expect(globalScopeNonce(home)).toBe(reg['@global']!.macNonce);
   });
 });

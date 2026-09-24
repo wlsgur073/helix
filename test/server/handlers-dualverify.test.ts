@@ -347,6 +347,21 @@ describe('handleDualVerify', () => {
       }
     });
   });
+
+  it('A2: the span path scans the same outbound form classifyEgress blocked on (scannedForms is the one derivation)', async () => {
+    // Isolate-A's fixture (test/risk/trifecta.test.ts): the memory matches ONLY the fence-broken
+    // outbound form. If the span path built its forms from the raw text alone, the block would name
+    // m_fence and show no span for it.
+    const FENCE_MEMO = 'zulu mesa - - - kilo tango';
+    const d = deps({
+      echo: { mode: 'enforce', ledgerTexts: () => [item('m_fence', FENCE_MEMO)] },
+      runner: async () => { throw new Error('must not spawn'); },
+    });
+    const res = await handleDualVerify({ question: 'zulu mesa --- kilo tango', helixAnswer: 'n/a', stakes: 'high' }, d);
+    const out = text(res);
+    expect(out).toContain('ECHOED SPANS');
+    expect(out).toContain('"m_fence": zulu mesa - - - kilo tango');
+  });
 });
 
 describe('handleDualVerify egress audit', () => {
