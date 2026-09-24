@@ -154,6 +154,48 @@ describe('aliasesAdoptedLedger follows the whole symlink chain (item 7, final re
   );
 });
 
+// Ruling R27 (owner, 2026-09-24): a `..` that FOLLOWS a symlinked directory. With `A/.helix/dl -> A/x`,
+// the kernel reads `A/.helix/dl/../../<B>` as `A/x/../../<B>`: it follows `dl` first, applies `..` to
+// the physical target and lands in B's ledger. `path.resolve` and Node's JS `realpathSync` collapse
+// `dl/..` as text and name `A/<B>/...`, which does not exist, so the link read as A's own file and the
+// first commit landed in (or created) B's ledger. Link targets here are joined with '/' by hand:
+// `path.join` would collapse `dl/..` itself before the link is ever planted.
+describe("a '..' after a symlinked directory is resolved the kernel's way (item 7, ruling R27)", () => {
+  /** `A/.helix/dl -> A/x`, and A's ledger -> `dl/../../<B>/.helix/memory.jsonl`, spelled relative to
+   *  A's `.helix` or as the same path from A's root (absolute). The roots are mkdtemp siblings. */
+  const plantDotdotLink = (a: string, b: string, spelling: 'relative' | 'absolute'): void => {
+    mkdirSync(join(a, 'x'));
+    symlinkSync(join(a, 'x'), join(a, '.helix', 'dl'));
+    const rel = ['dl', '..', '..', basename(b), '.helix', 'memory.jsonl'].join('/');
+    symlinkSync(spelling === 'relative' ? rel : `${join(a, '.helix')}/${rel}`, projectLedgerPath(a));
+  };
+
+  it.each([
+    ['relative', 'EXISTING'], ['relative', 'ABSENT'], ['absolute', 'EXISTING'], ['absolute', 'ABSENT'],
+  ] as const)("A's %s link through `dl/..` into the other project's %s ledger is aliased", (spelling, bLedger) => {
+    const h = home(); const a = project(h); const b = project(h);
+    if (bLedger === 'EXISTING') writeFileSync(projectLedgerPath(b), '');
+    plantDotdotLink(a, b, spelling);
+    expect(projectDispositionOf(desc(a, h))).toBe('aliased');
+    expect(resolveScopeTarget(h, join(h, 'memory.jsonl'), a)).toMatchObject({ ok: false, reason: 'aliases-project' });
+    expect(projectDispositionOf(desc(b, h))).toBe('owned');
+  });
+
+  it.each([['EXISTING', true], ['ABSENT', false]])(
+    "a second link reached through `dl/..` (`dl/../sub/hop2`) into the other project's %s ledger is aliased",
+    (_label, existing) => {
+      const h = home(); const a = project(h); const b = project(h);
+      if (existing) writeFileSync(projectLedgerPath(b), '');
+      mkdirSync(join(a, 'x'));
+      mkdirSync(join(a, 'sub'));
+      symlinkSync(join(a, 'x'), join(a, '.helix', 'dl'));                                     // A/.helix/dl -> A/x
+      symlinkSync(join('..', '..', basename(b), '.helix', 'memory.jsonl'), join(a, 'sub', 'hop2'));
+      symlinkSync('dl/../sub/hop2', projectLedgerPath(a));             // kernel: A/x/.. is A, so A/sub/hop2
+      expect(projectDispositionOf(desc(a, h))).toBe('aliased');
+    },
+  );
+});
+
 describe('resolveScopeTarget refuses an aliased project scope (item 7)', () => {
   it('reports aliases-project for the linking side and resolves the real side', () => {
     const h = home(); const a = project(h); const b = project(h);

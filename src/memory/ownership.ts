@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, readlinkSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
-import { join, resolve, dirname, isAbsolute } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, readlinkSync, openSync, writeSync, fsyncSync, closeSync, realpathSync } from 'node:fs';
+import { join, resolve, dirname, basename, isAbsolute } from 'node:path';
 import { withFileLock, canonical } from './lock.js';
 import { ensureHelixDir } from './home-permissions.js';
 import { fsyncDir } from './fs-ops.js';
@@ -203,35 +203,51 @@ export type ProjectDisposition = 'inactive' | 'owned' | 'unadopted-present' | 'a
 /** Linux's MAXSYMLINKS: the most links one path resolution follows before the kernel answers ELOOP. */
 const MAX_SYMLINK_HOPS = 40;
 
-/** Where an append through `ledger` lands: the symlink chain, followed by hand (bounded), then
- *  canonicalRoot. `canonical` returns a DANGLING link's own location, so it cannot answer this for a
- *  link — or a chain of links — into a file that does not exist yet, and following only the first
- *  link was not enough (final review I-1: `A/.helix/memory.jsonl -> A/.helix/hop -> B's absent
- *  ledger` read as A's own file, and the first commit created B's ledger holding A's record). The
- *  walk stops at a non-link, or at a path that does not exist — the path a write would create.
+/** The path as the kernel resolves it: `realpathSync.native`, which follows a symlinked directory
+ *  BEFORE it applies a `..` that comes after it (`path.resolve` and Node's JS `realpathSync` collapse
+ *  `dl/..` as text first). For a path that does not exist, the physical parent plus the name — where
+ *  a write creates the file; when the parent does not resolve either, `resolve(p)`. Never throws. */
+function physicalPath(p: string): string {
+  try { return realpathSync.native(p); } catch { /* absent: the physical parent plus the name */ }
+  try { return join(realpathSync.native(dirname(p)), basename(p)); } catch { return resolve(p); }
+}
+
+/** Where an append through `ledger` lands: the symlink chain, followed by hand (bounded), then the
+ *  endpoint's physicalPath. `canonical` returns a DANGLING link's own location, so it cannot answer
+ *  this for a link — or a chain of links — into a file that does not exist yet, and following only
+ *  the first link was not enough (final review I-1: `A/.helix/memory.jsonl -> A/.helix/hop -> B's
+ *  absent ledger` read as A's own file, and the first commit created B's ledger holding A's record).
+ *  The walk stops at a non-link, or at a path that does not exist — the path a write would create.
  *
- *  A relative link target is resolved from the link's PHYSICAL directory
- *  (`canonicalRoot(dirname(p))`), the directory the kernel resolves it from and the one realpath
- *  uses, so an existing destination reads exactly as `canonical` reads it. From the textual
- *  `dirname(p)`, a relative target that climbs (`..`) out of a directory reached through a
- *  directory link lands one level off the kernel's write (measured 2026-09-24: `A/.helix/dl ->
- *  A/x/y/z` plus `A/x/y/z/hop -> ../../../../<B>/.helix/memory.jsonl` read as owned while the append
- *  landed in B's file).
+ *  A relative link target is resolved from the link's PHYSICAL directory (`physicalPath(dirname(p))`),
+ *  the directory the kernel resolves it from. From the textual `dirname(p)`, a relative target that
+ *  climbs (`..`) out of a directory reached through a directory link lands one level off the kernel's
+ *  write (measured 2026-09-24: `A/.helix/dl -> A/x/y/z` plus `A/x/y/z/hop ->
+ *  ../../../../<B>/.helix/memory.jsonl` read as owned while the append landed in B's file).
+ *
+ *  A `..` after a symlinked directory is resolved the kernel's way: the next hop is the physical
+ *  directory joined to the target as written (an absolute target as written), never normalized, so
+ *  `lstatSync` and physicalPath follow each directory link before the `..` after it. Collapsed as
+ *  text instead (`path.resolve`, JS `realpathSync`), `A/.helix/dl -> A/x` plus a ledger linked to
+ *  `dl/../../<B>/.helix/memory.jsonl` read as A's own file (a non-existent `A/<B>/...`) while the
+ *  append landed in B's ledger (measured 2026-09-24). The global alias rule (scope-target.ts
+ *  aliasesGlobalLedger), lock identity (lock.ts `canonical`) and aliasesAdoptedLedger's canonicalRoot
+ *  side still collapse it as text; that is tracked separately (open item ALIAS-DOTDOT).
  *
  *  Never throws: after MAX_SYMLINK_HOPS links (a loop, or a chain the kernel itself refuses), or on
  *  any lstat/readlink error other than "does not exist", it falls back to canonicalRoot(ledger);
- *  canonicalRoot never throws. */
+ *  canonicalRoot and physicalPath never throw. */
 function ledgerDestination(ledger: string): string {
   let p = ledger;
   for (let hops = 0; ; hops++) {
     let st;
     try { st = lstatSync(p); }
-    catch (e) { return (e as NodeJS.ErrnoException).code === 'ENOENT' ? canonicalRoot(p) : canonicalRoot(ledger); }
-    if (!st.isSymbolicLink()) return canonicalRoot(p);
+    catch (e) { return (e as NodeJS.ErrnoException).code === 'ENOENT' ? physicalPath(p) : canonicalRoot(ledger); }
+    if (!st.isSymbolicLink()) return physicalPath(p);
     if (hops === MAX_SYMLINK_HOPS) return canonicalRoot(ledger);
     let target: string;
     try { target = readlinkSync(p); } catch { return canonicalRoot(ledger); }
-    p = resolve(canonicalRoot(dirname(p)), target);
+    p = isAbsolute(target) ? target : `${physicalPath(dirname(p))}/${target}`;
   }
 }
 
@@ -239,13 +255,17 @@ function ledgerDestination(ledger: string): string {
  *  The global rule (scope-target.ts aliasesGlobalLedger) compares a project ledger with the global
  *  ledger only, so project A's `memory.jsonl` symlinked to project B's file was witnessed under two
  *  scope keys against one inode. Hard links are refused at the write layer by link count and are not
- *  this rule's business. Realpath, like the global rule, with the symlink chain followed by hand
- *  (bounded) — ledgerDestination: without the walk a link into another project's not-yet-created
- *  ledger reads as this project's own file and the first append creates the file inside the other
- *  project. The project whose ledger path IS the real file is never aliased by this rule — the
- *  linking side is, and both sides are when both lead to a third file. Pure reads, never throws: the
- *  walk falls back on every error, and the registry comes through readRegistry (absent/corrupt → no
- *  other roots). */
+ *  this rule's business. This project's side is where the append lands, read the kernel's way
+ *  (ledgerDestination: the symlink chain followed by hand, bounded, and a `..` after a symlinked
+ *  directory applied to that directory's physical target): without the walk a link into another
+ *  project's not-yet-created ledger reads as this project's own file and the first append creates
+ *  the file inside the other project. The paths it is compared with — this project's own ledger path
+ *  and each registered project's ledger — are canonicalRoot, which still collapses that `..` as
+ *  text, so a registered project whose OWN ledger links through one is compared at its textual
+ *  reading (open item ALIAS-DOTDOT). The project whose ledger path IS the real file is never aliased
+ *  by this rule — the linking side is, and both sides are when both lead to a third file. Pure
+ *  reads, never throws: the walk falls back on every error, and the registry comes through
+ *  readRegistry (absent/corrupt → no other roots). */
 export function aliasesAdoptedLedger(project: { root: string; home: string; ledger: string }): boolean {
   const real = ledgerDestination(project.ledger);
   const ownKey = canonicalRoot(project.root);

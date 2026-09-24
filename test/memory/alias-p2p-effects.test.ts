@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, writeFileSync, symlinkSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { stampOwnership, projectLedgerPath } from '../../src/memory/ownership.js';
 import { handleRecall, handleInspect } from '../../src/server/handlers.js';
@@ -143,4 +143,65 @@ describe('healWitness leaves an aliased project layer alone (item 7, final revie
     expect(readFileSync(join(home, 'witness.json')).equals(witnessBefore)).toBe(true);
     expect(readFileSync(projectLedgerPath(b)).equals(bBefore)).toBe(true);
   });
+});
+
+// Ruling R27 (owner, 2026-09-24): `A/.helix/dl -> A/x` plus A's ledger -> `dl/../../<B>/.helix/memory.jsonl`.
+// The kernel follows `dl` before it applies `..`, so an append through A's ledger lands in B's file;
+// the predicate used to collapse `dl/..` as text and read the link as A's own file. Measured through
+// this store before the fix: A's commit landed in (or created) B's ledger, and A's unscoped erase of
+// B's id tombstoned B's fact.
+/** Two adopted mkdtemp siblings; A's ledger reaches B's through `dl/..` after a directory link inside
+ *  A (target joined with '/' by hand — `path.join` would collapse `dl/..`). With `bFact`, B's OWN
+ *  store first commits one fact, so B's file holds a live id. Returns A's store. */
+function dotdotPair(opts: { spelling: 'relative' | 'absolute'; bFact?: boolean }) {
+  const home = mkdtempSync(join(tmpdir(), 'helix-p2pe-home-'));
+  const a = mkdtempSync(join(tmpdir(), 'helix-p2pe-proj-'));
+  const b = mkdtempSync(join(tmpdir(), 'helix-p2pe-proj-'));
+  stampOwnership(a, home, {});
+  stampOwnership(b, home, {});
+  let bId = '';
+  if (opts.bFact) {
+    const bStore = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's2', project: { root: b, ledger: projectLedgerPath(b) } });
+    bId = bStore.commit({ content: "B's own fact", source: 'user' }).id;
+  }
+  mkdirSync(join(a, 'x'));
+  symlinkSync(join(a, 'x'), join(a, '.helix', 'dl'));                     // A/.helix/dl -> A/x
+  const rel = ['dl', '..', '..', basename(b), '.helix', 'memory.jsonl'].join('/');
+  symlinkSync(opts.spelling === 'relative' ? rel : `${join(a, '.helix')}/${rel}`, projectLedgerPath(a));
+  const store = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's1', project: { root: a, ledger: projectLedgerPath(a) } });
+  return { home, b, bId, store };
+}
+
+describe("a '..' after a symlinked directory inside the linking project (item 7, ruling R27)", () => {
+  it.each(['relative', 'absolute'] as const)(
+    "B's ledger absent, %s link: the omitted-scope commit is refused with the alias message and B's .helix gains no memory.jsonl",
+    (spelling) => {
+      const { b, store } = dotdotPair({ spelling });
+      expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves to another adopted project/);
+      expect(existsSync(projectLedgerPath(b))).toBe(false);
+      expect(readdirSync(join(b, '.helix'))).toEqual(['.owner']);
+    },
+  );
+
+  it.each(['relative', 'absolute'] as const)(
+    "B's ledger existing, %s link: the omitted-scope commit is refused and B's file bytes are unchanged",
+    (spelling) => {
+      const { b, store } = dotdotPair({ spelling, bFact: true });
+      const before = readFileSync(projectLedgerPath(b));
+      expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves to another adopted project/);
+      expect(readFileSync(projectLedgerPath(b)).equals(before)).toBe(true);
+    },
+  );
+
+  it.each(['relative', 'absolute'] as const)(
+    "B's ledger existing, %s link: A's unscoped erase of B's id is a no-op for A, and B's file bytes are unchanged",
+    (spelling) => {
+      const { home, b, bId, store } = dotdotPair({ spelling, bFact: true });
+      const before = readFileSync(projectLedgerPath(b));
+      expect(() => store.erase(bId)).not.toThrow();
+      expect(readFileSync(projectLedgerPath(b)).equals(before)).toBe(true);
+      const bView = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's3', project: { root: b, ledger: projectLedgerPath(b) } });
+      expect(bView.currentView().records.some((r) => r.record.id === bId)).toBe(true);
+    },
+  );
 });
