@@ -199,7 +199,7 @@
               "type": "string"
             },
             "minItems": 1,
-            "maxItems": 20
+            "maxItems": 32
           }
         },
         "additionalProperties": false,
@@ -422,7 +422,7 @@
     },
     {
       "bundle": "bin/helix-trigger.mjs",
-      "usage": "usage: trigger-cli --root <path> --run <id> [--service-result <s>] [--exit-code <s>] [--exit-status <s>]",
+      "usage": "usage: trigger-cli --root <path> --run <id> [--service-result <s>] [--exit-code <s>] [--exit-status <s>]\n       trigger-cli --acknowledge",
       "noArgsExitCode": 2
     },
     {

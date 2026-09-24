@@ -52,7 +52,7 @@ function writeAll(fs, fd, data) {
 }
 
 // src/memory/ownership.ts
-import { existsSync, mkdirSync, readFileSync as readFileSync2, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync2, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
+import { existsSync, mkdirSync, readFileSync as readFileSync2, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync2, readlinkSync, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
 import { join as join2, resolve, dirname as dirname2, isAbsolute } from "node:path";
 
 // src/memory/lock.ts
@@ -77,6 +77,7 @@ function canonicalRoot(projectRoot) {
 function projectLedgerPath(projectRoot) {
   return join2(projectRoot, ".helix", "memory.jsonl");
 }
+var GLOBAL_KEY = "@global";
 function registryPath(home) {
   return join2(home, "projects.json");
 }
@@ -140,6 +141,21 @@ function isOwned(projectRoot, home) {
   if (!entry) return false;
   const stamp = readOwner(projectRoot);
   return stamp !== null && stamp === entry.stamp;
+}
+function aliasesAdoptedLedger(project) {
+  let real;
+  try {
+    real = lstatSync2(project.ledger).isSymbolicLink() ? canonicalRoot(resolve(dirname2(project.ledger), readlinkSync(project.ledger))) : canonicalRoot(project.ledger);
+  } catch {
+    real = canonicalRoot(project.ledger);
+  }
+  const ownKey = canonicalRoot(project.root);
+  if (real === join2(ownKey, ".helix", "memory.jsonl")) return false;
+  for (const key of Object.keys(readRegistry(project.home))) {
+    if (key === GLOBAL_KEY || key === ownKey) continue;
+    if (canonicalRoot(projectLedgerPath(key)) === real) return true;
+  }
+  return false;
 }
 
 // src/memory/ledger-mac.ts
@@ -273,7 +289,7 @@ function toParticipant(id, outcome) {
 function resolveProjectDisposition(root, home, globalLedger) {
   if (!existsSync2(join4(root, ".helix"))) return "absent";
   const distinctFromGlobal = !aliasesGlobalLedger(projectLedgerPath(root), globalLedger);
-  return distinctFromGlobal && isOwned(root, home) ? "owned" : "unowned";
+  return distinctFromGlobal && isOwned(root, home) && !aliasesAdoptedLedger({ root, home, ledger: projectLedgerPath(root) }) ? "owned" : "unowned";
 }
 function readTwoParticipants(globalLedger, root, home, disposition, readFile) {
   const global = toParticipant("global", readWholeFile(globalLedger, readFile));
@@ -379,6 +395,51 @@ function appendToSink(home, line, fs = realFsOps) {
   }
   if (!existedBefore) fs.fsyncDir(dirname3(path));
 }
+function validateAcknowledgementLine(line) {
+  const fail = (field) => {
+    throw new Error(`trigger acknowledgement self-validation failed: ${field}`);
+  };
+  if (!/^[\x00-\x7F]*$/.test(line)) fail("non-ASCII byte in output");
+  const parsed = JSON.parse(line);
+  if (parsed.v !== 1) fail("v");
+  if (parsed.policy !== POLICY) fail("policy");
+  if (parsed.kind !== "acknowledgement") fail("kind");
+  if (typeof parsed.ts !== "string" || Number.isNaN(Date.parse(parsed.ts))) fail("ts");
+  if (typeof parsed.evaluationTs !== "string" || Number.isNaN(Date.parse(parsed.evaluationTs))) fail("evaluationTs");
+  const legs = parsed.legs;
+  if (!legs || !isLegShape(legs.rows) || !isLegShape(legs.bytes) || !isLegShape(legs.latency)) fail("legs");
+  return parsed;
+}
+function acknowledgeLatest(deps = {}) {
+  const env = deps.env ?? process.env;
+  const readFile = deps.readFile ?? ((p) => readFileSync4(p));
+  const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
+  const home = resolveHome(env);
+  let text;
+  try {
+    text = readFile(join4(home, SINK_FILE)).toString("utf8");
+  } catch {
+    return { ok: false, reason: "no trigger sink to acknowledge" };
+  }
+  const last = text.split("\n").filter((l) => l.includes('"kind":"evaluation"')).at(-1);
+  if (last === void 0) return { ok: false, reason: "no evaluation to acknowledge" };
+  const evaluation = validateRecordLine(last);
+  if (evaluation.overall !== "fired") {
+    return { ok: false, reason: `the latest evaluation reads ${evaluation.overall}, not fired -- nothing to acknowledge` };
+  }
+  const record = {
+    v: 1,
+    policy: POLICY,
+    kind: "acknowledgement",
+    ts: now(),
+    evaluationTs: evaluation.ts,
+    legs: evaluation.legs
+  };
+  const line = JSON.stringify(record);
+  validateAcknowledgementLine(line);
+  appendToSink(home, line, deps.fs ?? realFsOps);
+  return { ok: true, line };
+}
 function measureAndRecord(input, deps = {}) {
   const env = deps.env ?? process.env;
   const readFile = deps.readFile ?? ((p) => readFileSync4(p));
@@ -416,7 +477,7 @@ function measureAndRecord(input, deps = {}) {
 }
 
 // scripts/trigger-cli.ts
-var USAGE = "usage: trigger-cli --root <path> --run <id> [--service-result <s>] [--exit-code <s>] [--exit-status <s>]\n";
+var USAGE = "usage: trigger-cli --root <path> --run <id> [--service-result <s>] [--exit-code <s>] [--exit-status <s>]\n       trigger-cli --acknowledge\n";
 function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
@@ -426,6 +487,7 @@ function parseArgs(argv) {
     else if (flag === "--service-result") out.serviceResult = argv[++i] ?? "";
     else if (flag === "--exit-code") out.exitCode = argv[++i] ?? "";
     else if (flag === "--exit-status") out.exitStatus = argv[++i] ?? "";
+    else if (flag === "--acknowledge") out.acknowledge = true;
   }
   return out;
 }
@@ -435,6 +497,25 @@ function main(argv, deps = {}) {
     process.exitCode = code;
   });
   const parsed = parseArgs(argv);
+  if (parsed.acknowledge) {
+    try {
+      const r = acknowledgeLatest(deps);
+      if (!r.ok) {
+        process.stderr.write(`trigger-cli: ${r.reason}
+`);
+        exit(2);
+        return 2;
+      }
+      process.stdout.write(r.line + "\n");
+      exit(0);
+      return 0;
+    } catch (e) {
+      process.stderr.write(`trigger-cli: ${e instanceof Error ? e.message : String(e)}
+`);
+      exit(1);
+      return 1;
+    }
+  }
   if (!parsed.root || !parsed.run) {
     process.stderr.write(USAGE);
     exit(2);

@@ -1147,7 +1147,7 @@ import { dirname as dirname6, join as join6 } from "node:path";
 
 // src/memory/ownership.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync3, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync3, readlinkSync as readlinkSync2, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
 import { join as join5, resolve, dirname as dirname5, isAbsolute } from "node:path";
 function isReviewableRoot(projectRoot) {
   return isAbsolute(projectRoot);
@@ -1268,9 +1268,24 @@ function isOwned(projectRoot, home) {
   const stamp = readOwner(projectRoot);
   return stamp !== null && stamp === entry.stamp;
 }
+function aliasesAdoptedLedger(project) {
+  let real;
+  try {
+    real = lstatSync3(project.ledger).isSymbolicLink() ? canonicalRoot(resolve(dirname5(project.ledger), readlinkSync2(project.ledger))) : canonicalRoot(project.ledger);
+  } catch {
+    real = canonicalRoot(project.ledger);
+  }
+  const ownKey = canonicalRoot(project.root);
+  if (real === join5(ownKey, ".helix", "memory.jsonl")) return false;
+  for (const key of Object.keys(readRegistry(project.home))) {
+    if (key === GLOBAL_KEY || key === ownKey) continue;
+    if (canonicalRoot(projectLedgerPath(key)) === real) return true;
+  }
+  return false;
+}
 function projectDispositionOf(project) {
   if (!project) return "inactive";
-  if (isOwned(project.root, project.home)) return "owned";
+  if (isOwned(project.root, project.home)) return aliasesAdoptedLedger(project) ? "aliased" : "owned";
   return existsSync2(project.ledger) ? "unadopted-present" : "inactive";
 }
 function stampOwnership(projectRoot, home, opts = {}) {
@@ -2609,6 +2624,9 @@ var MemoryStore = class {
     if (!canCommit({ provenance: { source, sessionId: this.session() } })) {
       throw new Error("commit: missing provenance");
     }
+    if (input.scope !== "global" && this.opts.project) {
+      this.refuseAliasedProjectWrite(this.opts.project);
+    }
     if (input.supersedes) {
       const targetLedger = this.ledgerOf(input.supersedes);
       const target = this.verifiedOf(targetLedger).live.get(input.supersedes);
@@ -2660,6 +2678,20 @@ var MemoryStore = class {
     appendWitnessed(ledger, record, this.homeDir(), this.scopeRootOf(ledger), "commit");
     return record;
   }
+  /** ALIAS-P2P (item 7, fix round 1): the single condition + message for refusing a project-routed
+   *  write on an owned layer whose ledger leads to ANOTHER adopted project's file — shared by
+   *  commit()'s early pre-check (fired before the supersede block ever calls ledgerOf, which used to
+   *  read through the alias) and by targetLedger()'s own routing below, so the two call sites can
+   *  never carry different wording or drift out of sync. Side-effect free: only isOwned /
+   *  aliasesAdoptedLedger reads, no ownership stamping — a write about to be refused must never first
+   *  claim or create a ledger. Throws iff aliased; otherwise returns without side effect. */
+  refuseAliasedProjectWrite(p) {
+    if (isOwned(p.root, this.homeDir()) && aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger })) {
+      throw new Error(
+        "commit: this project's memory file resolves to another adopted project's memory file, so the project layer is disabled here \u2014 the write is refused rather than written into the other project's memory. Pass scope 'global', or replace the link with the project's own file."
+      );
+    }
+  }
   /** Resolve the ledger to write to. Project scope claims ownership on first use and refuses a
    *  pre-existing unowned (foreign) ledger. With no project layer active, an OMITTED scope falls
    *  back to global — the contextual default — while an EXPLICIT 'project' is REFUSED rather than
@@ -2672,6 +2704,7 @@ var MemoryStore = class {
       );
     }
     if (scope === "global" || !p) return this.global;
+    this.refuseAliasedProjectWrite(p);
     if (!isOwned(p.root, this.homeDir())) {
       if (existsSync4(p.ledger)) {
         throw new Error(
@@ -2694,6 +2727,10 @@ var MemoryStore = class {
    *
    *  - 'owned': isOwned(p.root, home) — true regardless of whether the ledger FILE exists yet (an
    *    owned project with no ledger file still participates, matching pre-existing behavior).
+   *  - 'aliased' (item 7): owned, but its ledger leads to another adopted project's ledger file
+   *    (ownership.ts's aliasesAdoptedLedger). Excluded from every read like 'unadopted-present', with
+   *    its own constant note; targetLedger() (commit) and resolveEraseTarget() (erase) both refuse to
+   *    write through it.
    *  - 'unadopted-present': project configured, NOT owned, and a ledger file exists at p.ledger — the
    *    exact condition targetLedger() (above) already throws on for commit. The write side keeps its
    *    OWN independent, fresh isOwned/existsSync check — targetLedger's auto-stamp claim-on-first-use
@@ -2701,7 +2738,7 @@ var MemoryStore = class {
    *  - 'inactive': no project layer configured, OR configured but neither owned nor a ledger file
    *    present — nothing to read, nothing to disclose.
    *
-   *  B2: the tri-state RULES above now live in the shared, pure projectDispositionOf (ownership.ts) —
+   *  B2: the four-state RULES above now live in the shared, pure projectDispositionOf (ownership.ts) —
    *  this method is a one-line delegate. What stays HERE is the call-site contract: invoke it ONCE per
    *  public read call (recall/currentView/historyView/asOfView each do so, then thread the snapshot as
    *  a parameter into every private helper that needs it, never re-invoking this within that call). */
@@ -2928,13 +2965,17 @@ var MemoryStore = class {
       witnessNotes: collectWitnessNotes(verdicts.map((v) => v.verdict))
     };
   }
-  /** Which ledger currently holds `id` (project iff owned and present); defaults to global.
-   *  D9: an id live in BOTH scopes at once (only reachable via a hand-planted/forged ledger row)
-   *  is ambiguous — silently binding global would ignore the project duplicate. Throw instead. */
+  /** Which ledger currently holds `id` (project iff the per-call disposition snapshot is 'owned' —
+   *  item 7 fix round 1: gating on the shared four-state predicate, not raw isOwned, excludes an
+   *  ALIASED layer here too, so neither of this method's callers (commit()'s supersede pre-check,
+   *  writeVerify) ever reads through the alias into the other project's real ledger file) and
+   *  present; defaults to global. D9: an id live in BOTH scopes at once (only reachable via a
+   *  hand-planted/forged ledger row) is ambiguous — silently binding global would ignore the project
+   *  duplicate. Throw instead. */
   ledgerOf(id) {
     const p = this.opts.project;
     const inGlobal = this.verifiedOf(this.global).live.has(id);
-    const inProject = !!p && isOwned(p.root, this.homeDir()) && this.verifiedOf(p.ledger).live.has(id);
+    const inProject = !!p && this.projectDisposition() === "owned" && this.verifiedOf(p.ledger).live.has(id);
     if (inGlobal && inProject) throw new Error("ledgerOf: id live in more than one scope \u2014 ambiguous");
     if (inProject) return p.ledger;
     return this.global;
@@ -3230,7 +3271,9 @@ var MemoryStore = class {
    *  must never brick it (finding 2). */
   resolveEraseTarget(id, scope, permanent) {
     const p = this.opts.project;
-    const projectActive = !!p && isOwned(p.root, this.homeDir());
+    const owned = !!p && isOwned(p.root, this.homeDir());
+    const aliased = owned && aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger });
+    const projectActive = owned && !aliased;
     const classify = (ledger) => {
       const kind = this.findEraseTarget(ledger, id);
       if (kind === "ambiguous") {
@@ -3242,6 +3285,11 @@ var MemoryStore = class {
       if (scope === "project" && !p) {
         throw new EraseRefusedError(
           "erase: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started inside a directory holding a .helix folder). Omit `scope`, or start Helix inside the project and adopt it (helix_memory_adopt) \u2014 the erase is refused rather than silently widened to the global ledger."
+        );
+      }
+      if (scope === "project" && aliased) {
+        throw new EraseRefusedError(
+          "erase: this project's memory file resolves to another adopted project's memory file \u2014 the erase is refused rather than applied to the other project's memory."
         );
       }
       const ledger = scope === "global" || !p ? this.global : projectActive ? p.ledger : (() => {

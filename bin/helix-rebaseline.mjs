@@ -2,7 +2,7 @@
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { isAbsolute as isAbsolute2, dirname as dirname8, join as join7 } from "node:path";
-import { mkdirSync as mkdirSync5 } from "node:fs";
+import { mkdirSync as mkdirSync6 } from "node:fs";
 
 // src/memory/lock.ts
 import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from "node:fs";
@@ -323,7 +323,7 @@ function readdirSyncSafe(dir) {
 }
 
 // src/memory/ledger.ts
-import { readFileSync as readFileSync5, mkdirSync as mkdirSync4, statSync as statSync2 } from "node:fs";
+import { readFileSync as readFileSync6, mkdirSync as mkdirSync5, statSync as statSync2 } from "node:fs";
 import { dirname as dirname7 } from "node:path";
 
 // src/memory/ledger-mac.ts
@@ -536,10 +536,11 @@ function fenceId(epoch, nonce) {
 
 // src/memory/witness-store.ts
 import { randomBytes as randomBytes3, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { readFileSync as readFileSync4 } from "node:fs";
+import { readFileSync as readFileSync5 } from "node:fs";
 import { dirname as dirname6, join as join6 } from "node:path";
 
 // src/memory/ownership.ts
+import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync3, readlinkSync as readlinkSync2, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
 import { join as join5, resolve, dirname as dirname5, isAbsolute } from "node:path";
 function canonicalRoot(projectRoot) {
   try {
@@ -550,6 +551,65 @@ function canonicalRoot(projectRoot) {
 }
 function projectLedgerPath(projectRoot) {
   return join5(projectRoot, ".helix", "memory.jsonl");
+}
+var GLOBAL_KEY = "@global";
+function registryPath(home) {
+  return join5(home, "projects.json");
+}
+function isPlainObject(x) {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+function isValidRegistry(x) {
+  if (!isPlainObject(x)) return false;
+  for (const v of Object.values(x)) {
+    if (!isPlainObject(v)) return false;
+    if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
+    if (v.trustState !== void 0 && v.trustState !== "active" && v.trustState !== "pending") return false;
+  }
+  return true;
+}
+function loadRegistry(home) {
+  const path = registryPath(home);
+  let st;
+  try {
+    st = lstatSync3(path);
+  } catch (e) {
+    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
+  }
+  if (st.isSymbolicLink()) return { kind: "corrupt" };
+  let text;
+  try {
+    text = readFileSync4(path, "utf8");
+  } catch {
+    return { kind: "corrupt" };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { kind: "corrupt" };
+  }
+  if (!isValidRegistry(parsed)) return { kind: "corrupt" };
+  return { kind: "ok", reg: parsed };
+}
+function readRegistry(home) {
+  const r = loadRegistry(home);
+  return r.kind === "ok" ? r.reg : {};
+}
+function aliasesAdoptedLedger(project) {
+  let real;
+  try {
+    real = lstatSync3(project.ledger).isSymbolicLink() ? canonicalRoot(resolve(dirname5(project.ledger), readlinkSync2(project.ledger))) : canonicalRoot(project.ledger);
+  } catch {
+    real = canonicalRoot(project.ledger);
+  }
+  const ownKey = canonicalRoot(project.root);
+  if (real === join5(ownKey, ".helix", "memory.jsonl")) return false;
+  for (const key of Object.keys(readRegistry(project.home))) {
+    if (key === GLOBAL_KEY || key === ownKey) continue;
+    if (canonicalRoot(projectLedgerPath(key)) === real) return true;
+  }
+  return false;
 }
 
 // src/memory/witness-store.ts
@@ -602,7 +662,7 @@ function signedJournal(scopeKey, master, unsigned) {
 }
 function readStoreFileAt(path) {
   try {
-    const parsed = JSON.parse(readFileSync4(path, "utf8"));
+    const parsed = JSON.parse(readFileSync5(path, "utf8"));
     return { v: 1, scopes: parsed.scopes ?? {} };
   } catch {
     return { v: 1, scopes: {} };
@@ -788,7 +848,7 @@ function aliasedLedgerRefusal(rawPath) {
   return st.nlink === 1 ? null : aliasedLedgerMessage(st.nlink);
 }
 function appendRecordUnlocked(rawPath, record, fsOps = realFsOps) {
-  mkdirSync4(dirname7(rawPath), { recursive: true });
+  mkdirSync5(dirname7(rawPath), { recursive: true });
   const path = canonical(rawPath);
   sweepOrphanTmps(path, { fsOps });
   const fd = fsOps.openSync(path, "a+", 384);
@@ -810,7 +870,7 @@ function appendRecordUnlocked(rawPath, record, fsOps = realFsOps) {
 }
 function readLedgerBytes(path) {
   try {
-    return readFileSync5(path);
+    return readFileSync6(path);
   } catch (err) {
     if (err.code === "ENOENT") return Buffer.alloc(0);
     throw err;
@@ -825,6 +885,7 @@ function resolveScopeTarget(home, globalLedger, scope) {
   if (scope === "global") return { ok: true, ledger: globalLedger, scopeKey: scopeKeyOf(home) };
   const ledger = projectLedgerPath(scope);
   if (aliasesGlobalLedger(ledger, globalLedger)) return { ok: false, reason: "aliases-global", ledger };
+  if (aliasesAdoptedLedger({ root: scope, home, ledger })) return { ok: false, reason: "aliases-project", ledger };
   return { ok: true, ledger, scopeKey: scopeKeyOf(home, scope) };
 }
 
@@ -884,11 +945,15 @@ async function main(argv, deps = {}) {
     if (!target.ok) {
       process.stderr.write(
         // ASCII only
-        `helix-rebaseline: REFUSING - ${scope} resolves to the global ledger, not a separate project ledger.
+        target.reason === "aliases-global" ? `helix-rebaseline: REFUSING - ${scope} resolves to the global ledger, not a separate project ledger.
   resolved ledger: ${target.ledger}
   global ledger  : ${globalLedger}
 Re-baselining it under a project scope key would record one file under two witness identities.
 Use: --scope global
+` : `helix-rebaseline: REFUSING - ${scope}'s ledger resolves to another adopted project's ledger file.
+  resolved ledger: ${target.ledger}
+Re-baselining it would record one file under two project witness identities.
+Replace the link with the project's own file, then re-run.
 `
       );
       exit(2);
@@ -902,7 +967,7 @@ Use: --scope global
       exit(2);
       return 2;
     }
-    mkdirSync5(dirname8(ledger), { recursive: true });
+    mkdirSync6(dirname8(ledger), { recursive: true });
     const code = await withFileLockAsync(ledger, async () => {
       const displayedBytes = readLedgerBytes(ledger);
       const displayedHash = sha256Hex(displayedBytes);

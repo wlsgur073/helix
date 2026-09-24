@@ -22,7 +22,7 @@ import { dirname as dirname6, join as join6 } from "node:path";
 
 // src/memory/ownership.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync3, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync3, readlinkSync as readlinkSync2, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2 } from "node:fs";
 import { join as join3, resolve, dirname as dirname3, isAbsolute } from "node:path";
 
 // src/memory/lock.ts
@@ -507,9 +507,24 @@ function isOwned(projectRoot, home) {
   const stamp = readOwner(projectRoot);
   return stamp !== null && stamp === entry.stamp;
 }
+function aliasesAdoptedLedger(project) {
+  let real;
+  try {
+    real = lstatSync3(project.ledger).isSymbolicLink() ? canonicalRoot(resolve(dirname3(project.ledger), readlinkSync2(project.ledger))) : canonicalRoot(project.ledger);
+  } catch {
+    real = canonicalRoot(project.ledger);
+  }
+  const ownKey = canonicalRoot(project.root);
+  if (real === join3(ownKey, ".helix", "memory.jsonl")) return false;
+  for (const key of Object.keys(readRegistry(project.home))) {
+    if (key === GLOBAL_KEY || key === ownKey) continue;
+    if (canonicalRoot(projectLedgerPath(key)) === real) return true;
+  }
+  return false;
+}
 function projectDispositionOf(project) {
   if (!project) return "inactive";
-  if (isOwned(project.root, project.home)) return "owned";
+  if (isOwned(project.root, project.home)) return aliasesAdoptedLedger(project) ? "aliased" : "owned";
   return existsSync2(project.ledger) ? "unadopted-present" : "inactive";
 }
 function trustStateOf(projectRoot, home) {
@@ -1071,6 +1086,7 @@ function normalizeUntrusted(s, maxChars) {
   return out;
 }
 var UNADOPTED_LEDGER_NOTE = "(an unadopted project memory file is present and excluded from results; adoption requires explicit user approval)";
+var ALIASED_LEDGER_NOTE = "(this project's memory file resolves to another adopted project's memory file and is excluded from results)";
 var WITNESS_MISMATCH_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; elevated grades are clamped to Fresh until an authorized re-baseline)";
 var WITNESS_TRANSITION_NOTE = "(a ledger rewrite for this scope was interrupted; its records are excluded until the transition is re-driven or re-baselined)";
 var WITNESS_INIT_NOTE = "(rollback witness: scope not yet witnessed; the current head will be adopted trust-on-first-use at the next write)";
@@ -1150,7 +1166,7 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   const maxChars = opts.maxChars ?? 4e3;
   const maxItemChars = opts.maxItemChars ?? 240;
   const integrityAvailable = opts.integrityAvailable ?? true;
-  const unadoptedNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : null;
+  const unadoptedNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : opts.aliasedPresent ? ALIASED_LEDGER_NOTE : null;
   const scaleNote = opts.unionRows !== void 0 && opts.unionRows >= SCALE_ADVISORY_ROWS ? scaleAdvisoryNote(opts.unionRows) : null;
   const trailer = [unadoptedNote, ...opts.witnessNotes ?? [], scaleNote].filter((n) => n !== null && n !== "");
   const usable = records.filter(({ record }) => record.content.trim() !== "").sort((a, b) => STATE_ORDER[a.record.state] - STATE_ORDER[b.record.state] || b.record.tx.localeCompare(a.record.tx));
@@ -1426,6 +1442,7 @@ async function main() {
     const text = formatSessionStartContext(records, newNonce(), {
       integrityAvailable,
       unadoptedPresent: projectDisposition === "unadopted-present",
+      aliasedPresent: projectDisposition === "aliased",
       witnessNotes,
       unionRows: unionPhysicalRows(replays)
     });

@@ -14533,7 +14533,7 @@ import { dirname as dirname6, join as join6 } from "node:path";
 
 // src/memory/ownership.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync3, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync3, readlinkSync as readlinkSync2, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3 } from "node:fs";
 import { join as join5, resolve, dirname as dirname5, isAbsolute } from "node:path";
 function isReviewableRoot(projectRoot2) {
   return isAbsolute(projectRoot2);
@@ -14544,6 +14544,9 @@ function canonicalRoot(projectRoot2) {
   } catch {
     return resolve(projectRoot2);
   }
+}
+function projectLedgerPath(projectRoot2) {
+  return join5(projectRoot2, ".helix", "memory.jsonl");
 }
 var GLOBAL_KEY = "@global";
 function registryPath(home2) {
@@ -14651,9 +14654,24 @@ function isOwned(projectRoot2, home2) {
   const stamp = readOwner(projectRoot2);
   return stamp !== null && stamp === entry.stamp;
 }
+function aliasesAdoptedLedger(project2) {
+  let real;
+  try {
+    real = lstatSync3(project2.ledger).isSymbolicLink() ? canonicalRoot(resolve(dirname5(project2.ledger), readlinkSync2(project2.ledger))) : canonicalRoot(project2.ledger);
+  } catch {
+    real = canonicalRoot(project2.ledger);
+  }
+  const ownKey = canonicalRoot(project2.root);
+  if (real === join5(ownKey, ".helix", "memory.jsonl")) return false;
+  for (const key of Object.keys(readRegistry(project2.home))) {
+    if (key === GLOBAL_KEY || key === ownKey) continue;
+    if (canonicalRoot(projectLedgerPath(key)) === real) return true;
+  }
+  return false;
+}
 function projectDispositionOf(project2) {
   if (!project2) return "inactive";
-  if (isOwned(project2.root, project2.home)) return "owned";
+  if (isOwned(project2.root, project2.home)) return aliasesAdoptedLedger(project2) ? "aliased" : "owned";
   return existsSync2(project2.ledger) ? "unadopted-present" : "inactive";
 }
 function stampOwnership(projectRoot2, home2, opts = {}) {
@@ -15371,6 +15389,7 @@ function normalizeUntrusted(s, maxChars) {
   return out;
 }
 var UNADOPTED_LEDGER_NOTE = "(an unadopted project memory file is present and excluded from results; adoption requires explicit user approval)";
+var ALIASED_LEDGER_NOTE = "(this project's memory file resolves to another adopted project's memory file and is excluded from results)";
 var WITNESS_MISMATCH_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; elevated grades are clamped to Fresh until an authorized re-baseline)";
 var WITNESS_MISMATCH_ASOF_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; this as-of view preserves the reconstructed historical grades present in the available bytes, which may omit later corrections and are not a current-authority verdict)";
 var WITNESS_TRANSITION_NOTE = "(a ledger rewrite for this scope was interrupted; its records are excluded until the transition is re-driven or re-baselined)";
@@ -15855,7 +15874,7 @@ var MAX_COMMIT_CONTENT_CHARS = 16384;
 var MAX_DV_QUESTION_CHARS = 65536;
 var MAX_DV_ANSWER_CHARS = 65536;
 var MAX_DV_QUOTED_ITEMS = 64;
-var MAX_INSPECT_IDS = 20;
+var MAX_INSPECT_IDS = 32;
 var MAX_ECHO_SPAN_IDS = 10;
 var MAX_ECHO_SPANS_PER_ID = 3;
 var MAX_ECHO_SPAN_CHARS = 160;
@@ -15982,6 +16001,9 @@ var MemoryStore = class {
     if (!canCommit({ provenance: { source, sessionId: this.session() } })) {
       throw new Error("commit: missing provenance");
     }
+    if (input.scope !== "global" && this.opts.project) {
+      this.refuseAliasedProjectWrite(this.opts.project);
+    }
     if (input.supersedes) {
       const targetLedger = this.ledgerOf(input.supersedes);
       const target = this.verifiedOf(targetLedger).live.get(input.supersedes);
@@ -16033,6 +16055,20 @@ var MemoryStore = class {
     appendWitnessed(ledger, record2, this.homeDir(), this.scopeRootOf(ledger), "commit");
     return record2;
   }
+  /** ALIAS-P2P (item 7, fix round 1): the single condition + message for refusing a project-routed
+   *  write on an owned layer whose ledger leads to ANOTHER adopted project's file — shared by
+   *  commit()'s early pre-check (fired before the supersede block ever calls ledgerOf, which used to
+   *  read through the alias) and by targetLedger()'s own routing below, so the two call sites can
+   *  never carry different wording or drift out of sync. Side-effect free: only isOwned /
+   *  aliasesAdoptedLedger reads, no ownership stamping — a write about to be refused must never first
+   *  claim or create a ledger. Throws iff aliased; otherwise returns without side effect. */
+  refuseAliasedProjectWrite(p) {
+    if (isOwned(p.root, this.homeDir()) && aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger })) {
+      throw new Error(
+        "commit: this project's memory file resolves to another adopted project's memory file, so the project layer is disabled here \u2014 the write is refused rather than written into the other project's memory. Pass scope 'global', or replace the link with the project's own file."
+      );
+    }
+  }
   /** Resolve the ledger to write to. Project scope claims ownership on first use and refuses a
    *  pre-existing unowned (foreign) ledger. With no project layer active, an OMITTED scope falls
    *  back to global — the contextual default — while an EXPLICIT 'project' is REFUSED rather than
@@ -16045,6 +16081,7 @@ var MemoryStore = class {
       );
     }
     if (scope === "global" || !p) return this.global;
+    this.refuseAliasedProjectWrite(p);
     if (!isOwned(p.root, this.homeDir())) {
       if (existsSync4(p.ledger)) {
         throw new Error(
@@ -16067,6 +16104,10 @@ var MemoryStore = class {
    *
    *  - 'owned': isOwned(p.root, home) — true regardless of whether the ledger FILE exists yet (an
    *    owned project with no ledger file still participates, matching pre-existing behavior).
+   *  - 'aliased' (item 7): owned, but its ledger leads to another adopted project's ledger file
+   *    (ownership.ts's aliasesAdoptedLedger). Excluded from every read like 'unadopted-present', with
+   *    its own constant note; targetLedger() (commit) and resolveEraseTarget() (erase) both refuse to
+   *    write through it.
    *  - 'unadopted-present': project configured, NOT owned, and a ledger file exists at p.ledger — the
    *    exact condition targetLedger() (above) already throws on for commit. The write side keeps its
    *    OWN independent, fresh isOwned/existsSync check — targetLedger's auto-stamp claim-on-first-use
@@ -16074,7 +16115,7 @@ var MemoryStore = class {
    *  - 'inactive': no project layer configured, OR configured but neither owned nor a ledger file
    *    present — nothing to read, nothing to disclose.
    *
-   *  B2: the tri-state RULES above now live in the shared, pure projectDispositionOf (ownership.ts) —
+   *  B2: the four-state RULES above now live in the shared, pure projectDispositionOf (ownership.ts) —
    *  this method is a one-line delegate. What stays HERE is the call-site contract: invoke it ONCE per
    *  public read call (recall/currentView/historyView/asOfView each do so, then thread the snapshot as
    *  a parameter into every private helper that needs it, never re-invoking this within that call). */
@@ -16301,13 +16342,17 @@ var MemoryStore = class {
       witnessNotes: collectWitnessNotes(verdicts.map((v) => v.verdict))
     };
   }
-  /** Which ledger currently holds `id` (project iff owned and present); defaults to global.
-   *  D9: an id live in BOTH scopes at once (only reachable via a hand-planted/forged ledger row)
-   *  is ambiguous — silently binding global would ignore the project duplicate. Throw instead. */
+  /** Which ledger currently holds `id` (project iff the per-call disposition snapshot is 'owned' —
+   *  item 7 fix round 1: gating on the shared four-state predicate, not raw isOwned, excludes an
+   *  ALIASED layer here too, so neither of this method's callers (commit()'s supersede pre-check,
+   *  writeVerify) ever reads through the alias into the other project's real ledger file) and
+   *  present; defaults to global. D9: an id live in BOTH scopes at once (only reachable via a
+   *  hand-planted/forged ledger row) is ambiguous — silently binding global would ignore the project
+   *  duplicate. Throw instead. */
   ledgerOf(id) {
     const p = this.opts.project;
     const inGlobal = this.verifiedOf(this.global).live.has(id);
-    const inProject = !!p && isOwned(p.root, this.homeDir()) && this.verifiedOf(p.ledger).live.has(id);
+    const inProject = !!p && this.projectDisposition() === "owned" && this.verifiedOf(p.ledger).live.has(id);
     if (inGlobal && inProject) throw new Error("ledgerOf: id live in more than one scope \u2014 ambiguous");
     if (inProject) return p.ledger;
     return this.global;
@@ -16603,7 +16648,9 @@ var MemoryStore = class {
    *  must never brick it (finding 2). */
   resolveEraseTarget(id, scope, permanent) {
     const p = this.opts.project;
-    const projectActive2 = !!p && isOwned(p.root, this.homeDir());
+    const owned = !!p && isOwned(p.root, this.homeDir());
+    const aliased = owned && aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger });
+    const projectActive2 = owned && !aliased;
     const classify = (ledger) => {
       const kind = this.findEraseTarget(ledger, id);
       if (kind === "ambiguous") {
@@ -16615,6 +16662,11 @@ var MemoryStore = class {
       if (scope === "project" && !p) {
         throw new EraseRefusedError(
           "erase: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started inside a directory holding a .helix folder). Omit `scope`, or start Helix inside the project and adopt it (helix_memory_adopt) \u2014 the erase is refused rather than silently widened to the global ledger."
+        );
+      }
+      if (scope === "project" && aliased) {
+        throw new EraseRefusedError(
+          "erase: this project's memory file resolves to another adopted project's memory file \u2014 the erase is refused rather than applied to the other project's memory."
         );
       }
       const ledger = scope === "global" || !p ? this.global : projectActive2 ? p.ledger : (() => {
@@ -25188,13 +25240,19 @@ function buildAgreementMap(helixAnswer, codexAnswer) {
     partnerOfHelix[c.i] = c.j;
     partnerOfCodex[c.j] = c.i;
   }
-  const helixStatus = new Array(helix.length).fill("divergent");
-  const codexStatus = new Array(codex.length).fill("divergent");
+  const helixStatus = new Array(helix.length).fill("unpaired");
+  const codexStatus = new Array(codex.length).fill("unpaired");
   const figureNotes = [];
+  let pairs = 0;
   for (let i = 0; i < helix.length; i++) {
     const j = partnerOfHelix[i];
     if (j < 0) continue;
-    if (helixPolarity[i] !== codexPolarity[j]) continue;
+    pairs++;
+    if (helixPolarity[i] !== codexPolarity[j]) {
+      helixStatus[i] = "divergent";
+      codexStatus[j] = "divergent";
+      continue;
+    }
     const helixFigures = figuresOf(helix[i]);
     const codexFigures = figuresOf(codex[j]);
     if (sameFigures(helixFigures, codexFigures)) {
@@ -25213,9 +25271,13 @@ function buildAgreementMap(helixAnswer, codexAnswer) {
     ...helix.filter((_, i) => helixStatus[i] === "divergent"),
     ...codex.filter((_, j) => codexStatus[j] === "divergent")
   ];
+  const unmatched = [
+    ...helix.filter((_, i) => helixStatus[i] === "unpaired"),
+    ...codex.filter((_, j) => codexStatus[j] === "unpaired")
+  ];
   const divergences = [...trueDivergences, ...figureNotes];
-  const verdict = !anyCandidate ? "indeterminate" : trueDivergences.length > 0 ? "diverge" : figureNotes.length > 0 ? "indeterminate" : "agree";
-  return { verdict, agreements, divergences, withheldPairs: figureNotes.length };
+  const verdict = !anyCandidate ? "indeterminate" : trueDivergences.length > 0 ? "diverge" : figureNotes.length > 0 || unmatched.length > 0 ? "indeterminate" : "agree";
+  return { verdict, agreements, divergences, withheldPairs: figureNotes.length, pairs, unmatched };
 }
 
 // src/memory/pii-scan.ts
@@ -25341,7 +25403,7 @@ function echoSpans(forms, content, opts = {}) {
   const grams = /* @__PURE__ */ new Set();
   for (let i = 0; i + k <= norm.length; i++) grams.add(norm.slice(i, i + k));
   const out = [];
-  const seen = /* @__PURE__ */ new Set();
+  const fulls = [];
   for (const form of forms) {
     const hay = normalizeForMatch(form).slice(0, maxScan);
     let start = -1;
@@ -25365,8 +25427,14 @@ function echoSpans(forms, content, opts = {}) {
   }
   return out;
   function push(run) {
-    if (seen.has(run)) return;
-    seen.add(run);
+    if (fulls.some((f) => f.includes(run))) return;
+    for (let i = fulls.length - 1; i >= 0; i--) {
+      if (run.includes(fulls[i])) {
+        fulls.splice(i, 1);
+        out.splice(i, 1);
+      }
+    }
+    fulls.push(run);
     out.push({ text: run.length > cap ? `${run.slice(0, cap)}\u2026` : run, fullLength: run.length });
   }
 }
@@ -25664,10 +25732,12 @@ function assertValidId(id) {
     );
   }
 }
-function unadoptedNote(disposition) {
+function projectLayerNote(disposition) {
   return disposition === "unadopted-present" ? `
 
-${UNADOPTED_LEDGER_NOTE}` : "";
+${UNADOPTED_LEDGER_NOTE}` : disposition === "aliased" ? `
+
+${ALIASED_LEDGER_NOTE}` : "";
 }
 function witnessNotesText(notes) {
   return notes.map((n) => `
@@ -25716,7 +25786,7 @@ function handleRecall(store2, args) {
   const recencyNote = recencyIds.length ? `
 
 (recency appendix \u2014 newest records included regardless of rank: ${recencyIds.join(", ")})` : "";
-  const trailingNotes = reverifyNote + egressNote + integrityNote + conflictNote + recencyNote + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes);
+  const trailingNotes = reverifyNote + egressNote + integrityNote + conflictNote + recencyNote + projectLayerNote(projectDisposition) + witnessNotesText(witnessNotes);
   const scoped = served.map(({ record: record2, scope, contentDigest }) => ({ record: record2, scope, contentDigest }));
   const { text: framedOut } = capRendered(
     scoped.length,
@@ -25776,7 +25846,7 @@ function handleInspect(store2, args) {
     const missingNote = missing > 0 ? `
 
 (${missing} of the requested ids have no live memory)` : "";
-    const trailingNotes2 = missingNote + unadoptedNote(projectDisposition2) + witnessNotesText(witnessNotes2);
+    const trailingNotes2 = missingNote + projectLayerNote(projectDisposition2) + witnessNotesText(witnessNotes2);
     if (rows2.length === 0) return ok("(no live memory for the requested ids)" + trailingNotes2);
     return ok(renderCurrentRows(rows2, "CURRENT MEMORY", trailingNotes2) + trailingNotes2);
   }
@@ -25784,7 +25854,7 @@ function handleInspect(store2, args) {
     if (args.history) return ok("inspect: history and asOf are mutually exclusive \u2014 pass one.");
     if (!isIsoInstant(args.asOf)) return ok("inspect: as-of cursor must be a canonical ISO-8601 instant (e.g. 2026-07-04T00:00:00.000Z).");
     const { facts, keyAvailable, truncated, projectDisposition: projectDisposition2, witnessNotes: witnessNotes2 } = store2.asOfView(args.asOf);
-    if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + unadoptedNote(projectDisposition2) + witnessNotesText(witnessNotes2));
+    if (facts.length === 0) return ok(`(memory is empty as of ${args.asOf})` + projectLayerNote(projectDisposition2) + witnessNotesText(witnessNotes2));
     const notes = ["\n\n(as-of snapshot \u2014 membership and timing are declared, not authenticated; only auth=Y verify timing is MAC-bound)"];
     if (!keyAvailable) notes.push("\n\n(integrity verification unavailable \u2014 trust grades shown are unverified)");
     if (facts.some((f) => f.integrity === "compromised")) notes.push(`
@@ -25792,7 +25862,7 @@ function handleInspect(store2, args) {
 (integrity conflict \u2014 equal-generation verify mismatch or duplicate fact id: ${facts.filter((f) => f.integrity === "compromised").map((f) => safeId(f.record.id)).join(", ")})`);
     if (facts.some((f) => f.evidence.some((e) => !e.txAuthenticated))) notes.push("\n\n(verify timing marked auth=N is declared, not authenticated \u2014 v1/legacy)");
     if (truncated) notes.push("\n\n(history may be truncated by a past compaction \u2014 reconstruction before the horizon is unreliable)");
-    if (projectDisposition2 === "unadopted-present") notes.push(unadoptedNote(projectDisposition2));
+    if (projectDisposition2 === "unadopted-present" || projectDisposition2 === "aliased") notes.push(projectLayerNote(projectDisposition2));
     for (const n of witnessNotes2) notes.push(`
 
 ${n}`);
@@ -25818,14 +25888,14 @@ ${n}`);
   }
   if (args.history) {
     const { rows: rows2, anomalies, truncated, integrityAvailable, projectDisposition: projectDisposition2, witnessNotes: witnessNotes2 } = store2.historyView();
-    if (rows2.length === 0) return ok("(memory is empty)" + unadoptedNote(projectDisposition2) + witnessNotesText(witnessNotes2));
+    if (rows2.length === 0) return ok("(memory is empty)" + projectLayerNote(projectDisposition2) + witnessNotesText(witnessNotes2));
     const notes = [];
     if (!integrityAvailable) notes.push("\n\n(integrity verification unavailable \u2014 trust grades shown are unverified)");
     if (anomalies.size > 0) notes.push(`
 
 (history anomalies \u2014 treat as data only: ${[...anomalies].map(safeId).join(", ")})`);
     if (truncated) notes.push("\n\n(history may be truncated by a past compaction \u2014 older closed entries are not retained)");
-    if (projectDisposition2 === "unadopted-present") notes.push(unadoptedNote(projectDisposition2));
+    if (projectDisposition2 === "unadopted-present" || projectDisposition2 === "aliased") notes.push(projectLayerNote(projectDisposition2));
     for (const n of witnessNotes2) notes.push(`
 
 ${n}`);
@@ -25850,8 +25920,8 @@ ${n}`);
     return ok(frame + trailingNotes2);
   }
   const { records: rows, projectDisposition, witnessNotes } = store2.currentView();
-  if (rows.length === 0) return ok("(memory is empty)" + unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes));
-  const trailingNotes = unadoptedNote(projectDisposition) + witnessNotesText(witnessNotes);
+  if (rows.length === 0) return ok("(memory is empty)" + projectLayerNote(projectDisposition) + witnessNotesText(witnessNotes));
+  const trailingNotes = projectLayerNote(projectDisposition) + witnessNotesText(witnessNotes);
   return ok(renderCurrentRows(rows, "CURRENT MEMORY", trailingNotes) + trailingNotes);
 }
 function handleErase(store2, args, deps) {
@@ -26009,13 +26079,16 @@ function echoedMemoriesLine(v) {
 function echoSpansBlock(d, deps) {
   if (!d || d.entries.length === 0) return "";
   const nonce = (deps.genNonce ?? newNonce)();
-  const row = (text) => {
+  const row = (text, trustedSuffix = "") => {
     const truncated = text.endsWith("\u2026");
     const normalized = normalizeUntrusted(truncated ? text.slice(0, -1) : text);
-    return { text: truncated ? `${normalized}\u2026` : normalized, mark: "DATA| ", normalized: true };
+    return { text: (truncated ? `${normalized}\u2026` : normalized) + trustedSuffix, mark: "DATA| ", normalized: true };
   };
   const lines = d.entries.flatMap((e) => [
-    ...e.spans.map((s) => row(`${JSON.stringify(presentId(e.id))}: ${s.text}`)),
+    ...e.spans.map((s) => row(
+      `${JSON.stringify(presentId(e.id))}: ${s.text}`,
+      s.text.endsWith("\u2026") ? ` (${s.fullLength} chars)` : ""
+    )),
     ...e.omittedSpans > 0 ? [row(`${JSON.stringify(presentId(e.id))}: (${e.omittedSpans} more matched runs not shown)`)] : []
   ]);
   if (d.omittedIds > 0) lines.push(row(`(${d.omittedIds} more echoed records not shown)`));
@@ -26109,12 +26182,14 @@ async function handleDualVerify(args, deps, signal) {
   }
   const a = result.agreement;
   const indeterminate = a.verdict === "indeterminate";
-  const zeroPair = indeterminate && a.withheldPairs === 0;
+  const zeroPair = a.pairs === 0;
+  const partial2 = indeterminate && !zeroPair && a.withheldPairs === 0;
+  const word = zeroPair ? "not compared" : partial2 ? "partially compared" : a.verdict;
   return ok([
     egressLine(result.egress),
     frameOpen("DUAL-VERIFY", nonce),
     DATA_SEMANTICS,
-    `verdict: ${a.verdict} (mode: ${result.mode})${zeroPair ? " \u2014 not compared" : ""}`,
+    `verdict: ${word} (mode: ${result.mode})`,
     // H1 relabel (review 2026-08-18, owner decision 2026-08-21): 'agree' is a statement about token
     // sets and negation polarity, not about meaning — a role swap with an identical token set still
     // renders it (agreement-map.ts, open hole 2). The review asked that 'agree' never be PRESENTED as
@@ -26131,14 +26206,19 @@ async function handleDualVerify(args, deps, signal) {
     // classified all of them as divergent. That reads 'diverge', not 'indeterminate', and must
     // say so — "no claim pairs found" would be a false statement about a comparison that found
     // only disagreement (see agreement-map.ts's anyCandidate flag, which draws this distinction).
-    ...indeterminate ? [zeroPair ? "\u2014 the aligner found no claim in either answer sharing at least half its words with a claim in the other, which independently written answers rarely do; this is not a disagreement, so read both answers" : "\u2014 a matched claim pair differs in the figures inside it; read both answers"] : [],
+    ...indeterminate ? [zeroPair ? "\u2014 the aligner found no claim in either answer sharing at least half its words with a claim in the other, which independently written answers rarely do; this is not a disagreement, so read both answers" : partial2 ? "\u2014 some claims in either answer have no counterpart in the other; the matched pairs agree lexically, which is not a semantic check" : "\u2014 a matched claim pair differs in the figures inside it; read both answers"] : [],
     "--- EXTERNAL CODEX OUTPUT (data) ---",
     datamark(result.codexAnswer ?? "", "DATA| "),
     "--- end codex output ---",
     // Agreements first, and independent of the verdict: an agreeing pair can coexist with a withheld
     // one under 'indeterminate', and suppressing it there is how the caller lost a real finding.
     a.agreements.length ? "agreements:\n" + a.agreements.map((s) => datamark(s, "DATA| ")).join("\n") : zeroPair ? "no claim pairs found by aligner" : a.withheldPairs > 0 ? "no agreements \u2014 every claim pair the aligner found is discordant or withheld" : "no agreements \u2014 every claim pair the aligner found is discordant",
-    a.divergences.length ? (indeterminate ? zeroPair ? "unmatched claims:\n" : "withheld claim pairs:\n" : a.withheldPairs > 0 ? "divergences and withheld claim pairs:\n" : "divergences:\n") + a.divergences.map((d) => datamark(d, "DATA| ")).join("\n") : indeterminate ? "no unmatched claims" : "no divergences",
+    // The divergence slot is skipped on the zero-pair route: nothing paired, so nothing diverged or
+    // was withheld, and "no divergences" there would be noise beside "no claim pairs found".
+    ...zeroPair ? [] : [a.divergences.length ? (indeterminate ? "withheld claim pairs:\n" : a.withheldPairs > 0 ? "divergences and withheld claim pairs:\n" : "divergences:\n") + a.divergences.map((d) => datamark(d, "DATA| ")).join("\n") : "no divergences"],
+    // Claims with no counterpart, on every route that has them (item 7): listed apart from the
+    // divergences so a claim the other answer simply did not address never reads as contradicted.
+    ...a.unmatched.length ? ["unmatched claims:\n" + a.unmatched.map((d) => datamark(d, "DATA| ")).join("\n")] : zeroPair ? ["no unmatched claims"] : [],
     frameClose(nonce)
   ].join("\n"));
 }
