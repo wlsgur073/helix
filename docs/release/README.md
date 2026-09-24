@@ -74,7 +74,10 @@ the candidate was re-cut at `edeb57f7` and certified 74 of 74 on 2026-09-23. Tha
 span two days on purpose: its verdict rows include observations made through the host's own MCP
 connection, and the launch barrier means a session started before the reinstall still serves the old
 bytes, so the rebinding waited for a restarted session rather than carrying evidence the run had not
-produced. Declaring the release is the step after it.
+produced. Item 7's batch — the compare verdict words, the aliased project ledger check, the 32-id
+`inspect` cap and the trigger acknowledgement — moved `bin/` again and retired that certification;
+the candidate was re-cut at `8abd984` and certified 74 of 74 on 2026-09-24, its Block E again run
+from a Claude Code process started after the reinstall. Declaring the release is the step after it.
 
 ## 3. Where each document sits
 
