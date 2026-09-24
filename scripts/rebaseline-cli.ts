@@ -129,11 +129,16 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
     const target = resolveScopeTarget(home, globalLedger, scope);
     if (!target.ok) {
       process.stderr.write(                                                         // ASCII only
-        `helix-rebaseline: REFUSING - ${scope} resolves to the global ledger, not a separate project ledger.\n` +
-        `  resolved ledger: ${target.ledger}\n` +
-        `  global ledger  : ${globalLedger}\n` +
-        `Re-baselining it under a project scope key would record one file under two witness identities.\n` +
-        `Use: --scope global\n`,
+        target.reason === 'aliases-global'
+          ? `helix-rebaseline: REFUSING - ${scope} resolves to the global ledger, not a separate project ledger.\n` +
+            `  resolved ledger: ${target.ledger}\n` +
+            `  global ledger  : ${globalLedger}\n` +
+            `Re-baselining it under a project scope key would record one file under two witness identities.\n` +
+            `Use: --scope global\n`
+          : `helix-rebaseline: REFUSING - ${scope}'s ledger resolves to another adopted project's ledger file.\n` +
+            `  resolved ledger: ${target.ledger}\n` +
+            `Re-baselining it would record one file under two project witness identities.\n` +
+            `Replace the link with the project's own file, then re-run.\n`,
       );
       exit(2);
       return 2;

@@ -4,7 +4,7 @@
 // delegates to, per the task's tsconfig note: scripts/ is only typechecked transitively via test
 // imports, so both modules must be imported here for `npm run typecheck` to see them at all.
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../scripts/trigger-cli.js';
@@ -99,6 +99,17 @@ describe('resolveProjectDisposition (pure-ish; real fs for existence/ownership)'
     const root = tmpProj();
     stampOwnership(root, home, { genStamp: () => 'stamp' });
     expect(resolveProjectDisposition(root, home, projectLedgerPath(root))).toBe('unowned');
+  });
+  it('item 7: an aliased project does not participate; the project holding the real file does', () => {
+    const home = tmpHome();
+    const a = tmpProj();
+    const b = tmpProj();
+    stampOwnership(a, home, { genStamp: () => 'stamp-a' });
+    stampOwnership(b, home, { genStamp: () => 'stamp-b' });
+    writeFileSync(projectLedgerPath(b), '');
+    symlinkSync(projectLedgerPath(b), projectLedgerPath(a));
+    expect(resolveProjectDisposition(a, home, join(home, 'memory.jsonl'))).toBe('unowned');
+    expect(resolveProjectDisposition(b, home, join(home, 'memory.jsonl'))).toBe('owned');
   });
 });
 

@@ -10,7 +10,7 @@
  *  reads it from here now). Naming the rule is most of the fix; `resolveScopeTarget` is the rest,
  *  because it stops the ceremony deriving a ledger and a witness key from the same argument by two
  *  independent routes. */
-import { canonicalRoot, projectLedgerPath } from './ownership.js';
+import { aliasesAdoptedLedger, canonicalRoot, projectLedgerPath } from './ownership.js';
 import { scopeKeyOf } from './witness-store.js';
 
 /**
@@ -34,7 +34,7 @@ export type Scope = 'global' | (string & {});
 
 export type ScopeResolution =
   | { ok: true; ledger: string; scopeKey: string }
-  | { ok: false; reason: 'aliases-global'; ledger: string };
+  | { ok: false; reason: 'aliases-global' | 'aliases-project'; ledger: string };
 
 /**
  * The ledger a scope names AND the witness key it is recorded under — derived together, from one
@@ -56,5 +56,6 @@ export function resolveScopeTarget(home: string, globalLedger: string, scope: Sc
   if (scope === 'global') return { ok: true, ledger: globalLedger, scopeKey: scopeKeyOf(home) };
   const ledger = projectLedgerPath(scope);
   if (aliasesGlobalLedger(ledger, globalLedger)) return { ok: false, reason: 'aliases-global', ledger };
+  if (aliasesAdoptedLedger({ root: scope, home, ledger })) return { ok: false, reason: 'aliases-project', ledger };
   return { ok: true, ledger, scopeKey: scopeKeyOf(home, scope) };
 }

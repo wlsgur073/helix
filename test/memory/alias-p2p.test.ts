@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, symlinkSync, rmSync, existsSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stampOwnership, projectLedgerPath, projectDispositionOf, aliasesAdoptedLedger } from '../../src/memory/ownership.js';
+import { resolveScopeTarget } from '../../src/memory/scope-target.js';
 
 // ALIAS-P2P (item 7): an adopted project's ledger that resolves to ANOTHER adopted project's ledger
 // file. The global rule (scope-target.ts aliasesGlobalLedger) compared against the global ledger
@@ -64,5 +65,16 @@ describe('aliasesAdoptedLedger / the aliased disposition', () => {
     writeFileSync(projectLedgerPath(b), '');
     const stranger = mkdtempSync(join(tmpdir(), 'helix-p2p-proj-'));
     expect(projectDispositionOf(desc(stranger, h))).toBe('inactive');
+  });
+});
+
+describe('resolveScopeTarget refuses an aliased project scope (item 7)', () => {
+  it('reports aliases-project for the linking side and resolves the real side', () => {
+    const h = home(); const a = project(h); const b = project(h);
+    writeFileSync(projectLedgerPath(b), '');
+    symlinkSync(projectLedgerPath(b), projectLedgerPath(a));
+    const globalLedger = join(h, 'memory.jsonl');
+    expect(resolveScopeTarget(h, globalLedger, a)).toMatchObject({ ok: false, reason: 'aliases-project' });
+    expect(resolveScopeTarget(h, globalLedger, b)).toMatchObject({ ok: true });
   });
 });

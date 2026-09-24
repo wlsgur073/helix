@@ -10,7 +10,7 @@ import type { MemoryRecord } from '../src/types.js';
 import { ensureMaster, signVerify, digestContent } from '../src/memory/ledger-mac.js';
 import { subkeyForScope, verifiedLiveStats } from '../src/memory/verified-read.js';
 import { MemoryStore } from '../src/memory/store.js';
-import { isOwned, projectLedgerPath } from '../src/memory/ownership.js';
+import { aliasesAdoptedLedger, isOwned, projectLedgerPath } from '../src/memory/ownership.js';
 import { aliasesGlobalLedger } from '../src/memory/scope-target.js';
 
 // --- deterministic RNG (seedable) — reproducible fixtures, no Math.random ---
@@ -195,7 +195,7 @@ export function runReal(deps: RealDeps = {}): void {
   const scopes: Array<{ label: string; ledger: string; root?: string }> = [{ label: 'global', ledger: globalLedger }];
   // One physical file is never two participants (cwd == $HOME aliases the global ledger in the
   // default layout) — the same gate the server, hook, and trigger measurement apply. See scope-target.ts.
-  if (existsSync(join(cwd, '.helix')) && !aliasesGlobalLedger(projectLedgerPath(cwd), globalLedger) && isOwned(cwd, home)) {
+  if (existsSync(join(cwd, '.helix')) && !aliasesGlobalLedger(projectLedgerPath(cwd), globalLedger) && isOwned(cwd, home) && !aliasesAdoptedLedger({ root: cwd, home, ledger: projectLedgerPath(cwd) })) {
     scopes.push({ label: 'project', ledger: projectLedgerPath(cwd), root: cwd });
   }
   for (const s of scopes) {
