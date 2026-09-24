@@ -123,10 +123,10 @@ describe('the two copies of trigger_fired_summary are byte-identical', () => {
   });
 });
 
-const legsWith = (latencyMin: number | null, rows: Leg['status'] = 'false'): EvaluationRecord['legs'] => ({
+const legsWith = (latencyMin: number | null, rows: Leg['status'] = 'false', latStatus?: Leg['status']): EvaluationRecord['legs'] => ({
   rows: { min: 78, max: 78, threshold: 2500, status: rows },
   bytes: { min: 1, max: 1, threshold: 4194304, status: 'false' },
-  latency: { min: latencyMin, max: latencyMin, threshold: 3, status: latencyMin !== null && latencyMin >= 3 ? 'true' : 'false' },
+  latency: { min: latencyMin, max: latencyMin, threshold: 3, status: latStatus ?? (latencyMin !== null && latencyMin >= 3 ? 'true' : 'false') },
 });
 function ackLine(ts: string, evaluationTs: string, legs: EvaluationRecord['legs']): string {
   const r: AcknowledgementRecord = { v: 1, policy: 'T1-2026-07-11', kind: 'acknowledgement', ts, evaluationTs, legs };
@@ -168,4 +168,11 @@ describe('T1-STICKY: an acknowledged fire stays quiet until new evidence (item 7
     quiet(history(E('2026-09-24T09:00:00.000Z', null), E('2026-09-25T09:00:00.000Z', 5))));
   it('acknowledged with rows false, later rows true -> re-armed', () =>
     rearmed(history(E('2026-09-24T09:00:00.000Z', 5, 'true'))));
+  it('acknowledged with rows true and latency min null (unavailable), later latency min 50 (status true), rows unchanged -> re-armed (R19: a leg not true at ack, true after, re-arms even from a null baseline)', () =>
+    rearmed([
+      E('2026-09-20T09:00:00.000Z', 5),
+      E('2026-09-23T08:30:18.147Z', 5),
+      ackLine(ACK_TS, '2026-09-23T08:30:18.147Z', legsWith(null, 'true', 'unavailable')),
+      E('2026-09-24T09:00:00.000Z', 50, 'true'),
+    ].join('\n') + '\n'));
 });

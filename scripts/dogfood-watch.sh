@@ -44,11 +44,13 @@ trigger_fired_summary() {
   recent=$(grep '"kind":"evaluation"' "$f" 2>/dev/null | tail -n 14 | grep -c '"overall":"fired"')
   msg="Trigger-1 has fired since $first; $recent of the last $w evaluations fired."
   # T1-STICKY (item 7): the LATEST acknowledgement (helix-trigger --acknowledge) quiets the alarm
-  # until a later evaluation shows NEW evidence: the latency arm's definite slow count (`min`) RISING
-  # between consecutive readings, starting from the acknowledged reading (a fall is an old slow
-  # recall leaving the window; a null reading is skipped), or a row/byte arm reading "true" that did
-  # not at the acknowledgement. Known limit: a new slow recall entering in the same interval an old
-  # one leaves nets zero and is missed. Returns 10 alarm, 11 acknowledged, 0 nothing to report.
+  # until a later evaluation shows NEW evidence: a row, byte or latency leg reading "true" that did
+  # not at the acknowledgement, or a RISE in the latency arm's definite slow count (`min`) between
+  # consecutive readings, starting from the acknowledged reading (a fall is an old slow recall
+  # leaving the window; a null reading is skipped). Known limits: a new slow recall entering in the
+  # same interval an old one leaves nets zero and is missed; an evaluation with exactly the
+  # acknowledgement's timestamp is not "later" and is not compared. Returns 10 alarm, 11
+  # acknowledged, 0 nothing to report.
   ack=$(grep '"kind":"acknowledgement"' "$f" 2>/dev/null | tail -n 1)
   if [ -z "$ack" ]; then
     printf '%s\n' "$msg"
@@ -58,6 +60,7 @@ trigger_fired_summary() {
   prev=$(printf '%s' "$ack" | grep -o '"latency":{"min":[0-9]*' | head -n 1 | grep -o '[0-9]*$')
   rows0=$(printf '%s' "$ack" | grep -o '"rows":{[^}]*}' | head -n 1 | grep -o '"status":"[a-z]*"' | cut -d'"' -f4)
   bytes0=$(printf '%s' "$ack" | grep -o '"bytes":{[^}]*}' | head -n 1 | grep -o '"status":"[a-z]*"' | cut -d'"' -f4)
+  lat0=$(printf '%s' "$ack" | grep -o '"latency":{[^}]*}' | head -n 1 | grep -o '"status":"[a-z]*"' | cut -d'"' -f4)
   rearmed=0
   while IFS= read -r line; do
     ts=$(printf '%s' "$line" | grep -o '"ts":"[^"]*"' | head -n 1 | cut -d'"' -f4)
@@ -67,8 +70,10 @@ trigger_fired_summary() {
     [ -n "$cur" ] && prev="$cur"
     rows=$(printf '%s' "$line" | grep -o '"rows":{[^}]*}' | head -n 1 | grep -o '"status":"[a-z]*"' | cut -d'"' -f4)
     bytes=$(printf '%s' "$line" | grep -o '"bytes":{[^}]*}' | head -n 1 | grep -o '"status":"[a-z]*"' | cut -d'"' -f4)
+    lat=$(printf '%s' "$line" | grep -o '"latency":{[^}]*}' | head -n 1 | grep -o '"status":"[a-z]*"' | cut -d'"' -f4)
     if [ "$rows" = true ] && [ "$rows0" != true ]; then rearmed=1; fi
     if [ "$bytes" = true ] && [ "$bytes0" != true ]; then rearmed=1; fi
+    if [ "$lat" = true ] && [ "$lat0" != true ]; then rearmed=1; fi
   done < <(grep '"kind":"evaluation"' "$f" 2>/dev/null)
   if [ "$rearmed" = 1 ]; then
     printf '%s Re-armed after the acknowledgement of %s: a new slow recall or a size crossing since.\n' "$msg" "$ack_ts"
