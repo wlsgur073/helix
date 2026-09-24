@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -202,6 +202,44 @@ describe("a '..' after a symlinked directory inside the linking project (item 7,
       expect(readFileSync(projectLedgerPath(b)).equals(before)).toBe(true);
       const bView = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's3', project: { root: b, ledger: projectLedgerPath(b) } });
       expect(bView.currentView().records.some((r) => r.record.id === bId)).toBe(true);
+    },
+  );
+});
+
+// Ruling R28 (2026-09-24): a link body padded with `./` (a no-op for the kernel) past PATH_MAX made the
+// walk's hop string over-long; `lstatSync` threw ENAMETOOLONG on the string, the walk fell back to
+// canonicalRoot(ledger) and the dangling link read as A's own file. Measured through this store on the
+// R27 commit: A's first commit created B's ledger holding A's record — with a plain relative body, and
+// with the `dl/..` body the R27 fix exists for.
+/** Two adopted mkdtemp siblings, B's ledger absent; A's ledger links to B's through a relative body
+ *  padded to 4089-4090 chars, with or without the `dl/..` step (`A/.helix/dl -> A/x`). Returns A's store. */
+function paddedPair(shape: 'plain' | 'dotdot') {
+  const home = mkdtempSync(join(tmpdir(), 'helix-p2pe-home-'));
+  const a = mkdtempSync(join(tmpdir(), 'helix-p2pe-proj-'));
+  const b = mkdtempSync(join(tmpdir(), 'helix-p2pe-proj-'));
+  stampOwnership(a, home, {});
+  stampOwnership(b, home, {});
+  let tail = join('..', '..', basename(b), '.helix', 'memory.jsonl');
+  if (shape === 'dotdot') {
+    mkdirSync(join(a, 'x'));
+    symlinkSync(join(a, 'x'), join(a, '.helix', 'dl'));                   // A/.helix/dl -> A/x
+    tail = `dl/${tail}`;                                                   // joined by hand: path.join collapses dl/..
+  }
+  const body = './'.repeat(Math.floor((4090 - tail.length) / 2)) + tail;
+  symlinkSync(body, projectLedgerPath(a));
+  const store = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's1', project: { root: a, ledger: projectLedgerPath(a) } });
+  return { a, b, body, store };
+}
+
+describe('a link body padded past PATH_MAX inside the linking project (item 7, ruling R28)', () => {
+  it.each(['plain', 'dotdot'] as const)(
+    "a %s relative body, B's ledger absent: the omitted-scope commit is refused with the alias message and B's .helix gains no memory.jsonl",
+    (shape) => {
+      const { a, b, body, store } = paddedPair(shape);
+      expect(realpathSync(join(a, '.helix')).length + 1 + body.length).toBeGreaterThan(4095);   // the hop string is past PATH_MAX
+      expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves to another adopted project/);
+      expect(existsSync(projectLedgerPath(b))).toBe(false);
+      expect(readdirSync(join(b, '.helix'))).toEqual(['.owner']);
     },
   );
 });

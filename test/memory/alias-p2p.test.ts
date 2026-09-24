@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, existsSync, realpathSync, appendFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { stampOwnership, projectLedgerPath, projectDispositionOf, aliasesAdoptedLedger } from '../../src/memory/ownership.js';
@@ -134,6 +134,26 @@ describe('aliasesAdoptedLedger follows the whole symlink chain (item 7, final re
     expect(projectDispositionOf(desc(a, h))).toBe('owned');
   });
 
+  // MAX_SYMLINK_HOPS is Linux's MAXSYMLINKS (40). Each case also takes the kernel's own answer for the
+  // same chain, so the boundary is pinned against the kernel rather than against the constant.
+  it.each([
+    [40, 'EXISTING', 'aliased'], [40, 'ABSENT', 'aliased'], [41, 'EXISTING', 'owned'], [41, 'ABSENT', 'owned'],
+  ] as const)("a chain of %i links into the other project's %s ledger reads %s", (n, bLedger, expected) => {
+    const h = home(); const a = project(h); const b = project(h);
+    if (bLedger === 'EXISTING') writeFileSync(projectLedgerPath(b), '');
+    // A's ledger (link 1) -> A/.helix/c2 -> ... -> A/.helix/c<n> -> B's ledger: n links in all.
+    const c = (i: number): string => join(a, '.helix', `c${i}`);
+    for (let i = 2; i <= n; i++) symlinkSync(i === n ? projectLedgerPath(b) : c(i + 1), c(i));
+    symlinkSync(c(2), projectLedgerPath(a));
+    expect(projectDispositionOf(desc(a, h))).toBe(expected);
+    if (n === 40) {                                  // the kernel follows 40 links and appends into B
+      appendFileSync(projectLedgerPath(a), 'kernel marker\n');
+      expect(readFileSync(projectLedgerPath(b), 'utf8')).toBe('kernel marker\n');
+    } else {                                         // and refuses a 41st
+      expect(() => appendFileSync(projectLedgerPath(a), 'kernel marker\n')).toThrow(/ELOOP/);
+    }
+  });
+
   // A relative target is resolved from the link's PHYSICAL directory, as the kernel resolves it. Here
   // the second link sits in a directory reached through a directory link (`A/.helix/dl -> A/x/y/z`),
   // and its relative target climbs out of it: the kernel's `../../../..` from `A/x/y/z` is the
@@ -194,6 +214,36 @@ describe("a '..' after a symlinked directory is resolved the kernel's way (item 
       expect(projectDispositionOf(desc(a, h))).toBe('aliased');
     },
   );
+});
+
+// Ruling R28 (2026-09-24): each hop's directory part is resolved physically, leaving only the final
+// name for lstat. The hop used to be ONE string, the link's physical directory plus `/` plus the link
+// body: a body padded with `./` (a no-op for the kernel) past PATH_MAX made `lstatSync` throw
+// ENAMETOOLONG on that string, the walk fell back to canonicalRoot(ledger) and a dangling chain read as
+// A's own file, while the kernel, which resolves a link body from the link's directory without
+// building such a string, appended into B (measured on the R27 commit: with B's ledger absent, one
+// padded link read `owned` and A's first commit created B's ledger).
+describe("a link body padded past PATH_MAX is still followed the kernel's way (item 7, ruling R28)", () => {
+  /** `./` padding up to 4089-4090 chars: under symlink()'s 4095-byte limit for the body, while the
+   *  link's physical directory plus `/` plus the body is past PATH_MAX (4095). */
+  const padded = (tail: string): string => './'.repeat(Math.floor((4090 - tail.length) / 2)) + tail;
+
+  it.each([
+    ['a plain relative', 'ABSENT'], ['a plain relative', 'EXISTING'], ['the `dl/..`', 'ABSENT'], ['the `dl/..`', 'EXISTING'],
+  ] as const)("%s target padded past PATH_MAX into the other project's %s ledger is aliased", (shape, bLedger) => {
+    const h = home(); const a = project(h); const b = project(h);
+    if (bLedger === 'EXISTING') writeFileSync(projectLedgerPath(b), '');
+    let tail = join('..', '..', basename(b), '.helix', 'memory.jsonl');
+    if (shape === 'the `dl/..`') {
+      mkdirSync(join(a, 'x'));
+      symlinkSync(join(a, 'x'), join(a, '.helix', 'dl'));           // A/.helix/dl -> A/x
+      tail = `dl/${tail}`;                                           // joined by hand: path.join collapses dl/..
+    }
+    const body = padded(tail);
+    expect(realpathSync(join(a, '.helix')).length + 1 + body.length).toBeGreaterThan(4095);
+    symlinkSync(body, projectLedgerPath(a));
+    expect(projectDispositionOf(desc(a, h))).toBe('aliased');
+  });
 });
 
 describe('resolveScopeTarget refuses an aliased project scope (item 7)', () => {
