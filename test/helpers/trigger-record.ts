@@ -1,12 +1,15 @@
-// Shared grammar for BOTH T1 trigger sink record kinds (Phase 2 Track 2a -- see
-// the trigger-governance rollout plan). The sink
-// (<home>/trigger.jsonl) has exactly two writers, single-writer-per-kind: the measurement CLI
+// Shared grammar for the evaluation and reporter-failure T1 trigger sink record kinds (Phase 2 Track
+// 2a -- see the trigger-governance rollout plan). The sink
+// (<home>/trigger.jsonl) has three writers, single-writer-per-kind: the measurement CLI
 // (scripts/trigger-measure.ts / scripts/trigger-cli.ts, Task A2, compiled to bin/helix-trigger.mjs in
 // Task A3) appends `kind:"evaluation"` records; the systemd ExecStopPost adapter
 // (scripts/dogfood-postrun.sh, Task A4) appends `kind:"reporter-failure"` records whenever the
-// artifact does not exit 0. ONE parser locks BOTH shapes so the two record kinds can never silently
-// drift apart -- imported by both test/trigger-line.test.ts (evaluation records) and
-// test/dogfood-postrun.spawn.test.ts (reporter-failure records).
+// artifact does not exit 0; `helix-trigger --acknowledge` (item 7, scripts/trigger-cli.ts) appends
+// `kind:"acknowledgement"` records, validated by its own validateAcknowledgementLine
+// (scripts/trigger-measure.ts) rather than by this file. ONE parser locks the evaluation and
+// reporter-failure shapes so those two record kinds can never silently drift apart -- imported by
+// both test/trigger-line.test.ts (evaluation records) and test/dogfood-postrun.spawn.test.ts
+// (reporter-failure records).
 import { validateRecordLine, type EvaluationRecord } from '../../scripts/trigger-measure.js';
 
 const POLICY = 'T1-2026-07-11';
