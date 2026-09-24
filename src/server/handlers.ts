@@ -837,13 +837,13 @@ export async function handleDualVerify(
   }
   const a = result.agreement!;
   const indeterminate = a.verdict === 'indeterminate';
-  // 'indeterminate' has three routes and they need different words (agreement-map.ts's verdict note).
+  // 'indeterminate' has three routes (agreement-map.ts's verdict note) that need different words.
   // Zero-pair — nothing paired at all. Withheld — claims DID pair and at least one was withheld by
   // the figure clamp. Partial (item 7) — every pair agreed and some claims had no counterpart. The
-  // line names the route with a word (`not compared` / `partially compared`) while audit.jsonl keeps
-  // the enum value 'indeterminate': the persisted schema gains no union member.
-  // Three 'indeterminate' routes (agreement-map.ts's verdict note), told apart by COUNTS the aligner
-  // reports — never by the divergence or unmatched text, which carry untrusted Codex bytes.
+  // routes are told apart by COUNTS the aligner reports, never by the divergence or unmatched text,
+  // which carry untrusted Codex bytes. The line names the route with a word (`not compared` /
+  // `partially compared`) while audit.jsonl keeps the enum value 'indeterminate': the persisted
+  // schema gains no union member.
   const zeroPair = a.pairs === 0;
   const partial = indeterminate && !zeroPair && a.withheldPairs === 0;
   const word = zeroPair ? 'not compared' : partial ? 'partially compared' : a.verdict;

@@ -65,14 +65,14 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
   const maxChars = opts.maxChars ?? 4000;
   const maxItemChars = opts.maxItemChars ?? 240;
   const integrityAvailable = opts.integrityAvailable ?? true;
-  const unadoptedNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE
+  const projectLayerNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE
     : opts.aliasedPresent ? ALIASED_LEDGER_NOTE : null;
   const scaleNote = opts.unionRows !== undefined && opts.unionRows >= SCALE_ADVISORY_ROWS
     ? scaleAdvisoryNote(opts.unionRows) : null;
   // Trusted out-of-band trailer: the project-layer note (unadopted or aliased) FIRST, then the witness
   // notes (ordered, deduped by the caller), then the scale advisory (least security-critical last).
   // Reserved outside the maxChars budget below, like the project-layer note.
-  const trailer = [unadoptedNote, ...(opts.witnessNotes ?? []), scaleNote].filter((n): n is string => n !== null && n !== '');
+  const trailer = [projectLayerNote, ...(opts.witnessNotes ?? []), scaleNote].filter((n): n is string => n !== null && n !== '');
 
   const usable = records
     .filter(({ record }) => record.content.trim() !== '')

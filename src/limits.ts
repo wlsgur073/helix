@@ -8,12 +8,11 @@
 // ways: the MCP schema (`helix-server.ts`: the `.max(MAX_COMMIT_CONTENT_CHARS)` on `content`, the
 // `.max(MAX_DV_ANSWER_CHARS)` on `helixAnswer`) rejects an oversized `content` / `helixAnswer`
 // before the handler runs, and a core check rejects it again — the store (`MemoryStore.commit`) for
-// `content`, `dualVerify`'s `helixAnswer` length check (`src/verify/dual-verify.ts`) for
-// `helixAnswer` — so a caller that does not come through the MCP schema (hooks, CLI, tests, or a
-// direct `dualVerify()` call) still cannot get past either cap. `MAX_DV_ANSWER_CHARS` joined this
-// category with this task: before it, `helixAnswer`'s only core-side bound was the classifyEgress
-// joint scan limit described below, which compare mode no longer routes `helixAnswer` through at
-// all.
+// `content`, the length check in `dualVerify` (`src/verify/dual-verify.ts`) for `helixAnswer` — so
+// a caller that does not come through the MCP schema (hooks, CLI, tests, or a direct `dualVerify()`
+// call) still cannot get past either cap. `MAX_DV_ANSWER_CHARS` joined this category with this
+// task: before it, `helixAnswer`'s only core-side bound was the classifyEgress joint scan limit
+// described below, which compare mode no longer routes `helixAnswer` through at all.
 //
 // MAX_DV_QUESTION_CHARS and MAX_RECHECK_PATH_CHARS/MAX_RECHECK_PATTERN_CHARS are schema-only — no
 // core code reads these three constants directly — but each still has a core-side bound, through a
@@ -63,9 +62,9 @@ export const MAX_DV_QUESTION_CHARS = 65_536;
 /** `helix_dual_verify`'s `helixAnswer` field. Same CRITIQUE-mode joint-bound reasoning as
  *  MAX_DV_QUESTION_CHARS — see there. Compare mode never reaches that joint bound at all (G1:
  *  `helixAnswer` is never in classifyEgress's `texts` there), so in compare mode THIS constant is
- *  the only core-side cap — enforced on the schema and again directly in `dualVerify`
- *  (`dualVerify`'s `helixAnswer` length check), joining MAX_COMMIT_CONTENT_CHARS as one of the
- *  two constants in this file enforced literally both ways (see the header above). */
+ *  the only core-side cap — enforced on the schema and again by the length check in `dualVerify`
+ *  (`src/verify/dual-verify.ts`), joining MAX_COMMIT_CONTENT_CHARS as one of the two constants in
+ *  this file enforced literally both ways (see the header above). */
 export const MAX_DV_ANSWER_CHARS = 65_536;
 
 /** `helix_dual_verify`'s `quotedMemory` array (H6 proof-of-read declarations). Schema-only, like
