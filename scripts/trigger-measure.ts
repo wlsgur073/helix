@@ -279,7 +279,8 @@ export function validateRecordLine(line: string): EvaluationRecord {
  *  not need a directory fsync (the directory entry did not change), unlike the ledger's unconditional
  *  fsyncDir on every append (src/memory/ledger.ts appendRecordUnlocked). Existence is checked BEFORE
  *  opening; a mid-call TOCTOU race with a concurrent creator is an accepted, documented risk (single
- *  writer per record kind, by design — the CLI is the only writer of 'evaluation' rows). */
+ *  writer per record kind, by design — the CLI is the only writer of 'evaluation' and 'acknowledgement'
+ *  rows). */
 export function appendToSink(home: string, line: string, fs: DurableFsOps = realFsOps): void {
   const path = join(home, SINK_FILE);
   mkdirSync(dirname(path), { recursive: true });
@@ -292,6 +293,61 @@ export function appendToSink(home: string, line: string, fs: DurableFsOps = real
     fs.closeSync(fd);
   }
   if (!existedBefore) fs.fsyncDir(dirname(path));
+}
+
+/** T1-STICKY (item 7): a record that a fire was HANDLED. Written only by `helix-trigger --acknowledge`
+ *  (single writer per record kind), content-free, and it changes nothing about how an evaluation is
+ *  computed — policy, thresholds and the evaluation record are untouched. The fired-history readers
+ *  (both copies of trigger_fired_summary) go quiet after it until a later evaluation shows NEW
+ *  evidence. `legs` copies the acknowledged evaluation's legs, the baseline a re-arm compares against. */
+export interface AcknowledgementRecord {
+  v: 1;
+  policy: typeof POLICY;
+  kind: 'acknowledgement';
+  ts: string;
+  evaluationTs: string;
+  legs: { rows: Leg; bytes: Leg; latency: Leg };
+}
+
+export function validateAcknowledgementLine(line: string): AcknowledgementRecord {
+  const fail = (field: string): never => { throw new Error(`trigger acknowledgement self-validation failed: ${field}`); };
+  // eslint-disable-next-line no-control-regex -- deliberately matching the full ASCII byte range
+  if (!/^[\x00-\x7F]*$/.test(line)) fail('non-ASCII byte in output');
+  const parsed = JSON.parse(line) as Record<string, unknown>;
+  if (parsed.v !== 1) fail('v');
+  if (parsed.policy !== POLICY) fail('policy');
+  if (parsed.kind !== 'acknowledgement') fail('kind');
+  if (typeof parsed.ts !== 'string' || Number.isNaN(Date.parse(parsed.ts))) fail('ts');
+  if (typeof parsed.evaluationTs !== 'string' || Number.isNaN(Date.parse(parsed.evaluationTs))) fail('evaluationTs');
+  const legs = parsed.legs as Record<string, unknown> | undefined;
+  if (!legs || !isLegShape(legs.rows) || !isLegShape(legs.bytes) || !isLegShape(legs.latency)) fail('legs');
+  return parsed as unknown as AcknowledgementRecord;
+}
+
+/** Acknowledge the LATEST evaluation, iff it reads 'fired'. Refuses — returns a reason and appends
+ *  nothing — when the sink is absent, holds no evaluation, or its latest evaluation is not 'fired'. A
+ *  malformed latest evaluation throws (validateRecordLine), which the CLI turns into exit 1. */
+export function acknowledgeLatest(deps: MeasureDeps = {}): { ok: true; line: string } | { ok: false; reason: string } {
+  const env = deps.env ?? process.env;
+  const readFile = deps.readFile ?? ((p: string): Buffer => readFileSync(p));
+  const now = deps.now ?? ((): string => new Date().toISOString());
+  const home = resolveHome(env);
+  let text: string;
+  try { text = readFile(join(home, SINK_FILE)).toString('utf8'); }
+  catch { return { ok: false, reason: 'no trigger sink to acknowledge' }; }
+  const last = text.split('\n').filter((l) => l.includes('"kind":"evaluation"')).at(-1);
+  if (last === undefined) return { ok: false, reason: 'no evaluation to acknowledge' };
+  const evaluation = validateRecordLine(last);
+  if (evaluation.overall !== 'fired') {
+    return { ok: false, reason: `the latest evaluation reads ${evaluation.overall}, not fired -- nothing to acknowledge` };
+  }
+  const record: AcknowledgementRecord = {
+    v: 1, policy: POLICY, kind: 'acknowledgement', ts: now(), evaluationTs: evaluation.ts, legs: evaluation.legs,
+  };
+  const line = JSON.stringify(record);
+  validateAcknowledgementLine(line);
+  appendToSink(home, line, deps.fs ?? realFsOps);
+  return { ok: true, line };
 }
 
 /** End-to-end: resolve env -> read participants -> resolve metrics -> evaluate -> compose -> validate

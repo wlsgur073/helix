@@ -11,7 +11,7 @@
 // the hard process.exit(), so it cannot abort module evaluation, and (verified empirically before
 // relying on this) a stray process.exitCode mutation from that call does not leak into `npm test`'s
 // own reported exit code.
-import { measureAndRecord, type MeasureDeps } from './trigger-measure.js';
+import { measureAndRecord, acknowledgeLatest, type MeasureDeps } from './trigger-measure.js';
 
 export interface CliDeps extends MeasureDeps {
   exit?: (code: number) => void;
@@ -23,9 +23,12 @@ interface ParsedArgs {
   serviceResult?: string;
   exitCode?: string;
   exitStatus?: string;
+  acknowledge?: boolean;
 }
 
-const USAGE = 'usage: trigger-cli --root <path> --run <id> [--service-result <s>] [--exit-code <s>] [--exit-status <s>]\n';
+const USAGE =
+  'usage: trigger-cli --root <path> --run <id> [--service-result <s>] [--exit-code <s>] [--exit-status <s>]\n' +
+  '       trigger-cli --acknowledge\n';
 
 function parseArgs(argv: string[]): ParsedArgs {
   const out: ParsedArgs = {};
@@ -36,6 +39,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (flag === '--service-result') out.serviceResult = argv[++i] ?? '';
     else if (flag === '--exit-code') out.exitCode = argv[++i] ?? '';
     else if (flag === '--exit-status') out.exitStatus = argv[++i] ?? '';
+    else if (flag === '--acknowledge') out.acknowledge = true;
   }
   return out;
 }
@@ -50,10 +54,26 @@ const toNullable = (s: string | undefined): string | null => (s === undefined ||
  *  (default: process.exitCode, never the hard process.exit(), matching this repo's natural-exit
  *  convention — see src/hooks/session-start.ts). Exit 2 = usage error (no record attempted); exit 1 =
  *  a reporter crash somewhere in validate/append/print; exit 0 = a validated record was appended AND
- *  printed, including the all-legs-unavailable case (a valid record). */
+ *  printed, including the all-legs-unavailable case (a valid record). `--acknowledge` (item 7) carries
+ *  its own meaning under the same three codes: exit 0 = a validated acknowledgement appended and
+ *  printed, exit 2 = refused (a reason on stderr, nothing appended), exit 1 = a crash, e.g. a
+ *  malformed latest evaluation. */
 export function main(argv: string[], deps: CliDeps = {}): number {
   const exit = deps.exit ?? ((code: number): void => { process.exitCode = code; });
   const parsed = parseArgs(argv);
+  if (parsed.acknowledge) {
+    try {
+      const r = acknowledgeLatest(deps);
+      if (!r.ok) { process.stderr.write(`trigger-cli: ${r.reason}\n`); exit(2); return 2; }
+      process.stdout.write(r.line + '\n');
+      exit(0);
+      return 0;
+    } catch (e) {
+      process.stderr.write(`trigger-cli: ${e instanceof Error ? e.message : String(e)}\n`);
+      exit(1);
+      return 1;
+    }
+  }
   if (!parsed.root || !parsed.run) {
     process.stderr.write(USAGE);
     exit(2);
