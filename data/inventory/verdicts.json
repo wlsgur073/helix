@@ -32,7 +32,7 @@
  {
   "rowId": "r004",
   "surfaceItem": "tool:helix_memory_commit",
-  "claimId": "README.md#286e5235961c",
+  "claimId": "README.md#ebbc6c1ac22d",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Through the INSTALLED bundle 2026-09-22 under temporary HELIX_HOMEs: global and project commits returned committed {id, state Fresh, classification normal}; every Block C and D journey was seeded this way.",
@@ -52,7 +52,7 @@
  {
   "rowId": "r006",
   "surfaceItem": "tool:helix_memory_erase",
-  "claimId": "README.md#286e5235961c",
+  "claimId": "README.md#ebbc6c1ac22d",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "C4 2026-09-22 through the installed bundle: erase returned erased {id}; recall no longer served the row; history rendered DATA[erase:global:tx..txTo] with content blanked; asOf inside that interval returned the content in full, and asOf after txTo returned an empty memory.",
@@ -282,7 +282,7 @@
  {
   "rowId": "r029",
   "surfaceItem": "config:metrics.enabled",
-  "claimId": "CHANGELOG.md#5624aa251aed",
+  "claimId": "CHANGELOG.md#abb93387e1e9",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
@@ -292,7 +292,7 @@
  {
   "rowId": "r030",
   "surfaceItem": "env:HELIX_HOME",
-  "claimId": "CHANGELOG.md#5624aa251aed",
+  "claimId": "CHANGELOG.md#abb93387e1e9",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Every Block C/D journey and all three C5 drill variants (R, U, D) ran 2026-09-22 under their own temporary HELIX_HOME with every HELIX_* stripped from the inherited environment, and the store landed there. Measured afterwards rather than asserted: the real ~/.helix still shows memory.jsonl last modified 2026-09-11, audit.jsonl 2026-09-22 21:44 and witness.json 2026-09-22 21:46 — all BEFORE the journeys and drill ran at 23:4x — so the run wrote nothing there.",
@@ -302,7 +302,7 @@
  {
   "rowId": "r031",
   "surfaceItem": "env:HELIX_LEDGER",
-  "claimId": "CHANGELOG.md#5624aa251aed",
+  "claimId": "CHANGELOG.md#abb93387e1e9",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files, both later executed under D2).",
@@ -342,7 +342,7 @@
  {
   "rowId": "r035",
   "surfaceItem": "hook:SessionEnd",
-  "claimId": "CHANGELOG.md#5624aa251aed",
+  "claimId": "CHANGELOG.md#abb93387e1e9",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Installed bin/hooks/session-end.mjs driven with a real stdin payload 2026-09-22: exit 0, appended a session-end row to sessions.jsonl at mode 600 under a temporary HELIX_HOME. A1 hooks.e2e re-run 2026-09-22 (suite 2643 passed | 2 skipped (2645), 207 files).",
@@ -352,7 +352,7 @@
  {
   "rowId": "r036",
   "surfaceItem": "hook:SessionStart",
-  "claimId": "CHANGELOG.md#5624aa251aed",
+  "claimId": "CHANGELOG.md#abb93387e1e9",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Installed bin/hooks/session-start.mjs driven from a project cwd 2026-09-22: exit 0, emitted ===HELIX <nonce> HELIX MEMORY (cross-session) — DATA … carrying DATA[Fresh:project], DATA[Fresh:global] and a flagged DATA[Suspect:project] row plus the verify-before-acting line.",
@@ -372,7 +372,7 @@
  {
   "rowId": "r038",
   "surfaceItem": "cli:bin/helix-trigger.mjs",
-  "claimId": "README.md#daccc52e7f2e",
+  "claimId": "README.md#555dbf3d692e",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "scripts/smoke-runtime-floor.mjs drove bin/helix-trigger.mjs bare: usage printed, exit 2, on node v24.17.0 locally on 2026-09-22 and on node v20.20.2 with no npm install in the runtime-floor job of CI run 35740243626 on the candidate edeb57f (all five jobs of that run succeeded, as did run 35837222666 on bbe57ec; read back from the job log 2026-09-23). A1 trigger-artifact-smoke re-run in the same suite.",
