@@ -372,7 +372,7 @@
  {
   "rowId": "r038",
   "surfaceItem": "cli:bin/helix-trigger.mjs",
-  "claimId": "README.md#555dbf3d692e",
+  "claimId": "README.md#2d52d9e6c409",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "scripts/smoke-runtime-floor.mjs drove bin/helix-trigger.mjs bare: usage printed, exit 2, on node v24.17.0 locally on 2026-09-22 and on node v20.20.2 with no npm install in the runtime-floor job of CI run 35740243626 on the candidate edeb57f (all five jobs of that run succeeded, as did run 35837222666 on bbe57ec; read back from the job log 2026-09-23). A1 trigger-artifact-smoke re-run in the same suite.",
