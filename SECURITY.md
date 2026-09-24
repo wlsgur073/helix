@@ -507,9 +507,11 @@ dropped back afterwards. It does not make ownership authenticated against an adv
 - **Hard-linked ledgers are refused:** every write path throws when the ledger's link count is not
   one — two alias names would carry two independent locks (no mutual exclusion) and a compaction
   through one name would leave the other name holding the entire pre-rewrite plaintext. A project
-  ledger that resolves through a symlink to another adopted project's ledger file is refused the
-  same way: that project runs without its project layer, its reads leave the layer out with a note,
-  and its commits and erases are refused, so one file is never written under two project scopes.
+  ledger that resolves through a symlink to another adopted project's ledger file is excluded
+  instead: that project runs without its project layer, its reads leave the layer out with a note,
+  its commits to that layer are refused, and an erase never reaches the other project's file (an id
+  that lives only there is unknown to that project), so one file is never written under two project
+  scopes.
 - **Appends are durable:** every append fsyncs the line before success is reported; a torn tail
   (power cut mid-append) is isolated by the next writer's tail repair and counted by parse health,
   and a complete-but-unacknowledged record commits (at-least-once). The **directory** fsync that
