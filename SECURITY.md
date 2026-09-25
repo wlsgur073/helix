@@ -26,9 +26,11 @@ acknowledgement within a few days.
   for your explicit approval. The same holds for **`helix_memory_adopt`**, the only other tool that
   moves what Helix trusts on your authority rather than on a mechanical check
   (`helix_memory_recheck` moves grades too, but never above `Corroborated`): adopting a project
-  ledger makes everything already in it recallable, and no grade check stands between the adoption
-  and the next recall. It names the project root it is adopting so the prompt has something to
-  review, and refuses a root that is not the active scope, but neither substitutes for the prompt —
+  ledger makes everything already in it recallable — unless it resolves to another adopted project's
+  ledger file, which stays excluded (see *Ledger locking, erasure, and durability boundaries* below)
+  — and no grade check stands between the adoption and the next recall. It names the project root
+  it is adopting so the prompt has something to review, and refuses a root that is not the active
+  scope, but neither substitutes for the prompt —
   do **not** allow-list it either. Every adoption made through the tool is recorded in `audit.jsonl`,
   best-effort like every audit row: the row is appended after the adoption lands, so a crash between
   the two leaves the adoption unrecorded, and a failed append returns an error for an adoption that
@@ -120,7 +122,11 @@ HKDF subkey); the unsigned, target-less `verify`-shaped markers and fences a rew
 nothing.
 That location is the home directory itself — `HELIX_HOME` when set — and it is **not** derived from
 where the ledger happens to be: pointing `HELIX_LEDGER` into a repository moves the data file and
-nothing else. When trust-store files are found beside a relocated ledger — a layout that a
+nothing else. `HELIX_HOME`, `HELIX_LEDGER` and `HELIX_SESSIONS` are used exactly as given, so set
+them to absolute paths: an empty or relative value resolves against the working directory, which the
+server also takes as the project root, and an empty `HELIX_HOME` makes that directory stand in for
+the home, so a `config.json` and a `memory.jsonl` there are read as the global ones. When trust-store
+files are found beside a relocated ledger — a layout that a
 pre-release build wrote for every `HELIX_LEDGER` user, and that a hand-assembled setup or a
 repo-writing adversary can also produce — the server measures whether starting would lose a grade
 this ledger currently carries, and refuses to start unless that measurement completes and finds
@@ -131,8 +137,9 @@ non-`Fresh` state count as a loss even when replay already reads that row as `Fr
 `HELIX_HOME` master key or a ledger that cannot be read refuses with no measurement at all.
 Refusing on the layout alone was a denial of service, since one planted, shape-valid file could stop
 every session on an install with nothing at risk; with the measurement, the same adversary also
-needs to write one forged `verify` or baked-state row into the relocated ledger, or make that ledger
-unreadable, to cause a refusal.
+needs to write one forged `verify` or baked-state row into the relocated ledger, make that ledger
+unreadable, or, when it carries an elevated grade, alter or truncate the bytes its rollback witness
+covers, to cause a refusal.
 On replay an elevated grade is honored only if its `verify` record's MAC validates under the
 locally-held key, so:
 
@@ -206,18 +213,20 @@ it again only on a new trigger — another dropped forged `verify`, another plan
 or, for `horizon_marker`, more dropped closed history. This is **deliberately unreachable from the
 MCP tool surface**: `helix_memory_erase`'s schema is `{id}` only — it is always soft (a tombstone
 for a live record, and nothing at all, still reported as `erased`, for an id that names no live
-record, a marker included; when the global ledger and an adopted project both hold rows the id names
-and either both or neither hold a record row with that id, as with any `witness_fence_` id once each
-ledger has been rewritten, it writes nothing and returns an `id present in more than one scope`
-error instead), and it can never pass `permanent: true`. So a
+record, a marker included; when the global ledger and an adopted project whose ledger does not
+resolve to another adopted project's file both hold rows the id names and either both or neither hold
+a record row with that id, as with any `witness_fence_` id once each ledger has been rewritten, it
+writes nothing to either ledger and returns an `id present in more than one scope` error instead),
+and it can never pass `permanent: true`. So a
 prompt-injected agent cannot reach this path and cannot destroy a genuine forgery-audit signal; only
 an operator running code outside the agent's conversation (a script or REPL against `MemoryStore`)
 can.
 
 **Marker-erase routing; general non-live-id fallback (narrower residual).** A permanent erase
-of an adopted *project* ledger's planted marker does not risk landing on the global ledger — a
-project that is not adopted is never a candidate, so there `scope: 'project'` is refused and a
-no-scope erase acts on the global ledger whenever it holds a marker of that family: `erase()` resolves
+of an adopted *project* ledger's planted marker does not risk landing on the global ledger unless
+that ledger resolves to another adopted project's file — such a project, like one that is not
+adopted, is never a candidate, so there `scope: 'project'` is refused and a no-scope erase acts on
+the global ledger whenever it holds a marker of that family: `erase()` resolves
 its target through `resolveEraseTarget`, which decides what an id names from the parsed rows rather
 than from the id alone. A row counts as a marker only when it is marker-shaped (`markerFamilyOf` over
 the record), so a non-marker row carrying the exact id is erased as a record even when that id wears
@@ -498,7 +507,11 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   closes wherever a start time becomes readable.
 - **What erase guarantees:** durable namespace removal by helix's own write paths (compaction
   fsyncs its temp AND the directory; a lock-losing compactor is fenced by orphan-temp sweeps so a
-  stale snapshot cannot resurrect erased plaintext). It is NOT media sanitization: freed blocks,
+  stale snapshot cannot resurrect erased plaintext), except through a ledger link that applies `..`
+  after a symlinked directory: the lock and the rewrite resolve that `..` as text, so a compaction
+  can replace the link itself and leave the file behind it holding its pre-rewrite plaintext, and a
+  writer that reaches the file by another path takes a different lock. It is NOT media
+  sanitization: freed blocks,
   SSD remapping, filesystem snapshots, external backups/copies (`cp`, `ln`), and already-open file
   descriptors are all outside any userspace design's reach. Those write paths are the ledger's, and
   the opt-in Codex content log is not among them: where `dualVerify.logContent` was on when a call
@@ -506,17 +519,20 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   Deleting the file is the remedy.
 - **Hard-linked ledgers are refused:** every write path throws when the ledger's link count is not
   one — two alias names would carry two independent locks (no mutual exclusion) and a compaction
-  through one name would leave the other name holding the entire pre-rewrite plaintext. A project
-  ledger that resolves through a symlink to another adopted project's ledger file is excluded
-  instead: that project runs without its project layer, its reads leave the layer out with a note,
+  through one name would leave the other name holding the entire pre-rewrite plaintext. An adopted
+  project whose ledger resolves through a symlink to another adopted project's ledger file is
+  excluded instead: that project runs without its project layer, its reads leave the layer out with a note,
   its commits to that layer are refused, and an erase never reaches the other project's file (an id
   that lives only there is unknown to that project), so one file is never written under two project
-  scopes. This check does not yet catch links it cannot resolve the way the kernel does: a `..`
+  scopes. A project not yet adopted is not checked before its first commit adopts it, so when its
+  ledger is a dangling link to another adopted project's ledger, that commit creates the other
+  project's file holding it; the project is excluded from then on. This check does not yet catch links it cannot resolve the way the kernel does: a `..`
   after a symlinked directory inside the other project's own ledger link, a link that climbs out
   through a directory tree deeper than the path limit, or a link or directory name that is not
-  valid UTF-8; the separate check against the global ledger does not yet resolve a `..` after a
-  symlinked directory either. Each shape needs links or directories planted inside an adopted
-  project's own tree.
+  valid UTF-8; the separate check against the global ledger does not resolve them the kernel's way
+  either: it misses a `..` after a symlinked directory in either ledger's link, and a link into a
+  global ledger that does not exist yet, which the project's first commit then creates. Each shape
+  needs links or directories planted inside a project's own tree.
 - **Appends are durable:** every append fsyncs the line before success is reported; a torn tail
   (power cut mid-append) is isolated by the next writer's tail repair and counted by parse health,
   and a complete-but-unacknowledged record commits (at-least-once). The **directory** fsync that
@@ -546,19 +562,25 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   resolution (`helix-trust-resolve`) and an adopt therefore report such a failure rather than
   succeeding over it; an adopt that fails on the repo-side `.helix` directory throws with the
   registry entry already renamed into place, because the registry is deliberately written before the
-  `.owner` stamp. There are two exceptions. The first `@global` scope-nonce mint — which a read such
+  `.owner` stamp. There are four exceptions. The first `@global` scope-nonce mint — which a read such
   as a recall or the SessionStart hook can perform — is one: it catches that propagated errno rather
   than failing the read, but it does not report success either. It returns no nonce, which is the
   key-absent case, so that one read clamps `@global` grades to `Fresh`; the rename it already made
   lets a later read pick the nonce up, since what the failed fsync leaves in doubt is that rename's
-  durability, not its visibility. The audit trail (`audit.jsonl`) is the other: it is documented
+  durability, not its visibility. The audit trail (`audit.jsonl`) is the second: it is documented
   best-effort/non-transactional already (see its own docstring), and its directory fsync — attempted
   on every append, not only on the one that creates the file — stays unconditionally suppressed, so a
   failed directory fsync on that side channel never reports an already-succeeded operation as failed
   — or, at a rejection site, replaces the real rejection error with an unrelated one on its way out.
   The suppression covers the directory fsync only: the line's own open, write and fsync still
   propagate, so a failure there (`ENOSPC`, `EIO`) makes the handler throw after its operation already
-  succeeded, and at a rejection site replaces the rejection error.
+  succeeded, and at a rejection site replaces the rejection error. The automatic compaction a recall
+  can trigger (opt-in, off by default) is the third: it swallows whatever its rewrite throws, a
+  failed post-rename directory fsync or witness write included, so the recall still answers normally
+  and the only record is a `compaction` row in `metrics.jsonl` with `"ok": false` (`"landed": true`
+  once the rename had landed), written only while metrics are on. The startup witness heal is the
+  fourth: a failure while it completes or retracts an interrupted rewrite's witness transition, a
+  failed directory fsync included, is swallowed so the server still starts, and nothing reports it.
 - **Rollout launch barrier (normative):** old bundles age-steal locks and do not sweep — while any
   old helix-mcp process runs, the new guarantees do not hold. Upgrade procedure: close every Claude
   session and pause anything that starts one on a schedule (for example a timer running
@@ -589,10 +611,14 @@ never matched; a shared run shorter than that passes; and a superseded or erased
 compared at all, even while its text is still in the ledger file. What the leg scans is what Helix
 actually transmits. In `compare` mode that is the question alone: `helixAnswer` is never sent, so it
 is never compared against the ledger and cannot block a call over bytes that stay on the machine. In
-`critique` mode both fields go inside the prompt, and both are scanned. When the leg does block, the
-refusal says where it matched: for each record that still blocks — an exempted record is one the
-caller already proved it read — the tool response quotes the runs of the caller's OWN payload that
-matched that record, bounded to 10 records, 3 runs each and 160 characters per run, and carried
+`critique` mode both fields go inside the prompt, and both are scanned. When the leg decides the
+block, the refusal says where it matched (a named credential in the same payload decides it instead,
+and that refusal names no echoed record or run; the audit row still lists their ids): for each record
+that still blocks — an exempted record is one the caller already proved it read — the tool response
+quotes the runs of the caller's OWN payload that matched that record, in the form the leg compared
+(lower-cased, whitespace collapsed, control characters dropped, fence runs broken), so a quoted run
+can differ from the typed text, bounded to 10 records, 3 runs each and 160 characters per run, and
+carried
 inside a datamarked DATA frame, because that text is content rather than advisory prose. Those runs
 render in that response only. `audit.jsonl` never receives a matched span; its row keeps counts, ids
 and labels, exactly as it does for every other leg.
@@ -636,3 +662,8 @@ not acceptable, run it under an OS-level sandbox or leave the feature off.
   firewall-refused payload is never written there. No erase reaches this file: `helix_memory_erase`
   and the operator-only permanent path both act on the ledger, so a memory whose text a logged call
   carried survives here after that record is gone from memory. Deleting the file is the remedy.
+- `~/.helix/metrics.jsonl` is written by default (`metrics.enabled`, default `true`, read from
+  `~/.helix/config.json` only) and is content-free: a row carries a timestamp, a random op id, a tool
+  name, scope and caller labels, row and byte counts, durations, booleans and, for a failed tool call,
+  the exception's class name — never memory text, a query, a path or an error message. It is created
+  `0o600`, is never sent anywhere, and nothing caps its size.

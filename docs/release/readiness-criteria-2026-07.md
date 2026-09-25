@@ -968,7 +968,9 @@ and `SECURITY.md`. A delta re-run at the certified candidate `8abd984` is now re
 code, one is FALSE and nine are imprecise, written out as replacement text and not applied, because an
 edit to `SECURITY.md` after the cut retires the certification. C3.3 was re-run in the same section and
 found two gaps, a missing disclosure and an edge case, neither a blocker under C3.3's own terms; C3.2
-holds. C3.1 stays open for this candidate until the owner applies or declines those corrections.)*
+holds. C3.1 stays open for this candidate until the owner applies or declines those corrections.
+The owner applied them the same day, before the re-cut: see that record's "Disposition of the
+corrections — applied 2026-09-25".)*
 
 **Constraints this ruling places on what may be written.** They bind the release notes and every
 shipped document: no Hit@1 or recall-quality number; the phrase "all runtime identity pins held" is

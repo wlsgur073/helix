@@ -12,8 +12,10 @@ First release.
 #### Memory, trust, and integrity
 
 - Trust-indexed, verifiable cross-session memory: an append-only JSONL ledger with a provenance
-  firewall (fail-closed promotion), `Fresh / Corroborated / Verified / Suspect` trust states,
-  blast-radius re-verify-before-use, crash-safe compaction, and a cross-process lock.
+  firewall (fail-closed promotion), `Fresh / Corroborated / Verified / Suspect` trust states, an
+  advisory re-verify-before-use flag (on every item whose source is not `user`, and on a `Suspect`
+  `user` item whose blast radius is not `read-only`/`local-reversible`), crash-safe compaction, and
+  a cross-process lock.
 - Layered memory scope: a global ledger plus an ownership-gated per-project ledger
   (`helix_memory_adopt`, default-deny).
 - Two-tier trust labels: machine-corroborated **Corroborated** (`helix_memory_recheck`, a
@@ -113,8 +115,8 @@ First release.
   cap is enforced directly in `dualVerify` instead, so no entry path escapes it.
   `critique` sends both fields inside the prompt, and both are scanned.
 - A refusal the memory-echo leg decided names *where* it matched. For each record that still
-  blocks, the tool response quotes the runs of the caller's own payload that matched that record —
-  up to 10 records, 3 runs each, 160 characters per run, with a count of whatever was left out —
+  blocks, the tool response quotes the runs of the caller's own payload that matched that record,
+  in the normalized form the leg compared (so a run can differ from the typed text) — up to 10 records, 3 runs each, 160 characters per run, with a count of whatever was left out —
   inside a datamarked DATA frame, because the runs are content rather than advisory prose. The
   audit row stays content-free: it never receives a span.
 
@@ -158,10 +160,12 @@ First release.
 
 - Nine MCP tools and SessionStart/SessionEnd hooks, installable as a Claude Code plugin with
   self-contained committed bundles — no `npm install` to use.
-- Two environment inputs place Helix's state: `HELIX_HOME` (default `~/.helix`) holds the signing
+- Three environment inputs place Helix's state: `HELIX_HOME` (default `~/.helix`) holds the signing
   key, the ownership registry, the rollback witness, the audit log and the metrics stream;
-  `HELIX_LEDGER` moves the global ledger data file and nothing else.
-- Content-free replay metrics in `~/.helix/metrics.jsonl` (default on; `metrics.enabled: false`
+  `HELIX_LEDGER` moves the global ledger data file and nothing else; `HELIX_SESSIONS` moves the
+  SessionEnd records (default `<HELIX_HOME>/sessions.jsonl`).
+- Content-free metrics in `~/.helix/metrics.jsonl`, one row per tool call, per verifying ledger read
+  and per compaction attempt (default on; `metrics.enabled: false`
   disables; the hook honours the global config only).
 - `helix_memory_inspect` takes an `ids` filter: up to 32 ids render only those records, each with
   its `contentDigest` proof line, so a caller can read back exactly the records a dual-verify

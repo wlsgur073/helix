@@ -36,8 +36,8 @@ ledger. Deleting the file is the remedy.
 A caveat worth knowing before you panic or relax: `helix_memory_erase` answers `erased <id>`
 even for an id that does not exist or is already dead. A success message is not proof that
 anything was erased. It can also answer with a refusal instead. When the id is present in both
-scopes (global and the adopted project), the tool refuses unless exactly one of them holds it as a
-record, and only an operator call to `store.erase(id, { scope })` from a script or REPL can then
+scopes (global and an adopted project whose ledger does not resolve to another adopted project's
+file), the tool refuses unless exactly one of them holds it as a record, and only an operator call to `store.erase(id, { scope })` from a script or REPL can then
 pick the scope; that call with `scope: 'project'` refuses in turn when no project memory layer is
 active, rather than falling back to the global ledger. Erasing a record is also refused, like a
 commit or a confirm, while its scope has an interrupted rewrite pending (see the interrupted-rewrite
@@ -214,7 +214,10 @@ line, which puts the secret in the process table.)
 
 **The passphrase has to be reachable without the machine you are backing up.** If it lives only in
 that machine's password store, the archive is unopenable in the exact situation it exists for. That
-is the same property Q1 asks of the GitHub recovery codes — different secret, same requirement.
+is the same property Q1 asks of the GitHub recovery codes — different secret, same requirement. The
+archive needs it too: `~/backups` sits on the disk you are backing up, so copy the `.gpg` file onto a
+separate medium — an external drive or another machine — and keep that copy detached; a second copy
+on the same physical disk fails with it.
 
 **Verify without extracting**, and confirm the key's mode survived:
 
