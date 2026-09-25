@@ -62,10 +62,10 @@ claude plugin uninstall helix
 claude plugin marketplace update helix
 claude plugin install helix@helix
 
-# Verify (all shas equal, marker in both load paths). node, not jq — helix already # requires node
-on PATH, while jq is absent on at least one real deploy box. Print EVERY entry # (user and local
-scopes), never [0] alone: node -p
-"require(process.env.HOME+'/.claude/plugins/installed_plugins.json').plugins['helix@helix'].map(e =>
+# Verify (all shas equal, marker in both load paths). node, not jq — helix already requires node
+# on PATH, while jq is absent on at least one real deploy box. Print EVERY entry (user and local
+# scopes), never [0] alone:
+node -p "require(process.env.HOME+'/.claude/plugins/installed_plugins.json').plugins['helix@helix'].map(e =>
 [e.scope, e.projectPath ?? '', e.gitCommitSha].join(' ')).join('\n')"
 git -C ~/.claude/plugins/marketplaces/helix rev-parse HEAD
 grep -rl "<marker>" ~/.claude/plugins/marketplaces/helix ~/.claude/plugins/cache/helix

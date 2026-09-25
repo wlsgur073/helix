@@ -33,8 +33,9 @@ future recall-quality claim, which would require a new freeze and a new window.
 *One inconsistency, recorded here rather than fixed, because the file that carries it must not be
 edited: `gate-decision-2026-07-22.md`'s last update states the second window's instants as
 `06:12:55`, taken from a candidate that was re-cut within the hour. The freeze receipt's `06:20:01`
-is authoritative. That document is the last receipt-pinned file whose tracked bytes still equal
-their pin, and that equality is the only live evidence of what the receipt pinned.*
+is authoritative. Of the two method documents the receipt pins, it is the one whose tracked bytes
+still equal their pin; 20 of the receipt's 26 pinned tool files also still equal their tracked
+bytes, and `npm run freeze-guard` re-hashes every pin from the candidate commit.*
 
 ## 2. What has happened
 
@@ -77,7 +78,10 @@ bytes, so the rebinding waited for a restarted session rather than carrying evid
 produced. Item 7's batch — the compare verdict words, the aliased project ledger check, the 32-id
 `inspect` cap and the trigger acknowledgement — moved `bin/` again and retired that certification;
 the candidate was re-cut at `8abd984` and certified 74 of 74 on 2026-09-24, its Block E again run
-from a Claude Code process started after the reinstall. Declaring the release is the step after it.
+from a Claude Code process started after the reinstall. On 2026-09-25 a delta re-run of C3.1 at that
+candidate found one FALSE and nine imprecise claims in `SECURITY.md` (`c3-audit-2026-09.md`); applying
+the corrections rotated claim blocks the receipt pins and retired that certification as well, so the
+candidate is re-cut and certified once more. Declaring the release is the step after that.
 
 ## 3. Where each document sits
 
@@ -161,16 +165,32 @@ that cite them are correct about the past; recover the bytes with
 
 ## 4. What is still owed
 
-- **The declaration.** Fast-forward `main` to the certified commit, cut and push an annotated
-  `v0.1.0` tag, publish the release notes. `origin` carries no tags today.
+- **The re-cut after the C3.1 corrections.** On a host with Node: `npm ci` and `npm test`; set the
+  `CHANGELOG.md` release date to the declaration day, which rotates one non-normative block id in
+  `data/inventory/claims.json`; `npm run cut-candidate`; then run `v0.1-certification-runsheet.md` from
+  the top, Block E from a Claude Code session started after the reinstall, until
+  `npm run certify-gate` exits 0.
+- **The declaration.** Fast-forward `main` to the commit that records that certification, the one
+  whose candidate receipt and verdict ledger both name the certified candidate; the candidate commit
+  itself still carries the previous candidate's receipt and ledger. Switch the GitHub default branch
+  to `main` at the same time: `claude plugin marketplace add wlsgur073/helix` installs from the
+  default branch, which is `feat/helix-v1` today, so without the switch the tag changes nothing an
+  install receives. Then cut and push an annotated `v0.1.0` tag and publish the release notes.
+  `origin` carries no tags today.
 - **Owner acts, on the machine that holds the deployment and the archives:**
   - C4.6-Q4's separate-medium copy, which regressed to open on 2026-09-03 because the copy sits on
     the same physical disk as its source.
   - The durable second copy of the non-secret evidence chain (`v2-close-report-2026-08.md`,
     Appendix A). It must not be discharged against the Q4 location, which has the same defect.
+  - The offline copy of the close-run snapshot (`helix-snapshot-2026-08-31.tar.gz.gpg`;
+    `v2-close-report-2026-08.md` §10 and Appendix A). It holds the ledger signing key, so it is not
+    part of the non-secret chain, and it sits on the system disk like the Q4 copy; it belongs on the
+    same separate medium.
   - C5.1 closure item 12, re-scoped: an off-machine bundle holding the release candidate and its tag.
     Minted last, after certification, so a failed check cannot leave it stale.
-  - Redeploy the release there; that machine runs the `263f2a9` build.
+  - Reinstall the release there from the tag. The certification runs record the maintainer's machine
+    at `428416a` since 2026-09-24, whose `bin/` equals `8abd984`'s; if the machine that holds the
+    archives is another one, read its `installed_plugins.json` `gitCommitSha` first.
 
 **And then the list ends.** Nothing on it is preparation for a version after `v0.1.0`.
 

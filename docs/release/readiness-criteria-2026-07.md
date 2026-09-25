@@ -526,7 +526,10 @@ The prior approved design's clean-room tier and drill set are carried forward IN
   needs 20 recalls and has 13. The latency arm itself keeps reading `fired`: it counts slow recalls
   among the trailing 200, the five pre-preload ones are still inside that window, and at the dogfood
   rate it clears only after about 175 more recalls. Whether the consumer should mark a fire that has
-  been dispositioned is an open owner decision.
+  been dispositioned is an open owner decision. *(2026-09-25: settled on 2026-09-24 by `d4cc202`,
+  which adds `helix-trigger --acknowledge`, and `c68c59c`, which keeps an acknowledged fire quiet
+  until new evidence re-arms it. README.md:293 documents the mode, and the certification run of
+  2026-09-24 drove it in a separate drill, run-sheet :1595-1600.)*
 
 ## 7. Owner decisions (ratification gate)
 

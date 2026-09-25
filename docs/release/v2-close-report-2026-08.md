@@ -1316,7 +1316,11 @@ off-by-one appears where the blocked verdict is cited to §8; it is in §9.
 - **Deployment.** §10 records the deployment brought current at the `263f2a9` build. `bin/` has moved
   twice since — `fa03865` (2026-09-05) and `2baf9c7` (2026-09-07) — so that observation describes a
   superseded build, not the release. The release's own deployment is recorded in the certification
-  run-sheet and in `deploy-runbook.md`.
+  run-sheet and in `deploy-runbook.md`. *(2026-09-25: the build is misnamed above. §10's
+  `helix-mcp.mjs` sha256 `a7c133d4…` is that bundle at `dddf5dd`, the abort run's F1/F3 rebuild; at
+  `263f2a9` it hashes to `4a7f01ef…`. Between `dddf5dd` and this appendix `bin/` moved six times, not
+  twice: `c2c4896`, `083cafa`, `b927324`, `263f2a9`, `fa03865` and `2baf9c7`. The conclusion stands:
+  §10 describes a superseded build.)*
 - **The freeze guard.** `scripts/freeze-runtime-check.sh` was retired in place on 2026-09-05 and
   **deleted** on 2026-09-09 together with `v2-freeze-runtime-pins-2026-08.txt`, so the D1 and G4
   rehearsal steps that drove it are no longer reproducible from a checkout. `npm run freeze-guard`
