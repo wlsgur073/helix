@@ -962,6 +962,14 @@ C5.1's pre-freeze work completed at the 2026-08-14 re-freeze. C5.2 executed and 
 verdict this section rules on. The release's own gate is the certification run-sheet, not the evidence
 program.
 
+*(2026-09-25: the re-run named here is bound to `abbf7b4`, before items 6 and 7 moved `src/`, `bin/`
+and `SECURITY.md`. A delta re-run at the certified candidate `8abd984` is now recorded in
+`c3-audit-2026-09.md` ("Delta re-run, 2026-09-25"): of the 280 claims that changed or rest on changed
+code, one is FALSE and nine are imprecise, written out as replacement text and not applied, because an
+edit to `SECURITY.md` after the cut retires the certification. C3.3 was re-run in the same section and
+found two gaps, a missing disclosure and an edge case, neither a blocker under C3.3's own terms; C3.2
+holds. C3.1 stays open for this candidate until the owner applies or declines those corrections.)*
+
 **Constraints this ruling places on what may be written.** They bind the release notes and every
 shipped document: no Hit@1 or recall-quality number; the phrase "all runtime identity pins held" is
 never used (`v2-freeze-deviations-2026-08.md`; `v2-close-report-2026-08.md` — byte continuity held
