@@ -859,7 +859,7 @@ function classifyWitness(bytes, entry, journal) {
     const onLineage = matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash) || journal.predecessor === null || matchesAt(bytes, journal.predecessor.byteLength, journal.predecessor.prefixHash);
     return onLineage ? { kind: "transition-interrupted", journal } : { kind: "mismatch" };
   }
-  if (!entry) return { kind: "first-contact", reason: "no-entry" };
+  if (!entry) return { kind: "first-contact", reason: bytes.length === 0 ? "pristine" : "no-entry" };
   if (!matchesAt(bytes, entry.byteLength, entry.prefixHash)) return { kind: "mismatch" };
   return bytes.length === entry.byteLength ? { kind: "in-sync" } : { kind: "unwitnessed-suffix" };
 }
@@ -1119,7 +1119,7 @@ var ALIASED_LEDGER_NOTE = "(this project's memory file resolves to another adopt
 var ANCESTOR_UNADOPTED_NOTE = "(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval)";
 var WITNESS_MISMATCH_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; elevated grades are clamped to Fresh until an authorized re-baseline)";
 var WITNESS_TRANSITION_NOTE = "(a ledger rewrite for this scope was interrupted; its records are excluded until the transition is re-driven or re-baselined)";
-var WITNESS_INIT_NOTE = "(rollback witness: scope not yet witnessed; the current head will be adopted trust-on-first-use at the next write)";
+var WITNESS_INIT_NOTE = "(rollback witness: this memory scope has no verified baseline, so a rollback of its current contents would go undetected; the next write records them as the baseline)";
 function witnessNoteFor(verdict) {
   switch (verdict.kind) {
     case "mismatch":
@@ -1127,7 +1127,7 @@ function witnessNoteFor(verdict) {
     case "transition-interrupted":
       return WITNESS_TRANSITION_NOTE;
     case "first-contact":
-      return WITNESS_INIT_NOTE;
+      return verdict.reason === "pristine" ? null : WITNESS_INIT_NOTE;
     default:
       return null;
   }

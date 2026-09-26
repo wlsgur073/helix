@@ -526,7 +526,7 @@ function classifyWitness(bytes, entry, journal) {
     const onLineage = matchesAt(bytes, journal.expected.byteLength, journal.expected.prefixHash) || journal.predecessor === null || matchesAt(bytes, journal.predecessor.byteLength, journal.predecessor.prefixHash);
     return onLineage ? { kind: "transition-interrupted", journal } : { kind: "mismatch" };
   }
-  if (!entry) return { kind: "first-contact", reason: "no-entry" };
+  if (!entry) return { kind: "first-contact", reason: bytes.length === 0 ? "pristine" : "no-entry" };
   if (!matchesAt(bytes, entry.byteLength, entry.prefixHash)) return { kind: "mismatch" };
   return bytes.length === entry.byteLength ? { kind: "in-sync" } : { kind: "unwitnessed-suffix" };
 }
