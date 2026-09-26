@@ -1,4 +1,4 @@
-// `docs/release/v0.1-candidate-receipt.json` is a sha256-sealed artifact that, until this file
+// `data/release/v0.1-candidate-receipt.json` is a sha256-sealed artifact that, until this file
 // existed, NOTHING produced and NOTHING verified. It was written by hand and re-written by hand at
 // each cut, and the run-sheet's instruction for a moved candidate is the single word "rewrite".
 //
@@ -40,7 +40,7 @@ function payload(over: Partial<CandidatePayload> = {}): CandidatePayload {
 describe('canonicalPayloadSha256', () => {
   // The whole point of canonicalising: two payloads that differ only in key ORDER are the same
   // document, and must seal identically. A plain JSON.stringify does not have this property, which
-  // is why the two receipts in docs/release disagree.
+  // is why the two receipts in data/release disagree.
   it('is unchanged when the same fields are inserted in a different order', () => {
     const a = { artifactKind: 'x', candidateCommit: 'y', bundles: { p: '1', q: '2' } };
     const b = { bundles: { q: '2', p: '1' }, candidateCommit: 'y', artifactKind: 'x' };
@@ -87,7 +87,7 @@ describe('the committed candidate receipt', () => {
   // Pins the convention against the real artifact. Written to FAIL if anyone re-seals that file with
   // the v2 freeze receipt's insertion-order formula, which is the mistake the two conventions invite.
   it('verifies under the canonical convention this module implements', () => {
-    const doc = JSON.parse(readFileSync(join(ROOT, 'docs/release/v0.1-candidate-receipt.json'), 'utf8')) as
+    const doc = JSON.parse(readFileSync(join(ROOT, 'data/release/v0.1-candidate-receipt.json'), 'utf8')) as
       { payload: Record<string, unknown>; payloadSha256: string };
     expect(canonicalPayloadSha256(doc.payload), 'the committed receipt no longer matches its own seal')
       .toBe(doc.payloadSha256);
@@ -99,7 +99,7 @@ describe('the committed candidate receipt', () => {
 // payload. These cases pin that the field holds observations instead.
 describe('gate state at the cut', () => {
   it('records a measurement, not prose describing one', () => {
-    const doc = JSON.parse(readFileSync(join(ROOT, 'docs/release/v0.1-candidate-receipt.json'), 'utf8')) as
+    const doc = JSON.parse(readFileSync(join(ROOT, 'data/release/v0.1-candidate-receipt.json'), 'utf8')) as
       { payload: { gateAtCut: Record<string, unknown> } };
     const gate = doc.payload.gateAtCut;
     expect(String(gate.typecheck), 'typecheck should be an observed exit code').toMatch(/^exit -?\d+\b/);

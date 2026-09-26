@@ -10,7 +10,7 @@ import { runFreezeGuard } from '../scripts/freeze-guard.js';
 import { sha256Hex } from '../scripts/pilot/pin-hashes.js';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const RECEIPT = join(ROOT, 'docs/release/v2-freeze-receipt-2026-08.json');
+const RECEIPT = join(ROOT, 'data/release/v2-freeze-receipt-2026-08.json');
 
 describe('freeze-guard', () => {
   it('passes on the committed receipt against the real repository', () => {

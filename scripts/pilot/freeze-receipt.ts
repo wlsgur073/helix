@@ -138,8 +138,8 @@ const objectId = (label: string, value: unknown): string => {
 const runtimeIdentity = (value: unknown): RuntimeIdentity => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     fail('malformed-runtime-identity', `--runtime must name a JSON object { gitCommitSha, loadPaths: [{ path, ` +
-      `gitCommitSha }, ...] } — the installed plugin's identity as docs/release/deploy-runbook.md verifies it. ` +
-      `Got ${JSON.stringify(value)}`);
+      `gitCommitSha }, ...] } — the installed plugin's identity as the deploy procedure in ` +
+      `docs/release/README.md verifies it. Got ${JSON.stringify(value)}`);
   }
   const v = value as { gitCommitSha?: unknown; loadPaths?: unknown };
   const gitCommitSha = objectId('the runtime gitCommitSha', v.gitCommitSha);

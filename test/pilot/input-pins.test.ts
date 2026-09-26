@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,6 +20,13 @@ beforeAll(async () => {
   cli = await bundleCli('scripts/pilot/input-pins.ts');
   freezeCli = await bundleCli('scripts/pilot/freeze-receipt.ts');
 }, 60_000);
+
+/** The working tree the CLI re-hashes at the close. It is a freeze fixture repo rather than this
+ *  repository, because the two pinned method documents left this tree on 2026-09-26 and are read
+ *  from history; the fixture copies every pinned tool from here, so the tool hashes are the same. */
+let methodTree: string | undefined;
+const methodRoot = (): string => (methodTree ??= freezeFixtureRepo().root);
+afterAll(() => { if (methodTree) rmSync(methodTree, { recursive: true, force: true }); });
 
 const CUTOFF = '2026-07-21T00:00:00.000Z';
 const CLOSE = '2026-08-18T00:00:00.000Z';
@@ -246,8 +253,8 @@ const fixture = () => {
     universe: join(dir, 'universe.json'),
   };
   const realMethod = () => ({
-    tools: hashTools(process.cwd()),
-    methodDocs: hashMethodDocs(process.cwd()),
+    tools: hashTools(methodRoot()),
+    methodDocs: hashMethodDocs(methodRoot()),
     config: { path: liveConfig, sha256: sha256Bytes(CONFIG_BYTES), redactionAcknowledged: true },
   });
   writeFileSync(paths.freeze!, receiptFile(realMethod()));
@@ -261,7 +268,7 @@ const args = (f: ReturnType<typeof fixture>) => [
   '--freeze', f.paths.freeze!, '--manifest', f.paths.manifest!, '--classifier', f.paths.classifier!,
   '--universe', f.paths.universe!, '--snapshot', f.dir, '--out', f.out];
 
-const run = (a: string[]) => execFileSync(process.execPath, [cli, ...a], { cwd: process.cwd(), stdio: 'pipe' });
+const run = (a: string[]) => execFileSync(process.execPath, [cli, ...a], { cwd: methodRoot(), stdio: 'pipe' });
 const status = (a: string[]): number => {
   try { run(a); return 0; } catch (e) { return (e as { status?: number }).status ?? -1; }
 };
@@ -317,7 +324,7 @@ describe('input-pins CLI', () => {
       copyFileSync(cli, stripped);
       let thrown: Error | undefined;
       try {
-        execFileSync(process.execPath, [stripped, ...args(f)], { cwd: process.cwd(), stdio: 'pipe' });
+        execFileSync(process.execPath, [stripped, ...args(f)], { cwd: methodRoot(), stdio: 'pipe' });
       } catch (e) { thrown = e as Error; }
       expect(thrown, 'a bundle with no data/ beside it must refuse').toBeDefined();
       expect((thrown as unknown as { status?: number }).status).toBe(1);

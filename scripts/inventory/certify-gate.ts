@@ -82,7 +82,7 @@ const isEntrypoint = process.argv[1] && import.meta.url === pathToFileURL(proces
 if (isEntrypoint) {
   const root = process.cwd();
   const r = runCertifyGate(
-    join(root, 'docs/release/v0.1-candidate-receipt.json'),
+    join(root, 'data/release/v0.1-candidate-receipt.json'),
     join(root, 'data/inventory/verdicts.json'),
     root,
   );

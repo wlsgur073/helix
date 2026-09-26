@@ -422,7 +422,7 @@
  {
   "rowId": "r043",
   "surfaceItem": "cross-cutting",
-  "claimId": "README.md#70bd9e86ed8b",
+  "claimId": "README.md#3721d0e24705",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Observed 2026-09-24 after the Block B reinstall of both scopes (user, and local from the dogfood project root) and a full quit and restart of Claude Code: the only helix-mcp.mjs processes running were started 2026-09-24 22:18 from ~/.claude/plugins/cache/helix/helix/0.1.0/bin/helix-mcp.mjs, whose sha256 equals the receipt's entry; the host registered the helix tools and helix_codex_status answered through the host's own MCP connection; every helix@helix entry carried gitCommitSha 428416a1c6d0d2cc1355c9ca626d0105fa2f99da. The loaded helix_memory_inspect schema capped `ids` at 32 items, which only the new bundle declares (the same session's process from before the reinstall had loaded a cap of 20) — independent proof that the launch barrier was crossed rather than assumed.",
@@ -652,7 +652,7 @@
  {
   "rowId": "r066",
   "surfaceItem": "cross-cutting",
-  "claimId": "docs/release/recovery-playbook.md#0064b2696d1f",
+  "claimId": "docs/release/README.md#0064b2696d1f",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "C4 2026-09-24: the tool erase was soft — the row stayed in the ledger and was recoverable through asOf inside its interval.",
@@ -662,7 +662,7 @@
  {
   "rowId": "r067",
   "surfaceItem": "cross-cutting",
-  "claimId": "docs/release/recovery-playbook.md#118ca105e459",
+  "claimId": "docs/release/README.md#118ca105e459",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "C4 2026-09-24: no undo command exists; recovery went through inspect asOf at an instant inside the fact's [tx, txTo) interval, exactly the playbook's route.",
@@ -672,7 +672,7 @@
  {
   "rowId": "r068",
   "surfaceItem": "cross-cutting",
-  "claimId": "docs/release/recovery-playbook.md#2dacbae5af3a",
+  "claimId": "docs/release/README.md#2dacbae5af3a",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims: the erased text stays in the file after a soft erase and is gone after a compaction; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -682,7 +682,7 @@
  {
   "rowId": "r069",
   "surfaceItem": "cross-cutting",
-  "claimId": "docs/release/recovery-playbook.md#3f634b1c30db",
+  "claimId": "docs/release/README.md#3f634b1c30db",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims: a cross-scope supersede raises the quoted refusal while a same-scope one does not; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -692,7 +692,7 @@
  {
   "rowId": "r071",
   "surfaceItem": "cross-cutting",
-  "claimId": "docs/release/recovery-playbook.md#90716eb2c539",
+  "claimId": "docs/release/README.md#90716eb2c539",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "C4 2026-09-24: history blanked the erased content while asOf inside the interval returned it in full, through the installed bundle.",
@@ -702,7 +702,7 @@
  {
   "rowId": "r072",
   "surfaceItem": "cross-cutting",
-  "claimId": "docs/release/recovery-playbook.md#a244a7848631",
+  "claimId": "docs/release/README.md#a244a7848631",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims: history+asOf refused while each alone is served, recovered by execution against the refusal at src/server/handlers.ts:272 ('inspect: history and asOf are mutually exclusive — pass one.'); the ids pairs are refused at :255 ('inspect: ids, history and asOf are mutually exclusive — pass one.') and pinned by test/server/handlers.test.ts:76 ('inspect ids is mutually exclusive with history and asOf'); re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -712,7 +712,7 @@
  {
   "rowId": "r073",
   "surfaceItem": "cross-cutting",
-  "claimId": "docs/release/recovery-playbook.md#9cae2460fad9",
+  "claimId": "docs/release/README.md#9cae2460fad9",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims: after erase and re-commit the text returns while the id changes and the grade drops to Fresh from a real Verified; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -722,7 +722,7 @@
  {
   "rowId": "r074",
   "surfaceItem": "cross-cutting",
-  "claimId": "docs/release/recovery-playbook.md#31984b6c27f3",
+  "claimId": "docs/release/README.md#31984b6c27f3",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "C4 2026-09-24: the history row carried DATA[erase:global:…] naming its scope.",
@@ -732,7 +732,7 @@
  {
   "rowId": "r075",
   "surfaceItem": "cross-cutting",
-  "claimId": "docs/release/recovery-playbook.md#d1c91b7614cb",
+  "claimId": "docs/release/README.md#d1c91b7614cb",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "C4 2026-09-24: the rendered interval matched the documented [tx, txTo) shape.",

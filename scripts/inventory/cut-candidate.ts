@@ -1,4 +1,4 @@
-// Producer AND verifier for docs/release/v0.1-candidate-receipt.json.
+// Producer AND verifier for data/release/v0.1-candidate-receipt.json.
 //
 // Until 2026-09-02 that file was written by hand, re-written by hand at each cut, and checked by
 // nothing. The run-sheet's whole instruction for a moved candidate is "rewrite … against the new
@@ -7,7 +7,7 @@
 // no verifier is decoration.
 //
 // THE SEALING CONVENTION IS NOT THE FREEZE RECEIPT'S, and the difference is the trap this module
-// exists to remove. docs/release/v2-freeze-receipt-2026-08.json seals with
+// exists to remove. data/release/v2-freeze-receipt-2026-08.json seals with
 // `sha256(JSON.stringify(payload))` — insertion order — and scripts/freeze-guard.ts verifies exactly
 // that. The v0.1 candidate receipt seals CANONICALLY: the same hash over a key-sorted payload.
 // Measured against the committed file, only the canonical form reproduces its recorded
@@ -187,7 +187,7 @@ if (isEntrypoint) {
   const problems = verifyCandidateReceipt(receipt);
   for (const p of problems) console.error(`FAIL ${p}`);
   if (problems.length > 0) process.exit(1);
-  const out = join(root, 'docs/release/v0.1-candidate-receipt.json');
+  const out = join(root, 'data/release/v0.1-candidate-receipt.json');
   writeFileSync(out, `${JSON.stringify(receipt, null, 1)}\n`);
   console.log(`cut-candidate: wrote ${out}`);
   console.log(`  candidate ${payload.candidateCommit}`);

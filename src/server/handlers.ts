@@ -44,14 +44,14 @@ const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] })
  *  Critical): the bound below is enforced ONLY at this MCP-facing layer, never inside MemoryStore
  *  itself, so an id that is legitimate but still fails this (e.g. from an adopted ledger, longer than
  *  128 chars) remains reachable the same "operator-only, from a script, never from a conversation"
- *  way recovery-playbook.md already documents for the permanent-erase path. */
+ *  way the recovery playbook in docs/release/README.md already documents for the permanent-erase path. */
 export function assertValidId(id: string): void {
   if (!isValidId(id)) {
     throw new Error(
       `invalid id: must be 1-${MAX_ID_CHARS} printable, non-control characters (got ${id.length}). ` +
       'An id from an adopted ledger that still fails this bound is not reachable through this MCP ' +
       'tool, but can be erased/rechecked/confirmed directly via the MemoryStore API from a script ' +
-      '(operator-only, outside any conversation) — see docs/release/recovery-playbook.md.',
+      '(operator-only, outside any conversation) — see the recovery playbook in docs/release/README.md.',
     );
   }
 }

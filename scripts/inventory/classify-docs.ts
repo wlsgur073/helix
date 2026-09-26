@@ -26,7 +26,7 @@ export const DOC_CORPUS: readonly string[] = [
   'README.md',
   'SECURITY.md',
   'CHANGELOG.md',
-  'docs/release/recovery-playbook.md',
+  'docs/release/README.md',
 ];
 
 /** Splits on blank lines, but keeps a fenced code block together as one piece. */

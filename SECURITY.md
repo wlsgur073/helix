@@ -586,8 +586,8 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   session and pause anything that starts one on a schedule (for example a timer running
   `claude -p`), verify no helix-mcp processes remain, reinstall the plugin at EVERY scope it is
   installed in (`claude plugin uninstall` acts on the user scope only; a local-scope entry is
-  uninstalled and reinstalled from its project root with `--scope local` — see
-  `docs/release/deploy-runbook.md`), confirm that every `helix@helix` entry's `gitCommitSha` in
+  uninstalled and reinstalled from its project root with `--scope local` — see the deploy runbook
+  in `docs/release/README.md`), confirm that every `helix@helix` entry's `gitCommitSha` in
   `installed_plugins.json` is the new one, then reopen sessions. The
   barrier's unit is a fresh CLI process, not a new conversation: a conversation reset (`/clear`)
   does NOT restart a session's MCP server, which keeps the code image it loaded at startup

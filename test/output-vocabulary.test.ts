@@ -29,7 +29,7 @@ const NEEDLE = ['docs', 'superpowers'].join('/'); // join(): this test must not 
 // verification chain, disproportionate for a documentation citation. That chain is
 // scripts/pilot/input-pins.ts, which re-derives the method-doc hashes at the close and refuses
 // `method-drift` on any change. The owner ended the window on 2026-08-31 (Abort A-2026-08-31,
-// anchored at ee35e41; record in docs/release/v2-close-report-2026-08.md), so no close chain will
+// anchored at ee35e41; recorded in docs/release/README.md), so no close chain will
 // run and no validated close receipt will ever be written. With the ground gone the obligation to
 // remove could be met at once — early compliance with an obligation to remove, not a waiver of it.
 // It moves the removal, never the deadline, and the rule it leaves behind is STRICTER than the one
@@ -127,10 +127,11 @@ describe('output vocabulary', () => {
   // three load-path lines survive under the void filename and carry the same by-design exemption
   // the live receipt has. Each window that resets adds exactly one more row here, by name and by
   // count — which is the point of listing counts rather than globbing the receipts: this test is
-  // what forced the question to be decided rather than absorbed.
+  // what forced the question to be decided rather than absorbed. Both receipts moved from
+  // docs/release/ to data/release/ on 2026-09-26, bytes unchanged.
   const PRIVATE_ALLOW: Record<string, number> = {
-    'docs/release/v2-freeze-receipt-2026-08.json': 3,
-    'docs/release/v2-freeze-receipt-2026-08-02-void.json': 3,
+    'data/release/v2-freeze-receipt-2026-08.json': 3,
+    'data/release/v2-freeze-receipt-2026-08-02-void.json': 3,
   };
 
   it('no tracked file carries a leading /home or /mnt/c/Users path beyond the by-design receipt (other private-path spellings are NOT checked — see above)', () => {

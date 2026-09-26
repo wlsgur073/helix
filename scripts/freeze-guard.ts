@@ -107,7 +107,7 @@ export function runFreezeGuard(receiptPath: string, repoRoot: string, nowIso?: s
 const isEntrypoint = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isEntrypoint) {
   const root = process.cwd();
-  const r = runFreezeGuard(join(root, 'docs/release/v2-freeze-receipt-2026-08.json'), root);
+  const r = runFreezeGuard(join(root, 'data/release/v2-freeze-receipt-2026-08.json'), root);
   for (const w of r.warnings) console.log(`::warning::${w}`);
   for (const n of r.notes) console.log(`note: ${n}`);
   for (const f of r.failures) console.error(`FAIL ${f}`);

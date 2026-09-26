@@ -1,7 +1,7 @@
-// Every path a maintained document points at must exist. Historical records under docs/release/ are
-// EXCLUDED on purpose: they are frozen evidence, and a record that cites a file which has since been
-// removed is correct about the past. docs/release/README.md carries the "Removed files" list that
-// resolves those citations for a reader.
+// Every path a maintained document points at must exist. Since 2026-09-26 docs/release/ holds one
+// file, the release record, and it is maintained like the rest. The records it replaced are in git
+// history, and its "Source records" section says where; a backticked path is prose, not a link, so
+// it is not swept here.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -15,8 +15,6 @@ const MAINTAINED = [
   'SECURITY.md',
   'CHANGELOG.md',
   'docs/release/README.md',
-  'docs/release/deploy-runbook.md',
-  'docs/release/recovery-playbook.md',
 ] as const;
 
 describe('maintained documents', () => {

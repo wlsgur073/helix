@@ -37,7 +37,8 @@ const ALLOWLIST_PATHS: RegExp[] = [
   /^bin\//,
   /^scripts\/smoke-secret-probe\.ts$/,
   // docs/release/audit-2026-07.md quotes the detector's own PEM pattern in prose while
-  // DOCUMENTING it; exact path only — a future real secret under docs/ must stay red.
+  // DOCUMENTING it; exact path only — a future real secret under docs/ must stay red. The file
+  // left the tree on 2026-09-26, but this scan reads history, where its blobs remain.
   /^docs\/release\/audit-2026-07\.md$/,
 ];
 

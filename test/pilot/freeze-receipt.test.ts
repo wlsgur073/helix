@@ -10,6 +10,7 @@ import {
 } from '../../scripts/pilot/pin-hashes.js';
 import { decimalInteger, freezeReceipt } from '../../scripts/pilot/freeze-receipt.js';
 import { RULE } from '../../scripts/pilot/gate-set.js';
+import { freezeFixtureRepo } from '../helpers/freeze-fixture-repo.js';
 
 /** §10 pins ten pilot scripts plus `src/memory/retrieval.ts` by their `git hash-object` value, and
  *  an operator must be able to reproduce every one of them with the real command. So the only
@@ -90,11 +91,15 @@ describe('hashMethodDocs', () => {
     expect(PINNED_METHOD_DOCS).toEqual([
       'docs/release/o67-class-rule-2026-07.md', 'docs/release/gate-decision-2026-07-22.md',
     ]);
-    const docs = hashMethodDocs(process.cwd());
-    expect(Object.keys(docs)).toEqual([...PINNED_METHOD_DOCS]);
-    for (const [rel, hash] of Object.entries(docs)) {
-      expect(hash, rel).toBe(createHash('sha256').update(readFileSync(rel)).digest('hex'));
-    }
+    // A fixture repo, not this tree: the two documents left it on 2026-09-26 and are read from history.
+    const repo = freezeFixtureRepo();
+    try {
+      const docs = hashMethodDocs(repo.root);
+      expect(Object.keys(docs)).toEqual([...PINNED_METHOD_DOCS]);
+      for (const [rel, hash] of Object.entries(docs)) {
+        expect(hash, rel).toBe(createHash('sha256').update(readFileSync(join(repo.root, rel))).digest('hex'));
+      }
+    } finally { rmSync(repo.root, { recursive: true, force: true }); }
   });
 
   it('refuses a missing rule document rather than pinning a method it never read', () => {

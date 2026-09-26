@@ -194,8 +194,8 @@ First release.
 
 - **Recall quality.** Helix makes no measured claim about how well recall ranks — no hit rate, no
   accuracy figure. A preregistered pilot was run to support one and did not reach its own minimum
-  sample, so the claim was withdrawn rather than weakened. `docs/release/v2-close-report-2026-08.md`
-  is the record.
+  sample, so the claim was withdrawn rather than weakened. `docs/release/README.md` is the
+  record.
 - **Trust beyond one trust store.** Elevated grades are local to one trust store (`HELIX_HOME`) and, for a project ledger, to one project path: they do not transfer to another machine, to a second `HELIX_HOME` on the same machine, or to the same project moved or cloned to another path.
 - **Compatibility before 1.0.** The ledger is append-only JSONL with no schema migrations to date,
   and no forward or backward compatibility is guaranteed across versions before 1.0.
@@ -206,7 +206,7 @@ First release.
 
 ### Dependencies
 
-- Dependency advisory triage is recorded in `docs/release/deps-audit-2026-09.md`; `fast-uri` is
+- Dependency advisory triage is recorded in `docs/release/README.md`; `fast-uri` is
   overridden to `3.1.7`. The advisories that remain are transitive dependencies of the MCP SDK's
   HTTP transports, which the shipped bundle does not contain — the record measures that rather than
   assuming it.

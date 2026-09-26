@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PINNED_METHOD_DOCS, PINNED_TOOL_PATHS } from '../../scripts/pilot/pin-hashes.js';
@@ -16,16 +16,27 @@ import { PINNED_METHOD_DOCS, PINNED_TOOL_PATHS } from '../../scripts/pilot/pin-h
  *  The pinned files are COPIES of the real ones, so `git hash-object` agreement tests still
  *  exercise real bytes. The authored date is forced through the env, which is what makes the
  *  §2 cutoff (`TZ=UTC git log --date=format-local:…`) a known constant instead of whatever HEAD
- *  happens to say. */
+ *  happens to say.
+ *
+ *  The two method documents left the working tree on 2026-09-26, when docs/release/ was folded into
+ *  one record. Their real bytes are still in history, so they are read from the v2 freeze receipt's
+ *  candidate commit, the bytes that receipt pinned. That needs a clone holding the commit, which
+ *  the CI test job already fetches for the anchor check. */
 export interface FreezeFixtureRepo { root: string; commit: string; cutoff: string; git: (a: string[]) => string }
 
 export const FIXTURE_CUTOFF = '2026-07-21T00:00:00.000Z';
 
+const METHOD_DOC_COMMIT = '94dd136925253be74c58df92392044c550aa6ec2';
+
 export const freezeFixtureRepo = (): FreezeFixtureRepo => {
   const root = mkdtempSync(join(tmpdir(), 'freezerepo-'));
-  for (const rel of [...PINNED_TOOL_PATHS, ...PINNED_METHOD_DOCS]) {
+  for (const rel of PINNED_TOOL_PATHS) {
     mkdirSync(join(root, dirname(rel)), { recursive: true });
     copyFileSync(join(process.cwd(), rel), join(root, rel));
+  }
+  for (const rel of PINNED_METHOD_DOCS) {
+    mkdirSync(join(root, dirname(rel)), { recursive: true });
+    writeFileSync(join(root, rel), execFileSync('git', ['-C', process.cwd(), 'show', `${METHOD_DOC_COMMIT}:${rel}`]));
   }
   const env = {
     ...process.env,

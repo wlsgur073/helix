@@ -215,7 +215,11 @@ export const PINNED_TOOL_PATHS = [
  *  rule it applied, so the class rule could be amended and every other pin would still match.
  *
  *  The preregistration itself is deliberately absent: §10 says it cannot pin its own hash, and
- *  what binds it is the freeze commit id that this receipt already carries. */
+ *  what binds it is the freeze commit id that this receipt already carries.
+ *
+ *  Neither file has been in the working tree since 2026-09-26, when docs/release/ became one
+ *  record. The freeze guard reads both from the candidate commit; a new freeze would pin new
+ *  documents. */
 export const PINNED_METHOD_DOCS = [
   'docs/release/o67-class-rule-2026-07.md',
   'docs/release/gate-decision-2026-07-22.md',

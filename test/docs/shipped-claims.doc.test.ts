@@ -785,7 +785,7 @@ describe('the recovery playbook states the exclusion the inspect tool actually e
       .toMatch(/mutually exclusive/i);
 
     expect(
-      doc('docs/release/recovery-playbook.md'),
+      doc('docs/release/README.md'),
       'the playbook no longer states the exclusion the tool enforces',
     ).toContain('`history` and `asOf` are mutually exclusive');
   }, 30_000);
@@ -928,7 +928,7 @@ describe('the playbook quotes the cross-scope refusal the store actually raises'
 
     expect(raised, 'a cross-scope supersede was not refused — the playbook line would be stale')
       .toContain('cannot supersede across scopes');
-    expect(doc('docs/release/recovery-playbook.md'), 'the playbook no longer quotes the refusal the store raises')
+    expect(doc('docs/release/README.md'), 'the playbook no longer quotes the refusal the store raises')
       .toContain(raised);
   }, 30_000);
 });
@@ -956,7 +956,7 @@ describe('the playbook table matches what a re-commit actually restores', () => 
     expect(recommitted.id, 'the re-commit reused the old id').not.toBe(original.id);  // table row: Item id — No
     expect(now?.state, 'the re-committed item kept the old grade').toBe('Fresh');     // table row: Trust grade — No
 
-    const play = doc('docs/release/recovery-playbook.md');
+    const play = doc('docs/release/README.md');
     expect(play, 'the table no longer says the id does not come back').toContain('**No — a new `m_<uuid>`.**');
     expect(play, 'the table no longer says the grade does not come back').toContain('**No — the new item is `Fresh`**');
   }, 30_000);
@@ -1038,7 +1038,7 @@ describe('the playbook states the only thing that closes the undo window', () =>
     compactLedger(path, { erasedIds: new Set([rec.id]), keepValidVerify: () => true, provesKey: () => true });
 
     expect(readFileSync(path, 'utf8'), 'a compaction did not physically drop the erased text').not.toContain(TEXT);
-    expect(doc('docs/release/recovery-playbook.md'), 'the playbook no longer names compaction as what closes the window')
+    expect(doc('docs/release/README.md'), 'the playbook no longer names compaction as what closes the window')
       .toContain('The window closes only when a **compaction** physically rewrites the ledger');
   }, 30_000);
 });

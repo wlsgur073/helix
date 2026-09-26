@@ -25757,7 +25757,7 @@ var ok = (text) => ({ content: [{ type: "text", text }] });
 function assertValidId(id) {
   if (!isValidId(id)) {
     throw new Error(
-      `invalid id: must be 1-${MAX_ID_CHARS} printable, non-control characters (got ${id.length}). An id from an adopted ledger that still fails this bound is not reachable through this MCP tool, but can be erased/rechecked/confirmed directly via the MemoryStore API from a script (operator-only, outside any conversation) \u2014 see docs/release/recovery-playbook.md.`
+      `invalid id: must be 1-${MAX_ID_CHARS} printable, non-control characters (got ${id.length}). An id from an adopted ledger that still fails this bound is not reachable through this MCP tool, but can be erased/rechecked/confirmed directly via the MemoryStore API from a script (operator-only, outside any conversation) \u2014 see the recovery playbook in docs/release/README.md.`
     );
   }
 }
