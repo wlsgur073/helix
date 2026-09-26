@@ -14,8 +14,8 @@ import { isEntryPoint } from '../entry-point.js';
 import { strayTrustFiles } from '../memory/trust-store-layout.js';
 import { formatSessionStartContext } from './format-context.js';
 import { newNonce, collectWitnessNotes } from '../memory/content-frame.js';
-import { projectDispositionOf, projectLedgerPath, type ProjectDisposition } from '../memory/ownership.js';
-import { aliasesGlobalLedger } from '../memory/scope-target.js';
+import { projectDispositionOf, type ProjectDisposition } from '../memory/ownership.js';
+import { resolveProjectLayer } from '../memory/project-root.js';
 import { verifiedLiveWitnessed, type ReplayStats } from '../memory/verified-read.js';
 import { enforceWitnessProjection } from '../memory/verified-projection.js';
 import type { WitnessVerdict } from '../memory/witness-core.js';
@@ -29,6 +29,9 @@ export interface GatherInput {
   home: string;
   globalLedger: string;
   cwd?: string;
+  /** The operating system's home directory, which bounds the parent-directory walk
+   *  (src/memory/project-root.ts). Defaults to os.homedir(); tests pass a temp directory. */
+  userHome?: string;
 }
 
 export interface GatherResult {
@@ -58,7 +61,7 @@ export interface GatherResult {
  * ledger/registry/master under `home`; the replay stats are pure observations of those reads — not
  * a write — so main() alone decides whether to emit them.
  */
-export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): GatherResult {
+export function gatherScopedRecords({ home, globalLedger, cwd, userHome }: GatherInput): GatherResult {
   const records: ScopedRecord[] = [];
   let integrityAvailable = true;
   const replays: Array<{ scope: MemoryScope } & ReplayStats> = [];
@@ -74,23 +77,23 @@ export function gatherScopedRecords({ home, globalLedger, cwd }: GatherInput): G
   for (const r of gProj.live.values()) records.push({ record: r, scope: 'global' });
   verdicts.push(g.verdict);
 
-  // Project root comes ONLY from the hook's stdin cwd (canonical). No process.cwd() fallback —
-  // a hook's own cwd is unreliable. No cwd -> global only (disposition stays 'inactive').
+  // Project root: the hook's stdin cwd, or the nearest parent project above it — the SAME resolver the
+  // server uses (src/memory/project-root.ts), so the two cannot disagree about which project a session
+  // is in; it also carries the cwd == ~ guard (one physical file is never two scopes). No
+  // process.cwd() fallback — a hook's own cwd is unreliable. No cwd -> global only ('inactive').
   let projectDisposition: ProjectDisposition = 'inactive';
   if (cwd) {
-    const projLedger = projectLedgerPath(cwd);
-    // guard: never read the global ledger as a "project" layer (cwd == ~ collision) — the SAME guard
-    // gates both the disposition snapshot and the read below, so the two can never disagree.
-    if (!aliasesGlobalLedger(projLedger, globalLedger)) { // one physical file is never two scopes -- see scope-target.ts
+    const layer = resolveProjectLayer({ cwd, userHome: userHome ?? homedir(), globalLedger });
+    if (layer) {
       try {
-        // B2 + item 7: the SAME shared four-state predicate the store uses, from the same descriptor shape —
-        // computed ONCE and reused to gate the read immediately below (mirrors store.ts's
+        // B2 + item 7 + issue #1: the SAME shared predicate the store uses, from the same descriptor
+        // shape — computed ONCE and reused to gate the read immediately below (mirrors store.ts's
         // projectDisposition()-then-route pattern: one evaluation per call, never a second isOwned
         // read for the same decision). projectDispositionOf never throws (isOwned/existsSync are
         // already safe), so an exception here can only come from the read that follows.
-        projectDisposition = projectDispositionOf({ root: cwd, home, ledger: projLedger });
+        projectDisposition = projectDispositionOf({ root: layer.root, home, ledger: layer.ledger, origin: layer.origin });
         if (projectDisposition === 'owned') {
-          const project = verifiedLiveWitnessed(projLedger, home, cwd);
+          const project = verifiedLiveWitnessed(layer.ledger, home, layer.root);
           replays.push({ scope: 'project', ...project.stats });
           if (!project.projection.keyAvailable) integrityAvailable = false;
           const pProj = enforceWitnessProjection(project.projection, project.verdict);
@@ -141,7 +144,8 @@ async function main(): Promise<void> {
     const { records, integrityAvailable, replays, projectDisposition, witnessNotes } = gatherScopedRecords({ home, globalLedger, cwd });
     const text = formatSessionStartContext(records, newNonce(), {
       integrityAvailable, unadoptedPresent: projectDisposition === 'unadopted-present',
-      aliasedPresent: projectDisposition === 'aliased', witnessNotes,
+      aliasedPresent: projectDisposition === 'aliased',
+      ancestorUnadopted: projectDisposition === 'ancestor-unadopted', witnessNotes,
       unionRows: unionPhysicalRows(replays),
     });
     // Synchronous write to fd 1: process exit must not drop a buffered async pipe write on
@@ -171,6 +175,6 @@ async function main(): Promise<void> {
 // launcher's spelling, so the two disagree the moment a symlink is anywhere on the path — which is
 // the normal case for a plugin cache. main() then never ran and the hook exited 0 having injected
 // nothing, a silent failure of the headline feature. isEntryPoint realpaths both sides — the same
-// realpath identity the project-ledger guard three screens up gets from aliasesGlobalLedger (a
+// realpath identity the project-ledger guard in resolveProjectLayer gets from aliasesGlobalLedger (a
 // canonicalRoot comparison under the hood) for the same reason.
 if (isEntryPoint(import.meta.url)) void main();

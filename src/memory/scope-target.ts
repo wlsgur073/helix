@@ -9,7 +9,8 @@
  *  elsewhere (the dev-only replay benchmark had also missed it; `scripts/bench-replay.ts` runReal
  *  reads it from here now). Naming the rule is most of the fix; `resolveScopeTarget` is the rest,
  *  because it stops the ceremony deriving a ledger and a witness key from the same argument by two
- *  independent routes. */
+ *  independent routes. Since issue #1 the server and the SessionStart hook no longer apply it
+ *  separately: `src/memory/project-root.ts` applies it once for both. */
 import { aliasesAdoptedLedger, canonicalRoot, projectLedgerPath } from './ownership.js';
 import { scopeKeyOf } from './witness-store.js';
 
