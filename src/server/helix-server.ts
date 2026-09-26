@@ -31,9 +31,10 @@ export const ID_SCHEMA = z.string().refine(isValidId, {
 
 /** adopt's `projectRoot`, mirroring the ID_SCHEMA split above: the SAME predicate the store enforces
  *  (isReviewableRoot from ownership.ts), so the client-facing rejection and the authoritative one
- *  cannot drift. A relative or empty root resolves against the server's cwd — which IS the active
- *  project root — so it would clear the store's equality check while leaving the approval prompt with
- *  nothing to render. See isReviewableRoot's docstring for why absoluteness is the whole rule. */
+ *  cannot drift. A relative or empty root resolves against the server's cwd — the active project root
+ *  or, for a session started below a project, a directory inside it — so a spelling like '' or '..'
+ *  could clear the store's equality check while leaving the approval prompt with nothing to render.
+ *  See isReviewableRoot's docstring for why absoluteness is the whole rule. */
 export const PROJECT_ROOT_SCHEMA = z.string().refine(isReviewableRoot, {
   message: 'projectRoot must be an absolute path, so the approval prompt can show which ledger is being trusted',
 });
@@ -106,7 +107,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
           'replacing; a supersede issued without having read the target is refused.',
         ),
       scope: z.enum(['project', 'global']).optional()
-        .describe('Which ledger to write to. Omit for the contextual default: the project ledger when a project layer is active, the global one otherwise. `global` always writes global. `project` REQUIRES an active project layer and is refused when there is none, rather than silently widening the write to global.'),
+        .describe('Which ledger to write to. Omit for the contextual default: the project ledger when a project layer is active, the global one otherwise. `global` always writes global. `project` REQUIRES an active project layer and is refused when there is none, rather than silently widening the write to global. Below a parent-directory project that is not adopted yet, an omitted scope and `project` are both refused until it is adopted. The result names the scope written.'),
     },
   }, async (args) => m.runOp('helix_memory_commit', () => handleCommit(store, args)));
 
@@ -224,11 +225,13 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   server.registerTool('helix_memory_adopt', {
     title: 'Adopt project memory',
     description:
-      "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a " +
-      'team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted. Pass ' +
-      'the project root you mean; a root that is not the active scope is refused and adopts nothing. ' +
-      'This moves a trust boundary — everything in that ledger becomes recallable — so the user, not ' +
-      'Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.',
+      "Trust the active project's memory file — a pre-existing one Helix did not create (only for a " +
+      'ledger you recognize, e.g. a team-shared one), or a parent-directory project this session was ' +
+      'started below. Default-deny: an unrecognized project ledger is ignored until adopted. Pass the ' +
+      'project root you mean: the active scope is the project whose .helix folder is nearest at or ' +
+      'above the session directory, and any other root is refused and adopts nothing. This moves a ' +
+      'trust boundary — everything in that ledger becomes recallable — so the user, not Helix, is the ' +
+      'authority: call only on explicit user instruction, and do not allow-list this tool.',
     inputSchema: { projectRoot: PROJECT_ROOT_SCHEMA },
   }, async (args) => m.runOp('helix_memory_adopt', () => handleAdopt(store, args, { auditPath: dv.auditPath, now: dv.now })));
 

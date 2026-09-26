@@ -13,9 +13,10 @@ import { fsyncDir } from './fs-ops.js';
  *  server no user-presence signal. What stands in for one is that the call NAMES the ledger it is
  *  about to trust, so the client's approval prompt has a target to render (the reasoning is spelled
  *  out in test/memory/adopt-requires-its-target.test.ts). A relative spelling is resolved against
- *  the SERVER's cwd — and the server's cwd IS the active project root, since that is the condition
- *  the project layer activates on. So `''`, `'.'`, `'./'` and `'../<name-of-cwd>'` every one resolve
- *  back to the active scope and clear the equality check below, while showing the approving user
+ *  the SERVER's cwd — and the server's cwd is the active project root or, for a session started below
+ *  a project, a directory inside it (src/memory/project-root.ts). So `''`, `'.'`, `'./'`,
+ *  `'../<name-of-cwd>'` — and `'..'` from a subdirectory — can all resolve back to the active scope
+ *  and clear the equality check below, while showing the approving user
  *  nothing: the prompt renders `projectRoot: ""`, and the user can only approve the act, never the
  *  target. Requiring an absolute path is precisely the property that makes the argument mean the
  *  same thing to the caller, to the approval prompt, and to this process.
