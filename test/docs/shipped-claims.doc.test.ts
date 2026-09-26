@@ -1199,5 +1199,8 @@ describe('a session below a project uses the parent project only once it is adop
     expect(readme).toContain('uses that project only if it is already adopted');
     expect(readme).toContain('A parent project is never claimed automatically');
     expect(readme).toContain('Every commit result names the scope it wrote');
+    // Final review: adopting is the one way a parent folder gets trusted, so both documents warn.
+    expect(readme).toContain('adopt only a parent project you created or recognize');
+    expect(doc('SECURITY.md')).toContain('Adopting a parent project you did not create');
   });
 });

@@ -35,15 +35,18 @@ acknowledgement within a few days.
   best-effort like every audit row: the row is appended after the adoption lands, so a crash between
   the two leaves the adoption unrecorded, and a failed append returns an error for an adoption that
   nonetheless stands.
-- **Parent-directory projects:** a session started below a project finds the nearest `.helix/` at or
-  above its directory — never the home directory or anything above it, but up to the filesystem root
-  for a directory outside the home — and reads or writes it only once it is adopted. Helix never
-  adopts a parent directory's folder on its own; `helix_memory_adopt` does, when it names that
-  project's absolute root, under the same approval as any adoption. The walk is new surface all the
-  same: a `.helix/` that another local user creates in a shared parent directory, such as `/tmp` or a
-  Windows drive root, is found by every session started below it. Nothing is read from or written
-  into that folder unless you adopt it, but until then those sessions carry the unadopted-parent note
-  and refuse commits that omit `scope`.
+- **Parent-directory projects:** a session started below a project finds the nearest `.helix/` above
+  its directory — never the home directory or anything above it, but up to the filesystem root for a
+  directory outside the home, and not at all when the home directory is not an absolute path — and
+  reads or writes it only once it is adopted. Helix never adopts a parent directory's folder on its
+  own; `helix_memory_adopt` does, when it names that project's absolute root, under the same approval
+  as any adoption. The walk is new surface all the same: a `.helix/` that another local user creates
+  in a shared parent directory, such as `/tmp` or a Windows drive root, is found by every session
+  started below it. No file in that folder is read or written unless you adopt it (the walk only
+  lists its entries), but until then those sessions carry the unadopted-parent note and refuse
+  commits that omit `scope` or name `project`. Adopting a parent project you did not create — above
+  all one in a shared directory — trusts everything already in it and sends your later project
+  commits into a folder someone else controls; pass `scope: "global"` or remove the folder instead.
 - **Trust states:** `Fresh / Corroborated / Verified / Suspect`. Recall and the SessionStart block
   flag an item for re-verification before use — a flag, not a block — whenever its source is not
   `user` (at any grade or blast radius), and when a `user` item is `Suspect` with a blast radius
