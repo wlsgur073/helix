@@ -1314,6 +1314,7 @@ function aliasesAdoptedLedger(project) {
 function projectDispositionOf(project) {
   if (!project) return "inactive";
   if (isOwned(project.root, project.home)) return aliasesAdoptedLedger(project) ? "aliased" : "owned";
+  if (project.origin === "ancestor") return "ancestor-unadopted";
   return existsSync2(project.ledger) ? "unadopted-present" : "inactive";
 }
 function stampOwnership(projectRoot, home, opts = {}) {
@@ -2644,6 +2645,12 @@ var MemoryStore = class {
     return projection;
   }
   commit(input) {
+    return this.commitScoped(input).record;
+  }
+  /** `commit`, plus the scope the record was actually written to — what `helix_memory_commit` reports.
+   *  Issue #1: a result that did not name its scope let a project fact land in the global ledger with
+   *  nothing to show for it. */
+  commitScoped(input) {
     if (input.content.length > MAX_COMMIT_CONTENT_CHARS) {
       throw new Error(`helix: content exceeds the ${MAX_COMMIT_CONTENT_CHARS}-char commit cap (got ${input.content.length}); split the fact or store a pointer`);
     }
@@ -2654,6 +2661,7 @@ var MemoryStore = class {
     }
     if (input.scope !== "global" && this.opts.project) {
       this.refuseAliasedProjectWrite(this.opts.project);
+      this.refuseUnadoptedParentWrite(this.opts.project);
     }
     if (input.supersedes) {
       const targetLedger = this.ledgerOf(input.supersedes);
@@ -2704,7 +2712,7 @@ var MemoryStore = class {
     };
     const ledger = this.targetLedger(input.scope);
     appendWitnessed(ledger, record, this.homeDir(), this.scopeRootOf(ledger), "commit");
-    return record;
+    return { record, scope: ledger === this.global ? "global" : "project" };
   }
   /** ALIAS-P2P (item 7, fix round 1): the single condition + message for refusing a project-routed
    *  write on an owned layer whose ledger leads to ANOTHER adopted project's file — shared by
@@ -2720,6 +2728,19 @@ var MemoryStore = class {
       );
     }
   }
+  /** Issue #1: a project layer found in a PARENT directory is used only once adopted, and nothing
+   *  claims it automatically — so a project-routed commit (omitted or explicit 'project' scope) below an
+   *  unadopted one is refused: never widened to the global ledger, never auto-adopted. Shared by
+   *  commitScoped()'s early check (before the supersede pre-check can read another ledger) and
+   *  targetLedger(), so no path reaches stampOwnership for a parent directory. Side-effect free. The
+   *  root is JSON-quoted so a newline or quote in a directory name cannot reshape the message. */
+  refuseUnadoptedParentWrite(p) {
+    if (p.origin === "ancestor" && !isOwned(p.root, this.homeDir())) {
+      throw new Error(
+        `commit: this session started below a Helix project at ${JSON.stringify(p.root)} that is not adopted, so project memory is off here \u2014 the write is refused rather than widened to the global ledger. Adopt it with helix_memory_adopt (projectRoot: that absolute path), or pass scope 'global'.`
+      );
+    }
+  }
   /** Resolve the ledger to write to. Project scope claims ownership on first use and refuses a
    *  pre-existing unowned (foreign) ledger. With no project layer active, an OMITTED scope falls
    *  back to global — the contextual default — while an EXPLICIT 'project' is REFUSED rather than
@@ -2728,11 +2749,12 @@ var MemoryStore = class {
     const p = this.opts.project;
     if (scope === "project" && !p) {
       throw new Error(
-        "commit: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started inside a directory holding a .helix folder). Omit `scope` to use the contextual default, or start Helix inside the project and adopt it (helix_memory_adopt) \u2014 the write is refused rather than silently widened to the global ledger."
+        "commit: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started in or below a directory holding a .helix folder). Omit `scope` to use the contextual default, or start Helix inside the project and adopt it (helix_memory_adopt) \u2014 the write is refused rather than silently widened to the global ledger."
       );
     }
     if (scope === "global" || !p) return this.global;
     this.refuseAliasedProjectWrite(p);
+    this.refuseUnadoptedParentWrite(p);
     if (!isOwned(p.root, this.homeDir())) {
       if (existsSync4(p.ledger)) {
         throw new Error(
@@ -2772,7 +2794,7 @@ var MemoryStore = class {
    *  a parameter into every private helper that needs it, never re-invoking this within that call). */
   projectDisposition() {
     const p = this.opts.project;
-    return projectDispositionOf(p && { root: p.root, ledger: p.ledger, home: this.homeDir() });
+    return projectDispositionOf(p && { root: p.root, ledger: p.ledger, home: this.homeDir(), origin: p.origin });
   }
   /** Verified live records from global + (project iff `disposition === 'owned'`), each tagged with
    *  scope + integrity, plus whether a master key was available for EVERY scope read
@@ -3312,7 +3334,7 @@ var MemoryStore = class {
     if (scope) {
       if (scope === "project" && !p) {
         throw new EraseRefusedError(
-          "erase: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started inside a directory holding a .helix folder). Omit `scope`, or start Helix inside the project and adopt it (helix_memory_adopt) \u2014 the erase is refused rather than silently widened to the global ledger."
+          "erase: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started in or below a directory holding a .helix folder). Omit `scope`, or start Helix inside the project and adopt it (helix_memory_adopt) \u2014 the erase is refused rather than silently widened to the global ledger."
         );
       }
       if (scope === "project" && aliased) {

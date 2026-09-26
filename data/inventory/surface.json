@@ -70,7 +70,7 @@
     },
     {
       "name": "helix_memory_adopt",
-      "description": "Trust the current project's pre-existing memory file (only for a ledger you recognize, e.g. a team-shared one). Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean; a root that is not the active scope is refused and adopts nothing. This moves a trust boundary — everything in that ledger becomes recallable — so the user, not Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.",
+      "description": "Trust the active project's memory file — a pre-existing one Helix did not create (only for a ledger you recognize, e.g. a team-shared one), or a parent-directory project this session was started below. Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean: the active scope is the project whose .helix folder is nearest at or above the session directory, and any other root is refused and adopts nothing. This moves a trust boundary — everything in that ledger becomes recallable — so the user, not Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -136,7 +136,7 @@
               "project",
               "global"
             ],
-            "description": "Which ledger to write to. Omit for the contextual default: the project ledger when a project layer is active, the global one otherwise. `global` always writes global. `project` REQUIRES an active project layer and is refused when there is none, rather than silently widening the write to global."
+            "description": "Which ledger to write to. Omit for the contextual default: the project ledger when a project layer is active, the global one otherwise. `global` always writes global. `project` REQUIRES an active project layer and is refused when there is none, rather than silently widening the write to global. Below a parent-directory project that is not adopted yet, an omitted scope and `project` are both refused until it is adopted. The result names the scope written."
           }
         },
         "required": [

@@ -1,7 +1,7 @@
 // src/hooks/session-start.ts
 import { writeSync as writeSync3 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join8 } from "node:path";
+import { join as join9 } from "node:path";
 
 // src/entry-point.ts
 import { realpathSync } from "node:fs";
@@ -553,6 +553,7 @@ function aliasesAdoptedLedger(project) {
 function projectDispositionOf(project) {
   if (!project) return "inactive";
   if (isOwned(project.root, project.home)) return aliasesAdoptedLedger(project) ? "aliased" : "owned";
+  if (project.origin === "ancestor") return "ancestor-unadopted";
   return existsSync2(project.ledger) ? "unadopted-present" : "inactive";
 }
 function trustStateOf(projectRoot, home) {
@@ -1115,6 +1116,7 @@ function normalizeUntrusted(s, maxChars) {
 }
 var UNADOPTED_LEDGER_NOTE = "(an unadopted project memory file is present and excluded from results; adoption requires explicit user approval)";
 var ALIASED_LEDGER_NOTE = "(this project's memory file resolves to another adopted project's memory file and is excluded from results)";
+var ANCESTOR_UNADOPTED_NOTE = "(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval)";
 var WITNESS_MISMATCH_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; elevated grades are clamped to Fresh until an authorized re-baseline)";
 var WITNESS_TRANSITION_NOTE = "(a ledger rewrite for this scope was interrupted; its records are excluded until the transition is re-driven or re-baselined)";
 var WITNESS_INIT_NOTE = "(rollback witness: scope not yet witnessed; the current head will be adopted trust-on-first-use at the next write)";
@@ -1194,7 +1196,7 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   const maxChars = opts.maxChars ?? 4e3;
   const maxItemChars = opts.maxItemChars ?? 240;
   const integrityAvailable = opts.integrityAvailable ?? true;
-  const projectLayerNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : opts.aliasedPresent ? ALIASED_LEDGER_NOTE : null;
+  const projectLayerNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : opts.aliasedPresent ? ALIASED_LEDGER_NOTE : opts.ancestorUnadopted ? ANCESTOR_UNADOPTED_NOTE : null;
   const scaleNote = opts.unionRows !== void 0 && opts.unionRows >= SCALE_ADVISORY_ROWS ? scaleAdvisoryNote(opts.unionRows) : null;
   const trailer = [projectLayerNote, ...opts.witnessNotes ?? [], scaleNote].filter((n) => n !== null && n !== "");
   const usable = records.filter(({ record }) => record.content.trim() !== "").sort((a, b) => STATE_ORDER[a.record.state] - STATE_ORDER[b.record.state] || b.record.tx.localeCompare(a.record.tx));
@@ -1257,14 +1259,56 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   return trailer.length > 0 ? out + "\n" + trailer.join("\n") : out;
 }
 
+// src/memory/project-root.ts
+import { existsSync as existsSync4, readdirSync as readdirSync4, statSync as statSync3 } from "node:fs";
+import { dirname as dirname7, isAbsolute as isAbsolute2, join as join7, relative, sep } from "node:path";
+
 // src/memory/scope-target.ts
 function aliasesGlobalLedger(projectLedger, globalLedger) {
   return canonicalRoot(projectLedger) === canonicalRoot(globalLedger);
 }
 
+// src/memory/project-root.ts
+function samePath(a, b) {
+  return relative(a, b) === "";
+}
+function within(parent, child) {
+  const rel = relative(parent, child);
+  return !isAbsolute2(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+}
+function holdsHelixMemory(dir) {
+  try {
+    if (!statSync3(dir).isDirectory()) return false;
+    const names = readdirSync4(dir);
+    return names.length === 0 || names.includes("memory.jsonl") || names.includes(".owner");
+  } catch {
+    return false;
+  }
+}
+function resolveProjectLayer(opts) {
+  const { cwd, userHome, globalLedger } = opts;
+  if (existsSync4(join7(cwd, ".helix"))) {
+    const ledger = projectLedgerPath(cwd);
+    return aliasesGlobalLedger(ledger, globalLedger) ? void 0 : { root: cwd, ledger, origin: "cwd" };
+  }
+  const home = canonicalRoot(userHome);
+  let dir = canonicalRoot(cwd);
+  const insideHome = within(home, dir);
+  for (; ; ) {
+    const parent = dirname7(dir);
+    if (parent === dir) return void 0;
+    if (insideHome && (samePath(home, parent) || !within(home, parent))) return void 0;
+    dir = parent;
+    if (holdsHelixMemory(join7(dir, ".helix"))) {
+      const ledger = projectLedgerPath(dir);
+      return aliasesGlobalLedger(ledger, globalLedger) ? void 0 : { root: dir, ledger, origin: "ancestor" };
+    }
+  }
+}
+
 // src/metrics.ts
 import { appendFileSync } from "node:fs";
-import { dirname as dirname7 } from "node:path";
+import { dirname as dirname8 } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 var noopMetricsSink = {
@@ -1277,7 +1321,7 @@ var noopMetricsSink = {
 function createMetricsSink(path, enabled, deps = {}) {
   if (!enabled) return noopMetricsSink;
   const append = deps.append ?? ((p, line) => {
-    ensureHelixDir(dirname7(p));
+    ensureHelixDir(dirname8(p));
     appendFileSync(p, line, { mode: 384 });
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
@@ -1374,7 +1418,7 @@ function createMetricsSink(path, enabled, deps = {}) {
 
 // src/config.ts
 import { readFileSync as readFileSync8 } from "node:fs";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 function readJson(path, onUnusable) {
   let text;
   try {
@@ -1391,7 +1435,7 @@ function readJson(path, onUnusable) {
   }
 }
 function metricsEnabledFromGlobalConfig(home) {
-  const raw = readJson(join7(home, "config.json"), () => {
+  const raw = readJson(join8(home, "config.json"), () => {
   });
   const m = raw?.metrics;
   return m && typeof m === "object" && typeof m.enabled === "boolean" ? m.enabled : true;
@@ -1411,7 +1455,7 @@ async function readStdinCapped(stream, maxBytes) {
 }
 
 // src/hooks/session-start.ts
-function gatherScopedRecords({ home, globalLedger, cwd }) {
+function gatherScopedRecords({ home, globalLedger, cwd, userHome }) {
   const records = [];
   let integrityAvailable = true;
   const replays = [];
@@ -1424,12 +1468,12 @@ function gatherScopedRecords({ home, globalLedger, cwd }) {
   verdicts.push(g.verdict);
   let projectDisposition = "inactive";
   if (cwd) {
-    const projLedger = projectLedgerPath(cwd);
-    if (!aliasesGlobalLedger(projLedger, globalLedger)) {
+    const layer = resolveProjectLayer({ cwd, userHome: userHome ?? homedir(), globalLedger });
+    if (layer) {
       try {
-        projectDisposition = projectDispositionOf({ root: cwd, home, ledger: projLedger });
+        projectDisposition = projectDispositionOf({ root: layer.root, home, ledger: layer.ledger, origin: layer.origin });
         if (projectDisposition === "owned") {
-          const project = verifiedLiveWitnessed(projLedger, home, cwd);
+          const project = verifiedLiveWitnessed(layer.ledger, home, layer.root);
           replays.push({ scope: "project", ...project.stats });
           if (!project.projection.keyAvailable) integrityAvailable = false;
           const pProj = enforceWitnessProjection(project.projection, project.verdict);
@@ -1447,8 +1491,8 @@ function unionPhysicalRows(replays) {
 }
 async function main() {
   try {
-    const home = process.env.HELIX_HOME ?? join8(homedir(), ".helix");
-    const globalLedger = process.env.HELIX_LEDGER ?? join8(home, "memory.jsonl");
+    const home = process.env.HELIX_HOME ?? join9(homedir(), ".helix");
+    const globalLedger = process.env.HELIX_LEDGER ?? join9(home, "memory.jsonl");
     const stray = strayTrustFiles(home, globalLedger);
     if (stray.length > 0) {
       writeSync3(1, `helix: NOTE - trust-store files (${stray.join(", ")}) sit next to the ledger instead of under HELIX_HOME (${home}); if memory tools are not working, this is why. Run the MCP server directly to see whether it refuses to start or just warns, and the full instructions either way.
@@ -1471,11 +1515,12 @@ async function main() {
       integrityAvailable,
       unadoptedPresent: projectDisposition === "unadopted-present",
       aliasedPresent: projectDisposition === "aliased",
+      ancestorUnadopted: projectDisposition === "ancestor-unadopted",
       witnessNotes,
       unionRows: unionPhysicalRows(replays)
     });
     if (text !== "") writeSync3(1, text + "\n");
-    const sink = createMetricsSink(join8(home, "metrics.jsonl"), metricsEnabledFromGlobalConfig(home));
+    const sink = createMetricsSink(join9(home, "metrics.jsonl"), metricsEnabledFromGlobalConfig(home));
     for (const rp of replays) {
       sink.emitReplay({
         scope: rp.scope,
