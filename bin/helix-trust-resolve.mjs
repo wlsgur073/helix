@@ -2737,7 +2737,7 @@ var MemoryStore = class {
   refuseUnadoptedParentWrite(p) {
     if (p.origin === "ancestor" && !isOwned(p.root, this.homeDir())) {
       throw new Error(
-        `commit: this session started below a Helix project at ${JSON.stringify(p.root)} that is not adopted, so project memory is off here \u2014 the write is refused rather than widened to the global ledger. Adopt it with helix_memory_adopt (projectRoot: that absolute path), or pass scope 'global'.`
+        `commit: this session started below a Helix project at ${JSON.stringify(p.root)} that is not adopted, so project memory is off here \u2014 the write is refused rather than widened to the global ledger. If the user created that project, adopt it with helix_memory_adopt (projectRoot: that absolute path); otherwise pass scope 'global'.`
       );
     }
   }

@@ -1291,6 +1291,7 @@ function resolveProjectLayer(opts) {
     const ledger = projectLedgerPath(cwd);
     return aliasesGlobalLedger(ledger, globalLedger) ? void 0 : { root: cwd, ledger, origin: "cwd" };
   }
+  if (!isAbsolute2(userHome)) return void 0;
   const home = canonicalRoot(userHome);
   let dir = canonicalRoot(cwd);
   const insideHome = within(home, dir);

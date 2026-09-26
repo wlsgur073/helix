@@ -16115,7 +16115,7 @@ var MemoryStore = class {
   refuseUnadoptedParentWrite(p) {
     if (p.origin === "ancestor" && !isOwned(p.root, this.homeDir())) {
       throw new Error(
-        `commit: this session started below a Helix project at ${JSON.stringify(p.root)} that is not adopted, so project memory is off here \u2014 the write is refused rather than widened to the global ledger. Adopt it with helix_memory_adopt (projectRoot: that absolute path), or pass scope 'global'.`
+        `commit: this session started below a Helix project at ${JSON.stringify(p.root)} that is not adopted, so project memory is off here \u2014 the write is refused rather than widened to the global ledger. If the user created that project, adopt it with helix_memory_adopt (projectRoot: that absolute path); otherwise pass scope 'global'.`
       );
     }
   }
@@ -16898,6 +16898,7 @@ function resolveProjectLayer(opts) {
     const ledger = projectLedgerPath(cwd);
     return aliasesGlobalLedger(ledger, globalLedger2) ? void 0 : { root: cwd, ledger, origin: "cwd" };
   }
+  if (!isAbsolute2(userHome)) return void 0;
   const home2 = canonicalRoot(userHome);
   let dir = canonicalRoot(cwd);
   const insideHome = within(home2, dir);
@@ -26921,7 +26922,7 @@ function buildServer(store2, dualDeps, metrics2) {
   }, async () => m.runOp("helix_codex_status", () => handleCodexStatus(codexStatusDeps)));
   server2.registerTool("helix_memory_adopt", {
     title: "Adopt project memory",
-    description: "Trust the active project's memory file \u2014 a pre-existing one Helix did not create (only for a ledger you recognize, e.g. a team-shared one), or a parent-directory project this session was started below. Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean: the active scope is the project whose .helix folder is nearest at or above the session directory, and any other root is refused and adopts nothing. This moves a trust boundary \u2014 everything in that ledger becomes recallable \u2014 so the user, not Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.",
+    description: "Trust the active project's memory file: a pre-existing one Helix did not create, or a parent-directory project this session was started below. Only for a ledger the user recognizes (e.g. a team-shared one, or a parent project they created) \u2014 never one in a shared directory such as /tmp. Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean: the active scope is the project whose .helix folder is nearest at or above the session directory, and any other root is refused and adopts nothing. This moves a trust boundary \u2014 everything in that ledger becomes recallable \u2014 so the user, not Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.",
     inputSchema: { projectRoot: PROJECT_ROOT_SCHEMA }
   }, async (args) => m.runOp("helix_memory_adopt", () => handleAdopt(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   return Object.assign(server2, {
