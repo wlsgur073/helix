@@ -121,8 +121,8 @@ function capRendered(total: number, render: (n: number) => string, budget: numbe
 }
 
 export function handleCommit(store: MemoryStore, args: CommitInput): ToolResult {
-  const rec = store.commit(args);
-  return ok(`committed ${JSON.stringify({ id: rec.id, state: rec.state, classification: rec.classification })}`);
+  const { record: rec, scope } = store.commitScoped(args);
+  return ok(`committed ${JSON.stringify({ id: rec.id, scope, state: rec.state, classification: rec.classification })}`);
 }
 
 export function handleRecall(store: MemoryStore, args: { query: string; maxItems?: number; maxChars?: number }): ToolResult {
