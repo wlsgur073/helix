@@ -388,7 +388,11 @@ same one-time path as before; nothing about the key's secrecy changes, only when
   all trust-on-first-use: each is an honest, fail-open re-initialization, adopted by the next write
   to that scope. Every recall, inspect or SessionStart read of that scope before that write carries
   the same constant first-contact disclosure note, which does not say which of the four occurred; a
-  write that comes first adopts the current head with no note.
+  write that comes first adopts the current head with no note. The note is left off only when the
+  scope has no witness entry at all and its ledger is absent or empty, because there is then no head
+  to adopt; a witness entry that fails its MAC keeps the note even over an empty ledger. So a rollback
+  that deletes both a scope's ledger and its witness entry shows as empty memory with no note, a case
+  the whole-home coordinated rollback above already covers.
 - The re-baseline ceremony proves interface shape, not human presence: any agent capable of driving
   a shell can allocate a pty, read the displayed hash, and type the confirmation. This is a
   residual in every deployment that grants an agent shell access — it is not a guarantee that a

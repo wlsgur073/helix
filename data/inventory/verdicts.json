@@ -22,7 +22,7 @@
  {
   "rowId": "r003",
   "surfaceItem": "tool:helix_memory_adopt",
-  "claimId": "CHANGELOG.md#a5b03654042d",
+  "claimId": "CHANGELOG.md#0940cf6348c4",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Driven end to end through the INSTALLED bundle with a sequential MCP client, 2026-09-24: helix_memory_adopt {projectRoot} returned adopted; .helix/.owner was written and projects.json under the temporary HELIX_HOME named the path; a scope: project commit then returned Fresh.",
@@ -42,7 +42,7 @@
  {
   "rowId": "r005",
   "surfaceItem": "tool:helix_memory_confirm",
-  "claimId": "CHANGELOG.md#a5b03654042d",
+  "claimId": "CHANGELOG.md#0940cf6348c4",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "C3 2026-09-24 through the installed bundle: confirm on a source=user item returned confirmed {state Verified} and inspect rendered DATA[Verified:global]; after only ledger-mac-master.key was deleted the row rendered DATA[Fresh:global] with content and contentDigest unchanged.",
@@ -62,7 +62,7 @@
  {
   "rowId": "r007",
   "surfaceItem": "tool:helix_memory_inspect",
-  "claimId": "CHANGELOG.md#a5b03654042d",
+  "claimId": "CHANGELOG.md#0940cf6348c4",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Through the installed bundle 2026-09-24: inspect {} rendered DATA[Fresh:global]| and DATA[Fresh:project]| rows side by side; history rendered an erase interval; asOf reconstructed erased content; inspect carried the rollback-witness mismatch note (C2, D1) and the not-yet-witnessed note (C3).",
@@ -82,7 +82,7 @@
  {
   "rowId": "r009",
   "surfaceItem": "tool:helix_memory_recheck",
-  "claimId": "CHANGELOG.md#a5b03654042d",
+  "claimId": "CHANGELOG.md#0940cf6348c4",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Driven end to end through the INSTALLED bundle 2026-09-24: a file-contains check whose file agreed returned recheck {state Corroborated}; after the file was changed to contradict, the same check returned {state Suspect} and recall flagged the row for re-verification.",
@@ -362,7 +362,7 @@
  {
   "rowId": "r037",
   "surfaceItem": "cli:bin/helix-rebaseline.mjs",
-  "claimId": "CHANGELOG.md#a5b03654042d",
+  "claimId": "CHANGELOG.md#0940cf6348c4",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D1 2026-09-24 through the installed bundle: helix-rebaseline refused without a terminal (exit 2); under a pty a typed 'yes' was refused as a negative control (exit 1) with nothing written; the ceremony's own keyword path re-baselined and the next read rendered the row with no mismatch note. In the C5 drill the same installed ceremony cleared an interrupted transition, and after a restart the journal was gone and writes succeeded.",

@@ -42,7 +42,10 @@ First release.
   signed. A mismatch clamps that scope's grades to `Fresh` on every live projection and renders a
   disclosure note; reads and ordinary appends continue — an elevated `verify` (a `confirm` or a
   passing `recheck`) is refused before anything is written — and the witness never advances past a
-  mismatch without an explicit re-baseline. Armed from the first release, not opt-in.
+  mismatch without an explicit re-baseline. A scope whose contents no witness has verified yet (an
+  existing ledger at first run, a newly adopted scope, a rotated key, a deleted witness file) carries
+  a disclosure note until its next write records them as the baseline; an empty scope with no
+  witness state carries none. Armed from the first release, not opt-in.
 - Operator re-baseline ceremony: `node bin/helix-rebaseline.mjs --scope global` (or
   `--scope <projectRoot>`), the only sanctioned way to clear a witness mismatch. Interactive and
   TTY-only, it displays the mismatched hash and target epoch, requires a typed confirmation, and
