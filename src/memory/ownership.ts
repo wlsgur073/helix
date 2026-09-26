@@ -203,7 +203,7 @@ export type ProjectOrigin = 'cwd' | 'ancestor';
  *  every read surface. 'aliased' (item 7) is the second disclosure trigger: an OWNED project whose
  *  ledger leads to another adopted project's ledger file, excluded from every read surface the same
  *  way, with its own constant note. */
-export type ProjectDisposition = 'inactive' | 'owned' | 'unadopted-present' | 'aliased';
+export type ProjectDisposition = 'inactive' | 'owned' | 'unadopted-present' | 'aliased' | 'ancestor-unadopted';
 
 /** Linux's MAXSYMLINKS: the most links one path resolution follows before the kernel answers ELOOP. */
 const MAX_SYMLINK_HOPS = 40;
@@ -310,6 +310,9 @@ export function aliasesAdoptedLedger(project: { root: string; home: string; ledg
  *  - 'aliased' (item 7): owned, but its ledger leads to another adopted project's ledger file
  *    (aliasesAdoptedLedger). Excluded from every read like 'unadopted-present', with its own constant
  *    note; writes are refused in store.ts.
+ *  - 'ancestor-unadopted' (issue #1): a project found in a PARENT directory (origin 'ancestor') that is
+ *    not owned — excluded from every read with its own constant note, and never claimed
+ *    automatically; commits there are refused in store.ts.
  *  - 'unadopted-present': a descriptor is given, NOT owned, and a ledger file exists at project.ledger
  *    — the exact condition MemoryStore's targetLedger() throws the adopt-hint error on for commit.
  *  - 'inactive': no descriptor (no project layer configured), OR configured but neither owned nor a
@@ -318,10 +321,11 @@ export function aliasesAdoptedLedger(project: { root: string; home: string; ledg
  *  A SNAPSHOT, not a lock: call fresh each time — see MemoryStore.projectDisposition's doc-comment for
  *  the full per-call self-consistency rationale (B1). */
 export function projectDispositionOf(
-  project: { root: string; home: string; ledger: string } | undefined,
+  project: { root: string; home: string; ledger: string; origin?: ProjectOrigin } | undefined,
 ): ProjectDisposition {
   if (!project) return 'inactive';
   if (isOwned(project.root, project.home)) return aliasesAdoptedLedger(project) ? 'aliased' : 'owned';
+  if (project.origin === 'ancestor') return 'ancestor-unadopted';
   return existsSync(project.ledger) ? 'unadopted-present' : 'inactive';
 }
 

@@ -65,6 +65,13 @@ export const UNADOPTED_LEDGER_NOTE =
 export const ALIASED_LEDGER_NOTE =
   "(this project's memory file resolves to another adopted project's memory file and is excluded from results)";
 
+/** Issue #1: the same constraints as UNADOPTED_LEDGER_NOTE — whoever can create a `.helix/` in a
+ *  directory above the session controls WHETHER this appears, so it is a constant: informational only,
+ *  no imperative, no interpolation, no path. Rendered wherever the unadopted note is, iff the per-call
+ *  project-disposition snapshot is 'ancestor-unadopted'. */
+export const ANCESTOR_UNADOPTED_NOTE =
+  "(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval)";
+
 // Rollback-witness disclosure notes (spec 2026-07-17-high-water-counter-decision §4). Like
 // UNADOPTED_LEDGER_NOTE these are TRUSTED, CONSTANT strings rendered OUTSIDE the DATA frame: an
 // adversary who can roll back / fork / interrupt a ledger controls WHETHER each note appears, so the

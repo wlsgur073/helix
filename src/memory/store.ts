@@ -17,7 +17,7 @@ import { rankWithArtifacts, buildRankArtifacts, assertQueryWithinBounds, type Ex
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce, collectWitnessNotes, asOfWitnessNotes } from './content-frame.js';
-import { isOwned, stampOwnership, projectDispositionOf, canonicalRoot, isReviewableRoot, trustStateOf, aliasesAdoptedLedger, type ProjectDisposition, type TrustState } from './ownership.js';
+import { isOwned, stampOwnership, projectDispositionOf, canonicalRoot, isReviewableRoot, trustStateOf, aliasesAdoptedLedger, type ProjectDisposition, type ProjectOrigin, type TrustState } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedLiveWitnessed, verifiedProjectionWithSubkey } from './verified-read.js';
@@ -38,8 +38,9 @@ export interface MemoryStoreOptions {
    *  The project scope layer. It deliberately does NOT carry a `home`: the trust store's location is
    *  `opts.home`, which is required, so a second field naming the same directory would be a second
    *  place for it to be wrong. That is not hypothetical — the two used to be separate, and the
-   *  comment claiming they were always equal was false against the shipped wiring. */
-  project?: { ledger: string; root: string };
+   *  comment claiming they were always equal was false against the shipped wiring. `origin` says
+   *  where it was found (src/memory/project-root.ts); absent reads as 'cwd'. */
+  project?: { ledger: string; root: string; origin?: ProjectOrigin };
   /** Injectable ownership stamp source (default crypto). */
   genStamp?: () => string;
   /** Where the ledger-MAC master key, the scope-nonce registry and the rollback witness live.
@@ -459,7 +460,7 @@ export class MemoryStore {
    *  a parameter into every private helper that needs it, never re-invoking this within that call). */
   private projectDisposition(): ProjectDisposition {
     const p = this.opts.project;
-    return projectDispositionOf(p && { root: p.root, ledger: p.ledger, home: this.homeDir() });
+    return projectDispositionOf(p && { root: p.root, ledger: p.ledger, home: this.homeDir(), origin: p.origin });
   }
 
   /** Verified live records from global + (project iff `disposition === 'owned'`), each tagged with
