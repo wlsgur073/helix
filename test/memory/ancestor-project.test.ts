@@ -70,6 +70,18 @@ describe('a commit below a parent project that is not adopted', () => {
   });
 });
 
+describe('the refusal below an unadopted parent project', () => {
+  // Final review: anyone can create a .helix in a shared parent (/tmp, a drive root), so the refusal
+  // must not steer the caller toward adopting it.
+  it('suggests adopting only a project the user created, and global otherwise', () => {
+    const root = tmp('helix-ap-proj-'); const { store } = below(root);
+    let message = '';
+    try { store.commit({ content: 'kilo fact', source: 'user' }); } catch (e) { message = (e as Error).message; }
+    expect(message).toContain('If the user created that project, adopt it with helix_memory_adopt');
+    expect(message).toContain("otherwise pass scope 'global'");
+  });
+});
+
 describe('a parent project that is adopted', () => {
   it('takes an omitted-scope commit, serves it on recall, and the result says project', () => {
     const root = tmp('helix-ap-proj-'); const { home, store } = below(root);

@@ -12,5 +12,8 @@ describe('tool descriptions state the parent-directory rule (issue #1)', () => {
     expect(scope).toContain('The result names the scope written.');
     const adopt = tools.find((t) => t.name === 'helix_memory_adopt');
     expect(adopt?.description ?? '').toContain('nearest at or above');
+    // Final review: the parent case needs the same "only one you recognize" limit as a foreign ledger.
+    expect(adopt?.description ?? '').toContain('or a parent project they created');
+    expect(adopt?.description ?? '').toContain('never one in a shared directory');
   });
 });

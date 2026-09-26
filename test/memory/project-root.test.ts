@@ -106,6 +106,19 @@ describe('resolveProjectLayer', () => {
     expect(resolveProjectLayer({ cwd: dir(pkg, 'src'), userHome: home, globalLedger: globalIn(home) })?.root).toBe(repo);
   });
 
+  // Final review: an empty or relative HOME gives no boundary to trust. Resolving it against each
+  // process's own cwd would let the server and the hook walk to different places (issue #1 again).
+  it('skips the parent walk when the home directory is not an absolute path', () => {
+    const b = base(); const home = dir(b, 'home');
+    const proj = dir(home, 'proj'); dir(proj, '.helix');
+    const sub = dir(proj, 'sub');
+    for (const userHome of ['', 'relative/home']) {
+      expect(resolveProjectLayer({ cwd: sub, userHome, globalLedger: globalIn(home) }), `userHome=${JSON.stringify(userHome)}`).toBeUndefined();
+    }
+    // The working directory's own folder is not a walk, so it still counts.
+    expect(resolveProjectLayer({ cwd: proj, userHome: '', globalLedger: globalIn(home) })?.origin).toBe('cwd');
+  });
+
   it('an empty parent .helix (a fresh mkdir opt-in) and one holding only .owner both count (D6)', () => {
     const b = base(); const home = dir(b, 'home');
     const a = dir(home, 'a'); dir(a, '.helix');

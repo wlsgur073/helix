@@ -225,9 +225,10 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   server.registerTool('helix_memory_adopt', {
     title: 'Adopt project memory',
     description:
-      "Trust the active project's memory file — a pre-existing one Helix did not create (only for a " +
-      'ledger you recognize, e.g. a team-shared one), or a parent-directory project this session was ' +
-      'started below. Default-deny: an unrecognized project ledger is ignored until adopted. Pass the ' +
+      "Trust the active project's memory file: a pre-existing one Helix did not create, or a " +
+      'parent-directory project this session was started below. Only for a ledger the user recognizes ' +
+      '(e.g. a team-shared one, or a parent project they created) — never one in a shared directory ' +
+      'such as /tmp. Default-deny: an unrecognized project ledger is ignored until adopted. Pass the ' +
       'project root you mean: the active scope is the project whose .helix folder is nearest at or ' +
       'above the session directory, and any other root is refused and adopts nothing. This moves a ' +
       'trust boundary — everything in that ledger becomes recallable — so the user, not Helix, is the ' +

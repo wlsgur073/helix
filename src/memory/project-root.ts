@@ -52,6 +52,9 @@ export function resolveProjectLayer(opts: { cwd: string; userHome: string; globa
     const ledger = projectLedgerPath(cwd);
     return aliasesGlobalLedger(ledger, globalLedger) ? undefined : { root: cwd, ledger, origin: 'cwd' };
   }
+  // An empty or relative home (an empty or relative HOME) gives no boundary to trust: resolved against
+  // each process's own cwd, it would let the server and the hook walk to different places. No walk.
+  if (!isAbsolute(userHome)) return undefined;
   // Physical parents: resolve symlinks first, then climb with dirname, so a `..` after a symlinked
   // directory is never folded as text (the ALIAS-DOTDOT lesson).
   const home = canonicalRoot(userHome);
