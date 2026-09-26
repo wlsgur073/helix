@@ -17,7 +17,9 @@ First release.
   `user` item whose blast radius is not `read-only`/`local-reversible`), crash-safe compaction, and
   a cross-process lock.
 - Layered memory scope: a global ledger plus an ownership-gated per-project ledger
-  (`helix_memory_adopt`, default-deny).
+  (`helix_memory_adopt`, default-deny). A session started in a subdirectory uses the nearest parent
+  project once it is adopted; below one that is not, reads carry a constant note and a commit that
+  omits `scope` is refused rather than written globally. Commit results name the scope written.
 - Two-tier trust labels: machine-corroborated **Corroborated** (`helix_memory_recheck`, a
   content-bound mechanical file check) and human-attested **Verified** (`helix_memory_confirm`).
 - Lexical recall ranker (coverage / phrase-first, BM25-assisted), with an in-process recall cache

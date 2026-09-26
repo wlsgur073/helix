@@ -35,6 +35,15 @@ acknowledgement within a few days.
   best-effort like every audit row: the row is appended after the adoption lands, so a crash between
   the two leaves the adoption unrecorded, and a failed append returns an error for an adoption that
   nonetheless stands.
+- **Parent-directory projects:** a session started below a project finds the nearest `.helix/` at or
+  above its directory — never the home directory or anything above it, but up to the filesystem root
+  for a directory outside the home — and reads or writes it only once it is adopted. Helix never
+  adopts a parent directory's folder on its own; `helix_memory_adopt` does, when it names that
+  project's absolute root, under the same approval as any adoption. The walk is new surface all the
+  same: a `.helix/` that another local user creates in a shared parent directory, such as `/tmp` or a
+  Windows drive root, is found by every session started below it. Nothing is read from or written
+  into that folder unless you adopt it, but until then those sessions carry the unadopted-parent note
+  and refuse commits that omit `scope`.
 - **Trust states:** `Fresh / Corroborated / Verified / Suspect`. Recall and the SessionStart block
   flag an item for re-verification before use — a flag, not a block — whenever its source is not
   `user` (at any grade or blast radius), and when a `user` item is `Suspect` with a blast radius
@@ -123,10 +132,10 @@ nothing.
 That location is the home directory itself — `HELIX_HOME` when set — and it is **not** derived from
 where the ledger happens to be: pointing `HELIX_LEDGER` into a repository moves the data file and
 nothing else. `HELIX_HOME`, `HELIX_LEDGER` and `HELIX_SESSIONS` are used exactly as given, so set
-them to absolute paths: an empty or relative value resolves against the working directory, which the
-server also takes as the project root, and an empty `HELIX_HOME` makes that directory stand in for
-the home, so a `config.json` and a `memory.jsonl` there are read as the global ones. When trust-store
-files are found beside a relocated ledger — a layout that a
+them to absolute paths: an empty or relative value resolves against the working directory, which is
+also where the server starts looking for the project root, and an empty `HELIX_HOME` makes that
+directory stand in for the home, so a `config.json` and a `memory.jsonl` there are read as the
+global ones. When trust-store files are found beside a relocated ledger — a layout that a
 pre-release build wrote for every `HELIX_LEDGER` user, and that a hand-assembled setup or a
 repo-writing adversary can also produce — the server measures whether starting would lose a grade
 this ledger currently carries, and refuses to start unless that measurement completes and finds

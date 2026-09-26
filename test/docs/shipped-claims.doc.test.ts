@@ -12,13 +12,14 @@
 // rewording stays cheap and deleting the claim does not.
 import { describe, it, expect } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, readdirSync, statSync, chmodSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, readdirSync, statSync, chmodSync, existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { MemoryStore } from '../../src/memory/store.js';
+import { resolveProjectLayer } from '../../src/memory/project-root.js';
 import { buildServer } from '../../src/server/helix-server.js';
 import { classifyEgress, type EgressInput } from '../../src/risk/trifecta.js';
 import { digestContent } from '../../src/memory/ledger-mac.js';
@@ -1177,5 +1178,26 @@ describe('SECURITY.md states the trust-resolution ceremony the CLI actually offe
       .toContain('stay `Fresh` rather than being');
     expect(sec, 'SECURITY.md no longer names single-lineage as what stops the drop')
       .toMatch(/single lineage/i);
+  });
+});
+
+// Issue #1: the README's parent-directory rule, recovered by running it rather than copied from it.
+describe('a session below a project uses the parent project only once it is adopted, as the README says', () => {
+  it('resolves the parent, refuses the unadopted case, accepts after adopt, and the README states each', () => {
+    const b = realpathSync(mkdtempSync(join(tmpdir(), 'helix-doc-anc-')));
+    const userHome = join(b, 'home'); const home = join(b, 'helix-home');
+    const proj = join(userHome, 'proj'); const sub = join(proj, 'sub');
+    mkdirSync(join(proj, '.helix'), { recursive: true }); mkdirSync(sub);
+    const layer = resolveProjectLayer({ cwd: sub, userHome, globalLedger: join(home, 'memory.jsonl') });
+    expect(layer?.origin).toBe('ancestor');
+    const store = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 't', project: layer });
+    expect(() => store.commit({ content: 'doc lock fact', source: 'user' })).toThrow(/not adopted/);
+    store.adopt(proj);
+    expect(store.commitScoped({ content: 'doc lock fact', source: 'user' }).scope).toBe('project');
+
+    const readme = doc('README.md');
+    expect(readme).toContain('uses that project only if it is already adopted');
+    expect(readme).toContain('A parent project is never claimed automatically');
+    expect(readme).toContain('Every commit result names the scope it wrote');
   });
 });
