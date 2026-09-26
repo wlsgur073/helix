@@ -8,7 +8,8 @@ import { parseLedger } from '../memory/ledger.js';
 import { scanLegacyElevated, classifyLegacyOffenders } from '../memory/legacy-scan.js';
 import { hardenHomePermissions } from '../memory/home-permissions.js';
 import { subkeyForScope } from '../memory/verified-read.js';
-import { aliasesGlobalLedger } from '../memory/scope-target.js';
+import { resolveProjectLayer } from '../memory/project-root.js';
+import { isOwned } from '../memory/ownership.js';
 import { defaultExpansion } from '../memory/expansion.js';
 import { strayTrustFiles, collidingTrustFiles, assessGradeLoss } from '../memory/trust-store-layout.js';
 import { verifyVerify, digestContent } from '../memory/ledger-mac.js';
@@ -23,17 +24,13 @@ import { realCodexRunner, checkCodexAvailable } from '../verify/codex.js';
 // registry, rollback witness). The acceptance suite uses it for hermetic isolation.
 const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
 const globalLedger = process.env.HELIX_LEDGER ?? join(home, 'memory.jsonl');
-const projectRoot = process.cwd();
-const projectLedger = join(projectRoot, '.helix', 'memory.jsonl');
-// The project LEDGER layer is active only when <cwd>/.helix/ exists — so Helix never litters a
-// non-Helix dir and a bare cwd stays global-only. The cwd == ~ collision (project ledger == global
-// ledger) also disables it. Note this gate is about the ledger alone: config no longer has a
+// The project LEDGER layer: the working directory's own .helix/, or — for a session started below a
+// project — the nearest parent's (src/memory/project-root.ts, shared with the SessionStart hook).
+// Helix never creates a .helix/ on its own, so a directory with none at or above it stays global-only,
+// and the cwd == ~ collision (project ledger == global ledger) disables the layer. A parent's folder is
+// used only once adopted: the store's ownership gate decides that per call. Config has no
 // cwd-discovered project layer to mirror, since a repo must not configure the process reading it.
-const projectActive = existsSync(join(projectRoot, '.helix'))
-  // One physical file is never two scopes — see aliasesGlobalLedger for why this is canonical and
-  // not textual, and for the census of the call sites that share this rule.
-  && !aliasesGlobalLedger(projectLedger, globalLedger);
-const project = projectActive ? { ledger: projectLedger, root: projectRoot } : undefined;
+const project = resolveProjectLayer({ cwd: process.cwd(), userHome: homedir(), globalLedger });
 
 // One config load drives both the store's metrics sink and the server deps. The real sink writes
 // content-free records to ~/.helix/metrics.jsonl, gated by config.metrics.enabled (noop when off).
@@ -50,8 +47,9 @@ const config = loadConfig({ globalPath: join(home, 'config.json') });
 // Say so when such a file exists. Silence here would be a regression in operator feedback, since a
 // project config with an INVALID value still warned when the layer was read — a user following older
 // guidance would otherwise get no signal at all that their settings stopped applying.
-if (existsSync(join(projectRoot, '.helix', 'config.json'))) {
-  process.stderr.write(`helix: NOTE - ${join(projectRoot, '.helix', 'config.json')} is not read; dual-verify, egress and logging settings come only from ${join(home, 'config.json')}\n`); // ASCII only
+const configRoot = project?.root ?? process.cwd();
+if (existsSync(join(configRoot, '.helix', 'config.json'))) {
+  process.stderr.write(`helix: NOTE - ${join(configRoot, '.helix', 'config.json')} is not read; dual-verify, egress and logging settings come only from ${join(home, 'config.json')}\n`); // ASCII only
 }
 const metrics = createMetricsSink(join(home, 'metrics.jsonl'), config.metrics.enabled);
 
@@ -181,7 +179,8 @@ store.healWitness();
 // assert/supersede rows, which R1 would clamp whatever the key situation is.
 const scanScopes: Array<{ ledger: string; root?: string }> = [
   { ledger: globalLedger },
-  ...(project ? [{ ledger: project.ledger, root: project.root }] : []),
+  // A parent directory's project is scanned only once adopted: until then nothing of it is read.
+  ...(project && (project.origin === 'cwd' || isOwned(project.root, home)) ? [{ ledger: project.ledger, root: project.root }] : []),
 ];
 for (const { ledger, root } of scanScopes) {
   try {
