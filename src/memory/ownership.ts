@@ -193,6 +193,11 @@ export function isOwned(projectRoot: string, home: string): boolean {
   return stamp !== null && stamp === entry.stamp;
 }
 
+/** Where a configured project layer was found (src/memory/project-root.ts): the session's own working
+ *  directory, or a parent of it. Only the ownership gate reads it — a parent's folder is never claimed
+ *  automatically, so an unowned one discloses itself instead of staying silent. */
+export type ProjectOrigin = 'cwd' | 'ancestor';
+
 /** A project layer's read-side participation state (B1/B2). 'unadopted-present' is a disclosure
  *  trigger: a foreign, un-owned ledger file sits where Helix would read one, and is excluded from
  *  every read surface. 'aliased' (item 7) is the second disclosure trigger: an OWNED project whose
