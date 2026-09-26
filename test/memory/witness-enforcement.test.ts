@@ -222,10 +222,20 @@ describe('Task 7 — read-side witness enforcement', () => {
   });
 
   describe('first-contact → INIT note only, no clamp/exclusion', () => {
-    it('INIT note appears on a virgin scope recall and disappears after the first commit', () => {
+    it('INIT note appears while a scope holds contents no witness has seen, and disappears after the first commit', () => {
       const home = newHome();
-      const { store } = makeStore(home);
+      const { store, ledger } = makeStore(home);
       try {
+        // Issue #2: a virgin scope with no bytes is first-contact/pristine — nothing for the next write
+        // to adopt, so no note.
+        expect(store.recall('anything').witnessNotes).not.toContain(WITNESS_INIT_NOTE);
+        // Contents that no witness has seen (written before the witness existed, or left behind by a
+        // deleted witness file) are what the note discloses: the next write adopts them as the baseline.
+        writeFileSync(ledger, JSON.stringify({
+          id: 'm_unwitnessed', tx: FIXED, validFrom: FIXED, validTo: null, type: 'assert', state: 'Fresh',
+          content: 'unwitnessed fact', provenance: { source: 'user', sessionId: 'x' }, supersedes: null,
+          blastRadius: null, reverifyTrigger: null, classification: 'normal',
+        }) + '\n');
         expect(store.recall('anything').witnessNotes).toContain(WITNESS_INIT_NOTE);
         store.commit({ content: 'first witnessed fact', source: 'user' });
         expect(store.recall('first').witnessNotes).not.toContain(WITNESS_INIT_NOTE);

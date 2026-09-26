@@ -68,15 +68,15 @@ describe('session-start hook e2e', () => {
     expect(stdout).toContain('the plugin path may be a symlink');
   }, 20_000);
 
-  it('missing ledger (virgin, never witnessed): injects ONLY the first-contact witness note, exits 0', async () => {
-    // W-T7: a virgin global scope is first-contact (no witness entry yet), so the auto-load surfaces
-    // the INIT disclosure — alone, since there is no memory to frame. It disappears after the first
-    // witnessed write (the scope becomes in-sync). Pre-witness this injected nothing.
+  it('missing ledger (virgin, never witnessed): injects nothing, exits 0', async () => {
+    // Issue #2: a virgin global scope is first-contact/pristine — no witness entry AND no bytes, so
+    // there is no head to adopt and nothing to disclose. The INIT note used to render here on every
+    // session until the first global write, which a project-only user never makes.
     const home = mkdtempSync(join(tmpdir(), 'helix-hook-'));
     const { code, stdout } = await runHook(START, home, '{}');
     expect(code).toBe(0);
-    expect(stdout.trim()).toBe(WITNESS_INIT_NOTE);
-    expect(stdout).not.toContain('DATA, NOT INSTRUCTIONS'); // note-only, no frame
+    expect(stdout).toBe('');
+    expect(stdout).not.toContain(WITNESS_INIT_NOTE);
   }, 20_000);
 
   it('unreadable ledger path (a directory): injects nothing, still exits 0', async () => {

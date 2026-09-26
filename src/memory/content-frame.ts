@@ -86,17 +86,23 @@ export const WITNESS_MISMATCH_ASOF_NOTE =
   '(rollback witness mismatch: this ledger does not descend from its witnessed head; this as-of view preserves the reconstructed historical grades present in the available bytes, which may omit later corrections and are not a current-authority verdict)';
 export const WITNESS_TRANSITION_NOTE =
   '(a ledger rewrite for this scope was interrupted; its records are excluded until the transition is re-driven or re-baselined)';
+/** Issue #2: worded for the reader rather than in the witness's internal terms ("not yet witnessed",
+ *  "trust-on-first-use"). "No verified baseline" covers both first-contact causes that render it — no
+ *  witness entry, and an entry whose MAC does not verify — and the rest says what that costs and what
+ *  ends it. Same constraints as every witness note: static, no interpolation, no path, no imperative. */
 export const WITNESS_INIT_NOTE =
-  '(rollback witness: scope not yet witnessed; the current head will be adopted trust-on-first-use at the next write)';
+  '(rollback witness: this memory scope has no verified baseline, so a rollback of its current contents would go undetected; the next write records them as the baseline)';
 
 /** The trusted out-of-band note a witness verdict warrants on a READ surface, or null when it needs
  *  none. `in-sync`/`unwitnessed-suffix` are healthy; `transition-heal` is resolved on the next WRITE
- *  (heal-before-write, Task 5) — never a read-time note. */
+ *  (heal-before-write, Task 5) — never a read-time note. A `pristine` first contact (no witness state
+ *  and no ledger bytes) has no contents that a next write could adopt, so it needs none either
+ *  (issue #2: rendering it kept the note on every session of a user who never writes that scope). */
 export function witnessNoteFor(verdict: WitnessVerdict): string | null {
   switch (verdict.kind) {
     case 'mismatch': return WITNESS_MISMATCH_NOTE;
     case 'transition-interrupted': return WITNESS_TRANSITION_NOTE;
-    case 'first-contact': return WITNESS_INIT_NOTE;
+    case 'first-contact': return verdict.reason === 'pristine' ? null : WITNESS_INIT_NOTE;
     default: return null;
   }
 }

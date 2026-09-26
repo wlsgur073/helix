@@ -32,6 +32,10 @@ describe('classifyWitness — journal-first (§4.4)', () => {
     const j = journalFor(after, { predecessor: { byteLength: before.length, prefixHash: sha256Hex(before) } });
     expect(classifyWitness(before, entryFor(before), j).kind).toBe('transition-interrupted');
   });
+  it('no entry, no journal, no bytes → first-contact/pristine: there is no head to adopt (issue #2)', () => {
+    expect(classifyWitness(B(''), null, null)).toEqual({ kind: 'first-contact', reason: 'pristine' });
+  });
+
   it('no entry, no journal → first-contact/no-entry', () => {
     expect(classifyWitness(B('a\n'), null, null)).toEqual({ kind: 'first-contact', reason: 'no-entry' });
   });
@@ -92,6 +96,7 @@ describe('classifyWitness — journal-first (§4.4)', () => {
 describe('advanceAllowed — anti-laundering (§4.2)', () => {
   it('allows first-contact / in-sync / unwitnessed-suffix only', () => {
     expect(advanceAllowed({ kind: 'first-contact', reason: 'no-entry' })).toBe(true);
+    expect(advanceAllowed({ kind: 'first-contact', reason: 'pristine' })).toBe(true); // the first write still records the baseline
     expect(advanceAllowed({ kind: 'in-sync' })).toBe(true);
     expect(advanceAllowed({ kind: 'unwitnessed-suffix' })).toBe(true);
     expect(advanceAllowed({ kind: 'mismatch' })).toBe(false);

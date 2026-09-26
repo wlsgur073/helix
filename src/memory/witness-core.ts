@@ -16,7 +16,7 @@ export interface JournalEntry {
   nonce: string; tx: string; supersedes: string | null; mac: string;
 }
 export type WitnessVerdict =
-  | { kind: 'first-contact'; reason: 'no-entry' | 'mac-invalid' }
+  | { kind: 'first-contact'; reason: 'pristine' | 'no-entry' | 'mac-invalid' }
   | { kind: 'in-sync' }
   | { kind: 'unwitnessed-suffix' }
   | { kind: 'transition-heal'; journal: JournalEntry }
@@ -57,7 +57,9 @@ export function classifyWitness(
       || matchesAt(bytes, journal.predecessor.byteLength, journal.predecessor.prefixHash);
     return onLineage ? { kind: 'transition-interrupted', journal } : { kind: 'mismatch' };
   }
-  if (!entry) return { kind: 'first-contact', reason: 'no-entry' };
+  // No entry: first contact either way, and the next write adopts whatever is here. 'pristine' marks
+  // the case where nothing is here — no bytes to adopt, so read surfaces owe no disclosure (issue #2).
+  if (!entry) return { kind: 'first-contact', reason: bytes.length === 0 ? 'pristine' : 'no-entry' };
   if (!matchesAt(bytes, entry.byteLength, entry.prefixHash)) return { kind: 'mismatch' };
   return bytes.length === entry.byteLength ? { kind: 'in-sync' } : { kind: 'unwitnessed-suffix' };
 }

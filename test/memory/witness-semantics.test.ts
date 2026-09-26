@@ -57,15 +57,15 @@ function plantInterrupted(home: string, scopeKey: string, ledger: string, tx: st
 
 describe('Task 8 — semantics table + failpoint scenarios', () => {
   describe('scenario: first run ever / new scope first contact -> TOFU + INIT note (spec rows 1-2)', () => {
-    it('row 1 — first run ever: witness.json is literally absent; first read is first-contact/no-entry; the first commit establishes TOFU at epoch 1; the INIT note renders before, and disappears after', () => {
+    it('row 1 — first run ever: witness.json is literally absent; first read is first-contact/pristine (no bytes to adopt), so no INIT note; the first commit establishes TOFU at epoch 1', () => {
       const home = newHome();
       try {
         const { store, ledger } = makeStore(home);
         expect(existsSync(witnessPath(home))).toBe(false); // witness.json has never been written
 
-        expect(classifyScope(home, scopeKeyOf(home), readLedgerBytes(ledger))).toEqual({ kind: 'first-contact', reason: 'no-entry' });
+        expect(classifyScope(home, scopeKeyOf(home), readLedgerBytes(ledger))).toEqual({ kind: 'first-contact', reason: 'pristine' });
         const before = store.recall('anything');
-        expect(before.witnessNotes).toContain(WITNESS_INIT_NOTE);
+        expect(before.witnessNotes).not.toContain(WITNESS_INIT_NOTE); // issue #2: nothing to adopt, nothing to disclose
 
         store.commit({ content: 'first ever fact', source: 'user' });
         expect(existsSync(witnessPath(home))).toBe(true);
@@ -80,7 +80,7 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
       } finally { rmSync(home, { recursive: true, force: true }); }
     });
 
-    it('row 2 — new scope first contact: GLOBAL is already witnessed; adopting a fresh PROJECT scope makes it participate before it has ever been witnessed, so its own independent first-contact renders the INIT note until its first commit', () => {
+    it('row 2 — new scope first contact: GLOBAL is already witnessed; adopting a PROJECT scope makes it participate before it has ever been witnessed — pristine and silent while its ledger is empty, and once it holds contents its own independent first-contact renders the INIT note until its first commit', () => {
       const home = newHome();
       const root = newProjectRoot();
       try {
@@ -101,6 +101,16 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
         store.adopt(root);
         expect(readScopeWitness(home, scopeKeyOf(home, root)).entry).toBeNull(); // never witnessed
 
+        // Issue #2: the adopted scope's ledger is still empty — first-contact/pristine, no note.
+        expect(store.recall('global already').witnessNotes).not.toContain(WITNESS_INIT_NOTE);
+
+        // A team-shared ledger arrives with contents no witness here has seen: the next write would
+        // adopt them as the baseline, and that is what the note discloses.
+        writeFileSync(projLedger, JSON.stringify({
+          id: 'm_shared', tx: FIXED, validFrom: FIXED, validTo: null, type: 'assert', state: 'Fresh',
+          content: 'team shared fact', provenance: { source: 'user', sessionId: 'x' }, supersedes: null,
+          blastRadius: null, reverifyTrigger: null, classification: 'normal',
+        }) + '\n');
         const res = store.recall('global already');
         expect(res.witnessNotes).toContain(WITNESS_INIT_NOTE); // triggered by the project scope alone
 

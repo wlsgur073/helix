@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { handleInspect } from '../../src/server/handlers.js';
-import { WITNESS_INIT_NOTE } from '../../src/memory/content-frame.js';
 
 function tmpStore() {
   const home = mkdtempSync(join(tmpdir(), 'helix-ih-'));
@@ -59,8 +58,9 @@ describe('handleInspect history mode', () => {
   });
 
   it('empty memory in history mode returns the empty marker', () => {
-    // W-T7: a virgin store's global scope is first-contact (never witnessed) -> INIT note trails the marker.
-    expect(handleInspect(tmpStore().store, { history: true }).content[0]!.text).toBe(`(memory is empty)\n\n${WITNESS_INIT_NOTE}`);
+    // Issue #2: a virgin store's global scope is first-contact/pristine (no witness entry, no bytes) ->
+    // nothing for a next write to adopt, so no INIT note trails the marker.
+    expect(handleInspect(tmpStore().store, { history: true }).content[0]!.text).toBe('(memory is empty)');
   });
 
   // --- Quarantine regression locks (finding I1 / carried M7). The history inspect render is a READ
