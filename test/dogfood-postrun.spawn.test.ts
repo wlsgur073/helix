@@ -16,7 +16,7 @@
 // echo if the stdout reader closes early.
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, copyFileSync, accessSync, constants as fsConstants } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, copyFileSync, accessSync, symlinkSync, constants as fsConstants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -81,24 +81,30 @@ function buildTreeMissingArtifact(): { scriptPath: string } {
   return { scriptPath };
 }
 
-/** PATH with every directory containing an executable literally named `node` removed. Used only for
- *  the launch-failure cell, so the adapter's `timeout -k ... node ...` fails to exec `node` (exit
- *  126/127) while `bash`/`timeout`/coreutils remain fully resolvable. IMPORTANT: this test's own
- *  spawnSync('bash', ...) call below resolves the `bash` executable using THIS SAME env.PATH -- Node
- *  resolves a bare command name against the env passed to the child, not the test runner's own
- *  process.env -- so stripping too much here would fail the spawnSync call itself (an ENOENT at the
- *  Node layer) rather than exercising the intended in-script failure. */
+/** Every external command scripts/dogfood-postrun.sh runs (cd/pwd/printf/read/[ are bash builtins),
+ *  plus `bash` itself, which this test's own spawnSync resolves against the CHILD's env.PATH. */
+const ADAPTER_TOOLS = ['bash', 'timeout', 'date', 'dirname', 'grep', 'head', 'tail', 'cut', 'sed', 'sort', 'tr', 'mkdir'];
+
+/** A PATH that resolves every tool in ADAPTER_TOOLS but NOT `node`: a fresh directory holding one
+ *  symlink per tool, each pointing at the first executable of that name on the runner's PATH. Used
+ *  only for the launch-failure cell, so the adapter's `timeout -k ... node ...` fails to exec `node`
+ *  (exit 127) while `bash`/`timeout`/coreutils stay resolvable.
+ *
+ *  It deliberately does NOT drop the PATH directories that contain `node`: where node is installed
+ *  by a distro or NodeSource package it lives in /usr/bin (and /bin, a symlink to it on merged-/usr
+ *  systems) next to bash, timeout and coreutils, so dropping those directories left nothing to run
+ *  and spawnSync('bash', ...) failed with ENOENT (status null) before the script ever started. */
 function pathWithoutNode(): string {
   const dirs = (process.env.PATH ?? '').split(':').filter((d) => d.length > 0);
-  const kept = dirs.filter((d) => {
-    try {
-      accessSync(join(d, 'node'), fsConstants.X_OK);
-      return false;
-    } catch {
-      return true;
-    }
-  });
-  return kept.join(':');
+  const shim = mkdtempSync(join(tmpdir(), 'helix-postrun-path-'));
+  for (const tool of ADAPTER_TOOLS) {
+    const found = dirs.map((d) => join(d, tool)).find((p) => {
+      try { accessSync(p, fsConstants.X_OK); return true; } catch { return false; }
+    });
+    if (found === undefined) throw new Error(`test setup: ${tool} is not on PATH`);
+    symlinkSync(found, join(shim, tool));
+  }
+  return shim;
 }
 
 /** Minimal env for one adapter invocation: PATH (node/timeout/coreutils) + a per-test HELIX_HOME so
@@ -217,10 +223,18 @@ describe('scripts/dogfood-postrun.sh (ExecStopPost adapter spawn tests)', () => 
     const home = mkdtempSync(join(tmpdir(), 'helix-postrun-home-'));
     const root = mkdtempSync(join(tmpdir(), 'helix-postrun-root-'));
     const env = { ...baseEnv(home), PATH: pathWithoutNode(), INVOCATION_ID: 'inv-5' };
+    // The constructed PATH must really hide node, or the cell below proves nothing.
+    expect(spawnSync('node', ['--version'], { env }).error).toMatchObject({ code: 'ENOENT' });
 
-    const { status } = runAdapter(scriptPath, root, env);
+    const { status, stderr } = runAdapter(scriptPath, root, env);
 
     expect(status).toBe(0);
+    // The 127 must come from `timeout` failing to exec node, not from bash failing to find `timeout`
+    // (bash's own "command not found" is also 127 and would map to the same reason). Only the line
+    // prefix is asserted: GNU coreutils says "failed to run command", uutils (Ubuntu 26.04) says
+    // "failed to execute process".
+    expect(stderr).toMatch(/^timeout: /m);
+    expect(stderr).not.toMatch(/command not found/);
     const lines = sinkLines(home);
     expect(lines).toHaveLength(1);
     const record = parseTriggerRecord(lines[0]!);
