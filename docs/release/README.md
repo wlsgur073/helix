@@ -519,9 +519,9 @@ has finished and succeeded.
 
 **What this does not undo.** It protects archives written from here on. Any plain `tar.gz` an
 earlier command already wrote still carries the key in the clear — including a
-`/tmp/helix-restore.tar.gz` left by the restore command this section printed before 2026-09-27 —
-delete those, and if one ever left the machine, treat the key as exposed and re-key rather than
-re-encrypt.
+`/tmp/helix-restore.tar.gz` left by an earlier form of this section's restore command, which
+decrypted to that fixed path and never removed it — delete those, and if one ever left the
+machine, treat the key as exposed and re-key rather than re-encrypt.
 
 Cadence that fits a personal-scale install: before any upgrade or destructive operation, plus one
 fixed quiet slot per week.
