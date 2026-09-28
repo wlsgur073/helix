@@ -323,7 +323,7 @@ function readdirSyncSafe(dir) {
 }
 
 // src/memory/ledger.ts
-import { readFileSync as readFileSync6, mkdirSync as mkdirSync5, statSync as statSync2 } from "node:fs";
+import { mkdirSync as mkdirSync5, statSync as statSync2, openSync as openSync4, fstatSync as fstatSync2, readSync as readSync2, closeSync as closeSync4, constants } from "node:fs";
 import { dirname as dirname7 } from "node:path";
 
 // src/memory/ledger-mac.ts
@@ -408,15 +408,30 @@ function sweepOrphanTmps(artifactPath, opts = {}) {
 
 // src/memory/home-permissions.ts
 import { lstatSync as lstatSync2, chmodSync, readdirSync as readdirSync3, mkdirSync, existsSync } from "node:fs";
-import { join as join3, dirname as dirname3 } from "node:path";
+import { join as join3, dirname as dirname3, sep } from "node:path";
+function finalName(dir) {
+  let n = dir;
+  for (; ; ) {
+    if (n.length > 1 && (n.endsWith("/") || n.endsWith(sep))) {
+      n = n.slice(0, -1);
+      continue;
+    }
+    if (n.length > 2 && (n.endsWith("/.") || n.endsWith(`${sep}.`))) {
+      n = n.slice(0, -2);
+      continue;
+    }
+    return n;
+  }
+}
 function ensureHelixDir(dir) {
   if (process.platform === "win32") {
     mkdirSync(dir, { recursive: true });
     return;
   }
+  const name = finalName(dir);
   let st = null;
   try {
-    st = lstatSync2(dir);
+    st = lstatSync2(name);
   } catch {
     st = null;
   }
@@ -427,18 +442,18 @@ function ensureHelixDir(dir) {
     if (uid !== void 0 && st.uid !== uid) {
       throw new Error(`refusing to use ${dir}: it is owned by uid ${st.uid}, not by this user (${uid})`);
     }
-    if ((st.mode & 63) !== 0) chmodSync(dir, 448);
+    if ((st.mode & 63) !== 0) chmodSync(name, 448);
     return;
   }
-  const parent = dirname3(dir);
+  const parent = dirname3(name);
   if (!existsSync(parent)) {
     throw new Error(`refusing to create ${dir}: its parent ${parent} does not exist (Helix creates one directory, never a chain)`);
   }
   try {
-    mkdirSync(dir, { mode: 448 });
+    mkdirSync(name, { mode: 448 });
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
-    ensureHelixDir(dir);
+    ensureHelixDir(name);
   }
 }
 
@@ -736,7 +751,13 @@ function deriveState(scopeKey, master, raw) {
   return { entry, journal, macInvalid };
 }
 function readScopeWitness(home, scopeKey) {
-  const path = canonical(witnessPath(home));
+  let path;
+  try {
+    path = canonical(witnessPath(home));
+  } catch (e) {
+    if (e.code === "ENOENT") return { entry: null, journal: null, macInvalid: false };
+    throw e;
+  }
   const store = readStoreFileAt(path);
   return deriveState(scopeKey, tryReadMaster(home), store.scopes[scopeKey]);
 }
@@ -896,9 +917,50 @@ function appendRecordUnlocked(rawPath, record, fsOps = realFsOps) {
   }
   fsOps.fsyncDir(dirname7(path));
 }
+var LedgerNotRegularError = class extends Error {
+  /** The marker isLedgerNotRegularError reads (a property, never class identity: see isWitnessAdvanceError). */
+  ledgerNotRegular = true;
+  constructor(path) {
+    super(`ledger ${path} is not a regular file`);
+    this.name = "LedgerNotRegularError";
+  }
+};
+function readLedgerFileBytes(path) {
+  let fd;
+  try {
+    fd = openSync4(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (e) {
+    if (e.code !== "ENOENT") {
+      let st = null;
+      try {
+        st = statSync2(path);
+      } catch {
+      }
+      if (st !== null && !st.isFile()) throw new LedgerNotRegularError(path);
+    }
+    throw e;
+  }
+  try {
+    const st = fstatSync2(fd);
+    if (!st.isFile()) throw new LedgerNotRegularError(path);
+    const buf = Buffer.alloc(st.size);
+    let len = 0;
+    while (len < buf.length) {
+      const n = readSync2(fd, buf, len, buf.length - len, null);
+      if (n === 0) break;
+      len += n;
+    }
+    return len === buf.length ? buf : buf.subarray(0, len);
+  } finally {
+    try {
+      closeSync4(fd);
+    } catch {
+    }
+  }
+}
 function readLedgerBytes(path) {
   try {
-    return readFileSync6(path);
+    return readLedgerFileBytes(path);
   } catch (err) {
     if (err.code === "ENOENT") return Buffer.alloc(0);
     throw err;

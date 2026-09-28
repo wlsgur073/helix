@@ -410,11 +410,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants2);
+          this.rhs = optimizeExpr(this.rhs, names, constants3);
         return this;
       }
       get names() {
@@ -431,10 +431,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants2);
+        this.rhs = optimizeExpr(this.rhs, names, constants3);
         return this;
       }
       get names() {
@@ -495,8 +495,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants2) {
-        this.code = optimizeExpr(this.code, names, constants2);
+      optimizeNames(names, constants3) {
+        this.code = optimizeExpr(this.code, names, constants3);
         return this;
       }
       get names() {
@@ -525,12 +525,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants2))
+          if (n.optimizeNames(names, constants3))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -583,12 +583,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants2);
-        if (!(super.optimizeNames(names, constants2) || this.else))
+        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants3);
+        if (!(super.optimizeNames(names, constants3) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants2);
+        this.condition = optimizeExpr(this.condition, names, constants3);
         return this;
       }
       get names() {
@@ -611,10 +611,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants2) {
-        if (!super.optimizeNames(names, constants2))
+      optimizeNames(names, constants3) {
+        if (!super.optimizeNames(names, constants3))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants2);
+        this.iteration = optimizeExpr(this.iteration, names, constants3);
         return this;
       }
       get names() {
@@ -650,10 +650,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants2) {
-        if (!super.optimizeNames(names, constants2))
+      optimizeNames(names, constants3) {
+        if (!super.optimizeNames(names, constants3))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants2);
+        this.iterable = optimizeExpr(this.iterable, names, constants3);
         return this;
       }
       get names() {
@@ -695,11 +695,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants2) {
+      optimizeNames(names, constants3) {
         var _a, _b;
-        super.optimizeNames(names, constants2);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants2);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants2);
+        super.optimizeNames(names, constants3);
+        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants3);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants3);
         return this;
       }
       get names() {
@@ -1000,7 +1000,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants2) {
+    function optimizeExpr(expr, names, constants3) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -1015,14 +1015,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants2[n.str];
+        const c = constants3[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants2[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants3[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -13341,11 +13341,11 @@ var StdioServerTransport = class {
 
 // src/memory/store.ts
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync4, readFileSync as readFileSync8, statSync as statSync3 } from "node:fs";
+import { existsSync as existsSync4, statSync as statSync3 } from "node:fs";
 import { dirname as dirname9 } from "node:path";
 
 // src/memory/ledger.ts
-import { readFileSync as readFileSync6, mkdirSync as mkdirSync5, statSync as statSync2 } from "node:fs";
+import { mkdirSync as mkdirSync5, statSync as statSync2, openSync as openSync4, fstatSync as fstatSync2, readSync as readSync2, closeSync as closeSync4, constants } from "node:fs";
 import { randomBytes as randomBytes5 } from "node:crypto";
 import { dirname as dirname7 } from "node:path";
 
@@ -14092,7 +14092,7 @@ function sweepOrphanTmps(artifactPath, opts = {}) {
 
 // src/memory/home-permissions.ts
 import { lstatSync as lstatSync2, chmodSync, readdirSync as readdirSync3, mkdirSync, existsSync } from "node:fs";
-import { join as join3, dirname as dirname3 } from "node:path";
+import { join as join3, dirname as dirname3, sep } from "node:path";
 var OWNED_FILES = [
   "memory.jsonl",
   "audit.jsonl",
@@ -14106,12 +14106,29 @@ var OWNED_FILES = [
   "ledger-mac-master.key",
   "config.json"
 ];
+function finalName(dir) {
+  let n = dir;
+  for (; ; ) {
+    if (n.length > 1 && (n.endsWith("/") || n.endsWith(sep))) {
+      n = n.slice(0, -1);
+      continue;
+    }
+    if (n.length > 2 && (n.endsWith("/.") || n.endsWith(`${sep}.`))) {
+      n = n.slice(0, -2);
+      continue;
+    }
+    return n;
+  }
+}
 function hardenHomePermissions(home2, deps) {
   if (process.platform === "win32") return;
   try {
-    const dir = lstatSync2(home2);
+    const dir = lstatSync2(finalName(home2));
+    if (dir.isSymbolicLink()) {
+      deps.warn(`helix: HELIX_HOME ${home2} is a symlink \u2014 Helix refuses to write through it, so nothing can be saved to memory (point HELIX_HOME at the directory itself)`);
+    }
     if (dir.isDirectory() && (dir.mode & 63) !== 0) {
-      chmodSync(home2, 448);
+      chmodSync(finalName(home2), 448);
       deps.warn(`helix: tightened HELIX_HOME ${home2} from 0${(dir.mode & 511).toString(8)} to 0700 (a group- or world-writable directory lets another local user replace files inside it, whatever their own mode)`);
     }
   } catch {
@@ -14148,9 +14165,10 @@ function ensureHelixDir(dir) {
     mkdirSync(dir, { recursive: true });
     return;
   }
+  const name = finalName(dir);
   let st = null;
   try {
-    st = lstatSync2(dir);
+    st = lstatSync2(name);
   } catch {
     st = null;
   }
@@ -14161,18 +14179,18 @@ function ensureHelixDir(dir) {
     if (uid !== void 0 && st.uid !== uid) {
       throw new Error(`refusing to use ${dir}: it is owned by uid ${st.uid}, not by this user (${uid})`);
     }
-    if ((st.mode & 63) !== 0) chmodSync(dir, 448);
+    if ((st.mode & 63) !== 0) chmodSync(name, 448);
     return;
   }
-  const parent = dirname3(dir);
+  const parent = dirname3(name);
   if (!existsSync(parent)) {
     throw new Error(`refusing to create ${dir}: its parent ${parent} does not exist (Helix creates one directory, never a chain)`);
   }
   try {
-    mkdirSync(dir, { mode: 448 });
+    mkdirSync(name, { mode: 448 });
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
-    ensureHelixDir(dir);
+    ensureHelixDir(name);
   }
 }
 
@@ -14868,7 +14886,13 @@ function deriveState(scopeKey, master, raw) {
   return { entry, journal, macInvalid };
 }
 function readScopeWitness(home2, scopeKey) {
-  const path = canonical(witnessPath(home2));
+  let path;
+  try {
+    path = canonical(witnessPath(home2));
+  } catch (e) {
+    if (e.code === "ENOENT") return { entry: null, journal: null, macInvalid: false };
+    throw e;
+  }
   const store2 = readStoreFileAt(path);
   return deriveState(scopeKey, tryReadMaster(home2), store2.scopes[scopeKey]);
 }
@@ -15097,10 +15121,52 @@ function parseLedgerHealth(text) {
 function parseLedgerText(text) {
   return parseLedgerHealth(text).records;
 }
+var LedgerNotRegularError = class extends Error {
+  /** The marker isLedgerNotRegularError reads (a property, never class identity: see isWitnessAdvanceError). */
+  ledgerNotRegular = true;
+  constructor(path) {
+    super(`ledger ${path} is not a regular file`);
+    this.name = "LedgerNotRegularError";
+  }
+};
+var isLedgerNotRegularError = (e) => e instanceof Error && e.ledgerNotRegular === true;
+function readLedgerFileBytes(path) {
+  let fd;
+  try {
+    fd = openSync4(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (e) {
+    if (e.code !== "ENOENT") {
+      let st = null;
+      try {
+        st = statSync2(path);
+      } catch {
+      }
+      if (st !== null && !st.isFile()) throw new LedgerNotRegularError(path);
+    }
+    throw e;
+  }
+  try {
+    const st = fstatSync2(fd);
+    if (!st.isFile()) throw new LedgerNotRegularError(path);
+    const buf = Buffer.alloc(st.size);
+    let len = 0;
+    while (len < buf.length) {
+      const n = readSync2(fd, buf, len, buf.length - len, null);
+      if (n === 0) break;
+      len += n;
+    }
+    return len === buf.length ? buf : buf.subarray(0, len);
+  } finally {
+    try {
+      closeSync4(fd);
+    } catch {
+    }
+  }
+}
 function parseLedger(path) {
   let text;
   try {
-    text = readFileSync6(path, "utf8");
+    text = readLedgerFileBytes(path).toString("utf8");
   } catch (err) {
     if (err.code === "ENOENT") return [];
     throw err;
@@ -15109,7 +15175,7 @@ function parseLedger(path) {
 }
 function readLedgerBytes(path) {
   try {
-    return readFileSync6(path);
+    return readLedgerFileBytes(path);
   } catch (err) {
     if (err.code === "ENOENT") return Buffer.alloc(0);
     throw err;
@@ -15118,7 +15184,7 @@ function readLedgerBytes(path) {
 function readLedgerRaw(path) {
   let bytes;
   try {
-    bytes = readFileSync6(path);
+    bytes = readLedgerFileBytes(path);
   } catch (err) {
     if (err.code === "ENOENT") return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
     throw err;
@@ -15305,6 +15371,7 @@ function modeOf(path) {
 import { dirname as dirname8 } from "node:path";
 import { mkdirSync as mkdirSync6 } from "node:fs";
 function appendWitnessedUnlocked(ledger, record2, home2, projectRoot, op) {
+  ensureHelixDir(home2);
   const key = scopeKeyOf(home2, projectRoot);
   const bytes = readLedgerBytes(ledger);
   const preVerdict = classifyState(readScopeWitness(home2, key), bytes);
@@ -15339,6 +15406,7 @@ function appendWitnessedUnlocked(ledger, record2, home2, projectRoot, op) {
   }
 }
 function appendWitnessed(ledger, record2, home2, projectRoot, op) {
+  ensureHelixDir(home2);
   mkdirSync6(dirname8(ledger), { recursive: true });
   withFileLock(ledger, () => appendWitnessedUnlocked(ledger, record2, home2, projectRoot, op));
 }
@@ -15661,21 +15729,21 @@ function selectWriteRedactions(content, spans) {
 }
 
 // src/memory/reality-check.ts
-import { existsSync as existsSync3, openSync as openSync4, fstatSync as fstatSync2, readSync as readSync2, closeSync as closeSync4, constants } from "node:fs";
+import { existsSync as existsSync3, openSync as openSync5, fstatSync as fstatSync3, readSync as readSync3, closeSync as closeSync5, constants as constants2 } from "node:fs";
 var INDETERMINATE = { ran: false, indeterminate: true, passed: false };
 var MAX_FILE_BYTES = 5e6;
 function containsBounded(path, pattern) {
   let fd = null;
   try {
-    fd = openSync4(path, constants.O_RDONLY | constants.O_NONBLOCK);
-    const st = fstatSync2(fd);
+    fd = openSync5(path, constants2.O_RDONLY | constants2.O_NONBLOCK);
+    const st = fstatSync3(fd);
     if (!st.isFile()) return INDETERMINATE;
     if (st.size > MAX_FILE_BYTES) return INDETERMINATE;
     const cap = Math.min(st.size, MAX_FILE_BYTES) + 1;
     const buf = Buffer.alloc(cap);
     let len = 0;
     for (; ; ) {
-      const n = readSync2(fd, buf, len, cap - len, null);
+      const n = readSync3(fd, buf, len, cap - len, null);
       if (n === 0) break;
       len += n;
       if (len === cap) return INDETERMINATE;
@@ -15684,7 +15752,7 @@ function containsBounded(path, pattern) {
   } finally {
     if (fd !== null) {
       try {
-        closeSync4(fd);
+        closeSync5(fd);
       } catch {
       }
     }
@@ -15719,7 +15787,7 @@ function checkBinding(content, check2) {
 }
 
 // src/memory/expansion.ts
-import { readFileSync as readFileSync7 } from "node:fs";
+import { readFileSync as readFileSync6 } from "node:fs";
 import { fileURLToPath } from "node:url";
 var EXP_THETA = 0.5;
 var EXP_K = 8;
@@ -15751,7 +15819,7 @@ function defaultExpansion() {
   let txt;
   for (const u of candidates) {
     try {
-      txt = readFileSync7(fileURLToPath(u), "utf8");
+      txt = readFileSync6(fileURLToPath(u), "utf8");
       break;
     } catch {
     }
@@ -16616,8 +16684,9 @@ var MemoryStore = class {
     if (p && disposition === "owned") addScope(p.ledger, "project");
     return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: asOfWitnessNotes(collectWitnessNotes(verdicts)) };
   }
-  /** Explicitly adopt the active project ledger (trust its current contents). For team-shared
-   *  ledgers. Throws if no project layer is active, or if `expectedRoot` names a different one.
+  /** Explicitly adopt the active project ledger (trust its current contents): a pre-existing ledger
+   *  Helix did not create, or a parent project. Throws if no project layer is active, or if
+   *  `expectedRoot` names a different one.
    *
    *  The caller must NAME the root it means. Adoption moves a trust boundary — it is the only other
    *  tool besides confirm that changes what Helix trusts — and a zero-argument call gives the
@@ -16730,13 +16799,7 @@ var MemoryStore = class {
     const candidates = [this.global, ...projectActive ? [p.ledger] : []];
     if (permanent) {
       for (const c of candidates) {
-        let text;
-        try {
-          text = readFileSync8(c, "utf8");
-        } catch (err) {
-          if (err.code === "ENOENT") continue;
-          throw err;
-        }
+        const text = readLedgerBytes(c).toString("utf8");
         if (parseLedgerHealth(text).skippedNonBlank > 0) {
           throw new EraseRefusedError("erase: a ledger has skipped (corrupt/torn) lines \u2014 pass an explicit scope");
         }
@@ -16868,7 +16931,7 @@ function classifyLegacyOffenders(records, offenders, keyResolved) {
 
 // src/memory/project-root.ts
 import { existsSync as existsSync5, readdirSync as readdirSync4, statSync as statSync4 } from "node:fs";
-import { dirname as dirname10, isAbsolute as isAbsolute2, join as join7, relative, sep } from "node:path";
+import { dirname as dirname10, isAbsolute as isAbsolute2, join as join7, relative, sep as sep2 } from "node:path";
 
 // src/memory/scope-target.ts
 function aliasesGlobalLedger(projectLedger, globalLedger2) {
@@ -16881,7 +16944,7 @@ function samePath(a, b) {
 }
 function within(parent, child) {
   const rel = relative(parent, child);
-  return !isAbsolute2(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+  return !isAbsolute2(rel) && rel !== ".." && !rel.startsWith(`..${sep2}`);
 }
 function holdsHelixMemory(dir) {
   try {
@@ -16915,7 +16978,7 @@ function resolveProjectLayer(opts) {
 }
 
 // src/memory/trust-store-layout.ts
-import { existsSync as existsSync6, readFileSync as readFileSync9, lstatSync as lstatSync4 } from "node:fs";
+import { existsSync as existsSync6, readFileSync as readFileSync7, lstatSync as lstatSync4 } from "node:fs";
 import { dirname as dirname11, join as join8 } from "node:path";
 var TRUST_FILE_NAMES = ["ledger-mac-master.key", "projects.json", "witness.json", "witness-log.jsonl"];
 var MASTER_KEY_LEN = 32;
@@ -16925,7 +16988,7 @@ function looksLikeOurs(name, path) {
     if (!st.isFile()) return false;
     if (name === "ledger-mac-master.key") return st.size === MASTER_KEY_LEN;
     if (name === "witness-log.jsonl") {
-      return readFileSync9(path, "utf8").split("\n").some((l) => {
+      return readFileSync7(path, "utf8").split("\n").some((l) => {
         if (!l.trim()) return false;
         try {
           JSON.parse(l);
@@ -16935,7 +16998,7 @@ function looksLikeOurs(name, path) {
         }
       });
     }
-    const parsed = JSON.parse(readFileSync9(path, "utf8"));
+    const parsed = JSON.parse(readFileSync7(path, "utf8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
     const obj = parsed;
     if (name === "projects.json") {
@@ -16969,7 +17032,7 @@ function globalNonceAlreadyEstablished(home2) {
   try {
     const path = join8(home2, "projects.json");
     if (!lstatSync4(path).isFile()) return false;
-    const parsed = JSON.parse(readFileSync9(path, "utf8"));
+    const parsed = JSON.parse(readFileSync7(path, "utf8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
     const entry = parsed["@global"];
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
@@ -25113,7 +25176,7 @@ var EMPTY_COMPLETION_RESULT = {
 };
 
 // src/config.ts
-import { readFileSync as readFileSync10 } from "node:fs";
+import { readFileSync as readFileSync8 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join9 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy", "secretEntropyExempt"];
@@ -25170,7 +25233,7 @@ var DEFAULT_CONFIG = {
 function readJson(path, onUnusable) {
   let text;
   try {
-    text = readFileSync10(path, "utf8");
+    text = readFileSync8(path, "utf8");
   } catch (e) {
     if (e.code !== "ENOENT") onUnusable(e.message);
     return null;
@@ -25754,7 +25817,15 @@ async function dualVerify(params, deps) {
     signal: params.signal
   });
   if (!res.ok) {
-    return { ran: false, attempted: true, outcome: "error", reason: `codex run failed: ${res.error}`, egress: verdict, gates: stoppedAt("runner") };
+    return {
+      ran: false,
+      attempted: true,
+      outcome: "error",
+      reason: `codex run failed: ${res.error}`,
+      egress: verdict,
+      gates: stoppedAt("runner"),
+      ...res.authRejected ? { authRejected: true } : {}
+    };
   }
   if (mode === "critique") {
     return { ran: true, attempted: true, outcome: "sent", promptSent: prompt, mode, codexAnswer: res.answer, critique: res.answer, egress: verdict };
@@ -25777,16 +25848,16 @@ function spansFor(verdict, input, ledger) {
 }
 
 // src/audit.ts
-import { openSync as openSync5, fsyncSync as fsyncSync4, closeSync as closeSync5 } from "node:fs";
+import { openSync as openSync6, fsyncSync as fsyncSync4, closeSync as closeSync6 } from "node:fs";
 import { dirname as dirname12 } from "node:path";
 function appendAudit(path, event, io = { fsyncDir }) {
   ensureHelixDir(dirname12(path));
-  const fd = openSync5(path, "a", 384);
+  const fd = openSync6(path, "a", 384);
   try {
     writeAll(realFsOps, fd, JSON.stringify(event) + "\n");
     fsyncSync4(fd);
   } finally {
-    closeSync5(fd);
+    closeSync6(fd);
   }
   try {
     io.fsyncDir(dirname12(path));
@@ -25795,22 +25866,22 @@ function appendAudit(path, event, io = { fsyncDir }) {
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync12 } from "node:fs";
+import { readFileSync as readFileSync10 } from "node:fs";
 
 // src/codex-log.ts
-import { readFileSync as readFileSync11, writeFileSync as writeFileSync2, openSync as openSync6, writeSync as writeSync3, closeSync as closeSync6 } from "node:fs";
+import { readFileSync as readFileSync9, writeFileSync as writeFileSync2, openSync as openSync7, writeSync as writeSync3, closeSync as closeSync7 } from "node:fs";
 import { dirname as dirname13 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
   try {
     ensureHelixDir(dirname13(path));
-    const fd = openSync6(path, "a", 384);
+    const fd = openSync7(path, "a", 384);
     try {
       writeSync3(fd, JSON.stringify(entry) + "\n");
     } finally {
-      closeSync6(fd);
+      closeSync7(fd);
     }
-    const lines = readFileSync11(path, "utf8").split("\n").filter((l) => l !== "");
+    const lines = readFileSync9(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
       writeFileSync2(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
@@ -26083,7 +26154,7 @@ function handleConfirm(store2, args, deps) {
 }
 function codexLogCount(path) {
   try {
-    return readFileSync12(path, "utf8").split("\n").filter((l) => l !== "").length;
+    return readFileSync10(path, "utf8").split("\n").filter((l) => l !== "").length;
   } catch {
     return 0;
   }
@@ -26098,7 +26169,7 @@ async function handleCodexStatus(deps) {
   const s = await deps.inspect();
   const dv = deps.config.dualVerify;
   const cli = s.cliFound && s.version ? `found \u2014 codex-cli ${s.version}` : "NOT FOUND on PATH";
-  const connection = s.available ? "logged in" : "not logged in \u2014 run `codex login`";
+  const login = s.available ? "stored credential found (not checked with the server)" : "not logged in \u2014 run `codex login`";
   const auth = AUTH_MODE_LABEL[s.authMode];
   const dualVerify2 = dv.enabled ? `enabled, mode=${dv.mode}` : "disabled";
   const contentLog = dv.logContent ? `ON \u2014 ${JSON.stringify(deps.codexLogPath)} (${codexLogCount(deps.codexLogPath)} entries)` : "OFF \u2014 set dualVerify.logContent=true to record prompts+responses";
@@ -26123,7 +26194,7 @@ async function handleCodexStatus(deps) {
       (p) => `! ${JSON.stringify(p)} could not be read \u2014 everything it sets is ignored; the values below are DEFAULTS`
     ),
     `- codex CLI:      ${cli}`,
-    `- connection:     ${connection}`,
+    `- login:          ${login}`,
     `- auth mode:      ${auth}`,
     `- dual-verify:    ${dualVerify2}`,
     // H4: the floor decides whether a call runs at all; a caller must see it from the free
@@ -26249,7 +26320,9 @@ async function handleDualVerify(args, deps, signal) {
       const lines = [];
       if (result.attempted) lines.push(egressLine(result.egress));
       lines.push(
-        "dual-verify did not run: codex run failed. (No Codex answer \u2014 nothing fabricated.)",
+        // H12: a rejected stored login gets a headline that names its remedy (`codex login status`
+        // could not have caught it). Constant text chosen by a boolean; the stderr stays framed below.
+        result.authRejected ? "dual-verify did not run: Codex rejected the stored login (codex login renews it). (No Codex answer \u2014 nothing fabricated.)" : "dual-verify did not run: codex run failed. (No Codex answer \u2014 nothing fabricated.)",
         frameOpen("DUAL-VERIFY ERROR", nonce2),
         DATA_SEMANTICS,
         datamark(result.reason ?? "", "DATA| "),
@@ -26304,6 +26377,11 @@ async function handleDualVerify(args, deps, signal) {
     // say so — "no claim pairs found" would be a false statement about a comparison that found
     // only disagreement (see agreement-map.ts's anyCandidate flag, which draws this distinction).
     ...indeterminate ? [zeroPair ? "\u2014 the aligner found no claim in either answer sharing at least half its words with a claim in the other, which independently written answers rarely do; this is not a disagreement, so read both answers" : partial2 ? "\u2014 some claims in either answer have no counterpart in the other; the matched pairs agree lexically, which is not a semantic check" : "\u2014 a matched claim pair differs in the figures inside it; read both answers"] : [],
+    // H13: the tool and field descriptions say compare mode keeps helixAnswer local; the response says
+    // it too, so a caller that asks Codex about "the answer" learns why Codex never saw it. Constant
+    // text, placed AFTER the verdict and its derived notes so the H1 lexical-agreement note stays
+    // directly beside the verdict line.
+    "\u2014 helixAnswer was not sent to Codex (compare mode); it was used only for the agreement map",
     "--- EXTERNAL CODEX OUTPUT (data) ---",
     datamark(result.codexAnswer ?? "", "DATA| "),
     "--- end codex output ---",
@@ -26322,7 +26400,7 @@ async function handleDualVerify(args, deps, signal) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync8, mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync8, mkdtempSync, readFileSync as readFileSync11, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join11, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
@@ -26403,6 +26481,9 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
 
 // src/verify/codex.ts
 var execFileAsync = promisify(execFile);
+function isCodexAuthRejection(stderr) {
+  return /401 Unauthorized|token_revoked|invalidated oauth/i.test(stderr);
+}
 function buildCodexExecArgs(outFile, opts = {}, cwd) {
   const args = ["exec", "--skip-git-repo-check", "-s", "read-only", "--ephemeral", "-o", outFile];
   if (cwd !== void 0 && cwd !== "") args.push("-C", cwd);
@@ -26653,11 +26734,15 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
       const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
       const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir, opts.signal);
       if (code !== 0) {
-        return { ok: false, error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ""}` };
+        return {
+          ok: false,
+          error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ""}`,
+          ...isCodexAuthRejection(stderr) ? { authRejected: true } : {}
+        };
       }
       let answer = "";
       try {
-        answer = readFileSync13(outFile, "utf8").trim();
+        answer = readFileSync11(outFile, "utf8").trim();
       } catch {
       }
       return answer ? { ok: true, answer } : { ok: false, error: "codex produced no output" };
@@ -26884,7 +26969,7 @@ function buildServer(store2, dualDeps, metrics2) {
   const dualVerifyInFlight = /* @__PURE__ */ new Set();
   server2.registerTool("helix_dual_verify", {
     title: "Dual-verify with Codex",
-    description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor; an omitted stakes counts as 'low' \u2014 omission is not an exemption. quotedMemory declares memories this call deliberately quotes, each {id, contentDigest} pair a proof of read; resolved pairs are exempt from the memory-echo guard, unresolvable pairs are discarded.",
+    description: "Ask Codex the same question and compare its independent answer with yours (config-gated; spends the user's Codex quota). In compare mode (the default) Codex receives only the question: helixAnswer stays local and feeds the agreement map; only critique mode sends helixAnswer for Codex to critique. Optional stakes are checked against the configured floor; an omitted stakes counts as 'low' \u2014 omission is not an exemption. quotedMemory declares memories this call deliberately quotes, each {id, contentDigest} pair a proof of read; resolved pairs are exempt from the memory-echo guard, unresolvable pairs are discarded.",
     inputSchema: {
       // H3: same bounded-input discipline as commit's content above -- an oversized question/answer
       // is refused by schema validation before the handler (and the JSON-parse allocation it would
@@ -26895,7 +26980,7 @@ function buildServer(store2, dualDeps, metrics2) {
       // question alone, and helixAnswer's own core-side bound there is the direct MAX_DV_ANSWER_CHARS
       // check in dualVerify (src/verify/dual-verify.ts), not this scan limit.
       question: external_exports.string().max(MAX_DV_QUESTION_CHARS).describe(`The question being verified (max ${MAX_DV_QUESTION_CHARS} characters).`),
-      helixAnswer: external_exports.string().max(MAX_DV_ANSWER_CHARS).describe(`Your answer to cross-validate (max ${MAX_DV_ANSWER_CHARS} characters).`),
+      helixAnswer: external_exports.string().max(MAX_DV_ANSWER_CHARS).describe(`Your own answer (max ${MAX_DV_ANSWER_CHARS} characters). Compare mode never sends it to Codex (it feeds only the agreement map); critique mode sends it for critique.`),
       stakes: external_exports.enum(["low", "medium", "high", "xhigh"]).optional(),
       // H6: proof-of-read declarations. SIZE-bounded only (array length + per-string chars): the
       // guard DISCARDS a pair that does not resolve against the ledger, so validity refinements
@@ -26917,12 +27002,12 @@ function buildServer(store2, dualDeps, metrics2) {
   });
   server2.registerTool("helix_codex_status", {
     title: "Codex status",
-    description: "Show whether Helix is connected to Codex (CLI/version, login, auth mode), the dual-verify config, and the content-log state. Free \u2014 no metered Codex call.",
+    description: "Show the local Codex setup (CLI/version, whether a stored login exists \u2014 not checked with the server, so only a real dual-verify call proves it \u2014 and auth mode), the dual-verify config, and the content-log state. Free \u2014 no metered Codex call.",
     inputSchema: {}
   }, async () => m.runOp("helix_codex_status", () => handleCodexStatus(codexStatusDeps)));
   server2.registerTool("helix_memory_adopt", {
     title: "Adopt project memory",
-    description: "Trust the active project's memory file: a pre-existing one Helix did not create, or a parent-directory project this session was started below. Only for a ledger the user recognizes (e.g. a team-shared one, or a parent project they created) \u2014 never one in a shared directory such as /tmp. Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean: the active scope is the project whose .helix folder is nearest at or above the session directory, and any other root is refused and adopts nothing. This moves a trust boundary \u2014 everything in that ledger becomes recallable \u2014 so the user, not Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.",
+    description: "Trust the active project's memory file: a pre-existing one Helix did not create, or a parent-directory project this session was started below. Only for a ledger the user recognizes (e.g. a parent project they created) \u2014 never one in a shared directory such as /tmp. Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean: the active scope is the project whose .helix folder is nearest at or above the session directory, and any other root is refused and adopts nothing. This moves a trust boundary \u2014 everything in that ledger becomes recallable \u2014 so the user, not Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.",
     inputSchema: { projectRoot: PROJECT_ROOT_SCHEMA }
   }, async (args) => m.runOp("helix_memory_adopt", () => handleAdopt(store2, args, { auditPath: dv.auditPath, now: dv.now })));
   return Object.assign(server2, {
@@ -27081,7 +27166,9 @@ for (const { ledger, root } of scanScopes) {
 `);
     if (unverifiable.length > 0) process.stderr.write(`helix: WARNING - ${unverifiable.length} unverifiable verify record(s) in ${ledger}; no signing key resolved for this scope, so those grades will not apply
 `);
-  } catch {
+  } catch (e) {
+    if (isLedgerNotRegularError(e)) process.stderr.write(`helix: WARNING - ${ledger} is not a regular file; skipped its integrity scan
+`);
   }
 }
 var server = buildServer(store, {

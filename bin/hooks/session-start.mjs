@@ -17,7 +17,7 @@ function isEntryPoint(importMetaUrl) {
 }
 
 // src/memory/trust-store-layout.ts
-import { existsSync as existsSync3, readFileSync as readFileSync7, lstatSync as lstatSync4 } from "node:fs";
+import { existsSync as existsSync3, readFileSync as readFileSync6, lstatSync as lstatSync4 } from "node:fs";
 import { dirname as dirname6, join as join6 } from "node:path";
 
 // src/memory/ownership.ts
@@ -337,15 +337,30 @@ function readdirSyncSafe(dir) {
 
 // src/memory/home-permissions.ts
 import { lstatSync as lstatSync2, chmodSync, readdirSync as readdirSync2, mkdirSync, existsSync } from "node:fs";
-import { join as join2, dirname as dirname2 } from "node:path";
+import { join as join2, dirname as dirname2, sep } from "node:path";
+function finalName(dir) {
+  let n = dir;
+  for (; ; ) {
+    if (n.length > 1 && (n.endsWith("/") || n.endsWith(sep))) {
+      n = n.slice(0, -1);
+      continue;
+    }
+    if (n.length > 2 && (n.endsWith("/.") || n.endsWith(`${sep}.`))) {
+      n = n.slice(0, -2);
+      continue;
+    }
+    return n;
+  }
+}
 function ensureHelixDir(dir) {
   if (process.platform === "win32") {
     mkdirSync(dir, { recursive: true });
     return;
   }
+  const name = finalName(dir);
   let st = null;
   try {
-    st = lstatSync2(dir);
+    st = lstatSync2(name);
   } catch {
     st = null;
   }
@@ -356,18 +371,25 @@ function ensureHelixDir(dir) {
     if (uid !== void 0 && st.uid !== uid) {
       throw new Error(`refusing to use ${dir}: it is owned by uid ${st.uid}, not by this user (${uid})`);
     }
-    if ((st.mode & 63) !== 0) chmodSync(dir, 448);
+    if ((st.mode & 63) !== 0) chmodSync(name, 448);
     return;
   }
-  const parent = dirname2(dir);
+  const parent = dirname2(name);
   if (!existsSync(parent)) {
     throw new Error(`refusing to create ${dir}: its parent ${parent} does not exist (Helix creates one directory, never a chain)`);
   }
   try {
-    mkdirSync(dir, { mode: 448 });
+    mkdirSync(name, { mode: 448 });
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
-    ensureHelixDir(dir);
+    ensureHelixDir(name);
+  }
+}
+function isSymlinkedHome(home) {
+  try {
+    return lstatSync2(finalName(home)).isSymbolicLink();
+  } catch {
+    return false;
   }
 }
 
@@ -681,7 +703,7 @@ function verifyVerify(record, subkey) {
 }
 
 // src/memory/ledger.ts
-import { readFileSync as readFileSync6, mkdirSync as mkdirSync5, statSync as statSync2 } from "node:fs";
+import { mkdirSync as mkdirSync5, statSync as statSync2, openSync as openSync4, fstatSync as fstatSync2, readSync as readSync2, closeSync as closeSync4, constants } from "node:fs";
 
 // src/memory/firewall.ts
 var VERIFYING_SOURCES = /* @__PURE__ */ new Set(["user", "reality-check"]);
@@ -915,7 +937,13 @@ function deriveState(scopeKey, master, raw) {
   return { entry, journal, macInvalid };
 }
 function readScopeWitness(home, scopeKey) {
-  const path = canonical(witnessPath(home));
+  let path;
+  try {
+    path = canonical(witnessPath(home));
+  } catch (e) {
+    if (e.code === "ENOENT") return { entry: null, journal: null, macInvalid: false };
+    throw e;
+  }
   const store = readStoreFileAt(path);
   return deriveState(scopeKey, tryReadMaster(home), store.scopes[scopeKey]);
 }
@@ -960,10 +988,51 @@ function parseLedgerHealth(text) {
   }
   return { records, skippedNonBlank };
 }
+var LedgerNotRegularError = class extends Error {
+  /** The marker isLedgerNotRegularError reads (a property, never class identity: see isWitnessAdvanceError). */
+  ledgerNotRegular = true;
+  constructor(path) {
+    super(`ledger ${path} is not a regular file`);
+    this.name = "LedgerNotRegularError";
+  }
+};
+function readLedgerFileBytes(path) {
+  let fd;
+  try {
+    fd = openSync4(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (e) {
+    if (e.code !== "ENOENT") {
+      let st = null;
+      try {
+        st = statSync2(path);
+      } catch {
+      }
+      if (st !== null && !st.isFile()) throw new LedgerNotRegularError(path);
+    }
+    throw e;
+  }
+  try {
+    const st = fstatSync2(fd);
+    if (!st.isFile()) throw new LedgerNotRegularError(path);
+    const buf = Buffer.alloc(st.size);
+    let len = 0;
+    while (len < buf.length) {
+      const n = readSync2(fd, buf, len, buf.length - len, null);
+      if (n === 0) break;
+      len += n;
+    }
+    return len === buf.length ? buf : buf.subarray(0, len);
+  } finally {
+    try {
+      closeSync4(fd);
+    } catch {
+    }
+  }
+}
 function readLedgerRaw(path) {
   let bytes;
   try {
-    bytes = readFileSync6(path);
+    bytes = readLedgerFileBytes(path);
   } catch (err) {
     if (err.code === "ENOENT") return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
     throw err;
@@ -1055,7 +1124,7 @@ function looksLikeOurs(name, path) {
     if (!st.isFile()) return false;
     if (name === "ledger-mac-master.key") return st.size === MASTER_KEY_LEN;
     if (name === "witness-log.jsonl") {
-      return readFileSync7(path, "utf8").split("\n").some((l) => {
+      return readFileSync6(path, "utf8").split("\n").some((l) => {
         if (!l.trim()) return false;
         try {
           JSON.parse(l);
@@ -1065,7 +1134,7 @@ function looksLikeOurs(name, path) {
         }
       });
     }
-    const parsed = JSON.parse(readFileSync7(path, "utf8"));
+    const parsed = JSON.parse(readFileSync6(path, "utf8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
     const obj = parsed;
     if (name === "projects.json") {
@@ -1117,6 +1186,8 @@ function normalizeUntrusted(s, maxChars) {
 var UNADOPTED_LEDGER_NOTE = "(an unadopted project memory file is present and excluded from results; adoption requires explicit user approval)";
 var ALIASED_LEDGER_NOTE = "(this project's memory file resolves to another adopted project's memory file and is excluded from results)";
 var ANCESTOR_UNADOPTED_NOTE = "(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval)";
+var SYMLINKED_HOME_NOTE = "helix: NOTE - HELIX_HOME is a symlink; Helix refuses to write through it, so nothing can be saved to memory in this session.";
+var SUPERSEDE_NOTE = "(this Helix memory block supersedes every earlier Helix memory block in this conversation; a fact shown only in an earlier block may have been erased or superseded since, and helix_memory_recall returns the current state)";
 var WITNESS_MISMATCH_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; elevated grades are clamped to Fresh until an authorized re-baseline)";
 var WITNESS_TRANSITION_NOTE = "(a ledger rewrite for this scope was interrupted; its records are excluded until the transition is re-driven or re-baselined)";
 var WITNESS_INIT_NOTE = "(rollback witness: this memory scope has no verified baseline, so a rollback of its current contents would go undetected; the next write records them as the baseline)";
@@ -1198,7 +1269,7 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   const integrityAvailable = opts.integrityAvailable ?? true;
   const projectLayerNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : opts.aliasedPresent ? ALIASED_LEDGER_NOTE : opts.ancestorUnadopted ? ANCESTOR_UNADOPTED_NOTE : null;
   const scaleNote = opts.unionRows !== void 0 && opts.unionRows >= SCALE_ADVISORY_ROWS ? scaleAdvisoryNote(opts.unionRows) : null;
-  const trailer = [projectLayerNote, ...opts.witnessNotes ?? [], scaleNote].filter((n) => n !== null && n !== "");
+  const trailer = [opts.supersedesEarlier ? SUPERSEDE_NOTE : null, projectLayerNote, ...opts.witnessNotes ?? [], scaleNote].filter((n) => n !== null && n !== "");
   const usable = records.filter(({ record }) => record.content.trim() !== "").sort((a, b) => STATE_ORDER[a.record.state] - STATE_ORDER[b.record.state] || b.record.tx.localeCompare(a.record.tx));
   if (usable.length === 0) return trailer.length > 0 ? trailer.join("\n") : "";
   const top = usable.slice(0, maxItems);
@@ -1261,7 +1332,7 @@ function formatSessionStartContext(records, nonce, opts = {}) {
 
 // src/memory/project-root.ts
 import { existsSync as existsSync4, readdirSync as readdirSync4, statSync as statSync3 } from "node:fs";
-import { dirname as dirname7, isAbsolute as isAbsolute2, join as join7, relative, sep } from "node:path";
+import { dirname as dirname7, isAbsolute as isAbsolute2, join as join7, relative, sep as sep2 } from "node:path";
 
 // src/memory/scope-target.ts
 function aliasesGlobalLedger(projectLedger, globalLedger) {
@@ -1274,7 +1345,7 @@ function samePath(a, b) {
 }
 function within(parent, child) {
   const rel = relative(parent, child);
-  return !isAbsolute2(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+  return !isAbsolute2(rel) && rel !== ".." && !rel.startsWith(`..${sep2}`);
 }
 function holdsHelixMemory(dir) {
   try {
@@ -1418,12 +1489,12 @@ function createMetricsSink(path, enabled, deps = {}) {
 }
 
 // src/config.ts
-import { readFileSync as readFileSync8 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 import { join as join8 } from "node:path";
 function readJson(path, onUnusable) {
   let text;
   try {
-    text = readFileSync8(path, "utf8");
+    text = readFileSync7(path, "utf8");
   } catch (e) {
     if (e.code !== "ENOENT") onUnusable(e.message);
     return null;
@@ -1490,6 +1561,20 @@ function gatherScopedRecords({ home, globalLedger, cwd, userHome }) {
 function unionPhysicalRows(replays) {
   return replays.reduce((sum, r) => sum + r.rows, 0);
 }
+function homeNotes(home) {
+  return isSymlinkedHome(home) ? [SYMLINKED_HOME_NOTE] : [];
+}
+var SUPERSEDING_SOURCES = /* @__PURE__ */ new Set(["resume", "compact", "fork"]);
+function hookInputOf(stdinText) {
+  try {
+    const j = JSON.parse(stdinText);
+    const cwd = typeof j?.cwd === "string" ? j.cwd : void 0;
+    const supersedesEarlier = typeof j?.source === "string" && SUPERSEDING_SOURCES.has(j.source);
+    return { cwd, supersedesEarlier };
+  } catch {
+    return { cwd: void 0, supersedesEarlier: false };
+  }
+}
 async function main() {
   try {
     const home = process.env.HELIX_HOME ?? join9(homedir(), ".helix");
@@ -1499,17 +1584,16 @@ async function main() {
       writeSync3(1, `helix: NOTE - trust-store files (${stray.join(", ")}) sit next to the ledger instead of under HELIX_HOME (${home}); if memory tools are not working, this is why. Run the MCP server directly to see whether it refuses to start or just warns, and the full instructions either way.
 `);
     }
+    for (const note of homeNotes(home)) writeSync3(1, `${note}
+`);
     let cwd;
+    let supersedesEarlier = false;
     const stdinText = await readStdinCapped(process.stdin, HOOK_STDIN_MAX_BYTES);
     if (stdinText === null) {
       writeSync3(2, `helix: NOTE - stdin exceeded ${HOOK_STDIN_MAX_BYTES} bytes; proceeding as if stdin were {} (global scope only).
 `);
     } else {
-      try {
-        const j = JSON.parse(stdinText);
-        if (typeof j.cwd === "string") cwd = j.cwd;
-      } catch {
-      }
+      ({ cwd, supersedesEarlier } = hookInputOf(stdinText));
     }
     const { records, integrityAvailable, replays, projectDisposition, witnessNotes } = gatherScopedRecords({ home, globalLedger, cwd });
     const text = formatSessionStartContext(records, newNonce(), {
@@ -1518,7 +1602,8 @@ async function main() {
       aliasedPresent: projectDisposition === "aliased",
       ancestorUnadopted: projectDisposition === "ancestor-unadopted",
       witnessNotes,
-      unionRows: unionPhysicalRows(replays)
+      unionRows: unionPhysicalRows(replays),
+      supersedesEarlier
     });
     if (text !== "") writeSync3(1, text + "\n");
     const sink = createMetricsSink(join9(home, "metrics.jsonl"), metricsEnabledFromGlobalConfig(home));
@@ -1539,6 +1624,9 @@ async function main() {
 }
 if (isEntryPoint(import.meta.url)) void main();
 export {
+  SUPERSEDING_SOURCES,
   gatherScopedRecords,
+  homeNotes,
+  hookInputOf,
   unionPhysicalRows
 };

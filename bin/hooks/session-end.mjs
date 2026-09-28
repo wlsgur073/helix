@@ -40,15 +40,30 @@ function buildSessionEndRecord(stdinText, now = () => (/* @__PURE__ */ new Date(
 
 // src/memory/home-permissions.ts
 import { lstatSync, chmodSync, readdirSync, mkdirSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, sep } from "node:path";
+function finalName(dir) {
+  let n = dir;
+  for (; ; ) {
+    if (n.length > 1 && (n.endsWith("/") || n.endsWith(sep))) {
+      n = n.slice(0, -1);
+      continue;
+    }
+    if (n.length > 2 && (n.endsWith("/.") || n.endsWith(`${sep}.`))) {
+      n = n.slice(0, -2);
+      continue;
+    }
+    return n;
+  }
+}
 function ensureHelixDir(dir) {
   if (process.platform === "win32") {
     mkdirSync(dir, { recursive: true });
     return;
   }
+  const name = finalName(dir);
   let st = null;
   try {
-    st = lstatSync(dir);
+    st = lstatSync(name);
   } catch {
     st = null;
   }
@@ -59,18 +74,18 @@ function ensureHelixDir(dir) {
     if (uid !== void 0 && st.uid !== uid) {
       throw new Error(`refusing to use ${dir}: it is owned by uid ${st.uid}, not by this user (${uid})`);
     }
-    if ((st.mode & 63) !== 0) chmodSync(dir, 448);
+    if ((st.mode & 63) !== 0) chmodSync(name, 448);
     return;
   }
-  const parent = dirname(dir);
+  const parent = dirname(name);
   if (!existsSync(parent)) {
     throw new Error(`refusing to create ${dir}: its parent ${parent} does not exist (Helix creates one directory, never a chain)`);
   }
   try {
-    mkdirSync(dir, { mode: 448 });
+    mkdirSync(name, { mode: 448 });
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
-    ensureHelixDir(dir);
+    ensureHelixDir(name);
   }
 }
 

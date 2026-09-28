@@ -5,11 +5,11 @@ import { isAbsolute as isAbsolute2, join as join7 } from "node:path";
 
 // src/memory/store.ts
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync4, readFileSync as readFileSync8, statSync as statSync3 } from "node:fs";
+import { existsSync as existsSync4, statSync as statSync3 } from "node:fs";
 import { dirname as dirname9 } from "node:path";
 
 // src/memory/ledger.ts
-import { readFileSync as readFileSync6, mkdirSync as mkdirSync5, statSync as statSync2 } from "node:fs";
+import { mkdirSync as mkdirSync5, statSync as statSync2, openSync as openSync4, fstatSync as fstatSync2, readSync as readSync2, closeSync as closeSync4, constants } from "node:fs";
 import { randomBytes as randomBytes5 } from "node:crypto";
 import { dirname as dirname7 } from "node:path";
 
@@ -756,15 +756,30 @@ function sweepOrphanTmps(artifactPath, opts = {}) {
 
 // src/memory/home-permissions.ts
 import { lstatSync as lstatSync2, chmodSync, readdirSync as readdirSync3, mkdirSync, existsSync } from "node:fs";
-import { join as join3, dirname as dirname3 } from "node:path";
+import { join as join3, dirname as dirname3, sep } from "node:path";
+function finalName(dir) {
+  let n = dir;
+  for (; ; ) {
+    if (n.length > 1 && (n.endsWith("/") || n.endsWith(sep))) {
+      n = n.slice(0, -1);
+      continue;
+    }
+    if (n.length > 2 && (n.endsWith("/.") || n.endsWith(`${sep}.`))) {
+      n = n.slice(0, -2);
+      continue;
+    }
+    return n;
+  }
+}
 function ensureHelixDir(dir) {
   if (process.platform === "win32") {
     mkdirSync(dir, { recursive: true });
     return;
   }
+  const name = finalName(dir);
   let st = null;
   try {
-    st = lstatSync2(dir);
+    st = lstatSync2(name);
   } catch {
     st = null;
   }
@@ -775,18 +790,18 @@ function ensureHelixDir(dir) {
     if (uid !== void 0 && st.uid !== uid) {
       throw new Error(`refusing to use ${dir}: it is owned by uid ${st.uid}, not by this user (${uid})`);
     }
-    if ((st.mode & 63) !== 0) chmodSync(dir, 448);
+    if ((st.mode & 63) !== 0) chmodSync(name, 448);
     return;
   }
-  const parent = dirname3(dir);
+  const parent = dirname3(name);
   if (!existsSync(parent)) {
     throw new Error(`refusing to create ${dir}: its parent ${parent} does not exist (Helix creates one directory, never a chain)`);
   }
   try {
-    mkdirSync(dir, { mode: 448 });
+    mkdirSync(name, { mode: 448 });
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
-    ensureHelixDir(dir);
+    ensureHelixDir(name);
   }
 }
 
@@ -1506,7 +1521,13 @@ function deriveState(scopeKey, master, raw) {
   return { entry, journal, macInvalid };
 }
 function readScopeWitness(home, scopeKey) {
-  const path = canonical(witnessPath(home));
+  let path;
+  try {
+    path = canonical(witnessPath(home));
+  } catch (e) {
+    if (e.code === "ENOENT") return { entry: null, journal: null, macInvalid: false };
+    throw e;
+  }
   const store = readStoreFileAt(path);
   return deriveState(scopeKey, tryReadMaster(home), store.scopes[scopeKey]);
 }
@@ -1735,10 +1756,51 @@ function parseLedgerHealth(text) {
 function parseLedgerText(text) {
   return parseLedgerHealth(text).records;
 }
+var LedgerNotRegularError = class extends Error {
+  /** The marker isLedgerNotRegularError reads (a property, never class identity: see isWitnessAdvanceError). */
+  ledgerNotRegular = true;
+  constructor(path) {
+    super(`ledger ${path} is not a regular file`);
+    this.name = "LedgerNotRegularError";
+  }
+};
+function readLedgerFileBytes(path) {
+  let fd;
+  try {
+    fd = openSync4(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (e) {
+    if (e.code !== "ENOENT") {
+      let st = null;
+      try {
+        st = statSync2(path);
+      } catch {
+      }
+      if (st !== null && !st.isFile()) throw new LedgerNotRegularError(path);
+    }
+    throw e;
+  }
+  try {
+    const st = fstatSync2(fd);
+    if (!st.isFile()) throw new LedgerNotRegularError(path);
+    const buf = Buffer.alloc(st.size);
+    let len = 0;
+    while (len < buf.length) {
+      const n = readSync2(fd, buf, len, buf.length - len, null);
+      if (n === 0) break;
+      len += n;
+    }
+    return len === buf.length ? buf : buf.subarray(0, len);
+  } finally {
+    try {
+      closeSync4(fd);
+    } catch {
+    }
+  }
+}
 function parseLedger(path) {
   let text;
   try {
-    text = readFileSync6(path, "utf8");
+    text = readLedgerFileBytes(path).toString("utf8");
   } catch (err) {
     if (err.code === "ENOENT") return [];
     throw err;
@@ -1747,7 +1809,7 @@ function parseLedger(path) {
 }
 function readLedgerBytes(path) {
   try {
-    return readFileSync6(path);
+    return readLedgerFileBytes(path);
   } catch (err) {
     if (err.code === "ENOENT") return Buffer.alloc(0);
     throw err;
@@ -1756,7 +1818,7 @@ function readLedgerBytes(path) {
 function readLedgerRaw(path) {
   let bytes;
   try {
-    bytes = readFileSync6(path);
+    bytes = readLedgerFileBytes(path);
   } catch (err) {
     if (err.code === "ENOENT") return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
     throw err;
@@ -1943,6 +2005,7 @@ function modeOf(path) {
 import { dirname as dirname8 } from "node:path";
 import { mkdirSync as mkdirSync6 } from "node:fs";
 function appendWitnessedUnlocked(ledger, record, home, projectRoot, op) {
+  ensureHelixDir(home);
   const key = scopeKeyOf(home, projectRoot);
   const bytes = readLedgerBytes(ledger);
   const preVerdict = classifyState(readScopeWitness(home, key), bytes);
@@ -1977,6 +2040,7 @@ function appendWitnessedUnlocked(ledger, record, home, projectRoot, op) {
   }
 }
 function appendWitnessed(ledger, record, home, projectRoot, op) {
+  ensureHelixDir(home);
   mkdirSync6(dirname8(ledger), { recursive: true });
   withFileLock(ledger, () => appendWitnessedUnlocked(ledger, record, home, projectRoot, op));
 }
@@ -2296,21 +2360,21 @@ function selectWriteRedactions(content, spans) {
 }
 
 // src/memory/reality-check.ts
-import { existsSync as existsSync3, openSync as openSync4, fstatSync as fstatSync2, readSync as readSync2, closeSync as closeSync4, constants } from "node:fs";
+import { existsSync as existsSync3, openSync as openSync5, fstatSync as fstatSync3, readSync as readSync3, closeSync as closeSync5, constants as constants2 } from "node:fs";
 var INDETERMINATE = { ran: false, indeterminate: true, passed: false };
 var MAX_FILE_BYTES = 5e6;
 function containsBounded(path, pattern) {
   let fd = null;
   try {
-    fd = openSync4(path, constants.O_RDONLY | constants.O_NONBLOCK);
-    const st = fstatSync2(fd);
+    fd = openSync5(path, constants2.O_RDONLY | constants2.O_NONBLOCK);
+    const st = fstatSync3(fd);
     if (!st.isFile()) return INDETERMINATE;
     if (st.size > MAX_FILE_BYTES) return INDETERMINATE;
     const cap = Math.min(st.size, MAX_FILE_BYTES) + 1;
     const buf = Buffer.alloc(cap);
     let len = 0;
     for (; ; ) {
-      const n = readSync2(fd, buf, len, cap - len, null);
+      const n = readSync3(fd, buf, len, cap - len, null);
       if (n === 0) break;
       len += n;
       if (len === cap) return INDETERMINATE;
@@ -2319,7 +2383,7 @@ function containsBounded(path, pattern) {
   } finally {
     if (fd !== null) {
       try {
-        closeSync4(fd);
+        closeSync5(fd);
       } catch {
       }
     }
@@ -2354,7 +2418,7 @@ function checkBinding(content, check) {
 }
 
 // src/memory/expansion.ts
-import { readFileSync as readFileSync7 } from "node:fs";
+import { readFileSync as readFileSync6 } from "node:fs";
 import { fileURLToPath } from "node:url";
 var EXP_THETA = 0.5;
 var EXP_K = 8;
@@ -2386,7 +2450,7 @@ function defaultExpansion() {
   let txt;
   for (const u of candidates) {
     try {
-      txt = readFileSync7(fileURLToPath(u), "utf8");
+      txt = readFileSync6(fileURLToPath(u), "utf8");
       break;
     } catch {
     }
@@ -3238,8 +3302,9 @@ var MemoryStore = class {
     if (p && disposition === "owned") addScope(p.ledger, "project");
     return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: asOfWitnessNotes(collectWitnessNotes(verdicts)) };
   }
-  /** Explicitly adopt the active project ledger (trust its current contents). For team-shared
-   *  ledgers. Throws if no project layer is active, or if `expectedRoot` names a different one.
+  /** Explicitly adopt the active project ledger (trust its current contents): a pre-existing ledger
+   *  Helix did not create, or a parent project. Throws if no project layer is active, or if
+   *  `expectedRoot` names a different one.
    *
    *  The caller must NAME the root it means. Adoption moves a trust boundary — it is the only other
    *  tool besides confirm that changes what Helix trusts — and a zero-argument call gives the
@@ -3352,13 +3417,7 @@ var MemoryStore = class {
     const candidates = [this.global, ...projectActive ? [p.ledger] : []];
     if (permanent) {
       for (const c of candidates) {
-        let text;
-        try {
-          text = readFileSync8(c, "utf8");
-        } catch (err) {
-          if (err.code === "ENOENT") continue;
-          throw err;
-        }
+        const text = readLedgerBytes(c).toString("utf8");
         if (parseLedgerHealth(text).skippedNonBlank > 0) {
           throw new EraseRefusedError("erase: a ledger has skipped (corrupt/torn) lines \u2014 pass an explicit scope");
         }

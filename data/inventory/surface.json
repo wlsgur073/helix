@@ -2,7 +2,7 @@
   "tools": [
     {
       "name": "helix_codex_status",
-      "description": "Show whether Helix is connected to Codex (CLI/version, login, auth mode), the dual-verify config, and the content-log state. Free — no metered Codex call.",
+      "description": "Show the local Codex setup (CLI/version, whether a stored login exists — not checked with the server, so only a real dual-verify call proves it — and auth mode), the dual-verify config, and the content-log state. Free — no metered Codex call.",
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -11,7 +11,7 @@
     },
     {
       "name": "helix_dual_verify",
-      "description": "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor; an omitted stakes counts as 'low' — omission is not an exemption. quotedMemory declares memories this call deliberately quotes, each {id, contentDigest} pair a proof of read; resolved pairs are exempt from the memory-echo guard, unresolvable pairs are discarded.",
+      "description": "Ask Codex the same question and compare its independent answer with yours (config-gated; spends the user's Codex quota). In compare mode (the default) Codex receives only the question: helixAnswer stays local and feeds the agreement map; only critique mode sends helixAnswer for Codex to critique. Optional stakes are checked against the configured floor; an omitted stakes counts as 'low' — omission is not an exemption. quotedMemory declares memories this call deliberately quotes, each {id, contentDigest} pair a proof of read; resolved pairs are exempt from the memory-echo guard, unresolvable pairs are discarded.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -23,7 +23,7 @@
           "helixAnswer": {
             "type": "string",
             "maxLength": 65536,
-            "description": "Your answer to cross-validate (max 65536 characters)."
+            "description": "Your own answer (max 65536 characters). Compare mode never sends it to Codex (it feeds only the agreement map); critique mode sends it for critique."
           },
           "stakes": {
             "type": "string",
@@ -70,7 +70,7 @@
     },
     {
       "name": "helix_memory_adopt",
-      "description": "Trust the active project's memory file: a pre-existing one Helix did not create, or a parent-directory project this session was started below. Only for a ledger the user recognizes (e.g. a team-shared one, or a parent project they created) — never one in a shared directory such as /tmp. Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean: the active scope is the project whose .helix folder is nearest at or above the session directory, and any other root is refused and adopts nothing. This moves a trust boundary — everything in that ledger becomes recallable — so the user, not Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.",
+      "description": "Trust the active project's memory file: a pre-existing one Helix did not create, or a parent-directory project this session was started below. Only for a ledger the user recognizes (e.g. a parent project they created) — never one in a shared directory such as /tmp. Default-deny: an unrecognized project ledger is ignored until adopted. Pass the project root you mean: the active scope is the project whose .helix folder is nearest at or above the session directory, and any other root is refused and adopts nothing. This moves a trust boundary — everything in that ledger becomes recallable — so the user, not Helix, is the authority: call only on explicit user instruction, and do not allow-list this tool.",
       "inputSchema": {
         "type": "object",
         "properties": {
