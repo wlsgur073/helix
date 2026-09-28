@@ -29,11 +29,13 @@ const cfg = (over: Partial<HelixConfig['dualVerify']> = {}): HelixConfig => {
 const LIVE: CodexStatus = { cliFound: true, version: '0.144.1', available: true, authMode: 'chatgpt' };
 
 describe('handleCodexStatus', () => {
-  it('found + logged-in ChatGPT subscription renders version, connection, inferred auth mode', async () => {
+  it('found + logged-in ChatGPT subscription renders version, the stored-login line, inferred auth mode (H12)', async () => {
     const res = await handleCodexStatus(deps({ cliFound: true, version: '0.139.0', available: true, authMode: 'chatgpt' }));
     expect(text(res)).toContain('Helix');
     expect(text(res)).toContain('codex-cli 0.139.0');
-    expect(text(res)).toMatch(/logged in/i);
+    // `codex login status` reads the LOCAL credential only; a server-revoked token passes it.
+    expect(text(res)).toMatch(/- login:\s+stored credential found \(not checked with the server\)/);
+    expect(text(res)).not.toMatch(/connection:\s+logged in/);
     expect(text(res)).toMatch(/ChatGPT subscription \(inferred\)/i);
   });
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { basename, dirname, join } from 'node:path';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { buildCodexExecArgs, createCodexRunner, interpretDoctorModel, interpretPreflight, interpretStatus, interpretWhereOutput, treeKillSpec } from '../../src/verify/codex.js';
+import { buildCodexExecArgs, createCodexRunner, interpretDoctorModel, interpretPreflight, interpretStatus, interpretWhereOutput, isCodexAuthRejection, treeKillSpec } from '../../src/verify/codex.js';
 
 describe('buildCodexExecArgs (prompt-via-stdin contract)', () => {
   it('builds the read-only, ephemeral, output-to-file command ending with "-" (verified vs codex-cli 0.144.1)', () => {
@@ -347,5 +347,38 @@ describe('interpretDoctorModel (free `codex doctor --json` probe)', () => {
   it('rejects the nested shape: `checks` is a flat map keyed by dotted check ids, not a tree', () => {
     // The design originally specified checks.config.load.details.model. No codex build emits that.
     expect(interpretDoctorModel(JSON.stringify({ checks: { config: { load: { details: { model: 'gpt-5.6-sol' } } } } }))).toBeNull();
+  });
+});
+
+describe('createCodexRunner (auth rejection: H12)', () => {
+  const inv = { file: 'codex', argsPrefix: [] };
+  // Recorded 2026-09-27 on the main PC (dogfood transcript), request id and cf-ray removed.
+  const REVOKED = '2026-09-27T05:39:30.650162Z ERROR codex_models_manager::manager: failed to refresh available models: unexpected status 401 Unauthorized: Encountered invalidated oauth token for user, failing request, url: https://chatgpt.com/backend-api/codex/models?client_version=0.157.1';
+  const failWith = (stderr: string) => async () => ({ code: 1, stdout: '', stderr });
+
+  it('flags a provider rejection of the stored login, read from the stderr the error string truncates', async () => {
+    // 600 characters of preamble push the marker past the 500 the error string keeps: the
+    // classification must read the whole captured stderr.
+    const res = await createCodexRunner(async () => inv, failWith(`${'x'.repeat(600)}\n${REVOKED}`))('q');
+    expect(res).toMatchObject({ ok: false, authRejected: true });
+    expect((res as { error: string }).error.length).toBeLessThanOrEqual('codex exited 1: '.length + 500);
+  });
+
+  it('does not flag any other failure', async () => {
+    for (const stderr of ['codex timed out after 120000ms', 'Error: model gpt-x not found', 'unexpected status 429 Too Many Requests', '']) {
+      const res = await createCodexRunner(async () => inv, failWith(stderr))('q');
+      expect(res.ok, stderr).toBe(false);
+      expect('authRejected' in res, stderr).toBe(false);
+    }
+  });
+});
+
+describe('isCodexAuthRejection (H12)', () => {
+  it('matches the recorded rejection markers case-insensitively, and nothing generic', () => {
+    expect(isCodexAuthRejection('unexpected status 401 Unauthorized: x')).toBe(true);
+    expect(isCodexAuthRejection('auth error: token_revoked')).toBe(true);
+    expect(isCodexAuthRejection('Encountered INVALIDATED OAUTH token')).toBe(true);
+    expect(isCodexAuthRejection('status 401')).toBe(false);
+    expect(isCodexAuthRejection('unexpected status 403 Forbidden')).toBe(false);
   });
 });

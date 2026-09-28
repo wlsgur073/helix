@@ -218,7 +218,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   server.registerTool('helix_codex_status', {
     title: 'Codex status',
-    description: 'Show whether Helix is connected to Codex (CLI/version, login, auth mode), the dual-verify config, and the content-log state. Free — no metered Codex call.',
+    description: 'Show the local Codex setup (CLI/version, whether a stored login exists — not checked with the server, so only a real dual-verify call proves it — and auth mode), the dual-verify config, and the content-log state. Free — no metered Codex call.',
     inputSchema: {},
   }, async () => m.runOp('helix_codex_status', () => handleCodexStatus(codexStatusDeps)));
 

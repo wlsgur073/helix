@@ -591,3 +591,19 @@ describe('G1: what the gate scanned is what the runner is sent', () => {
     expect(runnerSaw).not.toBe(question);        // and NOT the raw, un-normalized question
   });
 });
+
+describe('dualVerify: auth rejection pass-through (H12)', () => {
+  it('carries the runner authRejected flag onto the error result; the persisted reason stays content-free', async () => {
+    const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' },
+      deps({ config: enabled(), runner: async () => ({ ok: false, error: 'codex exited 1: unexpected status 401 Unauthorized', authRejected: true }) }));
+    expect(r.outcome).toBe('error');
+    expect(r.authRejected).toBe(true);
+    expect(persistedReason(r)).toBe('codex run failed');
+  });
+
+  it('sets no flag for any other runner failure', async () => {
+    const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' },
+      deps({ config: enabled(), runner: async () => ({ ok: false, error: 'timeout' }) }));
+    expect('authRejected' in r).toBe(false);
+  });
+});

@@ -528,7 +528,7 @@ const AUTH_MODE_LABEL: Record<CodexStatus['authMode'], string> = {
   unknown: 'unknown',
 };
 
-/** Free, on-demand Helix<->Codex visibility: CLI/version, connection, auth mode, dual-verify
+/** Free, on-demand Helix<->Codex visibility: CLI/version, stored login, auth mode, dual-verify
  *  state, and the content-log ON/OFF state. Always returns a readable block (never throws). */
 export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResult> {
   const s = await deps.inspect();
@@ -536,8 +536,10 @@ export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResu
   const cli = s.cliFound && s.version
     ? `found — codex-cli ${s.version}`
     : 'NOT FOUND on PATH';
-  const connection = s.available
-    ? 'logged in'
+  // H12: `codex login status` reads the LOCAL credential only; a token the server revoked still passes
+  // it. Say exactly that, so the line is never read as a verified connection.
+  const login = s.available
+    ? 'stored credential found (not checked with the server)'
     : 'not logged in — run `codex login`';
   const auth = AUTH_MODE_LABEL[s.authMode];
   const dualVerify = dv.enabled ? `enabled, mode=${dv.mode}` : 'disabled';
@@ -577,7 +579,7 @@ export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResu
       (p) => `! ${JSON.stringify(p)} could not be read — everything it sets is ignored; the values below are DEFAULTS`,
     ),
     `- codex CLI:      ${cli}`,
-    `- connection:     ${connection}`,
+    `- login:          ${login}`,
     `- auth mode:      ${auth}`,
     `- dual-verify:    ${dualVerify}`,
     // H4: the floor decides whether a call runs at all; a caller must see it from the free
@@ -800,7 +802,11 @@ export async function handleDualVerify(
       // placement as every other trusted line (F1a).
       if (result.attempted) lines.push(egressLine(result.egress));
       lines.push(
-        'dual-verify did not run: codex run failed. (No Codex answer — nothing fabricated.)',
+        // H12: a rejected stored login gets a headline that names its remedy (`codex login status`
+        // could not have caught it). Constant text chosen by a boolean; the stderr stays framed below.
+        result.authRejected
+          ? 'dual-verify did not run: Codex rejected the stored login (codex login renews it). (No Codex answer — nothing fabricated.)'
+          : 'dual-verify did not run: codex run failed. (No Codex answer — nothing fabricated.)',
         frameOpen('DUAL-VERIFY ERROR', nonce),
         DATA_SEMANTICS,
         datamark(result.reason ?? '', 'DATA| '),

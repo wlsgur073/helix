@@ -8,7 +8,17 @@ import { sweepScratchRoot, ensureScratchRoot } from './scratch-gc.js';
 
 const execFileAsync = promisify(execFile);
 
-export type CodexResult = { ok: true; answer: string } | { ok: false; error: string };
+export type CodexResult = { ok: true; answer: string } | { ok: false; error: string; authRejected?: true };
+
+/** H12: did codex's stderr report that the provider REJECTED the stored login? `codex login status`
+ *  reads only the local credential, so a server-revoked token passes it and fails the first metered
+ *  call; this lets that failure name its cause. Markers recorded from the 2026-09-27 failure (a 401
+ *  on the model-list refresh, auth error token_revoked). stderr is outside input, so the answer only
+ *  picks a constant headline; the raw text stays inside the handler's DATA frame either way. */
+export function isCodexAuthRejection(stderr: string): boolean {
+  return /401 Unauthorized|token_revoked|invalidated oauth/i.test(stderr);
+}
+
 export interface CodexRunOptions {
   model?: string | null;
   effort?: string | null;
@@ -378,7 +388,13 @@ export function createCodexRunner(
       const timeoutMs = Math.min(opts.timeoutMs ?? 120_000, MAX_TIMEOUT_MS);
       const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir, opts.signal);
       if (code !== 0) {
-        return { ok: false, error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ''}` };
+        // Classify the WHOLE captured stderr: the error string keeps only its first 500 characters, and
+        // the rejection line can follow a log preamble.
+        return {
+          ok: false,
+          error: `codex exited ${code}${stderr ? `: ${stderr.trim().slice(0, 500)}` : ''}`,
+          ...(isCodexAuthRejection(stderr) ? { authRejected: true as const } : {}),
+        };
       }
       let answer = '';
       try { answer = readFileSync(outFile, 'utf8').trim(); } catch { /* missing file -> no output */ }

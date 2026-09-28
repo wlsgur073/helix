@@ -995,3 +995,22 @@ describe('X2: audit distinguishes the deciding leg from released legs', () => {
     expect(row.releasedLegs ?? []).toEqual([]);
   });
 });
+
+describe('H12: a provider rejection of the stored login names codex login', () => {
+  it('uses the auth headline, keeps the stderr framed, and leaves the audit reason content-free', async () => {
+    const d = deps({ runner: async () => ({ ok: false, error: 'codex exited 1: unexpected status 401 Unauthorized: Encountered invalidated oauth token', authRejected: true }) });
+    const res = await handleDualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' }, d);
+    const lines = text(res).split('\n');
+    expect(lines[0]).toBe('egress: pass');
+    expect(lines[1]).toBe('dual-verify did not run: Codex rejected the stored login (codex login renews it). (No Codex answer — nothing fabricated.)');
+    expect(lines[2]).toContain('DUAL-VERIFY ERROR');
+    expect(text(res)).toContain('DATA| codex run failed: codex exited 1: unexpected status 401 Unauthorized');
+    expect(JSON.parse(readFileSync(d.auditPath, 'utf8').trim()).reason).toBe('codex run failed');
+  });
+
+  it('keeps the generic headline for every other runner failure', async () => {
+    const d = deps({ runner: async () => ({ ok: false, error: 'codex timed out after 120000ms' }) });
+    const res = await handleDualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' }, d);
+    expect(text(res).split('\n')[1]).toBe('dual-verify did not run: codex run failed. (No Codex answer — nothing fabricated.)');
+  });
+});

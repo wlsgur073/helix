@@ -71,6 +71,9 @@ export interface DualVerifyResult {
    *  refusal below is checked BEFORE `classifyEgress` is called (it reports `gates:
    *  stoppedAt('egress')` but nothing was classified yet), so that one return carries no verdict here. */
   egress?: EgressVerdict;
+  /** H12: the runner saw the provider reject the stored login (codex.ts isCodexAuthRejection). LIVE
+   *  only: it picks the handler's headline; audit.jsonl keeps the content-free 'codex run failed'. */
+  authRejected?: true;
   /** H7 gate trace. Present on every return that did NOT run. */
   gates?: GateTrace;
   /** A2 diagnosis for an echo block: per still-blocking record, the runs of the caller's own payload
@@ -207,7 +210,10 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
     signal: params.signal,
   });
   if (!res.ok) {
-    return { ran: false, attempted: true, outcome: 'error', reason: `codex run failed: ${res.error}`, egress: verdict, gates: stoppedAt('runner') };
+    return {
+      ran: false, attempted: true, outcome: 'error', reason: `codex run failed: ${res.error}`, egress: verdict, gates: stoppedAt('runner'),
+      ...(res.authRejected ? { authRejected: true as const } : {}),
+    };
   }
 
   if (mode === 'critique') {
