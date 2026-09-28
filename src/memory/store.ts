@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
 import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, type CompactionStats, type LedgerPath } from './ledger.js';
@@ -1177,12 +1177,9 @@ export class MemoryStore {
     // right-to-erasure via the tool available even when a candidate has a torn/partial line.
     if (permanent) {
       for (const c of candidates) {
-        let text: string;
-        try { text = readFileSync(c, 'utf8'); }
-        catch (err) {
-          if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue; // no ledger => no corruption
-          throw err;
-        }
+        // IT-H4: the same file-type-checked read as every ledger reader (a FIFO candidate used to block
+        // here forever). A missing candidate reads as empty, which has no corrupt lines.
+        const text = readLedgerBytes(c).toString('utf8');
         if (parseLedgerHealth(text).skippedNonBlank > 0) {
           throw new EraseRefusedError('erase: a ledger has skipped (corrupt/torn) lines — pass an explicit scope');
         }

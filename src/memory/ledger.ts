@@ -1,4 +1,4 @@
-import { readFileSync, mkdirSync, statSync, type Stats } from 'node:fs';
+import { mkdirSync, statSync, openSync, fstatSync, readSync, closeSync, constants, type Stats } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
@@ -236,11 +236,53 @@ export function parseLedgerText(text: string): MemoryRecord[] {
   return parseLedgerHealth(text).records;
 }
 
+/** IT-H4: a ledger path that names something other than a regular file — a FIFO, a character or
+ *  block device, a directory, a socket — reached directly or through a symlink. */
+export class LedgerNotRegularError extends Error {
+  /** The marker isLedgerNotRegularError reads (a property, never class identity: see isWitnessAdvanceError). */
+  readonly ledgerNotRegular = true;
+  constructor(path: string) {
+    super(`ledger ${path} is not a regular file`);
+    this.name = 'LedgerNotRegularError';
+  }
+}
+
+export const isLedgerNotRegularError = (e: unknown): boolean =>
+  e instanceof Error && (e as { ledgerNotRegular?: unknown }).ledgerNotRegular === true;
+
+/** The ONE ledger file read (IT-H4), shared by parseLedger / readLedgerBytes / readLedgerRaw.
+ *  readFileSync asked nothing about WHAT the path is: a FIFO with no writer blocks open(2) forever and
+ *  a character device reads without bound. Neither is an I/O error, so no caller's catch ever saw
+ *  them and the server's single thread simply stopped (reality-check.ts containsBounded documents the
+ *  same class). Three things make this safe: O_NONBLOCK on the open, so a writer-less FIFO opens
+ *  instead of blocking; fstat on the DESCRIPTOR, which asks about the object actually opened and
+ *  rejects everything that is not a regular file; and a read bounded by that fstat's size. For a
+ *  regular file this returns what readFileSync returned (Node reads a regular file up to its fstat
+ *  size too). ENOENT propagates unchanged so each caller keeps its absent-file convention. No size
+ *  cap (spec decision Q3): a ledger that grew legitimately must stay readable. */
+function readLedgerFileBytes(path: string): Buffer {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) throw new LedgerNotRegularError(path);
+    const buf = Buffer.alloc(st.size);
+    let len = 0;
+    while (len < buf.length) {
+      const n = readSync(fd, buf, len, buf.length - len, null);
+      if (n === 0) break;   // shrank since the fstat: return what is there
+      len += n;
+    }
+    return len === buf.length ? buf : buf.subarray(0, len);
+  } finally {
+    try { closeSync(fd); } catch { /* closing a finished descriptor changes nothing */ }
+  }
+}
+
 /** Read every record from the ledger, in append order. Missing file -> []. */
 export function parseLedger(path: LedgerPath): MemoryRecord[] {
   let text: string;
   try {
-    text = readFileSync(path, 'utf8');
+    text = readLedgerFileBytes(path).toString('utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw err;
@@ -257,7 +299,7 @@ export function parseLedger(path: LedgerPath): MemoryRecord[] {
  *  readLedgerRaw below: missing file -> an empty buffer, never a throw. */
 export function readLedgerBytes(path: LedgerPath): Buffer {
   try {
-    return readFileSync(path);
+    return readLedgerFileBytes(path);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0);
     throw err;
@@ -278,7 +320,7 @@ export function readLedgerBytes(path: LedgerPath): Buffer {
 export function readLedgerRaw(path: LedgerPath): { bytes: Buffer; records: MemoryRecord[]; skippedNonBlank: number } {
   let bytes: Buffer;
   try {
-    bytes = readFileSync(path);
+    bytes = readLedgerFileBytes(path);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
     throw err;

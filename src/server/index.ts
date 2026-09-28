@@ -4,7 +4,7 @@ import { join, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { MemoryStore } from '../memory/store.js';
-import { parseLedger } from '../memory/ledger.js';
+import { parseLedger, isLedgerNotRegularError } from '../memory/ledger.js';
 import { scanLegacyElevated, classifyLegacyOffenders } from '../memory/legacy-scan.js';
 import { hardenHomePermissions } from '../memory/home-permissions.js';
 import { subkeyForScope } from '../memory/verified-read.js';
@@ -190,7 +190,12 @@ for (const { ledger, root } of scanScopes) {
     const { forged, unverifiable } = classifyLegacyOffenders(records, scan.offenders, !!subkey);
     if (forged.length > 0) process.stderr.write(`helix: WARNING - ${forged.length} forged/legacy elevated record(s) in ${ledger}; trust states there are not tool-minted\n`); // ASCII only
     if (unverifiable.length > 0) process.stderr.write(`helix: WARNING - ${unverifiable.length} unverifiable verify record(s) in ${ledger}; no signing key resolved for this scope, so those grades will not apply\n`); // ASCII only
-  } catch { /* advisory: never block startup */ }
+  } catch (e) {
+    // IT-H4: a FIFO, device or directory at a ledger path used to stall startup here (the read never
+    // returned, so no catch saw it); it now throws at once, and the operator is told which ledger was
+    // skipped. Anything else stays silent, as before: advisory only, never block startup.
+    if (isLedgerNotRegularError(e)) process.stderr.write(`helix: WARNING - ${ledger} is not a regular file; skipped its integrity scan\n`); // ASCII only
+  }
 }
 
 const server = buildServer(store, {
