@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { formatSessionStartContext } from '../../src/hooks/format-context.js';
+import { SUPERSEDE_NOTE, UNADOPTED_LEDGER_NOTE } from '../../src/memory/content-frame.js';
 import type { MemoryRecord, MemoryState, BlastRadius, ScopedRecord } from '../../src/types.js';
 
 const N = 'b'.repeat(32); // fixed test nonce
@@ -295,5 +296,35 @@ describe('formatSessionStartContext', () => {
     );
     expect(out).toContain('DATA[Fresh:global]| global pref');
     expect(out).toContain('DATA[Fresh:project]| project fact');
+  });
+});
+
+describe('supersede note for a resumed, compacted or forked session (IT-M1)', () => {
+  it('renders the note alone when memory is empty', () => {
+    expect(formatSessionStartContext([], N, { supersedesEarlier: true })).toBe(SUPERSEDE_NOTE);
+  });
+
+  it('leads the trailer, right after the frame, when memory is present', () => {
+    const out = formatSessionStartContext(g([rec({ content: 'user prefers Korean replies' })]), N, { supersedesEarlier: true, unadoptedPresent: true });
+    const lines = out.split('\n');
+    const close = lines.indexOf(`===HELIX ${N} END===`);
+    expect(lines[close + 1]).toBe(SUPERSEDE_NOTE);
+    expect(lines[close + 2]).toBe(UNADOPTED_LEDGER_NOTE);
+  });
+
+  it('is outside the character budget, like every trailer note', () => {
+    const many = g(Array.from({ length: 40 }, (_, i) => rec({ content: `fact number ${i} `.repeat(10) })));
+    const out = formatSessionStartContext(many, N, { supersedesEarlier: true, maxChars: 600 });
+    expect(out.endsWith(SUPERSEDE_NOTE)).toBe(true);
+  });
+
+  it('is absent by default', () => {
+    expect(formatSessionStartContext([], N)).toBe('');
+    expect(formatSessionStartContext(g([rec({ content: 'user prefers Korean replies' })]), N)).not.toContain(SUPERSEDE_NOTE);
+  });
+
+  it('is a constant ASCII statement', () => {
+    expect(SUPERSEDE_NOTE).toMatch(/^[\x20-\x7e]+$/);
+    expect(SUPERSEDE_NOTE.startsWith('(this Helix memory block supersedes every earlier Helix memory block')).toBe(true);
   });
 });

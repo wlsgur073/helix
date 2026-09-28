@@ -82,6 +82,15 @@ export const ANCESTOR_UNADOPTED_NOTE =
 export const SYMLINKED_HOME_NOTE =
   'helix: NOTE - HELIX_HOME is a symlink; Helix refuses to write through it, so nothing can be saved to memory in this session.';
 
+/** IT-M1: rendered by the SessionStart hook when the session continues an earlier conversation
+ *  (source resume / compact / fork), whose earlier Helix block the host may still hold — it re-inserts
+ *  that block on resume. States only what is true of every such block: a fact that appears ONLY in an
+ *  earlier block may have been erased or superseded since. "Is no longer current" would be false for
+ *  a live fact that this block's item cap left out. Same constraints as every trusted note: constant,
+ *  no interpolation, no path, no imperative; ASCII only (hook stdout). */
+export const SUPERSEDE_NOTE =
+  '(this Helix memory block supersedes every earlier Helix memory block in this conversation; a fact shown only in an earlier block may have been erased or superseded since, and helix_memory_recall returns the current state)';
+
 // Rollback-witness disclosure notes (spec 2026-07-17-high-water-counter-decision §4). Like
 // UNADOPTED_LEDGER_NOTE these are TRUSTED, CONSTANT strings rendered OUTSIDE the DATA frame: an
 // adversary who can roll back / fork / interrupt a ledger controls WHETHER each note appears, so the

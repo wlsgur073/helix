@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, appendFileSync, writeFileSync, mkdirSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gatherScopedRecords, homeNotes } from '../../src/hooks/session-start.js';
+import { gatherScopedRecords, homeNotes, hookInputOf } from '../../src/hooks/session-start.js';
 import { SYMLINKED_HOME_NOTE } from '../../src/memory/content-frame.js';
 import { formatSessionStartContext } from '../../src/hooks/format-context.js';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -159,5 +159,28 @@ describe('homeNotes (IT-H2)', () => {
     const link = join(base, 'link');
     symlinkSync(real, link);
     expect(homeNotes(link + '/')).toEqual([SYMLINKED_HOME_NOTE]);
+  });
+});
+
+describe('hookInputOf (IT-M1)', () => {
+  it('marks resume, compact and fork as superseding, and nothing else', () => {
+    for (const source of ['resume', 'compact', 'fork']) {
+      expect(hookInputOf(JSON.stringify({ cwd: '/w', source })), source).toEqual({ cwd: '/w', supersedesEarlier: true });
+    }
+    for (const source of ['startup', 'clear', 'Resume', '', 42, null]) {
+      expect(hookInputOf(JSON.stringify({ cwd: '/w', source })).supersedesEarlier, String(source)).toBe(false);
+    }
+    expect(hookInputOf(JSON.stringify({ cwd: '/w' }))).toEqual({ cwd: '/w', supersedesEarlier: false });
+  });
+
+  // Review Focus: a resumed session with no cwd is global-only, and its earlier block is still there.
+  it('keeps the supersede mark without a cwd', () => {
+    expect(hookInputOf(JSON.stringify({ source: 'resume' }))).toEqual({ cwd: undefined, supersedesEarlier: true });
+  });
+
+  it('reads garbage or non-object stdin as {} (global only, no mark)', () => {
+    for (const raw of ['not json', '[1,2]', 'null', '42', '']) {
+      expect(hookInputOf(raw), JSON.stringify(raw)).toEqual({ cwd: undefined, supersedesEarlier: false });
+    }
   });
 });

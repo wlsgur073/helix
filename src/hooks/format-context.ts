@@ -1,5 +1,5 @@
 import type { MemoryState, ScopedRecord } from '../types.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, reverifyFlag, safeId, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS, reverifyFlag, safeId, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, SUPERSEDE_NOTE } from '../memory/content-frame.js';
 import { classifyEmission } from '../risk/trifecta.js';
 import { isVerifyingSource } from '../memory/firewall.js';
 
@@ -38,6 +38,11 @@ export interface FormatOptions {
    *  empty-records early return — a fat all-superseded ledger is exactly the signal). Local only:
    *  computed and shown on this machine, nothing leaves it. Default undefined (no advisory). */
   unionRows?: number;
+  /** IT-M1: the session continues an earlier conversation (resume / compact / fork), whose earlier
+   *  Helix block may still be in context. SUPERSEDE_NOTE then LEADS the trailer: outside the frame,
+   *  outside the maxChars budget, and rendered on the empty-records early return too, since empty
+   *  memory is exactly when the earlier block would otherwise stand unchallenged. Default false. */
+  supersedesEarlier?: boolean;
 }
 
 const INTEGRITY_UNAVAILABLE_NOTE = '(integrity verification unavailable — trust grades shown are unverified)';
@@ -73,10 +78,11 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
     : opts.ancestorUnadopted ? ANCESTOR_UNADOPTED_NOTE : null;
   const scaleNote = opts.unionRows !== undefined && opts.unionRows >= SCALE_ADVISORY_ROWS
     ? scaleAdvisoryNote(opts.unionRows) : null;
-  // Trusted out-of-band trailer: the project-layer note (unadopted or aliased) FIRST, then the witness
-  // notes (ordered, deduped by the caller), then the scale advisory (least security-critical last).
-  // Reserved outside the maxChars budget below, like the project-layer note.
-  const trailer = [projectLayerNote, ...(opts.witnessNotes ?? []), scaleNote].filter((n): n is string => n !== null && n !== '');
+  // Trusted out-of-band trailer: the supersede note (IT-M1) FIRST, then the project-layer note
+  // (unadopted or aliased), then the witness notes (ordered, deduped by the caller), then the scale
+  // advisory (least security-critical last). Reserved outside the maxChars budget below.
+  const trailer = [opts.supersedesEarlier ? SUPERSEDE_NOTE : null, projectLayerNote, ...(opts.witnessNotes ?? []), scaleNote]
+    .filter((n): n is string => n !== null && n !== '');
 
   const usable = records
     .filter(({ record }) => record.content.trim() !== '')

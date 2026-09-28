@@ -119,6 +119,24 @@ export function homeNotes(home: string): string[] {
   return isSymlinkedHome(home) ? [SYMLINKED_HOME_NOTE] : [];
 }
 
+/** IT-M1: the SessionStart sources that CONTINUE an earlier conversation, which may still hold an
+ *  earlier Helix block (the host re-inserts it on resume; a compaction summary or a fork carries it
+ *  over). Values per the Claude Code hooks reference: startup | resume | clear | compact | fork. */
+export const SUPERSEDING_SOURCES: ReadonlySet<string> = new Set(['resume', 'compact', 'fork']);
+
+/** Parse the hook's stdin JSON. Garbage, non-object or absent fields read as `{}` (global scope only,
+ *  no supersede mark): the hook must never fail on its input. */
+export function hookInputOf(stdinText: string): { cwd: string | undefined; supersedesEarlier: boolean } {
+  try {
+    const j = JSON.parse(stdinText) as { cwd?: unknown; source?: unknown } | null;
+    const cwd = typeof j?.cwd === 'string' ? j.cwd : undefined;
+    const supersedesEarlier = typeof j?.source === 'string' && SUPERSEDING_SOURCES.has(j.source);
+    return { cwd, supersedesEarlier };
+  } catch {
+    return { cwd: undefined, supersedesEarlier: false };
+  }
+}
+
 async function main(): Promise<void> {
   try {
     const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
@@ -135,6 +153,7 @@ async function main(): Promise<void> {
     for (const note of homeNotes(home)) writeSync(1, `${note}\n`); // ASCII only
 
     let cwd: string | undefined;
+    let supersedesEarlier = false;
     // H3: fail-closed on an over-cap stdin -- proceed exactly as if stdin were `{}` (global scope
     // only, same as garbage/absent stdin below) rather than reading a truncated, possibly-malformed
     // prefix. One stderr note names the cap so an operator can tell "no cwd" from "cwd was dropped".
@@ -142,10 +161,7 @@ async function main(): Promise<void> {
     if (stdinText === null) {
       writeSync(2, `helix: NOTE - stdin exceeded ${HOOK_STDIN_MAX_BYTES} bytes; proceeding as if stdin were {} (global scope only).\n`); // ASCII only
     } else {
-      try {
-        const j = JSON.parse(stdinText) as { cwd?: unknown };
-        if (typeof j.cwd === 'string') cwd = j.cwd;
-      } catch { /* no/garbage stdin -> global only */ }
+      ({ cwd, supersedesEarlier } = hookInputOf(stdinText));
     }
 
     const { records, integrityAvailable, replays, projectDisposition, witnessNotes } = gatherScopedRecords({ home, globalLedger, cwd });
@@ -153,7 +169,7 @@ async function main(): Promise<void> {
       integrityAvailable, unadoptedPresent: projectDisposition === 'unadopted-present',
       aliasedPresent: projectDisposition === 'aliased',
       ancestorUnadopted: projectDisposition === 'ancestor-unadopted', witnessNotes,
-      unionRows: unionPhysicalRows(replays),
+      unionRows: unionPhysicalRows(replays), supersedesEarlier,
     });
     // Synchronous write to fd 1: process exit must not drop a buffered async pipe write on
     // Windows (which would inject an unterminated DATA block). No explicit exit() needed —
