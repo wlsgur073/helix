@@ -492,11 +492,21 @@ gpg -d ~/backups/helix-<date>.tar.gz.gpg | tar -tvzf -   # expect -rw------- on 
 ```
 
 **To restore, decrypt to a file FIRST and check the exit status — never pipe decryption straight
-into `tar -x`:**
+into `tar -x`.** The decrypted archive carries the signing key in the clear, so it goes into a
+private directory that is removed whether or not the restore succeeds: `mktemp -d` creates it
+`0700`, `umask 077` makes the file inside `0600`, and the subshell keeps both the `umask` and the
+`exit` out of your own shell:
 
 ```bash
-gpg -d -o /tmp/helix-restore.tar.gz ~/backups/helix-<date>.tar.gz.gpg \
-  && tar -xzf /tmp/helix-restore.tar.gz -C <destination>
+(
+  umask 077
+  d=$(mktemp -d) || exit 1
+  gpg -d -o "$d/helix-restore.tar.gz" ~/backups/helix-<date>.tar.gz.gpg \
+    && tar -xzf "$d/helix-restore.tar.gz" -C <destination>
+  rc=$?
+  rm -rf -- "$d"
+  exit "$rc"
+)
 ```
 
 ⚠️ **Why two steps (measured 2026-08-24, GnuPG 2.4.4).** GnuPG checks the archive's integrity at
@@ -508,8 +518,10 @@ but the entire plaintext had already reached stdout, and `gpg -d … | tar -xzf 
 has finished and succeeded.
 
 **What this does not undo.** It protects archives written from here on. Any plain `tar.gz` an
-earlier command already wrote still carries the key in the clear — delete those, and if one ever
-left the machine, treat the key as exposed and re-key rather than re-encrypt.
+earlier command already wrote still carries the key in the clear — including a
+`/tmp/helix-restore.tar.gz` left by the restore command this section printed before 2026-09-27 —
+delete those, and if one ever left the machine, treat the key as exposed and re-key rather than
+re-encrypt.
 
 Cadence that fits a personal-scale install: before any upgrade or destructive operation, plus one
 fixed quiet slot per week.
