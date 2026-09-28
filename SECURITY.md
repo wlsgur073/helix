@@ -138,7 +138,11 @@ nothing else. `HELIX_HOME`, `HELIX_LEDGER` and `HELIX_SESSIONS` are used exactly
 them to absolute paths: an empty or relative value resolves against the working directory, which is
 also where the server starts looking for the project root, and an empty `HELIX_HOME` makes that
 directory stand in for the home, so a `config.json` and a `memory.jsonl` there are read as the
-global ones. When trust-store files are found beside a relocated ledger — a layout that a
+global ones.
+A `HELIX_HOME` that is a symlink is refused for every write — commit, erase, confirm, recheck,
+adopt and the SessionEnd record — before anything is written to a ledger; the server's startup and the
+SessionStart hook both say so.
+When trust-store files are found beside a relocated ledger — a layout that a
 pre-release build wrote for every `HELIX_LEDGER` user, and that a hand-assembled setup or a
 repo-writing adversary can also produce — the server measures whether starting would lose a grade
 this ledger currently carries, and refuses to start unless that measurement completes and finds

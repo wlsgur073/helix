@@ -70,6 +70,10 @@ First release.
   automatic reclaim of that lock until the gate file is removed by hand), appends and compactions
   fsync both the data and its directory before reporting success, and a hard-linked ledger (link
   count ≠ 1) is refused outright.
+- Ledger reads open the file non-blocking and read it only when it is a regular file, up to the size
+  its descriptor reports: a FIFO, a device or a directory at a ledger path — reached directly or
+  through a symlink, which a repository can carry — is refused with an error instead of stalling the
+  server or reading without bound, and the startup integrity scan skips such a ledger with a warning.
 - Untrusted-content quarantine: NFKC / control / bidi normalization, per-line datamarking, and a
   per-call 128-bit nonce frame.
 
@@ -105,6 +109,9 @@ First release.
   `dualVerify.model: null` it resolves the name from a free `codex doctor --json` probe and prints
   `(unresolved)` rather than guessing; there is no equivalent probe for effort, so a `null` effort
   prints only `inherited from codex config`.
+  Its `login` line reports whether a stored credential exists; it does not check that credential with
+  the server, so a revoked token still shows there, and a run whose stored login Codex rejects says
+  so in its own headline, naming `codex login`.
 - Every result whose payload was actually transmitted — a successful run, and a run that reached
   Codex and then errored — carries an `egress: …` disclosure line above the quarantine frame, so the
   calling agent can tell a config-valved release from a clean pass. A refused, unavailable or
@@ -119,6 +126,8 @@ First release.
   against the ledger and cannot refuse a call over bytes that stay local; its own 65,536-character
   cap is enforced directly in `dualVerify` instead, so no entry path escapes it.
   `critique` sends both fields inside the prompt, and both are scanned.
+  The tool and `helixAnswer` descriptions the calling model reads state the same, and a `compare`
+  response says that `helixAnswer` was not sent.
 - A refusal the memory-echo leg decided names *where* it matched. For each record that still
   blocks, the tool response quotes the runs of the caller's own payload that matched that record,
   in the normalized form the leg compared (so a run can differ from the typed text) — up to 10 records, 3 runs each, 160 characters per run, with a count of whatever was left out —
@@ -169,6 +178,9 @@ First release.
   key, the ownership registry, the rollback witness, the audit log and the metrics stream;
   `HELIX_LEDGER` moves the global ledger data file and nothing else; `HELIX_SESSIONS` moves the
   SessionEnd records (default `<HELIX_HOME>/sessions.jsonl`).
+  `HELIX_HOME` must be a directory, not a symlink: every write through a symlinked home is refused
+  before anything is written to a ledger. A home that does not exist yet reads as empty memory until the first
+  write creates it `0700`.
 - Content-free metrics in `~/.helix/metrics.jsonl`, one row per tool call, per verifying ledger read
   and per compaction attempt (default on; `metrics.enabled: false`
   disables; the hook honours the global config only).
@@ -208,6 +220,13 @@ First release.
   `dualVerify.logContent: true`, is outside every erase path: neither `helix_memory_erase` nor the
   operator-only permanent erase touches it, so a memory's text that a logged call carried stays
   there after the record is erased. Deleting the file is the remedy.
+- **Erasure from a host transcript.** An erase does not reach what a session was already shown: the
+  host keeps its own transcript. The SessionStart block of a resumed, compacted or forked session
+  says that it supersedes every earlier Helix block.
+- **Team sharing of a project ledger.** v0.1 does not support sharing `.helix/` through git:
+  `helix_memory_adopt` replaces the tracked `.helix/.owner` stamp with the adopter's own, so a
+  teammate's adoption locks the previous owner out, and a `verify` row is signed with a key that
+  lives in one user's `~/.helix`.
 
 ### Dependencies
 
