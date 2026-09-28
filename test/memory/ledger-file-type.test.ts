@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:net';
 import { parseLedger, readLedgerBytes, readLedgerRaw, isLedgerNotRegularError } from '../../src/memory/ledger.js';
 import { MemoryStore } from '../../src/memory/store.js';
 
@@ -80,6 +81,23 @@ posixOnly('ledger readers refuse a path that is not a regular file (IT-H4)', () 
     try {
       expect(isLedgerNotRegularError(thrown(() => store(home).erase('m_1', { permanent: true })))).toBe(true);
     } finally { rmSync(home, { recursive: true, force: true }); }
+  }, 10_000);
+
+  it('a UNIX socket at the ledger path: all three readers throw LedgerNotRegularError', async () => {
+    const dir = mkdtempSync('/tmp/hl-');   // short on purpose: a socket path must fit sun_path (108 bytes)
+    const p = join(dir, 'memory.jsonl');
+    const srv = createServer();
+    await new Promise<void>((resolve, reject) => { srv.once('error', reject); srv.listen(p, resolve); });
+    try {
+      for (const read of [parseLedger, readLedgerBytes, readLedgerRaw] as Array<(x: string) => unknown>) {
+        const e = thrown(() => read(p));
+        expect(isLedgerNotRegularError(e), `socket via ${read.name}`).toBe(true);
+        expect((e as Error).message).toContain('is not a regular file');
+      }
+    } finally {
+      await new Promise<void>((resolve) => srv.close(() => resolve()));
+      rmSync(dir, { recursive: true, force: true });
+    }
   }, 10_000);
 });
 

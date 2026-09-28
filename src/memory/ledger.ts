@@ -257,11 +257,30 @@ export const isLedgerNotRegularError = (e: unknown): boolean =>
  *  same class). Three things make this safe: O_NONBLOCK on the open, so a writer-less FIFO opens
  *  instead of blocking; fstat on the DESCRIPTOR, which asks about the object actually opened and
  *  rejects everything that is not a regular file; and a read bounded by that fstat's size. For a
- *  regular file this returns what readFileSync returned (Node reads a regular file up to its fstat
- *  size too). ENOENT propagates unchanged so each caller keeps its absent-file convention. No size
+ *  regular file whose size fstat reports (every ledger Helix writes) this returns what readFileSync
+ *  returned. Two measured exceptions are deliberate: a size-0 regular pseudo-file (under /proc) reads
+ *  as empty, because reading such a file to EOF is the unbounded class this closes, and a regular file
+ *  under another process's write lease fails at once with EAGAIN instead of waiting for the lease. An
+ *  object that cannot be opened at all (a socket, a driverless device) is classified by stat, which
+ *  never opens. ENOENT propagates unchanged so each caller keeps its absent-file convention. No size
  *  cap (spec decision Q3): a ledger that grew legitimately must stay readable. */
 function readLedgerFileBytes(path: string): Buffer {
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (e) {
+    // An object that cannot even be OPENED — a UNIX socket (ENXIO), a device node with no driver
+    // behind it (ENXIO), a device this user may not open (EACCES) — never reaches the fstat below.
+    // stat() does not open, so it cannot block: it tells "not a ledger at all" apart from an ordinary
+    // failure on a regular file, which propagates unchanged (ENOENT too, so each caller keeps its
+    // absent-file convention).
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+      let st: Stats | null = null;
+      try { st = statSync(path); } catch { /* the stat failed as well: report the open's own error */ }
+      if (st !== null && !st.isFile()) throw new LedgerNotRegularError(path);
+    }
+    throw e;
+  }
   try {
     const st = fstatSync(fd);
     if (!st.isFile()) throw new LedgerNotRegularError(path);

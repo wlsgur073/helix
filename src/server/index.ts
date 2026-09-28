@@ -168,8 +168,9 @@ store.healWitness();
 // routinely) is NOT flagged, so the §7 warning stays a forged-elevation detector instead of firing on
 // every legitimately-elevated ledger. Subkey resolution mirrors the store/hook (subkeyForScope) so
 // the scan asks the exact same validity question the live projection does. ADVISORY only — wrapped so
-// a malformed/unreadable ledger (parseLedger rethrows non-ENOENT I/O errors) degrades to no-warning,
-// never blocks startup. Output stays content-free (a count only).
+// a malformed/unreadable ledger (parseLedger rethrows non-ENOENT I/O errors) degrades to no-warning
+// and a ledger that is not a regular file is named in one stderr line (IT-H4); neither blocks startup.
+// Output stays content-free (a count only).
 //
 // TWO causes, two sentences. When no subkey resolves — key lost, HELIX_HOME moved, an adopted
 // ledger — the validity predicate answers false for EVERY record, so every correctly signed verify
