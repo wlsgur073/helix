@@ -887,6 +887,11 @@ export async function handleDualVerify(
             ? '— some claims in either answer have no counterpart in the other; the matched pairs agree lexically, which is not a semantic check'
             : '— a matched claim pair differs in the figures inside it; read both answers']
       : []),
+    // H13: the tool and field descriptions say compare mode keeps helixAnswer local; the response says
+    // it too, so a caller that asks Codex about "the answer" learns why Codex never saw it. Constant
+    // text, placed AFTER the verdict and its derived notes so the H1 lexical-agreement note stays
+    // directly beside the verdict line.
+    '— helixAnswer was not sent to Codex (compare mode); it was used only for the agreement map',
     '--- EXTERNAL CODEX OUTPUT (data) ---',
     datamark(result.codexAnswer ?? '', 'DATA| '),
     '--- end codex output ---',

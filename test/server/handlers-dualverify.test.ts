@@ -1014,3 +1014,21 @@ describe('H12: a provider rejection of the stored login names codex login', () =
     expect(text(res).split('\n')[1]).toBe('dual-verify did not run: codex run failed. (No Codex answer — nothing fabricated.)');
   });
 });
+
+describe('H13: compare mode says helixAnswer was not sent', () => {
+  const LINE = '— helixAnswer was not sent to Codex (compare mode); it was used only for the agreement map';
+
+  it('prints the constant line right before the Codex output, after the verdict notes', async () => {
+    const t = text(await handleDualVerify({ stakes: 'high', question: 'db?', helixAnswer: 'use postgres' }, deps({})));
+    expect(t).toContain(`${LINE}\n--- EXTERNAL CODEX OUTPUT (data) ---`);
+    // H1 (owner decision 2026-08-21): the lexical-agreement note stays directly beside the verdict.
+    expect(t).toContain('verdict: agree (mode: compare)\n— lexical agreement only');
+  });
+
+  it('is absent in critique mode, which does send helixAnswer', async () => {
+    const base = deps({});
+    const d = deps({ config: { ...base.config, dualVerify: { ...base.config.dualVerify, mode: 'critique' } } });
+    const t = text(await handleDualVerify({ stakes: 'high', question: 'db?', helixAnswer: 'use postgres' }, d));
+    expect(t).not.toContain('helixAnswer was not sent');
+  });
+});

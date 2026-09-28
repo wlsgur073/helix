@@ -183,7 +183,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   const dualVerifyInFlight = new Set<Promise<unknown>>();
   server.registerTool('helix_dual_verify', {
     title: 'Dual-verify with Codex',
-    description: "Cross-validate your answer with Codex (config-gated; spends the user's Codex quota). Optional stakes are checked against the configured floor; an omitted stakes counts as 'low' — omission is not an exemption. quotedMemory declares memories this call deliberately quotes, each {id, contentDigest} pair a proof of read; resolved pairs are exempt from the memory-echo guard, unresolvable pairs are discarded.",
+    description: "Ask Codex the same question and compare its independent answer with yours (config-gated; spends the user's Codex quota). In compare mode (the default) Codex receives only the question: helixAnswer stays local and feeds the agreement map; only critique mode sends helixAnswer for Codex to critique. Optional stakes are checked against the configured floor; an omitted stakes counts as 'low' — omission is not an exemption. quotedMemory declares memories this call deliberately quotes, each {id, contentDigest} pair a proof of read; resolved pairs are exempt from the memory-echo guard, unresolvable pairs are discarded.",
     inputSchema: {
       // H3: same bounded-input discipline as commit's content above -- an oversized question/answer
       // is refused by schema validation before the handler (and the JSON-parse allocation it would
@@ -194,7 +194,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       // question alone, and helixAnswer's own core-side bound there is the direct MAX_DV_ANSWER_CHARS
       // check in dualVerify (src/verify/dual-verify.ts), not this scan limit.
       question: z.string().max(MAX_DV_QUESTION_CHARS).describe(`The question being verified (max ${MAX_DV_QUESTION_CHARS} characters).`),
-      helixAnswer: z.string().max(MAX_DV_ANSWER_CHARS).describe(`Your answer to cross-validate (max ${MAX_DV_ANSWER_CHARS} characters).`),
+      helixAnswer: z.string().max(MAX_DV_ANSWER_CHARS).describe(`Your own answer (max ${MAX_DV_ANSWER_CHARS} characters). Compare mode never sends it to Codex (it feeds only the agreement map); critique mode sends it for critique.`),
       stakes: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
       // H6: proof-of-read declarations. SIZE-bounded only (array length + per-string chars): the
       // guard DISCARDS a pair that does not resolve against the ledger, so validity refinements
