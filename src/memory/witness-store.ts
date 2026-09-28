@@ -148,9 +148,19 @@ function deriveState(scopeKey: string, master: Buffer | null, raw: ScopeFile | u
   return { entry, journal, macInvalid };
 }
 
-/** Lock-free read; MAC-invalid entry/journal reported via `macInvalid`, returned as null. */
+/** Lock-free read; MAC-invalid entry/journal reported via `macInvalid`, returned as null. A home that
+ *  does not exist yet (a fresh install) has no witness state: canonical() realpaths the missing
+ *  directory and throws ENOENT, which is read here as absence (IT-H1) — witness-read.ts promises a
+ *  valid verdict on a virgin home. Anything else (ENOTDIR from a file standing in the path, EACCES)
+ *  still propagates. */
 export function readScopeWitness(home: string, scopeKey: string): ScopeWitnessState {
-  const path = canonical(witnessPath(home));
+  let path: string;
+  try {
+    path = canonical(witnessPath(home));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { entry: null, journal: null, macInvalid: false };
+    throw e;
+  }
   const store = readStoreFileAt(path);
   return deriveState(scopeKey, tryReadMaster(home), store.scopes[scopeKey]);
 }

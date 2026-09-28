@@ -657,3 +657,25 @@ describe('M1: transition-log durability wiring (three locks)', () => {
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });
+
+describe('readScopeWitness on a home that does not exist yet (IT-H1)', () => {
+  it('reads a missing home as no witness state, and does not create it', () => {
+    const base = tmpHome();
+    const home = join(base, 'not-created-yet');
+    try {
+      expect(readScopeWitness(home, '@global')).toEqual({ entry: null, journal: null, macInvalid: false });
+      expect(existsSync(home)).toBe(false);
+      expect(classifyScope(home, '@global', Buffer.alloc(0)).kind).toBe('first-contact');
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  // Already green before the fix; it pins that ONLY absence (ENOENT) is read as "no witness state".
+  it('still throws when a file stands in the path above the home (ENOTDIR is not absence)', () => {
+    const base = tmpHome();
+    const file = join(base, 'a-file');
+    writeFileSync(file, 'x');
+    try {
+      expect(() => readScopeWitness(join(file, 'home'), '@global')).toThrow(/ENOTDIR/);
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+});

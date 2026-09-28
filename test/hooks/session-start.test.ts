@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, appendFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, appendFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gatherScopedRecords } from '../../src/hooks/session-start.js';
@@ -110,5 +110,27 @@ describe('gather replay stats (spec §5 hook wiring)', () => {
     const { records, replays } = gatherScopedRecords({ home, globalLedger: join(home, 'absent.jsonl') });
     expect(records).toHaveLength(0);
     expect(replays[0]).toMatchObject({ scope: 'global', rows: 0, liveRows: 0, bytes: 0 });
+  });
+});
+
+describe('session-start gatherScopedRecords on a missing HELIX_HOME (IT-H1)', () => {
+  it('returns what an empty existing home returns, without throwing and without creating the home', () => {
+    const base = mkdtempSync(join(tmpdir(), 'helix-ss-nohome-'));
+    const proj = join(base, 'proj');
+    mkdirSync(join(proj, '.helix'), { recursive: true });
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), '');   // an unadopted, empty project ledger
+    const missing = join(base, 'hh-missing');
+    const present = join(base, 'hh-present');
+    mkdirSync(present, { mode: 0o700 });
+    const a = gatherScopedRecords({ home: missing, globalLedger: join(missing, 'memory.jsonl'), cwd: proj, userHome: base });
+    const b = gatherScopedRecords({ home: present, globalLedger: join(present, 'memory.jsonl'), cwd: proj, userHome: base });
+    expect(a.records).toEqual([]);
+    expect(a.projectDisposition).toBe(b.projectDisposition);
+    expect(a.witnessNotes).toEqual(b.witnessNotes);
+    const render = (g: typeof a): string => formatSessionStartContext(g.records, N, {
+      unadoptedPresent: g.projectDisposition === 'unadopted-present', witnessNotes: g.witnessNotes,
+    });
+    expect(render(a)).toBe(render(b));
+    expect(existsSync(missing)).toBe(false);
   });
 });
