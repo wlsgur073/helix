@@ -13,7 +13,8 @@ import { join } from 'node:path';
 import { isEntryPoint } from '../entry-point.js';
 import { strayTrustFiles } from '../memory/trust-store-layout.js';
 import { formatSessionStartContext } from './format-context.js';
-import { newNonce, collectWitnessNotes } from '../memory/content-frame.js';
+import { newNonce, collectWitnessNotes, SYMLINKED_HOME_NOTE } from '../memory/content-frame.js';
+import { isSymlinkedHome } from '../memory/home-permissions.js';
 import { projectDispositionOf, type ProjectDisposition } from '../memory/ownership.js';
 import { resolveProjectLayer } from '../memory/project-root.js';
 import { verifiedLiveWitnessed, type ReplayStats } from '../memory/verified-read.js';
@@ -113,6 +114,11 @@ export function unionPhysicalRows(replays: ReadonlyArray<{ rows: number }>): num
   return replays.reduce((sum, r) => sum + r.rows, 0);
 }
 
+/** IT-H2: constant notes about HELIX_HOME itself, printed before the memory block. */
+export function homeNotes(home: string): string[] {
+  return isSymlinkedHome(home) ? [SYMLINKED_HOME_NOTE] : [];
+}
+
 async function main(): Promise<void> {
   try {
     const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
@@ -126,6 +132,7 @@ async function main(): Promise<void> {
     if (stray.length > 0) {
       writeSync(1, `helix: NOTE - trust-store files (${stray.join(', ')}) sit next to the ledger instead of under HELIX_HOME (${home}); if memory tools are not working, this is why. Run the MCP server directly to see whether it refuses to start or just warns, and the full instructions either way.\n`); // ASCII only
     }
+    for (const note of homeNotes(home)) writeSync(1, `${note}\n`); // ASCII only
 
     let cwd: string | undefined;
     // H3: fail-closed on an over-cap stdin -- proceed exactly as if stdin were `{}` (global scope

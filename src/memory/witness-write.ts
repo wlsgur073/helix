@@ -8,6 +8,7 @@
  *  matching §4.2; the nested witness lock taken by completeTransition/advanceWitness below targets
  *  a DIFFERENT path, `witnessPath(home)`, so nesting is safe — withFileLock is only non-reentrant
  *  PER PATH — enforced by the `reentrant-self` throw in lock.ts's acquireFileLock):
+ *    0. validate the home (ensureHelixDir) BEFORE the ledger is read or appended (IT-H2).
  *    1. read current bytes and classify them against this scope's witness state (PRE-append verdict).
  *    2. transition-heal        -> completeTransition FIRST (resolve-before-any-write), using the
  *       bytes just read (classifyState already proved they match journal.expected exactly) and the
@@ -36,6 +37,7 @@ import { mkdirSync } from 'node:fs';
 import type { MemoryRecord } from '../types.js';
 import { appendRecordUnlocked, readLedgerBytes, type LedgerPath } from './ledger.js';
 import { withFileLock } from './lock.js';
+import { ensureHelixDir } from './home-permissions.js';
 import { advanceAllowed, type WitnessVerdict } from './witness-core.js';
 import {
   classifyState, readScopeWitness, scopeKeyOf, advanceWitness, completeTransition,
@@ -47,6 +49,12 @@ import {
  *  itself; the nested witness-lock calls inside (completeTransition/advanceWitness) are a different
  *  path and safe to acquire regardless of who holds the ledger lock. */
 export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined, op: 'commit' | 'erase' | 'verify'): void {
+  // IT-H2: validate the home BEFORE the ledger is read or appended. advanceWitness refuses a
+  // symlinked, foreign or non-directory home too, but only after the append had landed, which
+  // reported an error for a row that was already written and made every retry write it again.
+  // ensureHelixDir is idempotent (one lstat on a healthy home) and is the one owner of creating a
+  // home that does not exist yet (0700, its parent must exist).
+  ensureHelixDir(home);
   const key = scopeKeyOf(home, projectRoot);
   const bytes = readLedgerBytes(ledger);
   const preVerdict = classifyState(readScopeWitness(home, key), bytes);
@@ -113,6 +121,7 @@ export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord
  *  and `erase` tombstone append). Mirrors `appendRecord`'s own mkdir-before-lock convention
  *  (ledger.ts): the parent directory must exist before `withFileLock` can resolve the lock path. */
 export function appendWitnessed(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined, op: 'commit' | 'erase' | 'verify'): void {
+  ensureHelixDir(home);   // IT-H2: before the ledger directory or its lock file is created (see appendWitnessedUnlocked)
   mkdirSync(dirname(ledger), { recursive: true });
   withFileLock(ledger, () => appendWitnessedUnlocked(ledger, record, home, projectRoot, op));
 }

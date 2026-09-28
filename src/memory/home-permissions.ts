@@ -51,6 +51,11 @@ export function hardenHomePermissions(home: string, deps: HardenDeps): void {
   if (process.platform === 'win32') return; // mode bits are not enforced there
   try {
     const dir = lstatSync(home);
+    if (dir.isSymbolicLink()) {
+      // IT-H2: every write through a symlinked home is refused (ensureHelixDir, witness-write.ts);
+      // say so at startup instead of letting the first commit be the first sign.
+      deps.warn(`helix: HELIX_HOME ${home} is a symlink — Helix refuses to write through it, so nothing can be saved to memory (point HELIX_HOME at the directory itself)`);
+    }
     if (dir.isDirectory() && (dir.mode & 0o077) !== 0) {
       chmodSync(home, 0o700);
       deps.warn(`helix: tightened HELIX_HOME ${home} from 0${(dir.mode & 0o777).toString(8)} to 0700 `
@@ -143,4 +148,11 @@ export function ensureHelixDir(dir: string): void {
     if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
     ensureHelixDir(dir);
   }
+}
+
+/** IT-H2: true iff the NAME at `home` is a symlink (lstat, never stat). Absent or unreadable reads as
+ *  false: those cases are reported by the write path's own refusal. Every write through a symlinked
+ *  home is refused (ensureHelixDir); this lets startup and the SessionStart hook say so up front. */
+export function isSymlinkedHome(home: string): boolean {
+  try { return lstatSync(home).isSymbolicLink(); } catch { return false; }
 }

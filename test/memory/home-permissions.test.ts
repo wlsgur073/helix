@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync, statSync, writeFileSync, chmodSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
-import { hardenHomePermissions } from '../../src/memory/home-permissions.js';
+import { hardenHomePermissions, isSymlinkedHome } from '../../src/memory/home-permissions.js';
 
 // Creation-time modes fix new files only. Everything a shipped version already wrote keeps the mode
 // it was born with, so a creation-only fix leaves every existing install untouched — including the
@@ -97,5 +97,35 @@ describe('hardenHomePermissions', () => {
   it('never throws — a repair failure must not break startup', () => {
     if (platform() === 'win32') return;
     expect(() => hardenHomePermissions('/nonexistent/helix/home', { warn: () => {} })).not.toThrow();
+  });
+});
+
+describe('a symlinked HELIX_HOME (IT-H2)', () => {
+  it('hardenHomePermissions warns once when the home itself is a symlink, and does not throw', () => {
+    if (platform() === 'win32') return;
+    const base = tmpHome();
+    try {
+      const real = join(base, 'real');
+      mkdirSync(real, { mode: 0o700 });
+      const link = join(base, 'link');
+      symlinkSync(real, link);
+      const warnings: string[] = [];
+      hardenHomePermissions(link, { warn: (m) => warnings.push(m) });
+      expect(warnings.filter((w) => w.includes('is a symlink') && w.includes('refuses to write through it'))).toHaveLength(1);
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  it('isSymlinkedHome is true only for a symlink standing at the home path', () => {
+    if (platform() === 'win32') return;
+    const base = tmpHome();
+    try {
+      const real = join(base, 'real');
+      mkdirSync(real);
+      const link = join(base, 'link');
+      symlinkSync(real, link);
+      expect(isSymlinkedHome(link)).toBe(true);
+      expect(isSymlinkedHome(real)).toBe(false);
+      expect(isSymlinkedHome(join(base, 'absent'))).toBe(false);
+    } finally { rmSync(base, { recursive: true, force: true }); }
   });
 });

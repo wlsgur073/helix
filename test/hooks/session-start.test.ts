@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, appendFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, appendFileSync, writeFileSync, mkdirSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gatherScopedRecords } from '../../src/hooks/session-start.js';
+import { gatherScopedRecords, homeNotes } from '../../src/hooks/session-start.js';
+import { SYMLINKED_HOME_NOTE } from '../../src/memory/content-frame.js';
 import { formatSessionStartContext } from '../../src/hooks/format-context.js';
 import { MemoryStore } from '../../src/memory/store.js';
 import { digestContent } from '../../src/memory/ledger-mac.js';
@@ -132,5 +133,21 @@ describe('session-start gatherScopedRecords on a missing HELIX_HOME (IT-H1)', ()
     });
     expect(render(a)).toBe(render(b));
     expect(existsSync(missing)).toBe(false);
+  });
+});
+
+describe('homeNotes (IT-H2)', () => {
+  it('returns the constant symlink note for a symlinked home and nothing otherwise', () => {
+    if (process.platform === 'win32') return;
+    const base = mkdtempSync(join(tmpdir(), 'helix-ss-homenote-'));
+    const real = join(base, 'real');
+    mkdirSync(real);
+    const link = join(base, 'link');
+    symlinkSync(real, link);
+    expect(homeNotes(link)).toEqual([SYMLINKED_HOME_NOTE]);
+    expect(homeNotes(real)).toEqual([]);
+    expect(homeNotes(join(base, 'absent'))).toEqual([]);
+    expect(SYMLINKED_HOME_NOTE).toMatch(/^[\x20-\x7e]+$/);   // ASCII only (hook stdout)
+    expect(SYMLINKED_HOME_NOTE).not.toContain(base);          // constant: no path
   });
 });
