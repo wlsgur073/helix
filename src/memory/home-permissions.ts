@@ -1,5 +1,5 @@
 import { lstatSync, chmodSync, readdirSync, mkdirSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, sep } from 'node:path';
 
 /** Files Helix persists under HELIX_HOME. Enumerated rather than globbed so the pass can never
  *  reach a name Helix does not own, and so adding a persisted file is a deliberate edit here.
@@ -23,6 +23,21 @@ const OWNED_FILES: readonly string[] = [
 export interface HardenDeps {
   /** Called once per repaired or refused path. Never throws. */
   warn: (message: string) => void;
+}
+
+/** The NAME a lstat must ask about. A trailing separator or a trailing `/.` makes the kernel resolve
+ *  the final component through a symlink, so lstat('<link>/') reported the target directory and a
+ *  symlinked HELIX_HOME spelled with a trailing slash passed as a directory Helix owns (measured
+ *  2026-09-28: a commit through HELIX_HOME=<link>/ landed in the link target). Strips only those
+ *  suffixes, never `..`, and never resolves: the path keeps naming the same object, and an empty
+ *  HELIX_HOME keeps its current meaning. */
+function finalName(dir: string): string {
+  let n = dir;
+  for (;;) {
+    if (n.length > 1 && (n.endsWith('/') || n.endsWith(sep))) { n = n.slice(0, -1); continue; }
+    if (n.length > 2 && (n.endsWith('/.') || n.endsWith(`${sep}.`))) { n = n.slice(0, -2); continue; }
+    return n;
+  }
 }
 
 /**
@@ -50,14 +65,14 @@ export interface HardenDeps {
 export function hardenHomePermissions(home: string, deps: HardenDeps): void {
   if (process.platform === 'win32') return; // mode bits are not enforced there
   try {
-    const dir = lstatSync(home);
+    const dir = lstatSync(finalName(home));
     if (dir.isSymbolicLink()) {
       // IT-H2: every write through a symlinked home is refused (ensureHelixDir, witness-write.ts);
       // say so at startup instead of letting the first commit be the first sign.
       deps.warn(`helix: HELIX_HOME ${home} is a symlink — Helix refuses to write through it, so nothing can be saved to memory (point HELIX_HOME at the directory itself)`);
     }
     if (dir.isDirectory() && (dir.mode & 0o077) !== 0) {
-      chmodSync(home, 0o700);
+      chmodSync(finalName(home), 0o700);
       deps.warn(`helix: tightened HELIX_HOME ${home} from 0${(dir.mode & 0o777).toString(8)} to 0700 `
         + '(a group- or world-writable directory lets another local user replace files inside it, whatever their own mode)');
     }
@@ -122,8 +137,9 @@ export function hardenHomePermissions(home: string, deps: HardenDeps): void {
 export function ensureHelixDir(dir: string): void {
   if (process.platform === 'win32') { mkdirSync(dir, { recursive: true }); return; }
 
+  const name = finalName(dir);
   let st: ReturnType<typeof lstatSync> | null = null;
-  try { st = lstatSync(dir); } catch { st = null; }   // ENOENT is the create path below
+  try { st = lstatSync(name); } catch { st = null; }   // ENOENT is the create path below
 
   if (st !== null) {
     // lstat, never stat: the question is what the NAME is, never what it points at.
@@ -133,20 +149,20 @@ export function ensureHelixDir(dir: string): void {
     if (uid !== undefined && st.uid !== uid) {
       throw new Error(`refusing to use ${dir}: it is owned by uid ${st.uid}, not by this user (${uid})`);
     }
-    if ((st.mode & 0o077) !== 0) chmodSync(dir, 0o700);
+    if ((st.mode & 0o077) !== 0) chmodSync(name, 0o700);
     return;
   }
 
-  const parent = dirname(dir);
+  const parent = dirname(name);
   if (!existsSync(parent)) {
     throw new Error(`refusing to create ${dir}: its parent ${parent} does not exist (Helix creates one directory, never a chain)`);
   }
   try {
-    mkdirSync(dir, { mode: 0o700 });
+    mkdirSync(name, { mode: 0o700 });
   } catch (e) {
     // Lost a creation race with a concurrent Helix process: validate what landed rather than assume.
     if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-    ensureHelixDir(dir);
+    ensureHelixDir(name);
   }
 }
 
@@ -154,5 +170,5 @@ export function ensureHelixDir(dir: string): void {
  *  false: those cases are reported by the write path's own refusal. Every write through a symlinked
  *  home is refused (ensureHelixDir); this lets startup and the SessionStart hook say so up front. */
 export function isSymlinkedHome(home: string): boolean {
-  try { return lstatSync(home).isSymbolicLink(); } catch { return false; }
+  try { return lstatSync(finalName(home)).isSymbolicLink(); } catch { return false; }
 }

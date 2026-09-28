@@ -39,6 +39,15 @@ posixOnly('a symlinked HELIX_HOME is refused before any ledger write (IT-H2)', (
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
 
+  it('a symlinked home spelled with a trailing slash is refused the same way', () => {
+    const { base, real, link } = layout();
+    try {
+      const s = store(link + '/');
+      expect(() => s.commit({ content: 'the build uses node 24', source: 'user' })).toThrow(/symlink/);
+      expect(bytesOf(join(real, 'memory.jsonl')).length).toBe(0);
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
   // Seed through the REAL path, then read once: a read after the master key exists mints the global
   // nonce, which is the state a home replaced by a symlink is normally in. Without it the erase is
   // refused earlier (the nonce mint calls ensureHelixDir) and never reaches the append at all.

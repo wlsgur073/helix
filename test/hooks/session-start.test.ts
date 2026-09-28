@@ -150,4 +150,14 @@ describe('homeNotes (IT-H2)', () => {
     expect(SYMLINKED_HOME_NOTE).toMatch(/^[\x20-\x7e]+$/);   // ASCII only (hook stdout)
     expect(SYMLINKED_HOME_NOTE).not.toContain(base);          // constant: no path
   });
+
+  it('returns the constant symlink note when the home is spelled with a trailing slash', () => {
+    if (process.platform === 'win32') return;
+    const base = mkdtempSync(join(tmpdir(), 'helix-ss-homenote-'));
+    const real = join(base, 'real');
+    mkdirSync(real);
+    const link = join(base, 'link');
+    symlinkSync(real, link);
+    expect(homeNotes(link + '/')).toEqual([SYMLINKED_HOME_NOTE]);
+  });
 });

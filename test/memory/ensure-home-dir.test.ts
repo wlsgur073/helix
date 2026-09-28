@@ -63,6 +63,19 @@ describe('ensureHelixDir', () => {
     rmSync(base, { recursive: true, force: true });
   });
 
+  it('REFUSES a symlink standing where the directory should be, whatever trailing separator spells it', () => {
+    if (platform() === 'win32') return;
+    const base = tmp();
+    const elsewhere = join(base, 'attacker-owned');
+    mkdirSync(elsewhere);
+    const home = join(base, '.helix');
+    symlinkSync(elsewhere, home);                       // planted before Helix ever ran
+    for (const suffix of ['/', '//', '/.', '/./']) {
+      expect(() => ensureHelixDir(home + suffix)).toThrow(/symlink/);
+    }
+    rmSync(base, { recursive: true, force: true });
+  });
+
   it('REFUSES a plain file standing where the directory should be', () => {
     const base = tmp();
     const home = join(base, '.helix');

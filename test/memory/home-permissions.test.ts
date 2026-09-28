@@ -128,4 +128,19 @@ describe('a symlinked HELIX_HOME (IT-H2)', () => {
       expect(isSymlinkedHome(join(base, 'absent'))).toBe(false);
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
+
+  it('a trailing slash on the symlinked home is detected and warned about the same way', () => {
+    if (platform() === 'win32') return;
+    const base = tmpHome();
+    try {
+      const real = join(base, 'real');
+      mkdirSync(real, { mode: 0o700 });
+      const link = join(base, 'link');
+      symlinkSync(real, link);
+      expect(isSymlinkedHome(link + '/')).toBe(true);
+      const warnings: string[] = [];
+      hardenHomePermissions(link + '/', { warn: (m) => warnings.push(m) });
+      expect(warnings.filter((w) => w.includes('is a symlink') && w.includes('refuses to write through it'))).toHaveLength(1);
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
 });
