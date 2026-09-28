@@ -685,8 +685,8 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
     let landedStats: CompactionStats | null = null; // set the instant the rename succeeds (see below) — non-null there means every later throw in this try is a POST-rename failure, so the catch has real numbers to attach instead of reporting "nothing happened"
     try {
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost after tmp creation');
-      // Preserve the destination's mode across the rename — a project ledger may be deliberately
-      // group-readable for a shared team layout, and compaction is not the place to change that.
+      // Preserve the destination's mode across the rename — a project ledger's mode belongs to its
+      // repository (it may be deliberately group-readable), and compaction is not the place to change that.
       // But NEVER inherit a mode looser than owner-only from a MISSING destination, and never fall
       // through to the umask: with no target to copy, 0600 is the only safe default. (A home ledger
       // that is itself over-broad is repaired by hardenHomePermissions at startup, so the mode this

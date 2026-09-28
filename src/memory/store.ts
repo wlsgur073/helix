@@ -1035,8 +1035,9 @@ export class MemoryStore {
     return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: asOfWitnessNotes(collectWitnessNotes(verdicts)) };
   }
 
-  /** Explicitly adopt the active project ledger (trust its current contents). For team-shared
-   *  ledgers. Throws if no project layer is active, or if `expectedRoot` names a different one.
+  /** Explicitly adopt the active project ledger (trust its current contents): a pre-existing ledger
+   *  Helix did not create, or a parent project. Throws if no project layer is active, or if
+   *  `expectedRoot` names a different one.
    *
    *  The caller must NAME the root it means. Adoption moves a trust boundary — it is the only other
    *  tool besides confirm that changes what Helix trusts — and a zero-argument call gives the

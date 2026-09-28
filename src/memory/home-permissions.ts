@@ -58,7 +58,7 @@ function finalName(dir: string): string {
  *
  * SCOPE. Project `.helix` trees are deliberately excluded. SECURITY.md models an adversary who CAN
  * write `<project>/.helix/memory.jsonl` but cannot read `~/.helix`; normalizing a project ledger
- * would contradict the threat model, and a shared project ledger is a supported team layout.
+ * would contradict the threat model, and a project tree's modes belong to its repository, not to Helix.
  *
  * Never throws: a startup hardening pass that can break startup is worse than the exposure it fixes.
  */

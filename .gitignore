@@ -16,8 +16,8 @@ CLAUDE.md
 # .claude/ = Claude Code config + tooling state
 # .helix/  = Helix project scope layer: memory.jsonl (project ledger) + .owner (ownership stamp)
 #            (a config.json here is NOT read by the server — settings are global-only). Kept
-#            private by default so each developer has their own
-#            project memory; team sharing is opt-in (un-ignore + helix_memory_adopt).
+#            private so each developer has their own project memory; v0.1 does not support
+#            sharing a project ledger through git (adoption rewrites the tracked .owner stamp).
 #            Global/user-level state (audit, sessions, registry) lives in ~/.helix/, not here.
 # .remember/ = session-continuity buffer (also self-ignored within)
 # .superpowers/ = subagent working notes (review rounds, handoffs). Ignored rather

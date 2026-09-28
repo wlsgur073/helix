@@ -227,7 +227,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     description:
       "Trust the active project's memory file: a pre-existing one Helix did not create, or a " +
       'parent-directory project this session was started below. Only for a ledger the user recognizes ' +
-      '(e.g. a team-shared one, or a parent project they created) — never one in a shared directory ' +
+      '(e.g. a parent project they created) — never one in a shared directory ' +
       'such as /tmp. Default-deny: an unrecognized project ledger is ignored until adopted. Pass the ' +
       'project root you mean: the active scope is the project whose .helix folder is nearest at or ' +
       'above the session directory, and any other root is refused and adopts nothing. This moves a ' +

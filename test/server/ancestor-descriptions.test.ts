@@ -13,7 +13,10 @@ describe('tool descriptions state the parent-directory rule (issue #1)', () => {
     const adopt = tools.find((t) => t.name === 'helix_memory_adopt');
     expect(adopt?.description ?? '').toContain('nearest at or above');
     // Final review: the parent case needs the same "only one you recognize" limit as a foreign ledger.
-    expect(adopt?.description ?? '').toContain('or a parent project they created');
+    // IT-H3: v0.1 does not support team sharing, so the team-shared example is gone and the parent
+    // project is the one example left inside that limit.
+    expect(adopt?.description ?? '').toContain('Only for a ledger the user recognizes (e.g. a parent project they created)');
+    expect(adopt?.description ?? '').not.toContain('team-shared');
     expect(adopt?.description ?? '').toContain('never one in a shared directory');
   });
 });

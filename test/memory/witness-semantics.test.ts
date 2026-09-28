@@ -97,14 +97,14 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
         // adopt() stamps ownership (making the project scope PARTICIPATE in reads) WITHOUT ever
         // witnessing it — unlike an ordinary commit, which stamps ownership AND witnesses atomically
         // within one call, this is the genuine "a scope newly participates, unwitnessed" window
-        // (the team-shared-ledger precedent, store.ts adopt() doc-comment).
+        // (the foreign-ledger precedent, store.ts adopt() doc-comment).
         store.adopt(root);
         expect(readScopeWitness(home, scopeKeyOf(home, root)).entry).toBeNull(); // never witnessed
 
         // Issue #2: the adopted scope's ledger is still empty — first-contact/pristine, no note.
         expect(store.recall('global already').witnessNotes).not.toContain(WITNESS_INIT_NOTE);
 
-        // A team-shared ledger arrives with contents no witness here has seen: the next write would
+        // A foreign ledger arrives with contents no witness here has seen: the next write would
         // adopt them as the baseline, and that is what the note discloses.
         writeFileSync(projLedger, JSON.stringify({
           id: 'm_shared', tx: FIXED, validFrom: FIXED, validTo: null, type: 'assert', state: 'Fresh',
