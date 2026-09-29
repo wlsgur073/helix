@@ -49,11 +49,16 @@ import {
  *  itself; the nested witness-lock calls inside (completeTransition/advanceWitness) are a different
  *  path and safe to acquire regardless of who holds the ledger lock. */
 export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined, op: 'commit' | 'erase' | 'verify'): void {
-  // IT-H2: validate the home BEFORE the ledger is read or appended. advanceWitness refuses a
-  // symlinked, foreign or non-directory home too, but only after the append had landed, which
-  // reported an error for a row that was already written and made every retry write it again.
-  // ensureHelixDir is idempotent (one lstat on a healthy home) and is the one owner of creating a
-  // home that does not exist yet (0700, its parent must exist).
+  // IT-H2: validate the home BEFORE this function reads or appends the ledger. advanceWitness
+  // refuses a symlinked, foreign or non-directory home too, but only after the append had landed,
+  // which reported an error for a row that was already written and made every retry write it again.
+  // LOAD-BEARING for confirm and recheck: store.ts's writeVerify calls ensureMaster, which returns an
+  // existing key before its own ensureHelixDir (ledger-mac.ts), so once the master key exists (the
+  // home's first commit normally mints it) this is the only home check on that path. Before the
+  // IT-H2 fix a confirm or recheck through a symlinked home appended a signed verify row and only
+  // then reported the refusal; the confirm and recheck cases in test/memory/symlinked-home.test.ts
+  // pin this line. ensureHelixDir is idempotent (one lstat on a healthy home) and is the one owner
+  // of creating a home that does not exist yet (0700, its parent must exist).
   ensureHelixDir(home);
   const key = scopeKeyOf(home, projectRoot);
   const bytes = readLedgerBytes(ledger);

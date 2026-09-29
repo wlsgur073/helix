@@ -1,11 +1,12 @@
 // IT-H2: a symlinked HELIX_HOME is refused (ensureHelixDir), but the refusal used to come from
 // advanceWitness AFTER the append had landed: the caller saw an error while the link target's ledger
-// already held the row, and a retry wrote it again. The home is now validated before the ledger is
-// touched on every witnessed write. The same ordering makes ensureHelixDir's non-recursive rule apply
-// to a first commit (spec decision D2): a home whose parent is missing is refused, not created as a
-// chain.
+// already held the row, and a retry wrote it again. The home is now validated before anything is
+// written to a ledger on every witnessed write; the cases below cover commit, soft and permanent
+// erase, confirm and recheck (the last two take the ledger lock and read the ledger first). The same
+// ordering makes ensureHelixDir's non-recursive rule apply to a first commit (spec decision D2): a
+// home whose parent is missing is refused, not created as a chain.
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, symlinkSync, readFileSync, readdirSync, existsSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, symlinkSync, readFileSync, readdirSync, existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -49,11 +50,12 @@ posixOnly('a symlinked HELIX_HOME is refused before any ledger write (IT-H2)', (
   });
 
   // Seed through the REAL path, then read once: a read after the master key exists mints the global
-  // nonce, which is the state a home replaced by a symlink is normally in. Without it the erase is
-  // refused earlier (the nonce mint calls ensureHelixDir) and never reaches the append at all.
-  function seeded(real: string): string {
+  // nonce, which is the state a home replaced by a symlink is normally in. Without it a write through
+  // the link is refused earlier (the nonce mint calls ensureHelixDir) and never reaches the append at
+  // all, so each case first proves that a read through the link works.
+  function seeded(real: string, content = 'the deploy target is staging'): string {
     const s = store(real);
-    const rec = s.commit({ content: 'the deploy target is staging', source: 'user' });
+    const rec = s.commit({ content, source: 'user' });
     s.inspect();
     return rec.id;
   }
@@ -63,6 +65,7 @@ posixOnly('a symlinked HELIX_HOME is refused before any ledger write (IT-H2)', (
     try {
       const id = seeded(real);
       const before = bytesOf(join(real, 'memory.jsonl'));
+      expect(store(link).inspect().map((r) => r.record.id)).toContain(id);
       expect(() => store(link).erase(id)).toThrow(/symlink/);
       expect(bytesOf(join(real, 'memory.jsonl')).equals(before)).toBe(true);
     } finally { rmSync(base, { recursive: true, force: true }); }
@@ -73,7 +76,43 @@ posixOnly('a symlinked HELIX_HOME is refused before any ledger write (IT-H2)', (
     try {
       const id = seeded(real);
       const before = bytesOf(join(real, 'memory.jsonl'));
+      expect(store(link).inspect().map((r) => r.record.id)).toContain(id);
       expect(() => store(link).erase(id, { permanent: true })).toThrow(/symlink/);
+      expect(bytesOf(join(real, 'memory.jsonl')).equals(before)).toBe(true);
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  // confirm and recheck sign under the ledger lock (store.ts writeVerify), whose ensureMaster returns
+  // an existing key before its own ensureHelixDir. Once the key exists, the gate at the top of
+  // appendWitnessedUnlocked is the only home check on this path, so each case asserts the key first.
+  it('a confirm through the link is refused and leaves the ledger byte-identical', () => {
+    const { base, real, link } = layout();
+    try {
+      const id = seeded(real);
+      expect(existsSync(join(real, 'ledger-mac-master.key'))).toBe(true);
+      const before = bytesOf(join(real, 'memory.jsonl'));
+      expect(store(link).inspect().map((r) => r.record.id)).toContain(id);
+      expect(() => store(link).confirm(id)).toThrow(/symlink/);
+      expect(bytesOf(join(real, 'memory.jsonl')).equals(before)).toBe(true);
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  it('a recheck through the link is refused and leaves the ledger byte-identical', () => {
+    const { base, real, link } = layout();
+    try {
+      // The fact path is committed into ledger content, so it is a FIXED, low-entropy name under the
+      // real system temp: a mkdtemp path would be redacted by the write-path scanner and the
+      // file-contains binding would then fail. Constant content and no delete make the one file safe
+      // to share across concurrent runs (precedent: compaction.test.ts, the signed-demotion case).
+      const factDir = join(process.env.HELIX_TEST_SYS_TMP ?? tmpdir(), 'helix-verify-link-probe');
+      mkdirSync(factDir, { recursive: true });
+      const fact = join(factDir, 'fact.txt');
+      writeFileSync(fact, 'staging\n');
+      const id = seeded(real, `the file ${fact} says staging`);
+      expect(existsSync(join(real, 'ledger-mac-master.key'))).toBe(true);
+      const before = bytesOf(join(real, 'memory.jsonl'));
+      expect(store(link).inspect().map((r) => r.record.id)).toContain(id);
+      expect(() => store(link).recheck(id, { kind: 'file-contains', path: fact, pattern: 'staging' })).toThrow(/symlink/);
       expect(bytesOf(join(real, 'memory.jsonl')).equals(before)).toBe(true);
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
