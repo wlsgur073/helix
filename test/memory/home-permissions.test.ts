@@ -143,4 +143,31 @@ describe('a symlinked HELIX_HOME (IT-H2)', () => {
       expect(warnings.filter((w) => w.includes('is a symlink') && w.includes('refuses to write through it'))).toHaveLength(1);
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
+
+  // The warning says Helix will not write through the link, so the per-file repair must not reach
+  // through it either: the loop used to chmod every over-broad Helix file behind the link to 0600,
+  // in the same call that printed the warning.
+  it('chmods nothing behind a symlinked home, spelled with or without a trailing slash', () => {
+    if (platform() === 'win32') return;
+    const base = tmpHome();
+    try {
+      const real = join(base, 'real');
+      mkdirSync(real, { mode: 0o700 });
+      writeFileSync(join(real, 'memory.jsonl'), '{}\n');
+      chmodSync(join(real, 'memory.jsonl'), 0o644);
+      writeFileSync(join(real, 'config.json'), '{}\n');
+      chmodSync(join(real, 'config.json'), 0o664);
+      const link = join(base, 'link');
+      symlinkSync(real, link);
+      for (const home of [link, link + '/']) {
+        const warnings: string[] = [];
+        hardenHomePermissions(home, { warn: (m) => warnings.push(m) });
+        expect(modeOf(join(real, 'memory.jsonl')), home).toBe(0o644);
+        expect(modeOf(join(real, 'config.json')), home).toBe(0o664);
+        expect(warnings, home).toHaveLength(1);
+        expect(warnings[0], home).toContain('is a symlink');
+        expect(warnings.filter((w) => w.includes('tightened')), home).toEqual([]);
+      }
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
 });

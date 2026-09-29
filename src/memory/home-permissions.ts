@@ -68,8 +68,11 @@ export function hardenHomePermissions(home: string, deps: HardenDeps): void {
     const dir = lstatSync(finalName(home));
     if (dir.isSymbolicLink()) {
       // IT-H2: every write through a symlinked home is refused (ensureHelixDir, witness-write.ts);
-      // say so at startup instead of letting the first commit be the first sign.
+      // say so at startup instead of letting the first commit be the first sign. Then stop: nothing
+      // behind the link is chmodded. Repairing modes through the link would contradict the warning
+      // just printed and change files Helix will not write.
       deps.warn(`helix: HELIX_HOME ${home} is a symlink — Helix refuses to write through it, so nothing can be saved to memory (point HELIX_HOME at the directory itself)`);
+      return;
     }
     if (dir.isDirectory() && (dir.mode & 0o077) !== 0) {
       chmodSync(finalName(home), 0o700);
