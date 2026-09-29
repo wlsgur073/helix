@@ -178,10 +178,12 @@ describe('auto-compaction on recall', () => {
   });
 
   it('a live row wearing the fence prefix survives an auto-compaction end to end', () => {
-    // The delivery vector this guards: README documents team sharing as "track .helix/ and have each
-    // member run helix_memory_adopt after cloning", so a project ledger is a git-borne artifact whose
-    // bytes a teammate did not author. A row wearing the reserved namespace used to be physically
-    // dropped by the next compaction with nothing counting it.
+    // The delivery vector this guards: a repository can carry a `.helix/` whose bytes the adopter
+    // did not author. The README's former team-sharing recipe ("track .helix/ and have each member
+    // run helix_memory_adopt after cloning") made that the documented workflow; v0.1 does not
+    // support sharing a project ledger through git, but a cloned repository can still carry one. A
+    // row wearing the reserved namespace used to be physically dropped by the next compaction with
+    // nothing counting it.
     //
     // SCOPE, stated so it is not mistaken for more: this covers survival through the real recall
     // path, not the reclaim-accounting half. planCompaction's keep-set and this method's reclaim

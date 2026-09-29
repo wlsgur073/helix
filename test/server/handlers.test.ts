@@ -416,11 +416,13 @@ describe('id bound (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
   // FIX ROUND 1 (review Critical): the ORIGINAL fix allowlisted [A-Za-z0-9_.:-], reasoning only from
   // ids HELIX ITSELF mints. That missed adoption's whole premise — an adopted ledger's ids are
   // AUTHORED BY SOMEONE ELSE, and parseLedger enforces only `typeof id === 'string'`. This is the
-  // review's own repro method (README: "each team member run helix_memory_adopt after cloning"): a
-  // FOREIGN project ledger, forged with a human-authored id carrying a space, a slash, and non-ASCII
-  // (Hangul) — none of which are Helix's own m_<uuid> shape — is adopted, then must remain reachable
-  // by every id-taking tool. This is the discriminating case Step 4 originally missed (it only tested
-  // a CONFORMING id); this one is deliberately chosen to violate the OLD ASCII-only charset.
+  // review's own repro method, taken from the README's former team-sharing recipe ("each team member
+  // run helix_memory_adopt after cloning"); v0.1 does not support sharing a project ledger through
+  // git, but a repository can still carry a `.helix/` whose bytes the adopter did not author. The
+  // repro: a FOREIGN project ledger, forged with a human-authored id carrying a space, a slash, and
+  // non-ASCII (Hangul) — none of which are Helix's own m_<uuid> shape — is adopted, then must remain
+  // reachable by every id-taking tool. This is the discriminating case Step 4 originally missed (it
+  // only tested a CONFORMING id); this one is deliberately chosen to violate the OLD ASCII-only charset.
   //
   // FIX ROUND 2 (Minor): this id previously read `'note/2026 team-shared id'` — pure ASCII — while
   // the comment above claimed "non-ASCII (Hangul)". The claim was false (space/slash still

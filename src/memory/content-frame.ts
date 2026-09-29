@@ -72,8 +72,9 @@ export const ALIASED_LEDGER_NOTE =
 export const ANCESTOR_UNADOPTED_NOTE =
   "(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval)";
 
-/** IT-H2: printed by the SessionStart hook when HELIX_HOME is a symlink. Every write through such a
- *  home is refused before any ledger is touched (witness-write.ts), and the hook is the one surface
+/** IT-H2: printed by the SessionStart hook when HELIX_HOME is a symlink. Through such a home, commit,
+ *  erase, confirm, recheck, adopt and the SessionEnd record are refused before anything is written to
+ *  a ledger (ensureHelixDir; witness-write.ts for the ledger writes), and the hook is the one surface
  *  that reaches the session while the server can only log to stderr. Same constraints as every
  *  trusted note: constant, no interpolation, no path, no imperative; ASCII only. Deliberately silent
  *  about reads: a home with a master key but no global nonce refuses its first read too (the nonce
