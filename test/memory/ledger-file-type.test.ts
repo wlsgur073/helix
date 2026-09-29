@@ -7,11 +7,12 @@
 // through pre-fix code allocates without bound.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, readFileSync, rmSync, truncateSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { parseLedger, readLedgerBytes, readLedgerRaw, isLedgerNotRegularError } from '../../src/memory/ledger.js';
+import * as ledgerModule from '../../src/memory/ledger.js';
 import { MemoryStore } from '../../src/memory/store.js';
 
 const tmp = (): string => mkdtempSync(join(tmpdir(), 'helix-ledgertype-'));
@@ -33,6 +34,17 @@ function requireFileTypeCheck(): void {
   if (typeof isLedgerNotRegularError !== 'function') {
     throw new Error('the ledger file-type check is not implemented yet: refusing to open a FIFO through a blocking reader');
   }
+}
+
+// A reader without the size check allocates the whole file before it can fail (a 2 GiB Buffer for
+// the oversize case below). The constant ships with the check, so its presence is the precondition;
+// the namespace import lets this guard run, and refuse, on a checkout that lacks both.
+function requireSizeCheck(): number {
+  const max: unknown = ledgerModule.MAX_LEDGER_READ_BYTES;
+  if (typeof max !== 'number') {
+    throw new Error('the ledger size check is not implemented yet: refusing to run a file above 2 GiB through a reader that would allocate it');
+  }
+  return max;
 }
 
 const mkfifo = (p: string): void => { execFileSync('mkfifo', [p]); };
@@ -144,5 +156,29 @@ describe('regular files read exactly as readFileSync read them (IT-H4)', () => {
       rmSync(home, { recursive: true, force: true });
       rmSync(realDir, { recursive: true, force: true });
     }
+  });
+});
+
+// readFileSync(path) refused a file above 2 GiB - 1 (Node's kIoMaxLength) with ERR_FS_FILE_TOO_LARGE
+// before reading anything. The descriptor-based reader keeps that ceiling: without it, every recall,
+// inspect or hook read of such a ledger allocates and reads the whole file, and a sparse file costs
+// nothing to create. The oversize case is POSIX only, where truncate makes a sparse file.
+describe('a ledger above readFileSync\'s 2 GiB ceiling is refused as readFileSync refused it (IT-H4)', () => {
+  it('MAX_LEDGER_READ_BYTES is 2 ** 31 - 1, the bound readFileSync enforced', () => {
+    expect(ledgerModule.MAX_LEDGER_READ_BYTES).toBe(2 ** 31 - 1);
+  });
+
+  it.skipIf(process.platform === 'win32')('a sparse file one byte above the ceiling: all three readers throw ERR_FS_FILE_TOO_LARGE', () => {
+    const max = requireSizeCheck();
+    const dir = tmp();
+    try {
+      const p = join(dir, 'memory.jsonl');
+      writeFileSync(p, '');
+      truncateSync(p, max + 1);
+      for (const read of [parseLedger, readLedgerBytes, readLedgerRaw] as Array<(x: string) => unknown>) {
+        const e = thrown(() => read(p));
+        expect((e as { code?: unknown } | undefined)?.code, `via ${read.name}`).toBe('ERR_FS_FILE_TOO_LARGE');
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

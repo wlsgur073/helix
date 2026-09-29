@@ -250,6 +250,10 @@ export class LedgerNotRegularError extends Error {
 export const isLedgerNotRegularError = (e: unknown): boolean =>
   e instanceof Error && (e as { ledgerNotRegular?: unknown }).ledgerNotRegular === true;
 
+/** readFileSync's own ceiling (Node's kIoMaxLength, 2 GiB - 1): readFileSync(path) refused a larger
+ *  file with ERR_FS_FILE_TOO_LARGE before reading anything, and readLedgerFileBytes keeps that bound. */
+export const MAX_LEDGER_READ_BYTES = 2 ** 31 - 1;
+
 /** The ONE ledger file read (IT-H4), shared by parseLedger / readLedgerBytes / readLedgerRaw.
  *  readFileSync asked nothing about WHAT the path is: a FIFO with no writer blocks open(2) forever and
  *  a character device reads without bound. Neither is an I/O error, so no caller's catch ever saw
@@ -258,12 +262,14 @@ export const isLedgerNotRegularError = (e: unknown): boolean =>
  *  instead of blocking; fstat on the DESCRIPTOR, which asks about the object actually opened and
  *  rejects everything that is not a regular file; and a read bounded by that fstat's size. For a
  *  regular file whose size fstat reports (every ledger Helix writes) this returns what readFileSync
- *  returned. Two measured exceptions are deliberate: a size-0 regular pseudo-file (under /proc) reads
- *  as empty, because reading such a file to EOF is the unbounded class this closes, and a regular file
- *  under another process's write lease fails at once with EAGAIN instead of waiting for the lease. An
+ *  returned, and a file above readFileSync's ceiling (MAX_LEDGER_READ_BYTES) is refused as
+ *  readFileSync(path) refused it, with ERR_FS_FILE_TOO_LARGE, before anything is allocated. Two
+ *  measured exceptions are deliberate: a size-0 regular pseudo-file (under /proc) reads as empty,
+ *  because reading such a file to EOF is the unbounded class this closes, and a regular file under
+ *  another process's write lease fails at once with EAGAIN instead of waiting for the lease. An
  *  object that cannot be opened at all (a socket, a driverless device) is classified by stat, which
  *  never opens. ENOENT propagates unchanged so each caller keeps its absent-file convention. No size
- *  cap (spec decision Q3): a ledger that grew legitimately must stay readable. */
+ *  cap below readFileSync's own (spec decision Q3), so a ledger that grew legitimately stays readable. */
 function readLedgerFileBytes(path: string): Buffer {
   let fd: number;
   try {
@@ -284,6 +290,12 @@ function readLedgerFileBytes(path: string): Buffer {
   try {
     const st = fstatSync(fd);
     if (!st.isFile()) throw new LedgerNotRegularError(path);
+    if (st.size > MAX_LEDGER_READ_BYTES) {
+      // readFileSync's own refusal, same class, message and code, so no caller sees a new error kind
+      // (callers special-case only ENOENT). Checked before Buffer.alloc: a sparse file costs nothing
+      // to create, and allocating its whole size is the cost this refuses.
+      throw Object.assign(new RangeError(`File size (${st.size}) is greater than 2 GiB`), { code: 'ERR_FS_FILE_TOO_LARGE' });
+    }
     const buf = Buffer.alloc(st.size);
     let len = 0;
     while (len < buf.length) {
