@@ -178,9 +178,10 @@ First release.
   key, the ownership registry, the rollback witness, the audit log and the metrics stream;
   `HELIX_LEDGER` moves the global ledger data file and nothing else; `HELIX_SESSIONS` moves the
   SessionEnd records (default `<HELIX_HOME>/sessions.jsonl`).
-  `HELIX_HOME` must be a directory, not a symlink: every write through a symlinked home is refused
-  before anything is written to a ledger. A home that does not exist yet reads as empty memory until the first
-  write creates it `0700`.
+  `HELIX_HOME` must be a directory, not a symlink: commit, erase, confirm, recheck, adopt and the
+  SessionEnd record are refused through a symlinked home before anything is written to a ledger. A
+  home that does not exist yet reads as empty memory until the first write creates it `0700`; its
+  parent directory must already exist.
 - Content-free metrics in `~/.helix/metrics.jsonl`, one row per tool call, per verifying ledger read
   and per compaction attempt (default on; `metrics.enabled: false`
   disables; the hook honours the global config only).

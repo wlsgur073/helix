@@ -122,9 +122,10 @@ grades. Two consequences worth knowing before you set it: if you back up your me
 file too — it is no longer inside `HELIX_HOME` — and repointing `HELIX_LEDGER` at a *different*
 ledger later presents the rollback witness with a file it has never seen, which reads as tamper until
 you re-bless the scope with the [re-baseline ceremony](./SECURITY.md).
-`HELIX_HOME` must name the directory itself, not a symlink to one: Helix refuses every write through
-a symlinked home before anything is written to a ledger, and the server's startup and the SessionStart hook
-say so.
+`HELIX_HOME` must name the directory itself, not a symlink to one: through a symlinked home Helix
+refuses commit, erase, confirm, recheck, adopt and the SessionEnd record before anything is written to
+a ledger, and the server's startup and the SessionStart hook say so. A home that does not exist yet is
+created `0700` by the first write, and only when its parent directory already exists.
 
 Two further variables the shipped code reads. Neither is something you normally set, but both take
 effect if you do, so they are listed rather than left silent.

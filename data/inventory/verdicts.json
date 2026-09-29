@@ -282,7 +282,7 @@
  {
   "rowId": "r029",
   "surfaceItem": "config:metrics.enabled",
-  "claimId": "CHANGELOG.md#b76c14c39d9c",
+  "claimId": "CHANGELOG.md#4ee246da086d",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -292,7 +292,7 @@
  {
   "rowId": "r030",
   "surfaceItem": "env:HELIX_HOME",
-  "claimId": "CHANGELOG.md#b76c14c39d9c",
+  "claimId": "CHANGELOG.md#4ee246da086d",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Every Block C/D journey and all three C5 drill variants (R, U, D) ran 2026-09-24 under their own temporary HELIX_HOME with every HELIX_* stripped from the inherited environment, and the store landed there. Measured afterwards rather than asserted: at 2026-09-24 21:35 the real ~/.helix still showed memory.jsonl last modified 2026-09-11, audit.jsonl 2026-09-24 10:39 and witness.json 2026-09-24 10:44 — all BEFORE the journeys and drill ran at 20:20 — so the run wrote nothing there.",
@@ -302,7 +302,7 @@
  {
   "rowId": "r031",
   "surfaceItem": "env:HELIX_LEDGER",
-  "claimId": "CHANGELOG.md#b76c14c39d9c",
+  "claimId": "CHANGELOG.md#4ee246da086d",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -342,7 +342,7 @@
  {
   "rowId": "r035",
   "surfaceItem": "hook:SessionEnd",
-  "claimId": "CHANGELOG.md#b76c14c39d9c",
+  "claimId": "CHANGELOG.md#4ee246da086d",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Installed bin/hooks/session-end.mjs driven with a real stdin payload 2026-09-24: exit 0, appended a session-end row to sessions.jsonl at mode 600 under a temporary HELIX_HOME. A1 hooks.e2e re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files).",
@@ -352,7 +352,7 @@
  {
   "rowId": "r036",
   "surfaceItem": "hook:SessionStart",
-  "claimId": "CHANGELOG.md#b76c14c39d9c",
+  "claimId": "CHANGELOG.md#4ee246da086d",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Installed bin/hooks/session-start.mjs driven from a project cwd 2026-09-24: exit 0, emitted ===HELIX <nonce> HELIX MEMORY (cross-session) — DATA … carrying DATA[Fresh:project], DATA[Fresh:global] and a flagged DATA[Suspect:project] row plus the verify-before-acting line.",
