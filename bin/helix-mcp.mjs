@@ -14126,6 +14126,7 @@ function hardenHomePermissions(home2, deps) {
     const dir = lstatSync2(finalName(home2));
     if (dir.isSymbolicLink()) {
       deps.warn(`helix: HELIX_HOME ${home2} is a symlink \u2014 Helix refuses to write through it, so nothing can be saved to memory (point HELIX_HOME at the directory itself)`);
+      return;
     }
     if (dir.isDirectory() && (dir.mode & 63) !== 0) {
       chmodSync(finalName(home2), 448);
@@ -15130,6 +15131,7 @@ var LedgerNotRegularError = class extends Error {
   }
 };
 var isLedgerNotRegularError = (e) => e instanceof Error && e.ledgerNotRegular === true;
+var MAX_LEDGER_READ_BYTES = 2 ** 31 - 1;
 function readLedgerFileBytes(path) {
   let fd;
   try {
@@ -15148,6 +15150,9 @@ function readLedgerFileBytes(path) {
   try {
     const st = fstatSync2(fd);
     if (!st.isFile()) throw new LedgerNotRegularError(path);
+    if (st.size > MAX_LEDGER_READ_BYTES) {
+      throw Object.assign(new RangeError(`File size (${st.size}) is greater than 2 GiB`), { code: "ERR_FS_FILE_TOO_LARGE" });
+    }
     const buf = Buffer.alloc(st.size);
     let len = 0;
     while (len < buf.length) {

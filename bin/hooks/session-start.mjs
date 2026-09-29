@@ -996,6 +996,7 @@ var LedgerNotRegularError = class extends Error {
     this.name = "LedgerNotRegularError";
   }
 };
+var MAX_LEDGER_READ_BYTES = 2 ** 31 - 1;
 function readLedgerFileBytes(path) {
   let fd;
   try {
@@ -1014,6 +1015,9 @@ function readLedgerFileBytes(path) {
   try {
     const st = fstatSync2(fd);
     if (!st.isFile()) throw new LedgerNotRegularError(path);
+    if (st.size > MAX_LEDGER_READ_BYTES) {
+      throw Object.assign(new RangeError(`File size (${st.size}) is greater than 2 GiB`), { code: "ERR_FS_FILE_TOO_LARGE" });
+    }
     const buf = Buffer.alloc(st.size);
     let len = 0;
     while (len < buf.length) {
