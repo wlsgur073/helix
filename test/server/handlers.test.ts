@@ -251,10 +251,10 @@ describe('tool handlers', () => {
     const s = store();
     handleCommit(s, { content: 'db is postgres', source: 'user' });
     const out = text(handleRecall(s, { query: 'postgres' }));
-    // The content line is UNCHANGED: the pair rides a second, indented physical line so the H9
+    // The content line is UNCHANGED: the pair rides the record's own PROOF line (IT-M16), so the H9
     // cross-surface flag parity (hook vs tool) keeps holding byte-for-byte.
     expect(out).toContain('DATA[Fresh:global]| db is postgres');
-    const pair = /DATA\[Fresh:global\]\|\s+(m_[0-9a-f-]+) contentDigest: ([0-9a-f]{64})$/m.exec(out);
+    const pair = /^PROOF\[Fresh:global\]\| (m_[0-9a-f-]+) contentDigest: ([0-9a-f]{64})$/m.exec(out);
     expect(pair, 'no id+digest proof line on the recall surface').not.toBeNull();
     const [, id, digest] = pair!;
     // The pair must RESOLVE: the digest is the store's own value for that very row.
@@ -271,8 +271,8 @@ describe('tool handlers', () => {
     // Content-line bytes are UNCHANGED (H9 parity) — only the trailing break itself is gone.
     const contentIdx = lines.indexOf('DATA[Fresh:global]| db is postgres');
     expect(contentIdx, 'no content line').toBeGreaterThanOrEqual(0);
-    // The very next physical line is the proof line, never an empty marked line in between.
-    expect(lines[contentIdx + 1]).toMatch(/^DATA\[Fresh:global\]\|\s+m_[0-9a-f-]+ contentDigest: [0-9a-f]{64}$/);
+    // The very next physical line is the PROOF line, never an empty marked line in between.
+    expect(lines[contentIdx + 1]).toMatch(/^PROOF\[Fresh:global\]\| m_[0-9a-f-]+ contentDigest: [0-9a-f]{64}$/);
     expect(lines).not.toContain('DATA[Fresh:global]| '); // the bare mark, with nothing after it
   });
 

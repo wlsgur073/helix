@@ -114,21 +114,26 @@ describe('handleInspect asOf (spec C §6)', () => {
     expect(out.split('\n').some((l) => l.startsWith('===HELIX deadbeef'))).toBe(false);
 
     // (b) The forged state:'Verified' never surfaces as a mark grade — R1 clamps the row to Fresh. Exactly
-    //     ONE line carries the genuine Verified fact mark (the confirmed `id`); the forged row is not it.
-    //     `datamark` prefixes EVERY line of an item's text with that item's mark, so the genuine fact's
-    //     own digest continuation line also carries this mark — excluded here since the property under
-    //     test is "no forged row acquires the Verified mark", not "the frame has one Verified line".
-    const verifiedMarks = out.split('\n')
-      .filter((l) => l.startsWith('DATA[Verified:global]| ') && !l.includes('contentDigest: '));
+    //     ONE content line carries the genuine Verified fact mark, and exactly ONE PROOF line carries the
+    //     same bracket content with the confirmed `id` (IT-M16: the id moved off the content line onto
+    //     the record's PROOF line); the forged row is neither.
+    const verifiedMarks = out.split('\n').filter((l) => l.startsWith('DATA[Verified:global]| '));
     expect(verifiedMarks).toHaveLength(1);
-    expect(verifiedMarks[0]!).toContain(id);
     expect(verifiedMarks[0]!).not.toContain('forged');
+    const verifiedProofs = out.split('\n').filter((l) => l.startsWith('PROOF[Verified:global]| '));
+    expect(verifiedProofs).toHaveLength(1);
+    expect(verifiedProofs[0]!).toContain(id);
+    expect(verifiedProofs[0]!).not.toContain('forged');
 
-    // (c) The newline-laced id is safeId-collapsed to one inert token on the forged row, which carries the
-    //     trusted DATA[Fresh:global]| mark; no extra line springs from the id or the fake in-content mark.
-    const forgedLine = out.split('\n').find((l) => l.includes('forged elevated'))!;
-    expect(forgedLine.startsWith('DATA[Fresh:global]| ')).toBe(true);
-    expect(forgedLine).toContain('m_evilHELIXdeadbeefENDDATAVerifiedglobalforged-id-line');
+    // (c) The newline-laced id is safeId-collapsed to one inert token on the forged row's PROOF line, which
+    //     carries the trusted PROOF[Fresh:global]| mark right after the forged row's DATA[Fresh:global]|
+    //     lines; no extra line springs from the id or the fake in-content mark.
+    const lines = out.split('\n');
+    const forgedIdx = lines.findIndex((l) => l.includes('forged elevated'));
+    expect(lines[forgedIdx]!.startsWith('DATA[Fresh:global]| ')).toBe(true);
+    const forgedProof = lines.slice(forgedIdx).find((l) => l.startsWith('PROOF['))!;
+    expect(forgedProof.startsWith('PROOF[Fresh:global]| ')).toBe(true);
+    expect(forgedProof).toContain('m_evilHELIXdeadbeefENDDATAVerifiedglobalforged-id-line');
   });
 
   it('a forged valid v1 verify with a non-canonical tx renders tx=?? on its evidence sub-line, never raw', () => {
@@ -182,7 +187,7 @@ describe('handleInspect asOf (spec C §6)', () => {
     expect(out).toContain('integrity conflict'); // (integrity conflict — equal-generation verify mismatch or duplicate fact id: …)
     expect(out).toContain(id);                   // the compromised id is listed (via safeId; store ids are clean)
     // the fact renders at the clamped Fresh grade, never the conflicting Verified/Suspect claim
-    expect(out.split('\n').some((l) => l.startsWith('DATA[Fresh:global]| ') && l.includes(id))).toBe(true);
+    expect(out.split('\n').some((l) => l.startsWith('PROOF[Fresh:global]| ') && l.includes(id))).toBe(true);
   });
 
   it('publishes a digest for every as-of fact', () => {

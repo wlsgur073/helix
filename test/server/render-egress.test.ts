@@ -30,12 +30,11 @@ function store(): MemoryStore {
 }
 const text = (res: { content: Array<{ type: string; text?: string }> }) => res.content.map((c) => c.text ?? '').join('');
 
-// Anchors the proof line's shape: a DATA[...]| mark, the indent (the mark's own trailing space plus
-// the line's own four-space indent, which read back-to-back as one whitespace run), the id, the
-// literal ' contentDigest: ' separator, and 64 lowercase hex chars — the idiom
-// test/memory/store.test.ts's H10 case already uses for the library-level surface, generalized here
-// to any DATA mark and any id shape.
-const PROOF_LINE_RE = /DATA\[[^\]]+\]\|\s+(\S+) contentDigest: ([0-9a-f]{64})/;
+// Anchors the PROOF line's shape (IT-M16): a `PROOF[...]| ` mark at the start of the line, the id, the
+// literal ' contentDigest: ' separator, and 64 lowercase hex chars ending the line — the idiom
+// test/memory/store.test.ts's H10 case uses for the library-level surface, generalized here to any
+// PROOF bracket and any id shape.
+const PROOF_LINE_RE = /^PROOF\[[^\]]+\]\| (\S+) contentDigest: ([0-9a-f]{64})$/m;
 
 describe('the rendered read surfaces and the EH-4 boundary', () => {
   it('a complete recall rendering clears the entropy leg (short-id fixture)', () => {

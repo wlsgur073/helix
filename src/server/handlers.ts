@@ -4,7 +4,7 @@ import type { HelixConfig } from '../config.js';
 import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS, DEFAULT_CONFIG } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type DualVerifyResult, type EchoSource, type GateTrace } from '../verify/dual-verify.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, stripTrailingLineBreaks } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, recordRows, type FrameLine } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
 import { isWitnessAdvanceError, isWitnessBlockedError } from '../memory/witness-store.js';
 import { appendAudit, type VerifyAudit, type EraseAudit } from '../audit.js';
@@ -32,10 +32,12 @@ const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] })
  *  render an id INSIDE a data frame without importing the server layer (nothing under `src/memory`
  *  may import from `src/server`). They are re-exported at the top of this file, so every existing
  *  importer is unchanged. What stays HERE is the part this file owns: the CALL SITES. The site split
- *  is still re-derived by `grep -nE 'safeId|presentId' src/server/handlers.ts` — every out-of-frame
- *  advisory note calls `safeId`, every in-frame DATA row calls `presentId` — with one call site now
- *  outside this file: `frameAsData` in `content-frame.ts`, which is IN-FRAME and therefore uses
- *  `presentId`, as the moved argument above it explains. */
+ *  is still re-derived by `grep -nE 'safeId|presentId' src/server/handlers.ts src/memory/content-frame.ts`
+ *  — every out-of-frame advisory note calls `safeId`, every in-frame row calls `presentId`. Since IT-M16
+ *  the record PROOF lines are built outside this file: `proofRow` in `content-frame.ts` (through
+ *  `recordRows`) renders the PROOF line of recall's `frameAsData` and of every inspect view, IN-FRAME
+ *  and therefore `presentId`, as the moved argument there explains; the in-frame `presentId` site left
+ *  here is asOf's evidence row. */
 
 /** Throw unless `id` passes isValidId. REJECTS rather than truncating or sanitizing: a
  *  silently-shortened/stripped id would resolve against a DIFFERENT record than the caller named (or
@@ -93,9 +95,11 @@ function witnessNotesText(notes: string[]): string {
  *  substring cut of a finished string.
  *
  *  Binary-searches the largest `n` whose render, plus its own omission note, fits `budget`. Valid
- *  because `render` is monotonic in `n`: each additional item's own datamark prefix (`DATA[...]| `,
- *  never shorter than ~15 characters) is always more bytes than the at-most-one-character the
- *  omission count's digit width can ever shrink by as `n` grows. Binary search over a linear scan
+ *  because `render` is monotonic in `n`: each additional item adds at least one marked line (its
+ *  `DATA[...]| ` line, or on a PROOF-bearing surface at least its `PROOF[...]| <id>` line, which a
+ *  record whose body renders empty keeps alone — ruling R3), never shorter than ~15 characters, which is
+ *  always more bytes than the at-most-one-character the omission count's digit width can ever shrink
+ *  by as `n` grows. Binary search over a linear scan
  *  matters because inspect's currentView has no item cap at all — an unbounded-scale store must still
  *  resolve this in O(items * log items) render calls, not O(items^2).
  *
@@ -195,9 +199,9 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
  *  recall/SessionStart use (nonce frame + per-line datamark/normalizeUntrusted on the content) and
  *  applies the M1 response-cap (`capRendered`) exactly once.
  *
- *  M1: total response bound — one record is one item; every row's extra `contentDigest` sub-line
- *  rides along inside that SAME item's `text` (not restricted to Verified rows since 2026-09-02), so
- *  it is never split from its own row.
+ *  M1: total response bound — one record is one item; every record's PROOF line (id + contentDigest,
+ *  not restricted to Verified rows since 2026-09-02) is built from the SAME element of `rows` as its
+ *  DATA entry, so it is never split from its own record.
  *
  *  `trailingNotes` must be the CALLER's own fully-composed advisory text (the ids branch folds its
  *  missing-ids count into it) — its length is what sizes the remaining budget passed to
@@ -208,11 +212,13 @@ function renderCurrentRows(rows: ScopedRecord[], label: string, trailingNotes: s
     (n) => makeDataFrame({
       label,
       nonce: newNonce(),
-      lines: rows.slice(0, n).map(({ record, scope, contentDigest }) => ({
+      lines: rows.slice(0, n).flatMap(({ record, scope, contentDigest }) => {
         // The mark is the SAME known-enum `DATA[state:scope]| ` label recall/SessionStart use (mirrored
-        // byte-for-byte, not reinvented). The SANITIZED id is prepended to the datamarked content so
-        // inspect keeps its per-record usefulness (the id is still shown) while every attacker-controlled
-        // byte — id and content — stays inside the datamarked DATA frame and cannot forge a labelled line.
+        // byte-for-byte, not reinvented). IT-M16: the content is its own DATA entry, and the id moved
+        // OFF the head line onto the record's PROOF line (proofRow), under the same bracket content —
+        // content could forge a line shaped like the old `<id> <content>` head or `contentDigest:`
+        // row, but never a PROOF line. Both entries come from ONE element of `rows`, so `capRendered`,
+        // which slices records, never splits them.
         //
         // The digest rides along on EVERY row, under its own name. It has two callers and they need it
         // in different states: `commit` takes it back as `supersedesDigest` when replacing a VERIFIED
@@ -229,14 +235,10 @@ function renderCurrentRows(rows: ScopedRecord[], label: string, trailingNotes: s
         // mismatch between the two was itself half of why the escape went unfound. The cost is 64 hex
         // characters per row, which `capRendered` absorbs by showing fewer rows; it discloses nothing,
         // since a reader holding this line already holds the content it digests.
-        //
-        // M-1: the digest branch strips the content's own trailing break(s) first (same reason as
-        // the asOf/history branches above); the no-digest branch is untouched -- no suffix to protect.
-        text: contentDigest !== undefined
-          ? `${presentId(record.id)} ${stripTrailingLineBreaks(record.content)}\n    contentDigest: ${contentDigest}`
-          : `${presentId(record.id)} ${record.content}`,
-        mark: `DATA[${record.state}:${scope}]| `,
-      })),
+        // The content is normalized here, once (no `maxChars` reaches inspect), and recordRows drops
+        // the DATA entry of a record whose body renders empty (ruling R3).
+        return recordRows(`${record.state}:${scope}`, normalizeUntrusted(record.content), record.id, contentDigest);
+      }),
     }),
     RESPONSE_MAX_CHARS - trailingNotes.length,
   );
@@ -287,17 +289,14 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
     // M1: total response bound (capRendered's docstring). Drop whole FACTS from the tail — never
     // split a fact's content row from its own evidence sub-rows, which the plain per-LINE granularity
     // recall/history use would risk here.
-    const buildLines = (n: number): Array<{ text: string; mark: string }> => facts.slice(0, n).flatMap((f) => {
-      // The digest rides INSIDE the fact's own `text`, as a second line, so `datamark` re-applies
-      // this row's mark to it and `capRendered` — which drops whole FACTS — can never split the
-      // digest from the record it digests. No `maxChars` reaches this branch, so no slice can cut it.
-      // M-1: strip the content's own trailing line break(s) before the digest suffix -- otherwise
-      // datamark's single normalize-and-mark pass over the whole composed string only strips a
-      // break at the very END of it (after the digest), leaving an empty marked line in between.
-      const out: Array<{ text: string; mark: string }> = [{
-        text: `${presentId(f.record.id)} ${stripTrailingLineBreaks(f.record.content)}\n    contentDigest: ${f.contentDigest}`,
-        mark: `DATA[${f.grade}:${f.scope}]| `,
-      }];
+    const buildLines = (n: number): FrameLine[] => facts.slice(0, n).flatMap((f) => {
+      // IT-M16: the content is its own DATA entry; the id and digest ride on the fact's PROOF line
+      // right after it (proofRow), under the same `<grade>:<scope>` bracket content. Both entries,
+      // and the evidence rows below, come from ONE fact, so `capRendered` — which drops whole FACTS —
+      // can never split the digest from the record it digests. No `maxChars` reaches this branch.
+      // The evidence rows keep the id on a `DATA[verify:<scope>]| ` mark: record content is always
+      // marked with the fact's grade, never `verify`, so content cannot produce one either.
+      const out: FrameLine[] = recordRows(`${f.grade}:${f.scope}`, normalizeUntrusted(f.record.content), f.record.id, f.contentDigest);
       for (const e of f.evidence) {
         const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? 'Y' : 'N'} applicable=${e.applicable ? 'Y' : 'N'}${e.winner ? ' WINNER' : ''}`;
         out.push({ text: `${presentId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
@@ -329,20 +328,16 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
       (n) => makeDataFrame({
         label: 'MEMORY HISTORY',
         nonce: newNonce(),
-        lines: rows.slice(0, n).map((r) => {
+        lines: rows.slice(0, n).flatMap((r) => {
           const verb = r.closedBy ? r.closedBy.kind : r.record.state; // closed: verb; live: grade (both enums)
           const interval = `${iso(r.record.tx)}..${r.txTo === null ? '' : iso(r.txTo)}`;
           // No `maxChars` is threaded into this branch — `handleInspect`'s history param carries none —
-          // so no slice runs here, and the digest rides inside the row's own `text`, so `capRendered`
-          // drops it together with its row rather than orphaning it (see the asOf branch's identical note).
-          // M-1: the digest branch strips the content's own trailing break(s) first (same reason as the
-          // asOf branch above); the no-digest branch is untouched -- there is no suffix line to protect.
-          return {
-            text: r.contentDigest === undefined
-              ? `${presentId(r.record.id)} ${r.record.content}`
-              : `${presentId(r.record.id)} ${stripTrailingLineBreaks(r.record.content)}\n    contentDigest: ${r.contentDigest}`,
-            mark: `DATA[${verb}:${r.scope}:${interval}]| `,
-          };
+          // so no slice runs here. IT-M16: the row's PROOF line (proofRow) carries its id, plus the
+          // digest on a LIVE row (a closed row has none, so its PROOF line holds the id alone), under
+          // the same `<verb>:<scope>:<interval>` bracket content; both entries come from ONE row, so
+          // `capRendered` drops them together rather than orphaning the PROOF line. An erase-closed row,
+          // whose content history blanks, renders its PROOF line alone (recordRows, ruling R3).
+          return recordRows(`${verb}:${r.scope}:${interval}`, normalizeUntrusted(r.record.content), r.record.id, r.contentDigest);
         }),
       }),
       RESPONSE_MAX_CHARS - trailingNotes.length,

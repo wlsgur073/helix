@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { frameAsData, makeDataFrame, normalizeUntrusted, newNonce, datamark } from '../../src/memory/content-frame.js';
+import { frameAsData, makeDataFrame, normalizeUntrusted, newNonce, datamark, PROOF_LEGEND, DATA_SEMANTICS } from '../../src/memory/content-frame.js';
 import type { MemoryRecord } from '../../src/types.js';
 import type { ScopedRecord } from '../../src/types.js';
 
@@ -146,5 +146,53 @@ describe('adversarial framing (structural guarantees)', () => {
     // the single content line is capped to ~200 chars + the mark prefix
     const dataLine = out.split('\n').find((l) => l.startsWith('DATA| '))!;
     expect(dataLine.length).toBeLessThanOrEqual('DATA| '.length + 200);
+  });
+});
+
+// IT-M16 ruling R2 (second fix batch §4.1 item 3): the legend scopes "only" to the id-and-digest PAIR.
+// An id alone also appears outside the PROOF line (asOf's `DATA[verify:<scope>]| <id> gen=…` evidence
+// rows, and the out-of-frame notes), so the per-item reading "each record's id … appear(s) only on the
+// PROOF line" was literally false in those frames.
+describe('PROOF_LEGEND (R2)', () => {
+  it('is the ruled sentence, verbatim', () => {
+    expect(PROOF_LEGEND).toBe("Each record's id-and-contentDigest pair appears only on the PROOF line after its DATA lines; record content cannot produce a PROOF line.");
+  });
+
+  it('sits right after DATA_SEMANTICS, once, in a frame that carries a PROOF line', () => {
+    const out = frameAsData([{ record: rec('m_1', 'db is postgres'), scope: 'global', contentDigest: 'd'.repeat(64) }], 'a'.repeat(32));
+    const lines = out.split('\n');
+    expect(lines.filter((l) => l === PROOF_LEGEND)).toHaveLength(1);
+    expect(lines[lines.indexOf(DATA_SEMANTICS) + 1]).toBe(PROOF_LEGEND);
+  });
+});
+
+// Ruling R3 (second fix batch §4.1 item 1): a record whose RENDERED body is empty gets no DATA entry,
+// only its PROOF line. "Rendered": what the DATA entry would show after normalization and the trailing
+// line-break strip — so a body of line breaks alone counts as empty, while a re-verify flag in front of
+// an empty content does not (the flag is the body then).
+describe('a record with an empty rendered body (R3)', () => {
+  const N = 'a'.repeat(32);
+  const bareMark = (l: string): boolean => /^DATA\[[^\]]*\]\| $/.test(l);
+  it('recall: an empty or break-only content renders its PROOF line alone', () => {
+    const out = frameAsData([
+      { record: rec('m_empty', ''), scope: 'global', contentDigest: 'e'.repeat(64) },
+      { record: rec('m_breaks', '\n\n'), scope: 'global', contentDigest: 'b'.repeat(64) },
+      { record: rec('m_full', 'db is postgres'), scope: 'global', contentDigest: 'f'.repeat(64) },
+    ], N);
+    const lines = out.split('\n');
+    expect(lines.filter(bareMark)).toEqual([]);
+    const body = lines.slice(lines.indexOf(PROOF_LEGEND) + 1, -1);
+    expect(body).toEqual([
+      `PROOF[Verified:global]| m_empty contentDigest: ${'e'.repeat(64)}`,
+      `PROOF[Verified:global]| m_breaks contentDigest: ${'b'.repeat(64)}`,
+      'DATA[Verified:global]| db is postgres',
+      `PROOF[Verified:global]| m_full contentDigest: ${'f'.repeat(64)}`,
+    ]);
+  });
+
+  it('recall: a re-verify flag in front of an empty content is a body, so its DATA line stays', () => {
+    const out = frameAsData([{ record: rec('m_s', '', 'Suspect'), scope: 'global' }], N);
+    expect(out).toContain('DATA[Suspect:global]| (re-verify — reality may have changed) ');
+    expect(out).toContain('PROOF[Suspect:global]| m_s');
   });
 });

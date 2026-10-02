@@ -166,8 +166,50 @@ describe('handleInspect history mode', () => {
     expect(out).toContain(`contentDigest: ${live}`);
     // The closed row's digest would resolve against nothing — the guard ledger is the live
     // projection — so it is deliberately absent rather than present and unusable.
-    const closedLine = out.split('\n').find((l) => l.includes(b.id) && l.includes('..'));
-    expect(closedLine, 'no closed row rendered').toBeDefined();
-    expect(out).not.toMatch(new RegExp(`${b.id}[^\\n]*\\n[^\\n]*contentDigest`));
+    // IT-M16: the closed row's PROOF line carries its id ALONE — the whole line is the mark + the id.
+    // (The former next-line check went vacuous once id and digest shared one line: measured, a digest
+    // forced onto closed rows still passed it.)
+    const closedProof = out.split('\n').find((l) => l.startsWith('PROOF[supersede:') && l.includes(b.id));
+    expect(closedProof, 'no closed row rendered').toBeDefined();
+    expect(closedProof!).toMatch(new RegExp(`^PROOF\\[supersede:global:[^\\]]*\\]\\| ${b.id}$`));
+  });
+
+  // Ruling R3 (second fix batch §4.1 item 1): history blanks an erase-closed row's content (history.ts
+  // §6 redaction), and a record whose rendered body is empty gets NO DATA entry, only its PROOF line —
+  // never a bare `DATA[…]| ` mark with nothing after it.
+  it('an erase-closed row renders its PROOF line alone, with no empty DATA line (R3)', () => {
+    const { store } = tmpStore();
+    const keep = store.commit({ content: 'kept fact', source: 'user' });
+    const gone = store.commit({ content: 'erased fact', source: 'user' });
+    store.erase(gone.id);
+    const lines = handleInspect(store, { history: true }).content[0]!.text.split('\n');
+    expect(lines.filter((l) => /^DATA\[[^\]]*\]\| $/.test(l))).toEqual([]);   // no bare mark anywhere
+    expect(lines.some((l) => l.startsWith('DATA[erase:'))).toBe(false);             // the closed row has no DATA entry
+    const proofIdx = lines.findIndex((l) => l.startsWith('PROOF[erase:global:') && l.endsWith(`| ${gone.id}`));
+    expect(proofIdx, 'no PROOF line for the erase-closed row').toBeGreaterThan(0);
+    expect(lines[proofIdx - 1]!.startsWith('DATA[')).toBe(false);                   // nothing marked DATA right before it
+    expect(lines.some((l) => l.startsWith('DATA[Fresh:global:') && l.endsWith('| kept fact'))).toBe(true); // the live row keeps its DATA line
+    expect(lines.some((l) => l.startsWith('PROOF[Fresh:global:') && l.includes(`| ${keep.id} contentDigest: `))).toBe(true);
+  });
+
+  it('current, ids and asOf: a planted empty-content live row renders its PROOF line alone (R3)', () => {
+    const { store, ledger } = tmpStore();
+    store.commit({ content: 'anchor fact', source: 'user' });
+    appendRaw(ledger, { id: 'm_blank', content: '' });
+    appendRaw(ledger, { id: 'm_breaks', content: '\n\n' });
+    const bareMark = (l: string): boolean => /^DATA\[[^\]]*\]\| $/.test(l);
+    for (const out of [
+      handleInspect(store, {}).content[0]!.text,
+      handleInspect(store, { ids: ['m_blank', 'm_breaks'] }).content[0]!.text,
+      handleInspect(store, { asOf: '2026-07-01T00:00:00.000Z' }).content[0]!.text,
+    ]) {
+      const lines = out.split('\n');
+      expect(lines.filter(bareMark)).toEqual([]);
+      for (const id of ['m_blank', 'm_breaks']) {
+        const i = lines.findIndex((l) => l.startsWith('PROOF[Fresh:global]| ') && l.startsWith(`PROOF[Fresh:global]| ${id} contentDigest: `));
+        expect(i, `no PROOF line for ${id}`).toBeGreaterThan(0);
+        expect(lines[i - 1]!.startsWith('DATA[Fresh:global]| ')).toBe(false);
+      }
+    }
   });
 });

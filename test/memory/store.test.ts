@@ -83,7 +83,7 @@ describe('MemoryStore recall / verify / inspect / erase', () => {
     const { store } = tmpStore();
     store.commit({ content: 'db is postgres', source: 'user' });
     const r = store.recall('postgres');
-    const pair = /DATA\[Fresh:global\]\|\s+(m_[0-9a-f-]+) contentDigest: ([0-9a-f]{64})$/m.exec(r.framed);
+    const pair = /^PROOF\[Fresh:global\]\| (m_[0-9a-f-]+) contentDigest: ([0-9a-f]{64})$/m.exec(r.framed);
     expect(pair, 'no id+digest proof line on framed').not.toBeNull();
     const [, id, digest] = pair!;
     // The pair must RESOLVE, not just parse: the digest is the store's own value for that row, read

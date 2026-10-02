@@ -37,12 +37,12 @@ function guardLedger(s: MemoryStore): Array<{ id: string; content: string; conte
 
 /**
  * What a caller can actually do: read one `id -> contentDigest` pair out of the rendered output.
- * The digest sits on the line after its record, and the data frame re-applies the `DATA[state:scope]|`
- * mark to that continuation line, so the pattern has to step over the mark rather than over whitespace.
+ * IT-M16: id and digest share the record's PROOF line, right after its DATA lines, under a
+ * `PROOF[<same bracket content>]| ` mark.
  */
 function pairsFromInspect(text: string): Map<string, string> {
   const found = new Map<string, string>();
-  const re = /(m_[0-9a-f-]+)[^\n]*\n[^\n]*?contentDigest: ([0-9a-f]{64})/g;
+  const re = /^PROOF\[[^\]]*\]\| (m_[0-9a-f-]+) contentDigest: ([0-9a-f]{64})$/gm;
   for (const m of text.matchAll(re)) found.set(m[1]!, m[2]!);
   return found;
 }
@@ -73,10 +73,10 @@ describe('inspect publishes a contentDigest a caller can quote', () => {
     const s = store();
     const rec = s.commit({ content: 'hello\n', source: 'user' });
     const lines = handleInspect(s, {}).content[0]!.text.split('\n');
-    const contentIdx = lines.findIndex((l) => l.includes(rec.id) && l.includes('hello'));
+    const contentIdx = lines.indexOf('DATA[Fresh:global]| hello');
     expect(contentIdx, 'no content line found').toBeGreaterThanOrEqual(0);
     // Directly under it — never an empty marked line first (M-1's exact defect shape).
-    expect(lines[contentIdx + 1]).toContain('contentDigest: ');
+    expect(lines[contentIdx + 1]).toMatch(new RegExp(`^PROOF\\[Fresh:global\\]\\| ${rec.id} contentDigest: [0-9a-f]{64}$`));
   });
 
   it('publishes the digest of the row it sits on, not of some other row', () => {

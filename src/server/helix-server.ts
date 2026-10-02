@@ -101,9 +101,9 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
         .regex(/^[0-9a-f]{64}$/, 'supersedesDigest must be a 64-character lowercase hex digest')
         .optional()
         .describe(
-          'Required only when superseding a VERIFIED fact: the `contentDigest:` value that both ' +
-          'helix_memory_recall (on its proof line) and helix_memory_inspect (on that row) show for ' +
-          'the record. Echoing it proves you retrieved the record you are ' +
+          'Required only when superseding a VERIFIED fact: the `contentDigest:` value on the ' +
+          "record's PROOF line, which helix_memory_recall and helix_memory_inspect both print right " +
+          "after the record's DATA lines. Echoing it proves you retrieved the record you are " +
           'replacing; a supersede issued without having read the target is refused.',
         ),
       scope: z.enum(['project', 'global']).optional()
@@ -134,7 +134,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   server.registerTool('helix_memory_inspect', {
     title: 'Inspect memory',
-    description: 'List current memory items (id, trust state, content). Pass history=true to also list closed items with their [tx, txTo) declared interval, OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive. Pass ids=[...] to render only those records (with their contentDigest proof lines) instead of the whole store; ids, history and asOf are mutually exclusive.',
+    description: "List current memory items: each item's content on DATA lines marked with its trust state, then one PROOF line carrying its id and contentDigest. Pass history=true to also list closed items with their [tx, txTo) declared interval (a closed item's PROOF line carries its id only), OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive. Pass ids=[...] to render only those records instead of the whole store; ids, history and asOf are mutually exclusive.",
     inputSchema: { history: z.boolean().optional(), asOf: z.string().optional(), ids: z.array(ID_SCHEMA).min(1).max(MAX_INSPECT_IDS).optional() },
   }, async (args) => m.runOp('helix_memory_inspect', () => handleInspect(store, args)));
 
