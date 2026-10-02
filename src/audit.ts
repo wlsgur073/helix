@@ -55,7 +55,8 @@ export interface EraseAudit {
    *  append LANDED and the post-append witness advance then threw. Absent on every success row. */
   witnessAdvance?: 'failed';
   /** ADDITIVE: how a FAILED erase failed. 'rejected' — the store refused BEFORE any write: a typed
-   *  EraseRefusedError, a WitnessBlockedError, or — for the soft erase handleErase issues — a
+   *  EraseRefusedError (since IT-M16 also handleErase's refusal of an id no active scope holds — the
+   *  store's no-op 'absent' result), a WitnessBlockedError, or — for the soft erase handleErase issues — a
    *  WitnessAdvanceError carrying no landedState (its only pre-write source there is the pre-append
    *  completeTransition; the post-append advance always stamps landedState). 'indeterminate' — an
    *  UNCLASSIFIED error escaped after the write may have begun (post-append re-read, fsync), so the

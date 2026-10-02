@@ -147,6 +147,9 @@ export class EraseRefusedError extends Error {
 export const isEraseRefusedError = (e: unknown): boolean =>
   e instanceof Error && (e as { eraseRefused?: unknown }).eraseRefused === true;
 
+/** IT-M16: what `MemoryStore.erase` found the id naming (see its docstring). */
+export type EraseOutcome = 'erased' | 'not-live' | 'absent';
+
 /** Orchestrates the deterministic core modules over a real JSONL ledger file. */
 export class MemoryStore {
   constructor(private readonly global: LedgerPath, private readonly opts: MemoryStoreOptions) {
@@ -1107,12 +1110,24 @@ export class MemoryStore {
    *                record (marker rows are inert to a tombstone); a PERMANENT erase purges every row
    *                carrying the id;
    *  - 'absent'    nothing matches.
+   *
+   *  A SOFT erase asks a narrower question than a permanent one (IT-M16, rulings R1 and R4): it acts on
+   *  MEMORY RECORDS, so only an `assert` or `supersede` row counts as a 'record' — the id of a verify
+   *  row or of a tombstone (erase / invalidate) names no memory (R4) — and only a marker row carrying
+   *  this EXACT id counts as a 'marker': a name that merely matches a marker family while no row carries
+   *  it (`witness_fence_never_written` beside a real fence) names nothing (R1). Content can name any
+   *  such id, and answering `unchanged` there read as "already erased or superseded" while nothing was.
+   *  The PERMANENT (operator-only) path keeps both wider readings: its family match (C10) is what clears
+   *  a planted marker without knowing its nonce, and its exact-id match on any non-marker row is a
+   *  physical purge of that row, whatever its type.
    *  Snapshot-relative: computed before the mutation lock, exactly like the presence check it
    *  replaces; a concurrent writer can create the ambiguity after this returns. */
-  private findEraseTarget(ledger: LedgerPath, id: string): 'record' | 'marker' | 'ambiguous' | 'absent' {
+  private findEraseTarget(ledger: LedgerPath, id: string, permanent: boolean): 'record' | 'marker' | 'ambiguous' | 'absent' {
     const records = parseLedger(ledger);
-    const fam = this.familyPrefixOf(id);
-    const recordHit = records.some((r) => !isMarkerShape(r) && r.id === id);
+    const isRecordRow = (r: MemoryRecord): boolean =>
+      !isMarkerShape(r) && (permanent || r.type === 'assert' || r.type === 'supersede');
+    const fam = permanent ? this.familyPrefixOf(id) : null;   // R1: the family match serves the permanent path only
+    const recordHit = records.some((r) => isRecordRow(r) && r.id === id);
     const markerExact = records.some((r) => isMarkerShape(r) && r.id === id);
     const markerFamily = fam !== null && records.some((r) => this.markerFamilyOf(r) === fam);
     if (recordHit) return markerExact ? 'ambiguous' : 'record';
@@ -1134,7 +1149,7 @@ export class MemoryStore {
     const aliased = owned && aliasesAdoptedLedger({ root: p!.root, home: this.homeDir(), ledger: p!.ledger });
     const projectActive = owned && !aliased;
     const classify = (ledger: LedgerPath): 'record' | 'marker' | null => {
-      const kind = this.findEraseTarget(ledger, id);
+      const kind = this.findEraseTarget(ledger, id, permanent);
       if (kind === 'ambiguous') {
         // A marker-shaped row and a record carry the same exact id. A SOFT erase tombstones the RECORD:
         // the tombstone acts on the id in the projection, and marker-shaped rows never enter the live
@@ -1192,11 +1207,13 @@ export class MemoryStore {
       if (kind !== null) hits.push({ ledger: c, kind });
     }
     // SOFT erases (the tool's only shape — it cannot pass a scope) prefer the one candidate holding a
-    // RECORD with this exact id over candidates whose matches are marker rows, family or exact-id: every
-    // ledger that has ever been rewritten carries a witness fence, so a marker-only hit is the ordinary
-    // state of the OTHER scope, not a second home for the record (final review, I-2), and a soft erase
-    // never tombstones a marker row, so preferring the record loses nothing. A permanent no-scope erase
-    // with more than one hit stays refused — the operator passes an explicit scope.
+    // RECORD with this exact id over candidates whose matches are marker rows: every ledger that has ever
+    // been rewritten carries a witness fence, so a marker-only hit is the ordinary state of the OTHER
+    // scope, not a second home for the record (final review, I-2), and a soft erase never tombstones a
+    // marker row, so preferring the record loses nothing. (Since ruling R1 a soft erase takes no
+    // family-only marker match at all — findEraseTarget — so its marker hits here are exact-id ones; the
+    // permanent path keeps the family match.) A permanent no-scope erase with more than one hit stays
+    // refused — the operator passes an explicit scope.
     if (!permanent) {
       const recs = hits.filter((h) => h.kind === 'record');
       if (recs.length === 1) return recs[0]!;
@@ -1210,10 +1227,23 @@ export class MemoryStore {
    *  genuine right-to-erasure. Scope-aware routing (D5/D7/C4/C10): never falls back to a ledger the id
    *  does not live in — an explicit scope must contain the id or this throws; with no scope, exactly
    *  one candidate ledger may hold the id (else throws the multi-scope refusal), and a corrupt/torn
-   *  line on ANY candidate throws rather than silently risking a wrong-file compaction. */
-  erase(id: string, opts: { permanent?: boolean; scope?: MemoryScope } = {}): void {
+   *  line on ANY candidate throws rather than silently risking a wrong-file compaction.
+   *
+   *  IT-M16: returns what the id named, so a caller can tell a real erase from a no-op:
+   *  - 'erased'   a live record carried the id and its tombstone was appended;
+   *  - 'not-live' a memory record (an assert or supersede row) carries the id but is no longer live
+   *               (erased or superseded before), or a marker row carries the exact id — no tombstone is
+   *               written (T1-g, D8);
+   *  - 'absent'   no active scope holds a memory record or a marker row with the id (a no-scope call; an
+   *               explicit scope throws). For a SOFT erase that includes a name matching only a marker
+   *               FAMILY (R1) and the id of a verify row or a tombstone (R4): none names a memory record
+   *               (findEraseTarget).
+   *  The PERMANENT path classifies with the wider permanent reading (family match, any non-marker row)
+   *  and its behaviour is unchanged: it still compacts every row carrying the id, so 'not-live' there
+   *  does not mean nothing was removed. */
+  erase(id: string, opts: { permanent?: boolean; scope?: MemoryScope } = {}): EraseOutcome {
     const target = this.resolveEraseTarget(id, opts.scope, opts.permanent ?? false);
-    if (target === null) { this.rankCache = null; return; }   // clean + absent → idempotent no-op success
+    if (target === null) { this.rankCache = null; return 'absent'; }   // clean + absent → no-op, nothing written
     const { ledger, kind } = target;
     // Anti-laundering (spec §4.2 PR-1): a PERMANENT erase ends in a witnessed compactLedger rewrite,
     // which refuses to advance the witness over a MISMATCH. Gate the WHOLE permanent erase up front on
@@ -1229,9 +1259,11 @@ export class MemoryStore {
         `permanent-erase: scope for id '${id}' is in a MISMATCH (rollback-alarm) state — refusing a permanent erase that would launder the alarm; re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry (spec §4.2)`,
       );
     }
+    let outcome: EraseOutcome;
     try {
       const isMarker = kind === 'marker';                       // by the ROW, not the id (R5(c))
       const alreadyDead = !this.verifiedOf(ledger).live.has(id);
+      outcome = isMarker || alreadyDead ? 'not-live' : 'erased';
       if (!isMarker && !alreadyDead) {                          // skip tombstone for markers (T1-g) + already-dead ids (D8)
         const ts = this.now();
         appendWitnessed(ledger, {
@@ -1258,6 +1290,7 @@ export class MemoryStore {
       // and a LATER step threw, so a landed tombstone can never be masked by a stale recall cache.
       this.rankCache = null;
     }
+    return outcome;
   }
 
   /** WRITE-side startup step (spec §4.9): complete any transition whose new bytes already landed

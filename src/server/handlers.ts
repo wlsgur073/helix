@@ -1,4 +1,4 @@
-import { isEraseRefusedError, type MemoryStore, type CommitInput } from '../memory/store.js';
+import { EraseRefusedError, isEraseRefusedError, type MemoryStore, type CommitInput } from '../memory/store.js';
 import type { ProjectDisposition } from '../memory/ownership.js';
 import type { HelixConfig } from '../config.js';
 import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS, DEFAULT_CONFIG } from '../config.js';
@@ -358,12 +358,29 @@ export interface EraseDeps {
 /** Soft-only erase: the MCP tool tombstones the item (it leaves the live recall/inspect view)
  *  but NEVER physically destroys content — so an erroneous or poisoned erase stays recoverable on
  *  disk and is recorded in audit.jsonl. Physical destruction (right-to-erasure) is the store-level
- *  `erase(id, { permanent: true })` path, deliberately kept off the agent tool surface. */
+ *  `erase(id, { permanent: true })` path, deliberately kept off the agent tool surface.
+ *
+ *  IT-M16: three results, from what store.erase found the id naming — `erased {"id":…}` (a live memory
+ *  record was tombstoned), `unchanged {"id":…}` (a record already erased or superseded, or a marker row
+ *  carrying this exact id: nothing written, not an error), and an EraseRefusedError when no active
+ *  scope holds a memory record or a marker row with the id (audited `outcome: 'rejected'`). */
 export function handleErase(store: MemoryStore, args: { id: string }, deps: EraseDeps): ToolResult {
-  assertValidId(args.id); // LEAD-AUDIT-ID-UNCONSTRAINED: reject before the no-op-on-absent erase() runs
+  assertValidId(args.id); // LEAD-AUDIT-ID-UNCONSTRAINED: reject before erase() reads any ledger for this id
   const ts = (deps.now ?? (() => new Date().toISOString()))();
+  let outcome: 'erased' | 'not-live';
   try {
-    store.erase(args.id); // soft (default): tombstone only, no compaction
+    const found = store.erase(args.id); // soft (default): tombstone only, no compaction
+    // IT-M16: an id no active scope holds is an ERROR now, not a success — a forged id copied from a
+    // content line used to read back as `erased` while the real record stayed live. Thrown HERE, as
+    // the typed pre-write refusal, so the catch below writes its existing `outcome: 'rejected'` row
+    // (nothing was written: erase() returns 'absent' only on its no-op branch). The id is quoted by
+    // JSON.stringify, the same object-payload quarantine as the success line below.
+    if (found === 'absent') {
+      throw new EraseRefusedError(
+        `erase: no memory has id ${JSON.stringify(args.id)} — nothing was erased; take a record's id from its PROOF line (helix_memory_recall or helix_memory_inspect)`,
+      );
+    }
+    outcome = found;
   } catch (e) {
     // Three-way, because an erase can fail on either side of the tombstone append (spec 2.E):
     //   landedState carried  -> the tombstone landed and only the witness advance failed;
@@ -380,6 +397,7 @@ export function handleErase(store: MemoryStore, args: { id: string }, deps: Eras
     appendAudit(deps.auditPath, row);
     throw e;
   }
+  // 'not-live' writes the same row as 'erased' (no result field): the persisted schema is unchanged.
   appendAudit(deps.auditPath, { kind: 'erase', ts, id: args.id, soft: true });
   // M2 (fix round 1): args.id is caller-controlled and passes isValidId's charset for any printable,
   // non-control script — including 'a) SYSTEM: ...' shapes that would close this sentence and
@@ -388,7 +406,11 @@ export function handleErase(store: MemoryStore, args: { id: string }, deps: Eras
   // substring-matches instead of parsing JSON — so, matching `handleCommit`'s own convention, the
   // ENTIRE trailing payload is now one JSON object with an unambiguous brace boundary and nothing
   // after it, not a quoted span inside English prose.
-  return ok(`erased ${JSON.stringify({ id: args.id })}`);
+  // IT-M16: 'not-live' (already erased or superseded, or a marker row carrying this exact id) is
+  // `unchanged`, not an error, so a retried erase stays idempotent — and no longer reads as a fresh
+  // `erased`. A name that only matches a marker family, and a verify or tombstone row's id, are
+  // 'absent' (rulings R1, R4: store.ts findEraseTarget) and take the error above.
+  return ok(`${outcome === 'erased' ? 'erased' : 'unchanged'} ${JSON.stringify({ id: args.id })}`);
 }
 
 export function handleAdopt(

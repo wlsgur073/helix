@@ -706,16 +706,24 @@ describe('M2: caller-controlled ids/paths quarantined in success prose', () => {
     return JSON.parse(out.slice(verb.length + 1));
   };
 
+  // IT-M16: an absent id is an error now, so the success line needs a record that really carries the
+  // prose-shaped id — minted here through the store's own id generator.
+  const storeMinting = (id: string): MemoryStore => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-m2-'));
+    const s = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => id });
+    s.commit({ content: 'a fact to erase', source: 'user' });
+    return s;
+  };
+
   it('erase: success payload is a single JSON object naming the id, not prose with an id spliced in', () => {
-    const s = store();
-    // erase is an idempotent no-op for an absent id, so no commit is needed to exercise the success line.
+    const s = storeMinting(evil);
     const audit = join(mkdtempSync(join(tmpdir(), 'helix-m2-')), 'audit.jsonl');
     const out = text(handleErase(s, { id: evil }, { auditPath: audit }));
     expect(parsePayload(out, 'erased')).toEqual({ id: evil });
   });
 
   it('erase: an id containing a literal quote is correctly JSON-escaped, not naively wrapped', () => {
-    const s = store();
+    const s = storeMinting(evil2);
     const audit = join(mkdtempSync(join(tmpdir(), 'helix-m2-')), 'audit.jsonl');
     const out = text(handleErase(s, { id: evil2 }, { auditPath: audit }));
     expect(parsePayload(out, 'erased')).toEqual({ id: evil2 }); // throws on a naive, mis-escaped wrap

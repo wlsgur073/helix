@@ -129,7 +129,12 @@ describe('erase routing', () => {
     appendFileSync(projLedger, JSON.stringify(marker) + '\n');
     const globalBefore = readFileSync(global, 'utf8');
     const projBefore = readFileSync(projLedger, 'utf8');
-    expect(() => store.erase('integrity_marker', {})).toThrow(/more than one scope|ambiguous/);
+    // Ruling R1 (second fix batch): a SOFT erase takes presence from the EXACT id only, so the refusal is
+    // reached with the id both scopes carry; the family name reaches it on the PERMANENT path (C10), and
+    // a soft erase of the family name alone names nothing ('absent', no write).
+    expect(() => store.erase('integrity_planted', {})).toThrow(/more than one scope|ambiguous/);
+    expect(() => store.erase('integrity_marker', { permanent: true })).toThrow(/more than one scope|ambiguous/);
+    expect(store.erase('integrity_marker', {})).toBe('absent');
     expect(readFileSync(global, 'utf8')).toBe(globalBefore);       // global untouched — no partial compaction
     expect(readFileSync(projLedger, 'utf8')).toBe(projBefore);     // project untouched — no partial compaction
   });

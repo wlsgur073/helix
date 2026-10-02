@@ -181,7 +181,7 @@ describe('handleInspect history mode', () => {
     const { store } = tmpStore();
     const keep = store.commit({ content: 'kept fact', source: 'user' });
     const gone = store.commit({ content: 'erased fact', source: 'user' });
-    store.erase(gone.id);
+    expect(store.erase(gone.id)).toBe('erased');
     const lines = handleInspect(store, { history: true }).content[0]!.text.split('\n');
     expect(lines.filter((l) => /^DATA\[[^\]]*\]\| $/.test(l))).toEqual([]);   // no bare mark anywhere
     expect(lines.some((l) => l.startsWith('DATA[erase:'))).toBe(false);             // the closed row has no DATA entry
