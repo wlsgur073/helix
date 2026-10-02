@@ -371,11 +371,13 @@ interface CompactOptionsCommon {
   fsOps?: DurableFsOps;
   /** Witness integration (spec §4.9). When present, this rewrite plants a fresh epoch fence as its
    *  final row and drives the witness transition INSIDE the existing ledger lock: planTransition ->
-   *  openTransition (journal durable BEFORE the file changes) -> write+rename -> completeTransition
-   *  (after the new bytes land). So a crash before the rename is diagnosable as transition-interrupted
-   *  (re-drive supersedes it) and a crash after it heals to the new bytes. `now` sources the fence's
-   *  own transition tx; `kind` defaults to 'compaction' (the erase path passes 'erase'). Omitted =>
-   *  an un-witnessed rewrite (unchanged legacy behavior — used by direct-compaction unit tests). */
+   *  write+fsync the tmp -> openTransition (journal durable BEFORE the file changes) -> rename ->
+   *  completeTransition (after the new bytes land). So a crash between the journal's publish and the
+   *  rename is diagnosable as transition-interrupted (re-drive supersedes it), a crash before the
+   *  publish leaves no journal (the old bytes stay in sync), and a crash after the rename heals to
+   *  the new bytes. `now` sources the fence's own transition tx; `kind` defaults to 'compaction' (the
+   *  erase path passes 'erase'). Omitted => an un-witnessed rewrite (unchanged legacy behavior —
+   *  used by direct-compaction unit tests). */
   witness?: { home: string; scopeKey: string; now: () => string; kind?: 'compaction' | 'erase' };
 }
 
@@ -711,9 +713,17 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       // Witness integration (spec §4.9), ALL inside this existing ledger lock — planTransition/
       // openTransition/completeTransition each take the WITNESS lock (a different path, so nesting is
       // safe), never a second ledger lock. Ordering resolution: mint epoch+nonce (planTransition) ->
-      // build the fence and the EXACT final bytes -> journal (openTransition) BEFORE the file is
-      // written -> write+rename -> completeTransition AFTER the new bytes are durable.
+      // build the fence and the EXACT final bytes -> write+fsync+close the tmp -> journal
+      // (openTransition) -> rename -> completeTransition AFTER the new bytes are durable. The tmp is
+      // written BEFORE the journal is published (IT-M6): from the journal's rename until the ledger's
+      // rename a lock-free reader classifies this scope 'transition-interrupted' and withholds it, and
+      // writing first leaves that window one fsync (the journal publish's own directory fsync), the
+      // two pre-rename checks and the rename, where it used to hold the row writes and the tmp fsync
+      // too. The tmp is not the ledger until the rename, so a crash anywhere before it classifies
+      // exactly as it did (no journal: the old bytes as before; journal: interrupted at the
+      // predecessor, which the startup heal retracts).
       let rows = kept;
+      let transition: { kind: 'compaction' | 'erase'; plan: ReturnType<typeof planTransition>; expected: { byteLength: number; prefixHash: string } } | null = null;
       if (w) {
         const kind = w.kind ?? 'compaction';
         // Anti-laundering gate (spec §4.2 PR-1, SECURITY.md "the very next ordinary append after a
@@ -746,6 +756,16 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
         // assert (below) doubles as a serialization-drift guard if these ever diverge.
         const finalText = rows.map((r) => JSON.stringify(r) + '\n').join('');
         const expected = { byteLength: Buffer.byteLength(finalText), prefixHash: sha256Hex(Buffer.from(finalText)) };
+        transition = { kind, plan, expected };
+      }
+      for (const r of rows) writeAll(fsOps, fd, JSON.stringify(r) + '\n');
+      fsOps.fsyncSync(fd);
+      fsOps.closeSync(fd);
+      closed = true;
+      if (w && transition !== null && fenceTx !== null) {
+        // The tmp now holds the complete, durable rewrite; publish the journal only now. A throw above
+        // this line opened no journal, so the catch below has nothing to retract (retractNonce null).
+        const { kind, plan, expected } = transition;
         preRewriteHash = sha256Hex(readLedgerBytes(path)); // sampled under the lock the rename needs — nothing can move it but us
         const journal = openTransition(w.home, w.scopeKey, {
           kind, epoch: plan.epoch, nonce: plan.nonce, predecessor: plan.predecessor,
@@ -753,10 +773,6 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
         });
         retractNonce = journal.nonce;
       }
-      for (const r of rows) writeAll(fsOps, fd, JSON.stringify(r) + '\n');
-      fsOps.fsyncSync(fd);
-      fsOps.closeSync(fd);
-      closed = true;
       assertSingleLink(path);                                      // re-check immediately before the rename
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost before rename');
       fsOps.renameSync(tmp, path);                                 // atomic on the same filesystem
