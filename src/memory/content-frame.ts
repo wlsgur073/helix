@@ -61,9 +61,11 @@ export const UNADOPTED_LEDGER_NOTE =
 /** ALIAS-P2P (item 7): the same constraints as UNADOPTED_LEDGER_NOTE — whoever can plant a symlink in
  *  an adopted project controls WHETHER this appears, so it is a constant: informational only, no
  *  imperative, no interpolation, no path. Rendered wherever the unadopted note is, iff the per-call
- *  project-disposition snapshot is 'aliased'. */
+ *  project-disposition snapshot is 'aliased' — which since the second fix batch (D4) also covers a
+ *  ledger Helix cannot resolve the kernel's way (a non-UTF-8 name, a path past PATH_MAX, too many
+ *  links), excluded exactly like an alias. */
 export const ALIASED_LEDGER_NOTE =
-  "(this project's memory file resolves to another adopted project's memory file and is excluded from results)";
+  "(this project's memory file resolves to another adopted project's memory file, or through a path Helix cannot resolve, and is excluded from results)";
 
 /** Issue #1: the same constraints as UNADOPTED_LEDGER_NOTE — whoever can create a `.helix/` in a
  *  directory above the session controls WHETHER this appears, so it is a constant: informational only,

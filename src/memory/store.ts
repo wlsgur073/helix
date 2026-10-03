@@ -137,6 +137,19 @@ export interface RecheckResult {
   record: MemoryRecord | null;
 }
 
+/** ALIAS-P2P (item 7): the refusal for a project-routed write whose project ledger leads to another
+ *  adopted project's file — and, since the second fix batch (D4), also for one Helix cannot resolve
+ *  the kernel's way. One constant so every site carries the same wording. Ruling R7 with plan
+ *  refinement P1: the first sentence names every cause a refused project-routed write can have —
+ *  another adopted project's memory file, the global memory file, or an unresolvable path (a non-UTF-8
+ *  name, a path past PATH_MAX, too many links), which has no other project behind it at all — so the
+ *  text never states one cause while another holds. */
+const ALIASED_PROJECT_WRITE_REFUSAL =
+  "commit: this project's memory file resolves to another adopted project's memory file, to the global " +
+  'memory file, or through a path Helix cannot resolve, so the project layer is disabled here — the write ' +
+  "is refused rather than written into the other project's memory. Pass scope 'global', or replace the " +
+  "link with the project's own file.";
+
 /** A refusal thrown by `resolveEraseTarget` / `erase` BEFORE any byte moves — the pre-write half of
  *  handlers.ts's three-way erase audit. Read by property (`isEraseRefusedError`), never instanceof,
  *  for the reason witness-store.ts's `isWitnessAdvanceError` sets out. */
@@ -397,11 +410,7 @@ export class MemoryStore {
    *  claim or create a ledger. Throws iff aliased; otherwise returns without side effect. */
   private refuseAliasedProjectWrite(p: { root: string; ledger: string }): void {
     if (isOwned(p.root, this.homeDir()) && aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger })) {
-      throw new Error(
-        "commit: this project's memory file resolves to another adopted project's memory file, so the " +
-        "project layer is disabled here — the write is refused rather than written into the other " +
-        "project's memory. Pass scope 'global', or replace the link with the project's own file.",
-      );
+      throw new Error(ALIASED_PROJECT_WRITE_REFUSAL);
     }
   }
 
@@ -1177,8 +1186,9 @@ export class MemoryStore {
       }
       if (scope === 'project' && aliased) {
         throw new EraseRefusedError(
-          "erase: this project's memory file resolves to another adopted project's memory file — the " +
-          "erase is refused rather than applied to the other project's memory.",
+          "erase: this project's memory file resolves to another adopted project's memory file, to the " +
+          'global memory file, or through a path Helix cannot resolve — the erase is refused rather than ' +
+          "applied to the other project's memory.",
         );
       }
       const ledger = scope === 'global' || !p ? this.global

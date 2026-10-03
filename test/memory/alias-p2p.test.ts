@@ -123,21 +123,25 @@ describe('aliasesAdoptedLedger follows the whole symlink chain (item 7, final re
     expect(projectDispositionOf(desc(a, h))).toBe('owned');
   });
 
-  it('a symlink LOOP ends the walk without throwing and reports no alias', () => {
+  // Second fix batch (D4): more links than the hop limit is UNRESOLVABLE, excluded like an alias.
+  // This case used to read `owned` (the walk fell back to a textual reading of A's own ledger path).
+  it('a symlink LOOP ends the walk without throwing and reads as unresolvable, excluded like an alias', () => {
     const h = home(); const a = project(h); const b = project(h);
     writeFileSync(projectLedgerPath(b), '');
     const x = join(a, '.helix', 'x');
     symlinkSync(x, projectLedgerPath(a));
     symlinkSync(projectLedgerPath(a), x);
     expect(() => aliasesAdoptedLedger(desc(a, h))).not.toThrow();
-    expect(aliasesAdoptedLedger(desc(a, h))).toBe(false);
-    expect(projectDispositionOf(desc(a, h))).toBe('owned');
+    expect(aliasesAdoptedLedger(desc(a, h))).toBe(true);
+    expect(projectDispositionOf(desc(a, h))).toBe('aliased');
   });
 
   // MAX_SYMLINK_HOPS is Linux's MAXSYMLINKS (40). Each case also takes the kernel's own answer for the
   // same chain, so the boundary is pinned against the kernel rather than against the constant.
+  // Second fix batch (D4): a 41st link is past the hop limit, which is UNRESOLVABLE and excluded like
+  // an alias (it used to read `owned`); the kernel refuses the same chain with ELOOP.
   it.each([
-    [40, 'EXISTING', 'aliased'], [40, 'ABSENT', 'aliased'], [41, 'EXISTING', 'owned'], [41, 'ABSENT', 'owned'],
+    [40, 'EXISTING', 'aliased'], [40, 'ABSENT', 'aliased'], [41, 'EXISTING', 'aliased'], [41, 'ABSENT', 'aliased'],
   ] as const)("a chain of %i links into the other project's %s ledger reads %s", (n, bLedger, expected) => {
     const h = home(); const a = project(h); const b = project(h);
     if (bLedger === 'EXISTING') writeFileSync(projectLedgerPath(b), '');

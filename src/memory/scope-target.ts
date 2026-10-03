@@ -11,7 +11,7 @@
  *  because it stops the ceremony deriving a ledger and a witness key from the same argument by two
  *  independent routes. Since issue #1 the server and the SessionStart hook no longer apply it
  *  separately: `src/memory/project-root.ts` applies it once for both. */
-import { aliasesAdoptedLedger, canonicalRoot, projectLedgerPath } from './ownership.js';
+import { aliasesAdoptedLedger, ledgerDestination, projectLedgerPath } from './ownership.js';
 import { scopeKeyOf } from './witness-store.js';
 
 /**
@@ -25,9 +25,19 @@ import { scopeKeyOf } from './witness-store.js';
  * The default install layout makes this reachable without any symlink at all: `HELIX_HOME` is
  * `$HOME/.helix`, so the global ledger is `$HOME/.helix/memory.jsonl` — precisely what
  * `projectLedgerPath($HOME)` returns.
+ *
+ * ALIAS-DOTDOT (second fix batch, D4): both sides are where an append through them lands, computed
+ * the kernel's way (ownership.ts ledgerDestination), not canonicalRoot. canonicalRoot collapses a
+ * `..` after a symlinked directory as text and returns a DANGLING link's own location, so a project
+ * ledger linked as `dl/../<path to the global ledger>`, or linked to a global ledger that does not
+ * exist yet, read as a separate file while its appends landed in (or created) the global ledger. An
+ * UNRESOLVABLE side (ledgerDestination null) is not called the same file here: the project layer then
+ * stays configured and the aliased disposition excludes it (aliasesAdoptedLedger), so its writes are
+ * refused rather than silently routed to the global ledger.
  */
 export function aliasesGlobalLedger(projectLedger: string, globalLedger: string): boolean {
-  return canonicalRoot(projectLedger) === canonicalRoot(globalLedger);
+  const project = ledgerDestination(projectLedger);
+  return project !== null && project === ledgerDestination(globalLedger);
 }
 
 /** `'global'`, or an absolute project root. */
