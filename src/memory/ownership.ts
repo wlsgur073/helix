@@ -381,6 +381,28 @@ export function projectDispositionOf(
   return existsSync(project.ledger) ? 'unadopted-present' : 'inactive';
 }
 
+/** Does the server's startup integrity scan (src/server/index.ts) read this project layer's ledger?
+ *  The scan reads the file under this project's subkey, so it may read only what is this project's own:
+ *
+ *  - 'owned': yes.
+ *  - 'aliased' (owned, but the ledger leads to another adopted project's file or cannot be resolved the
+ *    kernel's way): no, exactly as every read path leaves it out (IT-M15, second fix batch §4.3 item 3).
+ *  - 'ancestor-unadopted': no — nothing of an unadopted parent project is read.
+ *  - an UNADOPTED working-directory project ('unadopted-present' or 'inactive'): yes, its own foreign
+ *    file is scanned as before, UNLESS its ledger leads — kernel-resolved, ledgerDestination — to
+ *    another registered project's ledger, or cannot be resolved (ruling R9). aliasesAdoptedLedger is
+ *    that predicate: it never needed ownership, and an unadopted project has no registry entry of its
+ *    own to skip. Before R9 the scan read the other project's file there and printed it under this
+ *    project's ledger path (measured: `unverifiable verify record(s) in <U's ledger>` for B's rows).
+ *
+ *  A missing `origin` reads as 'cwd', as everywhere else. Pure reads, never throws. */
+export function startupScanReadsProject(project: { root: string; ledger: string; origin?: ProjectOrigin }, home: string): boolean {
+  const d = projectDispositionOf({ root: project.root, ledger: project.ledger, home, origin: project.origin });
+  if (d === 'owned') return true;
+  if (d === 'aliased' || d === 'ancestor-unadopted') return false;
+  return !aliasesAdoptedLedger({ root: project.root, home, ledger: project.ledger });
+}
+
 /** Stamp a project as owned: write the repo-side .owner and the home-side registry entry. */
 export function stampOwnership(
   projectRoot: string,

@@ -9,7 +9,7 @@ import { scanLegacyElevated, classifyLegacyOffenders } from '../memory/legacy-sc
 import { hardenHomePermissions } from '../memory/home-permissions.js';
 import { subkeyForScope } from '../memory/verified-read.js';
 import { resolveProjectLayer } from '../memory/project-root.js';
-import { isOwned } from '../memory/ownership.js';
+import { startupScanReadsProject } from '../memory/ownership.js';
 import { defaultExpansion } from '../memory/expansion.js';
 import { strayTrustFiles, collidingTrustFiles, assessGradeLoss } from '../memory/trust-store-layout.js';
 import { verifyVerify, digestContent } from '../memory/ledger-mac.js';
@@ -178,18 +178,32 @@ store.healWitness();
 // sole evidence that a key was unavailable. classifyLegacyOffenders separates the verify-typed
 // offenders, whose verdict was decided entirely by key availability, from baked non-Fresh
 // assert/supersede rows, which R1 would clamp whatever the key situation is.
+//
+// IT-M15 (second fix batch): with a subkey resolved, a verify offender is split by the fields the MAC
+// check dispatches on (classifyLegacyOffenders): forged/legacy keeps its WARNING, a failing MAC under the
+// scope's CURRENT key id is a tampered WARNING, and a different key id or a newer MAC format/state is a
+// NOTE — the documented `--fresh` and key re-mint no longer accuse the ledger of forgery at every start.
+// An ALIASED project layer (its ledger leads to another adopted project's file, or through a path Helix
+// cannot resolve) is skipped exactly as every read path skips it: scanning it read the other project's
+// file under this project's subkey. So is an UNADOPTED working-directory project whose ledger leads to
+// another registered project's file or cannot be resolved (ruling R9); its own foreign file is still
+// scanned. The rule lives in ownership.ts startupScanReadsProject.
+const scanProject = !!project && startupScanReadsProject(project, home);
 const scanScopes: Array<{ ledger: string; root?: string }> = [
   { ledger: globalLedger },
   // A parent directory's project is scanned only once adopted: until then nothing of it is read.
-  ...(project && (project.origin === 'cwd' || isOwned(project.root, home)) ? [{ ledger: project.ledger, root: project.root }] : []),
+  ...(project && scanProject ? [{ ledger: project.ledger, root: project.root }] : []),
 ];
 for (const { ledger, root } of scanScopes) {
   try {
     const subkey = subkeyForScope(home, root);
     const records = parseLedger(ledger);
     const scan = scanLegacyElevated(records, (r) => (subkey ? verifyVerify(r, subkey) : false));
-    const { forged, unverifiable } = classifyLegacyOffenders(records, scan.offenders, !!subkey);
+    const { forged, tampered, otherKey, newerVersion, unverifiable } = classifyLegacyOffenders(records, scan.offenders, !!subkey, subkey);
     if (forged.length > 0) process.stderr.write(`helix: WARNING - ${forged.length} forged/legacy elevated record(s) in ${ledger}; trust states there are not tool-minted\n`); // ASCII only
+    if (tampered.length > 0) process.stderr.write(`helix: WARNING - ${tampered.length} verify record(s) in ${ledger} carry this scope's current key id but fail its MAC; they were altered after signing and their grades are not applied\n`); // ASCII only
+    if (otherKey.length > 0) process.stderr.write(`helix: NOTE - ${otherKey.length} verify record(s) in ${ledger} were signed under a different key (a nonce rotated by --fresh, a key lost and re-minted, or a forgery); their grades are not applied\n`); // ASCII only
+    if (newerVersion.length > 0) process.stderr.write(`helix: NOTE - ${newerVersion.length} verify record(s) in ${ledger} use a MAC format or state this Helix does not accept, likely written by a newer version or forged; their grades are not applied\n`); // ASCII only
     if (unverifiable.length > 0) process.stderr.write(`helix: WARNING - ${unverifiable.length} unverifiable verify record(s) in ${ledger}; no signing key resolved for this scope, so those grades will not apply\n`); // ASCII only
   } catch (e) {
     // IT-H4: a FIFO, device or directory at a ledger path used to stall startup here (the read never

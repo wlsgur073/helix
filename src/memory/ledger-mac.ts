@@ -10,6 +10,24 @@ import { ensureHelixDir } from './home-permissions.js';
 export const MAC_VERSION = 2;                             // version NEW signatures carry
 const ACCEPTED_MAC_VERSIONS = new Set<number>([1, 2]);   // versions verifyVerify treats as valid
 
+/** The same numeric whitelist verifyVerify dispatches on, exposed so the startup scan can say WHY a
+ *  verify failed (IT-M15). */
+export function isAcceptedMacVersion(v: unknown): boolean {
+  return typeof v === 'number' && ACCEPTED_MAC_VERSIONS.has(v);
+}
+
+/** Plan refinement P2 (second fix batch): a `macVersion` written by a NEWER Helix — a safe integer
+ *  above MAC_VERSION. ONE predicate for compaction's keep rule (store.ts keepValidVerifyFor: an older
+ *  compactor never destroys what a newer binary signed) and the startup scan's newer-version class
+ *  (legacy-scan.ts), so the two read a future version the same way. They do not name the same rows: a
+ *  future-version row with no mac or no keyId is kept by that rule and forged/legacy to the scan, and a
+ *  MAC-valid row with a state this build does not know is newer-version to the scan and not kept by that
+ *  rule. Every other value — 0, a negative or fractional number, one beyond the safe-integer range, an
+ *  infinity, a string, null, or no field at all — is no version any Helix writes. */
+export function isFutureMacVersion(v: unknown): boolean {
+  return typeof v === 'number' && Number.isSafeInteger(v) && v > MAC_VERSION;
+}
+
 /** Domain tag for the ill-formed lane. 0xFF is the load-bearing byte: it appears in the UTF-8
  *  encoding of NO code point, so no well-formed string's image can begin with it and the two lanes'
  *  images are disjoint BY CONSTRUCTION.

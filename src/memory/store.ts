@@ -18,7 +18,7 @@ import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce, collectWitnessNotes, asOfWitnessNotes } from './content-frame.js';
 import { isOwned, stampOwnership, projectDispositionOf, canonicalRoot, isReviewableRoot, trustStateOf, aliasesAdoptedLedger, type ProjectDisposition, type ProjectOrigin, type TrustState } from './ownership.js';
-import { ensureMaster, signVerify, verifyVerify, digestContent, MAC_VERSION } from './ledger-mac.js';
+import { ensureMaster, signVerify, verifyVerify, digestContent, isFutureMacVersion } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedLiveWitnessed, verifiedProjectionWithSubkey } from './verified-read.js';
 import { readLedgerWitnessed, readLedgerBytesWitnessed } from './witness-read.js';
@@ -232,10 +232,15 @@ export class MemoryStore {
    *
    *  spec §4.6: preserve records from a FUTURE MAC version too — an A-era compactor must never
    *  destroy what a newer binary signed (the pre-A -> v2 destructive-compaction class, one bump
-   *  later). They stay grade-inert (verifyVerify false until a verifier exists) and scan-visible. */
+   *  later). They stay grade-inert (verifyVerify false until a verifier exists) and scan-visible.
+   *  "Future" is ledger-mac.ts isFutureMacVersion, the predicate the startup scan's newer-version class
+   *  uses too (second fix batch, plan refinement P2), so both read a future version the same way. The
+   *  two sets still differ at two edges: a MAC-valid row with an unknown state is newer-version to the
+   *  scan and not kept here, and a future-version row with no mac or keyId is kept here and forged/legacy
+   *  to the scan. */
   private keepValidVerifyFor(subkey: Buffer | null): (r: MemoryRecord) => boolean {
     return subkey
-      ? (r) => (verifyVerify(r, subkey) && isKnownState(r.state)) || (typeof r.macVersion === 'number' && Number.isSafeInteger(r.macVersion) && r.macVersion > MAC_VERSION)
+      ? (r) => (verifyVerify(r, subkey) && isKnownState(r.state)) || isFutureMacVersion(r.macVersion)
       : () => true;
   }
 
