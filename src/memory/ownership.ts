@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, readlinkSync, openSync, writeSync, fsyncSync, closeSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname, basename, isAbsolute } from 'node:path';
-import { withFileLock, canonical } from './lock.js';
+import { withFileLock } from './lock.js';
 import { ensureHelixDir } from './home-permissions.js';
 import { fsyncDir } from './fs-ops.js';
 
@@ -34,7 +34,18 @@ export function isReviewableRoot(projectRoot: string): boolean {
  *  the disposition snapshot stays pure). On a normal (unsymlinked) path realpath === resolve, so
  *  existing resolve-keyed entries keep their key — no migration. */
 export function canonicalRoot(projectRoot: string): string {
-  try { return canonical(projectRoot); } catch { return resolve(projectRoot); }
+  try { return registryKeyPath(projectRoot); } catch { return resolve(projectRoot); }
+}
+
+/** ALIAS-DOTDOT (second fix batch, D4): the body `lock.ts canonical` had before it moved to
+ *  `realpathSync.native` — Node's JS `realpathSync`, which collapses a `..` after a symlinked directory
+ *  as text. Preserved for registry keys and witness scope keys ONLY (canonicalRoot, and through it
+ *  witness-store scopeKeyOf), so every key an older build wrote is still the key this build looks up.
+ *  Path IDENTITY — what a lock guards, what an append opens, what the alias rules compare — is the
+ *  kernel's (lock.ts canonical, ledgerDestination below), never this. */
+function registryKeyPath(target: string): string {
+  try { return realpathSync(target); }
+  catch { return join(realpathSync(dirname(target)), basename(target)); }
 }
 
 /** The in-repo project ledger path for a project root. */

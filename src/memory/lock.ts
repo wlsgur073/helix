@@ -52,10 +52,20 @@ export interface LockOptions { maxWaitMs?: number; probe?: LivenessProbe; }
  *  inode, and the pre-compaction plaintext (incl. permanently-erased content) survives on that inode
  *  — the erase claim broken. realpath resolves symlinks, not hard links — hard-link aliases are
  *  refused at the write layer (nlink guard), not here. The parent dir must exist (callers mkdir it
- *  first). */
+ *  first).
+ *
+ *  ALIAS-DOTDOT (second fix batch, D4): `realpathSync.native`, the kernel's resolution, for BOTH the
+ *  path and the parent fallback. Node's JS `realpathSync` collapses a `..` that follows a symlinked
+ *  directory as text (`dl/..` read as the directory holding `dl`), while the kernel follows `dl`
+ *  first: for a ledger linked as `dl/../x.jsonl` the JS answer named a different file than the one the
+ *  kernel opens, so the lock guarded one inode (and the append wrote one file) while reads opened
+ *  another, and one inode could carry two lock files. Registry and witness scope KEYS do not use this
+ *  function: ownership.ts canonicalRoot keeps the JS computation, so no key an older build wrote
+ *  changes. On an ordinary path (no `..` after a directory link) the two computations agree, so
+ *  existing lock paths do not move. */
 export function canonical(target: string): string {
-  try { return realpathSync(target); }
-  catch { return join(realpathSync(dirname(target)), basename(target)); }
+  try { return realpathSync.native(target); }
+  catch { return join(realpathSync.native(dirname(target)), basename(target)); }
 }
 
 export function lockPathOf(target: string): string { return canonical(target) + '.lock'; }
