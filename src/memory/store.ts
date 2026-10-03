@@ -26,6 +26,7 @@ import { interruptedAtPredecessor, type WitnessVerdict } from './witness-core.js
 import { ledgerDigest, subkeyFingerprint, keyVectorEqual, type ScopeKeyComponent, type RecallCacheEntry } from './recall-cache.js';
 import type { MetricsSink } from '../metrics.js';
 import { withFileLock } from './lock.js';
+import { aliasesGlobalLedger } from './scope-target.js';
 import { MAX_COMMIT_CONTENT_CHARS, RECALL_RECENCY_APPENDIX_COUNT } from '../limits.js';
 
 export interface MemoryStoreOptions {
@@ -139,7 +140,9 @@ export interface RecheckResult {
 
 /** ALIAS-P2P (item 7): the refusal for a project-routed write whose project ledger leads to another
  *  adopted project's file — and, since the second fix batch (D4), also for one Helix cannot resolve
- *  the kernel's way. One constant so every site carries the same wording. Ruling R7 with plan
+ *  the kernel's way, and (Δ4-37) for the pre-adopt check in targetLedger that finds either shape — or a
+ *  link to the global ledger — before a first commit would claim the project. One constant so every
+ *  site carries the same wording. Ruling R7 with plan
  *  refinement P1: the first sentence names every cause a refused project-routed write can have —
  *  another adopted project's memory file, the global memory file, or an unresolvable path (a non-UTF-8
  *  name, a path past PATH_MAX, too many links), which has no other project behind it at all — so the
@@ -461,6 +464,18 @@ export class MemoryStore {
           'commit: a project memory file exists here that Helix did not create — ' +
           'adopt it explicitly (helix_memory_adopt) or remove it',
         );
+      }
+      // Δ4-37 (second fix batch, C1): the auto-adopt claim used to run with NO alias check, so a
+      // project whose ledger was a dangling link to another adopted project's (or the global) ledger
+      // had its first commit stamp ownership and then create that other file holding the record. Linked
+      // to another project's ledger it was excluded only from then on; linked to the global ledger it
+      // stayed in use until the next server start. Both rules (global, then project-to-project, each
+      // computed the kernel's way — ledgerDestination) now run BEFORE the stamp, and an alias or an
+      // unresolvable ledger is refused with the alias refusal: no ownership recorded, no file created.
+      // This is the only place the store applies the global rule: once a project is adopted (by this
+      // branch or by adopt()), only the project-to-project rule guards it until the next server start.
+      if (aliasesGlobalLedger(p.ledger, this.global) || aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger })) {
+        throw new Error(ALIASED_PROJECT_WRITE_REFUSAL);
       }
       // autoAdoptLedger: re-check under the registry lock that no foreign ledger appeared between the
       // existsSync above and the stamp — closing the check-then-adopt TOCTOU on the auto-adopt path.

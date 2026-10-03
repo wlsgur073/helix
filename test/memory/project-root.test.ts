@@ -64,6 +64,21 @@ describe('resolveProjectLayer', () => {
     expect(resolveProjectLayer({ cwd: dir(proj, 'sub'), userHome: home, globalLedger: join(proj, '.helix', 'memory.jsonl') })).toBeUndefined();
   });
 
+  // Ruling R6 (second fix batch §4.5): the same rule when the project's memory file is a LINK to the
+  // global ledger, dangling or not — the cwd's own folder and a parent's alike. No project layer, so an
+  // omitted-scope commit is global (pinned through the server bundle in
+  // test/acceptance/global-link-store.e2e.test.ts).
+  it.each([['existing', true], ['absent (a dangling link)', false]] as const)(
+    'a .helix whose memory file links to the %s global ledger is the global store, for the cwd and for a parent', (_l, existing) => {
+      const b = base(); const home = dir(b, 'home');
+      const globalLedger = join(dir(b, 'helixhome'), 'memory.jsonl');
+      if (existing) writeFileSync(globalLedger, '');
+      const proj = dir(home, 'proj'); dir(proj, '.helix');
+      symlinkSync(globalLedger, join(proj, '.helix', 'memory.jsonl'));
+      expect(resolveProjectLayer({ cwd: proj, userHome: home, globalLedger })).toBeUndefined();
+      expect(resolveProjectLayer({ cwd: dir(proj, 'sub'), userHome: home, globalLedger })).toBeUndefined();
+    });
+
   it('returns undefined when no .helix exists below the home boundary', () => {
     const b = base(); const home = dir(b, 'home');
     expect(resolveProjectLayer({ cwd: dir(home, 'a', 'b'), userHome: home, globalLedger: globalIn(home) })).toBeUndefined();
