@@ -368,7 +368,12 @@ export function completeTransition(home: string, scopeKey: string, bytes: Buffer
  *  "bytes match the pre-transition state" cannot distinguish a rewrite that never started from one
  *  that landed and was rolled back (the journal-first rationale in witness-core.ts), which is why
  *  classifyWitness keeps calling that state 'transition-interrupted' and no read path may relax
- *  it; a CRASHED writer's journal therefore stays pending until an operator re-drives it. */
+ *  it. A CRASHED writer's journal therefore stays pending until the next server start retracts it
+ *  (store.ts healWitness, and only when the bytes still sit at the journal's recorded predecessor;
+ *  this function still refuses one that superseded another) or an operator re-drives the rewrite or
+ *  re-baselines the scope. A reader that meets the state while a LIVE process holds the ledger lock
+ *  waits for that holder and reads again (witness-read.ts, IT-M6); that changes when it reads, never
+ *  how it classifies. */
 export function discardTransition(home: string, scopeKey: string, nonce: string, fsOps: DurableFsOps = realFsOps): void {
   ensureHelixDir(home);
   const master = ensureMaster(home);

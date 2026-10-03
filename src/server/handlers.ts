@@ -504,7 +504,7 @@ export function handleConfirm(store: MemoryStore, args: { id: string }, deps: Re
     // A WitnessAdvanceError reaches here from two sides of the append: advanceWitness throws AFTER
     // the row lands and sets landedState (the one caller that knows a row landed), while
     // completeTransition throws BEFORE any byte moves, on the transition-heal path
-    // (witness-write.ts:63), leaving landedState undefined. So only landedState says whether a row
+    // (witness-write.ts:76), leaving landedState undefined. So only landedState says whether a row
     // landed — never the error class alone. Confirm's landed grade is provably 'Verified'
     // (resolveTransition returns {kind:'state', state:'Verified'} unconditionally for evidenceSource
     // 'user'), but auditing the carried state rather than a hard-coded 'Verified' keeps this handler

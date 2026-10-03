@@ -13,17 +13,46 @@
  *      we read afterwards can only be as-new-or-newer than it — an append-preserving suffix, classified
  *      `unwitnessed-suffix`, never the spurious `mismatch` a ledger-first read produced when the witness
  *      advanced between the two reads (Task 8 failpoint, §7).
- *    - Retry-once resolves the rarer concurrent-REWRITE interleave: an in-progress epoch transition
- *      (compaction/erase) momentarily makes the OLD entry not match the already-rewritten bytes
- *      (mismatch) or leaves a pending journal over not-yet-rewritten bytes (transition-interrupted),
- *      until the witness/journal catches up. A single re-read (witness-first again) reclassifies against
- *      the settled state. The retry uses the SECOND verdict UNCONDITIONALLY — it never loops — so a
- *      genuine, STABLE rollback (bytes that truly do not descend from the witness on BOTH reads) still
- *      verdicts `mismatch` and is never masked. */
+ *    - Retry-once resolves the SHORT concurrent-REWRITE interleaves: a rewrite's rename landing between
+ *      the two reads of a pair makes the OLD entry not match the already-rewritten bytes (mismatch)
+ *      until the witness catches up, and an immediate re-read (witness-first again) sees the settled
+ *      state. The retry uses the SECOND verdict UNCONDITIONALLY — it never loops — so a genuine,
+ *      STABLE rollback (bytes that truly do not descend from the witness on BOTH reads) still verdicts
+ *      `mismatch` and is never masked.
+ *    - An immediate re-read does NOT outlast a rewrite's journal window (compactLedger publishes the
+ *      journal, then renames the new bytes into place; in between the bytes still sit at the
+ *      predecessor and classify `transition-interrupted`). IT-M6: when the retry still verdicts
+ *      `transition-interrupted`, the scope's LEDGER lock is consulted — every rewrite holds it from
+ *      before the journal until after completion. A holder that classifies alive or alive-unknown is
+ *      waited for (every 25 ms, at most 2,000 ms, lock.ts awaitLiveHolder); no lock, a dead holder or
+ *      this thread's own lock means there is no writer to wait for. Ruling R5: WHATEVER the
+ *      consultation found — none, released, timeout — the scope is then read ONCE more, witness-first,
+ *      and that verdict is used unchanged. "No lock" at the consultation does not mean nothing landed:
+ *      a rewriter can rename, complete the transition and release in the gap after the retry's read
+ *      pair, and a reader that read again only after a wait returned the stale interrupted verdict
+ *      for a scope already in sync. The third read costs one more read pair only where the verdict is
+ *      still `transition-interrupted` after the retry, i.e. a scope whose journal outlived its writer
+ *      or whose rewrite is in flight.
+ *      The wait reads only the lock file and /proc; it never changes a verdict, and a scope that is
+ *      still interrupted after the third read is withheld exactly as before. */
 import type { MemoryRecord } from '../types.js';
 import { readLedgerRaw, readLedgerBytes, type LedgerPath } from './ledger.js';
+import { awaitLiveHolder, type HolderWaitOutcome } from './lock.js';
 import { classifyState, readScopeWitness, scopeKeyOf, type ScopeWitnessState } from './witness-store.js';
 import type { WitnessVerdict } from './witness-core.js';
+
+/** IT-M6 reader-wait budget: how long a witnessed read waits for a live holder of the scope's ledger
+ *  lock before it re-reads, and how often it looks. The SessionStart hook runs under a 10 s limit
+ *  (hooks/hooks.json) and reads at most two scopes. */
+export const REWRITER_WAIT_MAX_MS = 2_000;
+export const REWRITER_WAIT_POLL_MS = 25;
+
+/** The production rewriter wait for one ledger: waits for a live holder of its lock (lock.ts
+ *  awaitLiveHolder) and reports what it found. The caller reads once more whatever the answer (R5);
+ *  the answer is returned for observability only. Pure read — see awaitLiveHolder. */
+export function awaitLedgerRewriter(ledger: LedgerPath): HolderWaitOutcome {
+  return awaitLiveHolder(ledger, { maxWaitMs: REWRITER_WAIT_MAX_MS, pollMs: REWRITER_WAIT_POLL_MS });
+}
 
 /** The two alarm verdicts a witnessed read retries on (spec §7). Every other verdict — first-contact,
  *  in-sync, unwitnessed-suffix, transition-heal — is either benign or resolved by a later WRITE, so a
@@ -33,16 +62,22 @@ export function isWitnessAlarm(v: WitnessVerdict): boolean {
 }
 
 /**
- * The ONE place the §7 order + retry live — a higher-order read so the five witnessed-read sites share
- * a single implementation rather than each duplicating the retry. `readWitness` and `readLedger` are
+ * The ONE place the §7 order + retry live — a higher-order read so every witnessed read (the two
+ * helpers below, and through them every lock-free grade-assigning reader) shares a single
+ * implementation rather than each duplicating the retry. `readWitness` and `readLedger` are
  * the two reads, injected as closures: production callers pass the real disk reads; tests pass stubs to
  * drive an interleave deterministically (the seam §7 prescribes). CONSISTENCY: the returned `ledger`,
  * `state`, and `verdict` are ALWAYS from the SAME (final) read pair — on a retry the downstream caller
  * uses the RE-READ bytes/records and the RE-READ witness identity, never the first read's.
+ * `awaitRewriter` is the IT-M6 lock consultation (module header), injected like the two reads so a
+ * test can drive it without a lock or a clock: called at most once, only when the retry still verdicts
+ * `transition-interrupted`, and followed by exactly one more read pair WHATEVER it returns (R5) — its
+ * return value is not read. Omitted, the read behaves exactly as before IT-M6 (two read pairs at most).
  */
 export function witnessedRead<T extends { bytes: Buffer }>(
   readWitness: () => ScopeWitnessState,
   readLedger: () => T,
+  awaitRewriter?: () => unknown,
 ): { ledger: T; state: ScopeWitnessState; verdict: WitnessVerdict } {
   let state = readWitness();          // WITNESS FIRST
   let ledger = readLedger();          // ledger SECOND
@@ -53,6 +88,15 @@ export function witnessedRead<T extends { bytes: Buffer }>(
     state = readWitness();
     ledger = readLedger();
     verdict = classifyState(state, ledger.bytes);
+    // IT-M6: a journal still over the old bytes may be a rewrite in progress — or one that landed and
+    // released after the read pair above. Consult the ledger lock (waiting for a LIVE holder), then read
+    // once more whatever it found (R5), and keep that verdict as it is (never loop, never relax).
+    if (verdict.kind === 'transition-interrupted' && awaitRewriter) {
+      awaitRewriter();
+      state = readWitness();
+      ledger = readLedger();
+      verdict = classifyState(state, ledger.bytes);
+    }
   }
   return { ledger, state, verdict };
 }
@@ -80,7 +124,8 @@ export interface LedgerWitnessed {
 
 /**
  * Read one ledger's raw bytes + records (readLedgerRaw) and classify them against this scope's witness
- * state, witness-FIRST with a single alarm retry (witnessedRead — see the module header). `home` +
+ * state, witness-FIRST with a single alarm retry and, for a scope still transition-interrupted, the
+ * ledger-lock consultation and one more read (witnessedRead — see the module header). `home` +
  * `projectRoot` resolve the same scope key `scopeKeyOf` derives for witness-store's own callers, so a
  * project-scope caller and a global caller can never cross-classify against the wrong scope's entry.
  * verdict, witnessIdentity, and journalPending all derive from the SAME final witness state snapshot.
@@ -90,6 +135,7 @@ export function readLedgerWitnessed(path: LedgerPath, home: string, projectRoot?
   const { ledger, state, verdict } = witnessedRead(
     () => readScopeWitness(home, scopeKey),
     () => { const t0 = performance.now(); const r = readLedgerRaw(path); return { ...r, parseMs: performance.now() - t0 }; },
+    () => awaitLedgerRewriter(path),
   );
   return {
     bytes: ledger.bytes,
@@ -111,7 +157,8 @@ export interface LedgerBytesWitnessed {
 
 /**
  * The BYTES-ONLY sibling of readLedgerWitnessed — reads the witness first, then the ledger bytes with
- * `readLedgerBytes` (NO parse), classifies, and retries once (witnessedRead). This is what preserves
+ * `readLedgerBytes` (NO parse), classifies, retries once, and for a scope still transition-interrupted
+ * consults the ledger lock and reads once more (witnessedRead). This is what preserves
  * recall's zero-parse cache-HIT invariant (Task 4): the cache key's digest + the witness verdict are
  * computed from raw bytes alone, so a HIT never pays a parse. The caller re-decodes these SAME final
  * bytes only on a MISS. Deliberately NOT built on readLedgerRaw (which parses unconditionally).
@@ -121,6 +168,7 @@ export function readLedgerBytesWitnessed(path: LedgerPath, home: string, project
   const { ledger, state, verdict } = witnessedRead(
     () => readScopeWitness(home, scopeKey),
     () => { const t0 = performance.now(); const bytes = readLedgerBytes(path); return { bytes, readMs: performance.now() - t0 }; },
+    () => awaitLedgerRewriter(path),
   );
   return {
     bytes: ledger.bytes,

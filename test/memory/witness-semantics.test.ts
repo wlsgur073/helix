@@ -471,7 +471,7 @@ describe('Task 8 — semantics table + failpoint scenarios', () => {
     });
   });
 
-  describe('scenario: ceremony-bound honesty — a rebaseline-kind pending journal with non-matching bytes blocks writes + excludes reads, persisting across a store restart (no auto-decay)', () => {
+  describe('scenario: ceremony-bound honesty — a rebaseline-kind pending journal with non-matching bytes blocks writes + excludes reads, persisting across a fresh MemoryStore instance over the same home (no auto-decay; the startup heal, healWitness, is not run here)', () => {
     it('constructs the rebaseline journal directly (Task 9 ceremony CLI is not implemented yet) via openTransition(kind: "rebaseline", ...); the block/exclusion survives a fresh MemoryStore instance over the same home', () => {
       const home = newHome();
       const ledger = join(home, 'memory.jsonl');
