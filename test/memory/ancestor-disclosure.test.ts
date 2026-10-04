@@ -62,7 +62,7 @@ describe('ancestor-unadopted disposition', () => {
 
 describe('ANCESTOR_UNADOPTED_NOTE', () => {
   it('is a constant disclosure with no path in it', () => {
-    expect(ANCESTOR_UNADOPTED_NOTE).toBe("(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval)");
+    expect(ANCESTOR_UNADOPTED_NOTE).toBe("(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval; storing a fact in global memory makes it visible in every project, and that choice belongs to the user)");
     expect(ANCESTOR_UNADOPTED_NOTE).not.toMatch(/[\\/]/);
   });
 

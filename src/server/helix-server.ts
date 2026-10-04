@@ -107,7 +107,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
           'replacing; a supersede issued without having read the target is refused.',
         ),
       scope: z.enum(['project', 'global']).optional()
-        .describe('Which ledger to write to. Omit for the contextual default: the project ledger when a project layer is active, the global one otherwise. `global` always writes global. `project` REQUIRES an active project layer and is refused when there is none, rather than silently widening the write to global. Below a parent-directory project that is not adopted yet, an omitted scope and `project` are both refused until it is adopted. The result names the scope written.'),
+        .describe('Which ledger to write to. Omit for the contextual default: the project ledger when a project layer is active, the global one otherwise. `global` always writes global. `project` REQUIRES an active project layer and is refused when there is none, rather than silently widening the write to global. Below a parent-directory project that is not adopted yet, an omitted scope and `project` are both refused until it is adopted. The result names the scope written. Below a project whose memory is off here (not adopted, or its memory file excluded), storing a fact in global memory is the user\'s decision: ask the user before passing global, whether or not a project write was refused first.'),
     },
   }, async (args) => m.runOp('helix_memory_commit', () => handleCommit(store, args)));
 

@@ -73,12 +73,14 @@ describe('a commit below a parent project that is not adopted', () => {
 describe('the refusal below an unadopted parent project', () => {
   // Final review: anyone can create a .helix in a shared parent (/tmp, a drive root), so the refusal
   // must not steer the caller toward adopting it.
-  it('suggests adopting only a project the user created, and global otherwise', () => {
+  // IT-M4: the old tail ("otherwise pass scope 'global'") steered the model into choosing global
+  // itself; the choice between adopting and global memory is the user's.
+  it('asks the user to choose between adopting and global memory, and does not choose for them', () => {
     const root = tmp('helix-ap-proj-'); const { store } = below(root);
     let message = '';
     try { store.commit({ content: 'kilo fact', source: 'user' }); } catch (e) { message = (e as Error).message; }
-    expect(message).toContain('If the user created that project, adopt it with helix_memory_adopt');
-    expect(message).toContain("otherwise pass scope 'global'");
+    expect(message).toContain('Ask the user whether to adopt that project (helix_memory_adopt, projectRoot: that absolute path) or to store this fact in global memory, which every project sees; do not choose for them.');
+    expect(message).not.toContain("otherwise pass scope 'global'");
   });
 });
 

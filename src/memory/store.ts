@@ -146,20 +146,31 @@ export interface RecheckResult {
  *  refinement P1: the first sentence names every cause a refused project-routed write can have —
  *  another adopted project's memory file, the global memory file, or an unresolvable path (a non-UTF-8
  *  name, a path past PATH_MAX, too many links), which has no other project behind it at all — so the
- *  text never states one cause while another holds. */
+ *  text never states one cause while another holds. IT-M4: the last sentence leaves the choice of global
+ *  memory to the user — the former "Pass scope 'global'" steered the model into choosing it. */
 const ALIASED_PROJECT_WRITE_REFUSAL =
   "commit: this project's memory file resolves to another adopted project's memory file, to the global " +
   'memory file, or through a path Helix cannot resolve, so the project layer is disabled here — the write ' +
-  "is refused rather than written into the other project's memory. Pass scope 'global', or replace the " +
-  "link with the project's own file.";
+  "is refused rather than written into the other project's memory. Ask the user whether to store this " +
+  "fact in global memory, which every project sees, or to replace the link with the project's own file; " +
+  'do not choose for them.';
 
-/** What `commitScoped` reports: the record, the scope it was written to, and (IT-M3) `redactions`,
- *  which counts, per marker kind, the spans the secret scan actually replaced (the write-policy
- *  selection, one `[redacted:<kind>]` marker each); absent when nothing was replaced. */
+/** The states in which an explicit 'global' commit bypassed a project layer that is off here (IT-M4). */
+export type BypassedProjectDisposition = 'ancestor-unadopted' | 'aliased' | 'unadopted-present';
+/** What `commitScoped` reports: the record, the scope it was written to, and two disclosures.
+ *  `redactions` (IT-M3) counts, per marker kind, the spans the secret scan actually replaced (the
+ *  write-policy selection, one `[redacted:<kind>]` marker each); absent when nothing was replaced.
+ *  `bypassedProject` (IT-M4) is set only for an EXPLICIT 'global' commit made while a project layer
+ *  is configured but off here — 'ancestor-unadopted', 'aliased', or (ruling R11) 'unadopted-present',
+ *  a cwd project whose memory file Helix did not create and nobody adopted, excluded from every read
+ *  the same way; absent otherwise. A cwd project nobody adopted whose memory file the pre-adopt check
+ *  refuses (Δ4-37) reports 'aliased' too: it reads 'inactive' while its link leads to no file, but
+ *  every project write there is refused with the alias refusal. */
 export interface CommitResult {
   record: MemoryRecord;
   scope: MemoryScope;
   redactions?: Record<string, number>;
+  bypassedProject?: BypassedProjectDisposition;
 }
 
 /** A refusal thrown by `resolveEraseTarget` / `erase` BEFORE any byte moves — the pre-write half of
@@ -279,9 +290,9 @@ export class MemoryStore {
     return this.commitScoped(input).record;
   }
 
-  /** `commit`, plus the scope the record was actually written to — what `helix_memory_commit` reports.
-   *  Issue #1: a result that did not name its scope let a project fact land in the global ledger with
-   *  nothing to show for it. */
+  /** `commit`, plus what `helix_memory_commit` reports about it (CommitResult): the scope the record was
+   *  actually written to and the two disclosures. Issue #1: a result that did not name its scope let a
+   *  project fact land in the global ledger with nothing to show for it. */
   commitScoped(input: CommitInput): CommitResult {
     // H3 (2026-08-18 review): the FIRST statement of validation, before the secret scan and before
     // any append -- an oversized commit must cost O(1), not pay for a scan of content that is about
@@ -422,6 +433,20 @@ export class MemoryStore {
     appendWitnessed(ledger, record, this.homeDir(), this.scopeRootOf(ledger), 'commit');
     const out: CommitResult = { record, scope: ledger === this.global ? 'global' : 'project' };
     if (redactions) out.redactions = redactions;
+    // IT-M4: an explicit 'global' commit skips every project check above (targetLedger returns before
+    // any ownership read), so the result could not say it bypassed a project layer that is off here.
+    // The disposition is computed ONLY on this path — explicit 'global' with a layer configured — and
+    // after the append, so a refused or failed write never pays for it. Side-effect free.
+    if (input.scope === 'global' && this.opts.project) {
+      const d = this.projectDisposition();
+      if (d === 'ancestor-unadopted' || d === 'aliased' || d === 'unadopted-present') out.bypassedProject = d;
+      // A cwd project nobody adopted whose memory file the pre-adopt check refuses (Δ4-37) reads
+      // 'inactive' while its link leads to no existing file, yet every project write there is refused
+      // with the alias refusal, which calls the layer disabled and offers global memory. Its layer is
+      // off in the same way, so this commit says so too (the class ruling R11 closed for
+      // 'unadopted-present'). An owned project is never flagged here: it reads 'owned'.
+      else if (d === 'inactive' && this.preAdoptAliased(this.opts.project)) out.bypassedProject = 'aliased';
+    }
     return out;
   }
 
@@ -449,10 +474,19 @@ export class MemoryStore {
       throw new Error(
         `commit: this session started below a Helix project at ${JSON.stringify(p.root)} that is not adopted, ` +
         'so project memory is off here — the write is refused rather than widened to the global ledger. ' +
-        'If the user created that project, adopt it with helix_memory_adopt (projectRoot: that absolute ' +
-        "path); otherwise pass scope 'global'.",
+        'Ask the user whether to adopt that project (helix_memory_adopt, projectRoot: that absolute path) ' +
+        'or to store this fact in global memory, which every project sees; do not choose for them.',
       );
     }
+  }
+
+  /** Δ4-37: the two alias rules as they apply to a project that is NOT adopted yet — its ledger leads
+   *  to the global ledger, to another registered project's ledger, or through a path Helix cannot
+   *  resolve. ONE predicate for targetLedger's pre-adopt refusal and for commitScoped's
+   *  bypassed-project disclosure (IT-M4), so the refusal and the notice cannot disagree about that
+   *  state. Side-effect free: registry and link reads only. */
+  private preAdoptAliased(p: { root: string; ledger: string }): boolean {
+    return aliasesGlobalLedger(p.ledger, this.global) || aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger });
   }
 
   /** Resolve the ledger to write to. Project scope claims ownership on first use and refuses a
@@ -493,11 +527,10 @@ export class MemoryStore {
       // stayed in use until the next server start. Both rules (global, then project-to-project, each
       // computed the kernel's way — ledgerDestination) now run BEFORE the stamp, and an alias or an
       // unresolvable ledger is refused with the alias refusal: no ownership recorded, no file created.
-      // This is the only place the store applies the global rule: once a project is adopted (by this
+      // The store applies the global rule to a project NOT yet adopted only (here, and in the notice
+      // commitScoped adds to a global commit made in that state): once a project is adopted (by this
       // branch or by adopt()), only the project-to-project rule guards it until the next server start.
-      if (aliasesGlobalLedger(p.ledger, this.global) || aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger })) {
-        throw new Error(ALIASED_PROJECT_WRITE_REFUSAL);
-      }
+      if (this.preAdoptAliased(p)) throw new Error(ALIASED_PROJECT_WRITE_REFUSAL);
       // autoAdoptLedger: re-check under the registry lock that no foreign ledger appeared between the
       // existsSync above and the stamp — closing the check-then-adopt TOCTOU on the auto-adopt path.
       stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });

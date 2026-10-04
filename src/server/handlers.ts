@@ -129,14 +129,23 @@ function capRendered(total: number, render: (n: number) => string, budget: numbe
 export const REDACTION_NOTICE =
   'part of this fact was replaced with [redacted:<kind>] markers before storage; a recheck cannot bind a path or pattern that fell inside a redacted span';
 
+/** IT-M4: the commit result's `notice` for an explicit 'global' commit made while this session's
+ *  project layer is off ('ancestor-unadopted', 'aliased' or, ruling R11, 'unadopted-present' — see
+ *  store.ts CommitResult). Constant, no path. */
+export const GLOBAL_WHILE_PROJECT_OFF_NOTICE =
+  "written to global memory, which every project sees, while this session's project memory is off";
+
 /** Success stays ONE JSON object after the verb (`<verb> {json}`, CHANGELOG contract; decision E1):
- *  the disclosure is fields INSIDE it, never text after it. `redactions` and `notice` follow
- *  `classification` and appear only when a span was replaced, so an ordinary commit's key list is
- *  unchanged. */
+ *  the disclosures are fields INSIDE it, never text after it. `redactions` and `notice` follow
+ *  `classification` and appear only when they apply, so an ordinary commit's key list is unchanged.
+ *  When both notices apply they are joined in order: the redaction one first. */
 export function handleCommit(store: MemoryStore, args: CommitInput): ToolResult {
-  const { record: rec, scope, redactions } = store.commitScoped(args);
+  const { record: rec, scope, redactions, bypassedProject } = store.commitScoped(args);
   const result: Record<string, unknown> = { id: rec.id, scope, state: rec.state, classification: rec.classification };
-  if (redactions) { result.redactions = redactions; result.notice = REDACTION_NOTICE; }
+  const notices: string[] = [];
+  if (redactions) { result.redactions = redactions; notices.push(REDACTION_NOTICE); }
+  if (bypassedProject) notices.push(GLOBAL_WHILE_PROJECT_OFF_NOTICE);
+  if (notices.length > 0) result.notice = notices.join('; ');
   return ok(`committed ${JSON.stringify(result)}`);
 }
 

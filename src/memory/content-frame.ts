@@ -72,7 +72,7 @@ export const ALIASED_LEDGER_NOTE =
  *  no imperative, no interpolation, no path. Rendered wherever the unadopted note is, iff the per-call
  *  project-disposition snapshot is 'ancestor-unadopted'. */
 export const ANCESTOR_UNADOPTED_NOTE =
-  "(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval)";
+  "(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval; storing a fact in global memory makes it visible in every project, and that choice belongs to the user)";
 
 /** IT-H2: printed by the SessionStart hook when HELIX_HOME is a symlink. Through such a home, commit,
  *  erase, confirm, recheck, adopt and the SessionEnd record are refused before anything is written to

@@ -126,7 +126,8 @@ describe('the pre-adopt refusal is the alias refusal (R7, P1)', () => {
   const ALIAS_REFUSAL =
     "commit: this project's memory file resolves to another adopted project's memory file, to the global memory file, " +
     'or through a path Helix cannot resolve, so the project layer is disabled here — the write is refused rather than ' +
-    "written into the other project's memory. Pass scope 'global', or replace the link with the project's own file.";
+    "written into the other project's memory. Ask the user whether to store this fact in global memory, which every " +
+    "project sees, or to replace the link with the project's own file; do not choose for them.";
 
   it('pre-adopt, unresolvable (a non-UTF-8 link body): the exact text', () => {
     const { u, store } = fixture();
