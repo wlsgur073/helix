@@ -482,15 +482,17 @@ node bin/helix-trust-resolve.mjs --scope <absoluteProjectRoot> --fresh    # rota
 - The server's startup integrity scan names those rows rather than calling them forged. With the
   scope's key resolved, it sorts each `verify` row whose MAC fails by the fields the check reads and
   prints one line per class. The fields are read in this order and the first that applies decides: a
-  row with no MAC or no key id is forged/legacy whatever else it carries; a MAC version above the
-  current one is the newer-version NOTE whatever its key id; a version no Helix writes is
-  forged/legacy; then another key id; and last the current key id, where a failing MAC is the
-  tampered WARNING. Another key id, which is what `--fresh` and a re-minted key leave behind:
+  row with no MAC or no key id is forged/legacy whatever else it carries; a MAC version that is a
+  whole number above the current one and below 2^53 is the newer-version NOTE whatever its key id; a
+  version no Helix writes (0, a negative or fractional number, a number of 2^53 or more, a
+  non-number, or none at all) is forged/legacy; then another key id; and last the current key id,
+  where a failing MAC is the tampered WARNING. Another key id, which is what `--fresh` and a
+  re-minted key leave behind:
   `helix: NOTE - <N> verify record(s) in <ledger> were signed under a different key (a nonce rotated by --fresh, a key lost and re-minted, or a forgery); their grades are not applied`.
   The current key id with a failing MAC:
   `helix: WARNING - <N> verify record(s) in <ledger> carry this scope's current key id but fail its MAC; they were altered after signing and their grades are not applied`.
-  A MAC version above the current one (the rows compaction keeps for a newer Helix), or a valid MAC
-  over a state this build does not know:
+  A whole-number MAC version above the current one (the rows compaction keeps for a newer Helix), or
+  a valid MAC over a state this build does not know:
   `helix: NOTE - <N> verify record(s) in <ledger> use a MAC format or state this Helix does not accept, likely written by a newer version or forged; their grades are not applied`.
   A row with no MAC or key id, or with a version no Helix writes, keeps the `forged/legacy elevated
   record(s)` WARNING, as a baked non-`Fresh` fact row does. A NOTE is not an all-clear: a forged row
@@ -560,7 +562,11 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   ledger link whose target exists the way the kernel does, so a link that applies `..` after a
   symlinked directory is locked and rewritten at the file it reaches. A link whose target does not
   exist yet is locked at the link's own location for the one write that creates the target, so that
-  write does not exclude a writer that arrives once the file exists. It is NOT media
+  write does not exclude a writer that arrives once the file exists. The global ledger is never
+  excluded, so when it is a link whose destination is not valid UTF-8 it is locked, appended and
+  rewritten at the link's own location: an append reaches the target through the link, while a
+  rewrite (a compaction or a permanent erase) replaces the link with a regular file and leaves the
+  earlier bytes, erased content included, in the old target. It is NOT media
   sanitization: freed blocks,
   SSD remapping, filesystem snapshots, external backups/copies (`cp`, `ln`), and already-open file
   descriptors are all outside any userspace design's reach. Those write paths are the ledger's, and
@@ -578,8 +584,8 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   where an append through each ledger lands, resolved the way the kernel resolves it: a `..` after a
   symlinked directory is applied to that directory's target, and a link into a file that does not
   exist yet counts as that file, so two adopted projects linked to one file that does not exist yet
-  are both excluded before either writes it. A ledger Helix cannot resolve that way — a link or
-  directory name that is not valid UTF-8, a link that climbs out through a directory tree
+  are both excluded before either writes it. A project ledger Helix cannot resolve that way — a
+  link or directory name that is not valid UTF-8, a link that climbs out through a directory tree
   deeper than
   the path limit, or a chain of more than 40 links — is excluded exactly like an alias rather than
   read at a guessed location (fail-closed). Both checks also run before a first commit adopts a
@@ -595,9 +601,9 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   that is already adopted, or that `helix_memory_adopt` then adopts, that project's commits are
   written into the global ledger under the `project` scope and every record of the global ledger is
   read twice, once under each scope, until the next server start gives the session no project
-  layer. Until then an erase, recheck, confirm or supersede of any record is refused, because every
-  id is present in both scopes. That shape needs a link planted inside the project's own tree while
-  the server runs.
+  layer. Until then an erase, a confirm or a supersede of any record is refused, and so is a recheck
+  that would change a record's grade, because every id is present in both scopes. That shape needs a
+  link planted inside the project's own tree while the server runs.
 - **Appends are durable:** every append fsyncs the line before success is reported; a torn tail
   (power cut mid-append) is isolated by the next writer's tail repair and counted by parse health,
   and a complete-but-unacknowledged record commits (at-least-once). The **directory** fsync that
