@@ -20,7 +20,7 @@ const rec = (id: string): MemoryRecord => ({
 /** A directory's entries as latin1 strings, so a name holding 0xff and one holding U+FFFD's three bytes differ. */
 const names = (dir: string): string[] => readdirSync(dir, { encoding: 'buffer' }).map((b) => b.toString('latin1')).sort();
 
-/** `<d>/target/re<0xff>l.jsonl` (empty) and `<d>/home/memory.jsonl`, a link to it. */
+/** `target/re<0xff>l.jsonl` (empty) and `home/memory.jsonl`, a link to it, both under one temp directory. */
 function plantLinkToFfName(): { d: string; link: string; target: Buffer; targetDir: string } {
   const d = realpathSync(mkdtempSync(join(tmpdir(), 'helix-ffname-')));
   const targetDir = join(d, 'target');
