@@ -158,10 +158,13 @@ function sleepSync(ms) {
 }
 function canonical(target) {
   try {
-    return realpathSync2(target);
+    return realpathSync2.native(target);
   } catch {
-    return join(realpathSync2(dirname(target)), basename(target));
+    return join(realpathSync2.native(dirname(target)), basename(target));
   }
+}
+function lockPathOf(target) {
+  return canonical(target) + ".lock";
 }
 function timeoutMessage(lockPath, holder, waitedMs) {
   const head = `withFileLock: timed out after ${waitedMs}ms acquiring ${lockPath}`;
@@ -209,26 +212,10 @@ function acquireFileLock(target, opts = {}) {
       }
       if (code !== "EEXIST") throw e;
     }
-    let holder;
-    lastHolder = null;
-    try {
-      const st = lstatSync(lockPath);
-      if (st.isDirectory()) {
-        holder = classifyLegacyDir(lockPath, probe);
-      } else {
-        const raw = readFileSync2(lockPath, "utf8");
-        const parsed = tryParsePayload(raw);
-        if (parsed === null) {
-          const boot = probe.bootInstantMs();
-          holder = boot !== null && st.mtimeMs < boot ? "dead" : "alive-unknown";
-        } else {
-          lastHolder = parsed;
-          holder = classifyHolder(parsed, self, probe);
-        }
-      }
-    } catch {
-      continue;
-    }
+    const reading = readLockHolder(lockPath, self, probe);
+    lastHolder = reading?.payload ?? null;
+    if (reading === null) continue;
+    const holder = reading.holder;
     if (holder === "reentrant-self")
       throw new Error(`withFileLock: re-entrant acquisition of ${lockPath} from the same thread (pid ${process.pid}) \u2014 withFileLock is not re-entrant`);
     if (holder === "dead") stealUnderGate(lockPath, probe);
@@ -251,6 +238,62 @@ function acquireFileLock(target, opts = {}) {
     }
   };
   return { ctx, release };
+}
+function legacyDirSnapshot(lockPath, ino) {
+  let owner = "";
+  try {
+    owner = readFileSync2(join(lockPath, "owner"), "utf8");
+  } catch {
+  }
+  return `d:${ino}:${owner}`;
+}
+function holderSnapshot(lockPath) {
+  try {
+    const st = lstatSync(lockPath);
+    return st.isDirectory() ? legacyDirSnapshot(lockPath, st.ino) : `f:${st.ino}:${readFileSync2(lockPath, "utf8")}`;
+  } catch {
+    return null;
+  }
+}
+function readLockHolder(lockPath, self, probe) {
+  try {
+    const st = lstatSync(lockPath);
+    if (st.isDirectory()) {
+      const snapshot2 = legacyDirSnapshot(lockPath, st.ino);
+      return { holder: classifyLegacyDir(lockPath, probe), payload: null, snapshot: snapshot2 };
+    }
+    const raw = readFileSync2(lockPath, "utf8");
+    const snapshot = `f:${st.ino}:${raw}`;
+    const parsed = tryParsePayload(raw);
+    if (parsed === null) {
+      const boot = probe.bootInstantMs();
+      return { holder: boot !== null && st.mtimeMs < boot ? "dead" : "alive-unknown", payload: null, snapshot };
+    }
+    return { holder: classifyHolder(parsed, self, probe), payload: parsed, snapshot };
+  } catch {
+    return null;
+  }
+}
+function awaitLiveHolder(target, opts) {
+  const probe = opts.probe ?? realProbe;
+  let lockPath;
+  try {
+    lockPath = lockPathOf(target);
+  } catch {
+    return "none";
+  }
+  const current = readLockHolder(lockPath, selfIdentity("holder-wait", probe), probe);
+  if (current === null || current.holder === "dead" || current.holder === "reentrant-self") return "none";
+  const seen = current.snapshot;
+  const sleep = opts.sleep ?? sleepSync;
+  const pollMs = opts.pollMs ?? RETRY_MS;
+  const startedAt = performance2.now();
+  for (; ; ) {
+    const left = opts.maxWaitMs - (performance2.now() - startedAt);
+    if (left <= 0) return holderSnapshot(lockPath) === seen ? "timeout" : "released";
+    sleep(Math.max(1, Math.min(pollMs, left)));
+    if (holderSnapshot(lockPath) !== seen) return "released";
+  }
 }
 function withFileLock(target, fn, opts = {}) {
   const { ctx, release } = acquireFileLock(target, opts);
@@ -418,9 +461,16 @@ function fsyncDir(dir, sys = realDirFsyncSyscalls, platform = process.platform) 
 // src/memory/ownership.ts
 function canonicalRoot(projectRoot) {
   try {
-    return canonical(projectRoot);
+    return registryKeyPath(projectRoot);
   } catch {
     return resolve(projectRoot);
+  }
+}
+function registryKeyPath(target) {
+  try {
+    return realpathSync3(target);
+  } catch {
+    return join3(realpathSync3(dirname3(target)), basename2(target));
   }
 }
 function projectLedgerPath(projectRoot) {
@@ -530,15 +580,22 @@ function isOwned(projectRoot, home) {
   return stamp !== null && stamp === entry.stamp;
 }
 var MAX_SYMLINK_HOPS = 40;
+function utf8OrNull(b) {
+  const s = b.toString("utf8");
+  return Buffer.from(s, "utf8").equals(b) ? s : null;
+}
+var isNameTooLong = (e) => e?.code === "ENAMETOOLONG";
 function physicalPath(p) {
   try {
-    return realpathSync3.native(p);
-  } catch {
+    return utf8OrNull(realpathSync3.native(p, { encoding: "buffer" }));
+  } catch (e) {
+    if (isNameTooLong(e)) return null;
   }
   try {
-    return join3(realpathSync3.native(dirname3(p)), basename2(p));
-  } catch {
-    return resolve(p);
+    const parent = utf8OrNull(realpathSync3.native(dirname3(p), { encoding: "buffer" }));
+    return parent === null ? null : join3(parent, basename2(p));
+  } catch (e) {
+    return isNameTooLong(e) ? null : resolve(p);
   }
 }
 function ledgerDestination(ledger) {
@@ -548,27 +605,39 @@ function ledgerDestination(ledger) {
     try {
       st = lstatSync3(p);
     } catch (e) {
-      return e.code === "ENOENT" ? physicalPath(p) : canonicalRoot(ledger);
+      if (e.code === "ENOENT") return physicalPath(p);
+      return isNameTooLong(e) ? null : canonicalRoot(ledger);
     }
     if (!st.isSymbolicLink()) return physicalPath(p);
-    if (hops === MAX_SYMLINK_HOPS) return canonicalRoot(ledger);
+    if (hops === MAX_SYMLINK_HOPS) return null;
     let target;
     try {
-      target = readlinkSync2(p);
+      target = utf8OrNull(readlinkSync2(p, { encoding: "buffer" }));
     } catch {
       return canonicalRoot(ledger);
     }
-    const q = isAbsolute(target) ? target : `${physicalPath(dirname3(p))}/${target}`;
-    p = join3(physicalPath(dirname3(q)), basename2(q));
+    if (target === null) return null;
+    let q;
+    if (isAbsolute(target)) q = target;
+    else {
+      const dir = physicalPath(dirname3(p));
+      if (dir === null) return null;
+      q = `${dir}/${target}`;
+    }
+    const qDir = physicalPath(dirname3(q));
+    if (qDir === null) return null;
+    p = join3(qDir, basename2(q));
   }
 }
 function aliasesAdoptedLedger(project) {
   const real = ledgerDestination(project.ledger);
+  if (real === null) return true;
   const ownKey = canonicalRoot(project.root);
   if (real === projectLedgerPath(ownKey)) return false;
   for (const key of Object.keys(readRegistry(project.home))) {
     if (key === GLOBAL_KEY || key === ownKey) continue;
-    if (canonicalRoot(projectLedgerPath(key)) === real) return true;
+    const other = ledgerDestination(projectLedgerPath(key));
+    if (other !== null && other === real) return true;
   }
   return false;
 }
@@ -1046,10 +1115,15 @@ function readLedgerRaw(path) {
 }
 
 // src/memory/witness-read.ts
+var REWRITER_WAIT_MAX_MS = 2e3;
+var REWRITER_WAIT_POLL_MS = 25;
+function awaitLedgerRewriter(ledger) {
+  return awaitLiveHolder(ledger, { maxWaitMs: REWRITER_WAIT_MAX_MS, pollMs: REWRITER_WAIT_POLL_MS });
+}
 function isWitnessAlarm(v) {
   return v.kind === "mismatch" || v.kind === "transition-interrupted";
 }
-function witnessedRead(readWitness, readLedger) {
+function witnessedRead(readWitness, readLedger, awaitRewriter) {
   let state = readWitness();
   let ledger = readLedger();
   let verdict = classifyState(state, ledger.bytes);
@@ -1057,6 +1131,12 @@ function witnessedRead(readWitness, readLedger) {
     state = readWitness();
     ledger = readLedger();
     verdict = classifyState(state, ledger.bytes);
+    if (verdict.kind === "transition-interrupted" && awaitRewriter) {
+      awaitRewriter();
+      state = readWitness();
+      ledger = readLedger();
+      verdict = classifyState(state, ledger.bytes);
+    }
   }
   return { ledger, state, verdict };
 }
@@ -1068,7 +1148,8 @@ function readLedgerWitnessed(path, home, projectRoot) {
       const t0 = performance.now();
       const r = readLedgerRaw(path);
       return { ...r, parseMs: performance.now() - t0 };
-    }
+    },
+    () => awaitLedgerRewriter(path)
   );
   return {
     bytes: ledger.bytes,
@@ -1188,8 +1269,8 @@ function normalizeUntrusted(s, maxChars) {
   return out;
 }
 var UNADOPTED_LEDGER_NOTE = "(an unadopted project memory file is present and excluded from results; adoption requires explicit user approval)";
-var ALIASED_LEDGER_NOTE = "(this project's memory file resolves to another adopted project's memory file and is excluded from results)";
-var ANCESTOR_UNADOPTED_NOTE = "(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval)";
+var ALIASED_LEDGER_NOTE = "(this project's memory file resolves to another adopted project's memory file, or through a path Helix cannot resolve, and is excluded from results)";
+var ANCESTOR_UNADOPTED_NOTE = "(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval; storing a fact in global memory makes it visible in every project, and that choice belongs to the user)";
 var SYMLINKED_HOME_NOTE = "helix: NOTE - HELIX_HOME is a symlink; Helix refuses to write through it, so nothing can be saved to memory in this session.";
 var SUPERSEDE_NOTE = "(this Helix memory block supersedes every earlier Helix memory block in this conversation; a fact shown only in an earlier block may have been erased or superseded since, and helix_memory_recall returns the current state)";
 var WITNESS_MISMATCH_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; elevated grades are clamped to Fresh until an authorized re-baseline)";
@@ -1340,7 +1421,8 @@ import { dirname as dirname7, isAbsolute as isAbsolute2, join as join7, relative
 
 // src/memory/scope-target.ts
 function aliasesGlobalLedger(projectLedger, globalLedger) {
-  return canonicalRoot(projectLedger) === canonicalRoot(globalLedger);
+  const project = ledgerDestination(projectLedger);
+  return project !== null && project === ledgerDestination(globalLedger);
 }
 
 // src/memory/project-root.ts

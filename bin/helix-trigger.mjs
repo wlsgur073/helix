@@ -1,6 +1,6 @@
 // scripts/trigger-measure.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync4 } from "node:fs";
-import { dirname as dirname3, join as join4 } from "node:path";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3 } from "node:fs";
+import { dirname as dirname2, join as join3 } from "node:path";
 import { homedir } from "node:os";
 
 // src/memory/fs-ops.ts
@@ -52,37 +52,31 @@ function writeAll(fs, fd, data) {
 }
 
 // src/memory/ownership.ts
-import { existsSync, mkdirSync, readFileSync as readFileSync2, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync2, readlinkSync, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, realpathSync as realpathSync2 } from "node:fs";
-import { join as join2, resolve, dirname as dirname2, basename as basename2, isAbsolute } from "node:path";
-
-// src/memory/lock.ts
-import { readFileSync, writeFileSync, unlinkSync as unlinkSync2, linkSync as linkSync2, lstatSync, realpathSync, rmSync, readdirSync as readdirSync2 } from "node:fs";
-import { dirname, basename, join } from "node:path";
-function canonical(target) {
+import { existsSync, mkdirSync, readFileSync, renameSync as renameSync2, unlinkSync as unlinkSync2, lstatSync, readlinkSync, openSync as openSync2, writeSync as writeSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, realpathSync } from "node:fs";
+import { join, resolve, dirname, basename, isAbsolute } from "node:path";
+function canonicalRoot(projectRoot) {
+  try {
+    return registryKeyPath(projectRoot);
+  } catch {
+    return resolve(projectRoot);
+  }
+}
+function registryKeyPath(target) {
   try {
     return realpathSync(target);
   } catch {
     return join(realpathSync(dirname(target)), basename(target));
   }
 }
-
-// src/memory/ownership.ts
-function canonicalRoot(projectRoot) {
-  try {
-    return canonical(projectRoot);
-  } catch {
-    return resolve(projectRoot);
-  }
-}
 function projectLedgerPath(projectRoot) {
-  return join2(projectRoot, ".helix", "memory.jsonl");
+  return join(projectRoot, ".helix", "memory.jsonl");
 }
 var GLOBAL_KEY = "@global";
 function registryPath(home) {
-  return join2(home, "projects.json");
+  return join(home, "projects.json");
 }
 function ownerFile(projectRoot) {
-  return join2(projectRoot, ".helix", ".owner");
+  return join(projectRoot, ".helix", ".owner");
 }
 function isPlainObject(x) {
   return typeof x === "object" && x !== null && !Array.isArray(x);
@@ -100,14 +94,14 @@ function loadRegistry(home) {
   const path = registryPath(home);
   let st;
   try {
-    st = lstatSync2(path);
+    st = lstatSync(path);
   } catch (e) {
     return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
   }
   if (st.isSymbolicLink()) return { kind: "corrupt" };
   let text;
   try {
-    text = readFileSync2(path, "utf8");
+    text = readFileSync(path, "utf8");
   } catch {
     return { kind: "corrupt" };
   }
@@ -127,11 +121,11 @@ function readRegistry(home) {
 function readOwner(projectRoot) {
   const path = ownerFile(projectRoot);
   try {
-    if (lstatSync2(dirname2(path)).isSymbolicLink()) return null;
-    const st = lstatSync2(path);
+    if (lstatSync(dirname(path)).isSymbolicLink()) return null;
+    const st = lstatSync(path);
     if (!st.isFile()) return null;
     if (st.nlink > 1) return null;
-    return readFileSync2(path, "utf8").trim();
+    return readFileSync(path, "utf8").trim();
   } catch {
     return null;
   }
@@ -143,15 +137,22 @@ function isOwned(projectRoot, home) {
   return stamp !== null && stamp === entry.stamp;
 }
 var MAX_SYMLINK_HOPS = 40;
+function utf8OrNull(b) {
+  const s = b.toString("utf8");
+  return Buffer.from(s, "utf8").equals(b) ? s : null;
+}
+var isNameTooLong = (e) => e?.code === "ENAMETOOLONG";
 function physicalPath(p) {
   try {
-    return realpathSync2.native(p);
-  } catch {
+    return utf8OrNull(realpathSync.native(p, { encoding: "buffer" }));
+  } catch (e) {
+    if (isNameTooLong(e)) return null;
   }
   try {
-    return join2(realpathSync2.native(dirname2(p)), basename2(p));
-  } catch {
-    return resolve(p);
+    const parent = utf8OrNull(realpathSync.native(dirname(p), { encoding: "buffer" }));
+    return parent === null ? null : join(parent, basename(p));
+  } catch (e) {
+    return isNameTooLong(e) ? null : resolve(p);
   }
 }
 function ledgerDestination(ledger) {
@@ -159,29 +160,41 @@ function ledgerDestination(ledger) {
   for (let hops = 0; ; hops++) {
     let st;
     try {
-      st = lstatSync2(p);
+      st = lstatSync(p);
     } catch (e) {
-      return e.code === "ENOENT" ? physicalPath(p) : canonicalRoot(ledger);
+      if (e.code === "ENOENT") return physicalPath(p);
+      return isNameTooLong(e) ? null : canonicalRoot(ledger);
     }
     if (!st.isSymbolicLink()) return physicalPath(p);
-    if (hops === MAX_SYMLINK_HOPS) return canonicalRoot(ledger);
+    if (hops === MAX_SYMLINK_HOPS) return null;
     let target;
     try {
-      target = readlinkSync(p);
+      target = utf8OrNull(readlinkSync(p, { encoding: "buffer" }));
     } catch {
       return canonicalRoot(ledger);
     }
-    const q = isAbsolute(target) ? target : `${physicalPath(dirname2(p))}/${target}`;
-    p = join2(physicalPath(dirname2(q)), basename2(q));
+    if (target === null) return null;
+    let q;
+    if (isAbsolute(target)) q = target;
+    else {
+      const dir = physicalPath(dirname(p));
+      if (dir === null) return null;
+      q = `${dir}/${target}`;
+    }
+    const qDir = physicalPath(dirname(q));
+    if (qDir === null) return null;
+    p = join(qDir, basename(q));
   }
 }
 function aliasesAdoptedLedger(project) {
   const real = ledgerDestination(project.ledger);
+  if (real === null) return true;
   const ownKey = canonicalRoot(project.root);
   if (real === projectLedgerPath(ownKey)) return false;
   for (const key of Object.keys(readRegistry(project.home))) {
     if (key === GLOBAL_KEY || key === ownKey) continue;
-    if (canonicalRoot(projectLedgerPath(key)) === real) return true;
+    const other = ledgerDestination(projectLedgerPath(key));
+    if (other !== null && other === real) return true;
   }
   return false;
 }
@@ -193,16 +206,17 @@ var NULL_FIELD = Buffer.from([0, 0, 0, 0, 0]);
 
 // src/memory/scope-target.ts
 function aliasesGlobalLedger(projectLedger, globalLedger) {
-  return canonicalRoot(projectLedger) === canonicalRoot(globalLedger);
+  const project = ledgerDestination(projectLedger);
+  return project !== null && project === ledgerDestination(globalLedger);
 }
 
 // src/config.ts
-import { readFileSync as readFileSync3 } from "node:fs";
-import { join as join3 } from "node:path";
+import { readFileSync as readFileSync2 } from "node:fs";
+import { join as join2 } from "node:path";
 function readJson(path, onUnusable) {
   let text;
   try {
-    text = readFileSync3(path, "utf8");
+    text = readFileSync2(path, "utf8");
   } catch (e) {
     if (e.code !== "ENOENT") onUnusable(e.message);
     return null;
@@ -215,7 +229,7 @@ function readJson(path, onUnusable) {
   }
 }
 function metricsEnabledFromGlobalConfig(home) {
-  const raw = readJson(join3(home, "config.json"), () => {
+  const raw = readJson(join2(home, "config.json"), () => {
   });
   const m = raw?.metrics;
   return m && typeof m === "object" && typeof m.enabled === "boolean" ? m.enabled : true;
@@ -294,10 +308,10 @@ var SINK_FILE = "trigger.jsonl";
 var METRICS_FILE = "metrics.jsonl";
 var GLOBAL_LEDGER_FILE = "memory.jsonl";
 function resolveHome(env) {
-  return env.HELIX_HOME ?? join4(homedir(), ".helix");
+  return env.HELIX_HOME ?? join3(homedir(), ".helix");
 }
 function resolveGlobalLedger(env, home) {
-  return env.HELIX_LEDGER ?? join4(home, GLOBAL_LEDGER_FILE);
+  return env.HELIX_LEDGER ?? join3(home, GLOBAL_LEDGER_FILE);
 }
 function readWholeFile(path, readFile) {
   let buf;
@@ -315,7 +329,7 @@ function toParticipant(id, outcome) {
   return outcome.state === "read" ? { id, state: "read", rows: outcome.rows, bytes: outcome.bytes } : { id, state: outcome.state };
 }
 function resolveProjectDisposition(root, home, globalLedger) {
-  if (!existsSync2(join4(root, ".helix"))) return "absent";
+  if (!existsSync2(join3(root, ".helix"))) return "absent";
   const distinctFromGlobal = !aliasesGlobalLedger(projectLedgerPath(root), globalLedger);
   return distinctFromGlobal && isOwned(root, home) && !aliasesAdoptedLedger({ root, home, ledger: projectLedgerPath(root) }) ? "owned" : "unowned";
 }
@@ -360,7 +374,7 @@ function resolveMetrics(home, readFile) {
   if (!metricsEnabledFromGlobalConfig(home)) return { state: "disabled", events: null };
   let buf;
   try {
-    buf = readFile(join4(home, METRICS_FILE));
+    buf = readFile(join3(home, METRICS_FILE));
   } catch (e) {
     const code = e?.code;
     return { state: code === "ENOENT" ? "absent" : "read-error", events: null };
@@ -411,8 +425,8 @@ function validateRecordLine(line) {
   return parsed;
 }
 function appendToSink(home, line, fs = realFsOps) {
-  const path = join4(home, SINK_FILE);
-  mkdirSync2(dirname3(path), { recursive: true });
+  const path = join3(home, SINK_FILE);
+  mkdirSync2(dirname2(path), { recursive: true });
   const existedBefore = existsSync2(path);
   const fd = fs.openSync(path, "a", 384);
   try {
@@ -421,7 +435,7 @@ function appendToSink(home, line, fs = realFsOps) {
   } finally {
     fs.closeSync(fd);
   }
-  if (!existedBefore) fs.fsyncDir(dirname3(path));
+  if (!existedBefore) fs.fsyncDir(dirname2(path));
 }
 function validateAcknowledgementLine(line) {
   const fail = (field) => {
@@ -443,12 +457,12 @@ function tsOf(line) {
 }
 function acknowledgeLatest(deps = {}) {
   const env = deps.env ?? process.env;
-  const readFile = deps.readFile ?? ((p) => readFileSync4(p));
+  const readFile = deps.readFile ?? ((p) => readFileSync3(p));
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const home = resolveHome(env);
   let text;
   try {
-    text = readFile(join4(home, SINK_FILE)).toString("utf8");
+    text = readFile(join3(home, SINK_FILE)).toString("utf8");
   } catch {
     return { ok: false, reason: "no trigger sink to acknowledge" };
   }
@@ -482,7 +496,7 @@ function acknowledgeLatest(deps = {}) {
 }
 function measureAndRecord(input, deps = {}) {
   const env = deps.env ?? process.env;
-  const readFile = deps.readFile ?? ((p) => readFileSync4(p));
+  const readFile = deps.readFile ?? ((p) => readFileSync3(p));
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const fsOps = deps.fs ?? realFsOps;
   const home = resolveHome(env);

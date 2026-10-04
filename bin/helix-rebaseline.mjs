@@ -137,9 +137,9 @@ function sleepSync(ms) {
 }
 function canonical(target) {
   try {
-    return realpathSync(target);
+    return realpathSync.native(target);
   } catch {
-    return join(realpathSync(dirname(target)), basename(target));
+    return join(realpathSync.native(dirname(target)), basename(target));
   }
 }
 function timeoutMessage(lockPath, holder, waitedMs) {
@@ -188,26 +188,10 @@ function acquireFileLock(target, opts = {}) {
       }
       if (code !== "EEXIST") throw e;
     }
-    let holder;
-    lastHolder = null;
-    try {
-      const st = lstatSync(lockPath);
-      if (st.isDirectory()) {
-        holder = classifyLegacyDir(lockPath, probe);
-      } else {
-        const raw = readFileSync2(lockPath, "utf8");
-        const parsed = tryParsePayload(raw);
-        if (parsed === null) {
-          const boot = probe.bootInstantMs();
-          holder = boot !== null && st.mtimeMs < boot ? "dead" : "alive-unknown";
-        } else {
-          lastHolder = parsed;
-          holder = classifyHolder(parsed, self, probe);
-        }
-      }
-    } catch {
-      continue;
-    }
+    const reading = readLockHolder(lockPath, self, probe);
+    lastHolder = reading?.payload ?? null;
+    if (reading === null) continue;
+    const holder = reading.holder;
     if (holder === "reentrant-self")
       throw new Error(`withFileLock: re-entrant acquisition of ${lockPath} from the same thread (pid ${process.pid}) \u2014 withFileLock is not re-entrant`);
     if (holder === "dead") stealUnderGate(lockPath, probe);
@@ -230,6 +214,33 @@ function acquireFileLock(target, opts = {}) {
     }
   };
   return { ctx, release };
+}
+function legacyDirSnapshot(lockPath, ino) {
+  let owner = "";
+  try {
+    owner = readFileSync2(join(lockPath, "owner"), "utf8");
+  } catch {
+  }
+  return `d:${ino}:${owner}`;
+}
+function readLockHolder(lockPath, self, probe) {
+  try {
+    const st = lstatSync(lockPath);
+    if (st.isDirectory()) {
+      const snapshot2 = legacyDirSnapshot(lockPath, st.ino);
+      return { holder: classifyLegacyDir(lockPath, probe), payload: null, snapshot: snapshot2 };
+    }
+    const raw = readFileSync2(lockPath, "utf8");
+    const snapshot = `f:${st.ino}:${raw}`;
+    const parsed = tryParsePayload(raw);
+    if (parsed === null) {
+      const boot = probe.bootInstantMs();
+      return { holder: boot !== null && st.mtimeMs < boot ? "dead" : "alive-unknown", payload: null, snapshot };
+    }
+    return { holder: classifyHolder(parsed, self, probe), payload: parsed, snapshot };
+  } catch {
+    return null;
+  }
 }
 function withFileLock(target, fn, opts = {}) {
   const { ctx, release } = acquireFileLock(target, opts);
@@ -559,9 +570,16 @@ import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as rea
 import { join as join5, resolve, dirname as dirname5, basename as basename3, isAbsolute } from "node:path";
 function canonicalRoot(projectRoot) {
   try {
-    return canonical(projectRoot);
+    return registryKeyPath(projectRoot);
   } catch {
     return resolve(projectRoot);
+  }
+}
+function registryKeyPath(target) {
+  try {
+    return realpathSync2(target);
+  } catch {
+    return join5(realpathSync2(dirname5(target)), basename3(target));
   }
 }
 function projectLedgerPath(projectRoot) {
@@ -612,15 +630,22 @@ function readRegistry(home) {
   return r.kind === "ok" ? r.reg : {};
 }
 var MAX_SYMLINK_HOPS = 40;
+function utf8OrNull(b) {
+  const s = b.toString("utf8");
+  return Buffer.from(s, "utf8").equals(b) ? s : null;
+}
+var isNameTooLong = (e) => e?.code === "ENAMETOOLONG";
 function physicalPath(p) {
   try {
-    return realpathSync2.native(p);
-  } catch {
+    return utf8OrNull(realpathSync2.native(p, { encoding: "buffer" }));
+  } catch (e) {
+    if (isNameTooLong(e)) return null;
   }
   try {
-    return join5(realpathSync2.native(dirname5(p)), basename3(p));
-  } catch {
-    return resolve(p);
+    const parent = utf8OrNull(realpathSync2.native(dirname5(p), { encoding: "buffer" }));
+    return parent === null ? null : join5(parent, basename3(p));
+  } catch (e) {
+    return isNameTooLong(e) ? null : resolve(p);
   }
 }
 function ledgerDestination(ledger) {
@@ -630,27 +655,39 @@ function ledgerDestination(ledger) {
     try {
       st = lstatSync3(p);
     } catch (e) {
-      return e.code === "ENOENT" ? physicalPath(p) : canonicalRoot(ledger);
+      if (e.code === "ENOENT") return physicalPath(p);
+      return isNameTooLong(e) ? null : canonicalRoot(ledger);
     }
     if (!st.isSymbolicLink()) return physicalPath(p);
-    if (hops === MAX_SYMLINK_HOPS) return canonicalRoot(ledger);
+    if (hops === MAX_SYMLINK_HOPS) return null;
     let target;
     try {
-      target = readlinkSync2(p);
+      target = utf8OrNull(readlinkSync2(p, { encoding: "buffer" }));
     } catch {
       return canonicalRoot(ledger);
     }
-    const q = isAbsolute(target) ? target : `${physicalPath(dirname5(p))}/${target}`;
-    p = join5(physicalPath(dirname5(q)), basename3(q));
+    if (target === null) return null;
+    let q;
+    if (isAbsolute(target)) q = target;
+    else {
+      const dir = physicalPath(dirname5(p));
+      if (dir === null) return null;
+      q = `${dir}/${target}`;
+    }
+    const qDir = physicalPath(dirname5(q));
+    if (qDir === null) return null;
+    p = join5(qDir, basename3(q));
   }
 }
 function aliasesAdoptedLedger(project) {
   const real = ledgerDestination(project.ledger);
+  if (real === null) return true;
   const ownKey = canonicalRoot(project.root);
   if (real === projectLedgerPath(ownKey)) return false;
   for (const key of Object.keys(readRegistry(project.home))) {
     if (key === GLOBAL_KEY || key === ownKey) continue;
-    if (canonicalRoot(projectLedgerPath(key)) === real) return true;
+    const other = ledgerDestination(projectLedgerPath(key));
+    if (other !== null && other === real) return true;
   }
   return false;
 }
@@ -973,7 +1010,8 @@ function readLedgerBytes(path) {
 
 // src/memory/scope-target.ts
 function aliasesGlobalLedger(projectLedger, globalLedger) {
-  return canonicalRoot(projectLedger) === canonicalRoot(globalLedger);
+  const project = ledgerDestination(projectLedger);
+  return project !== null && project === ledgerDestination(globalLedger);
 }
 function resolveScopeTarget(home, globalLedger, scope) {
   if (scope === "global") return { ok: true, ledger: globalLedger, scopeKey: scopeKeyOf(home) };
