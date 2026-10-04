@@ -62,10 +62,25 @@ export interface LockOptions { maxWaitMs?: number; probe?: LivenessProbe; }
  *  another, and one inode could carry two lock files. Registry and witness scope KEYS do not use this
  *  function: ownership.ts canonicalRoot keeps the JS computation, so no key an older build wrote
  *  changes. On an ordinary path (no `..` after a directory link) the two computations agree, so
- *  existing lock paths do not move. */
+ *  existing lock paths do not move.
+ *
+ *  A destination whose bytes are not valid UTF-8 is never returned (second fix batch, after its final
+ *  review): Node decodes realpath's answer with replacement, so a target name holding 0xff came back
+ *  as U+FFFD, a name the kernel does not open, and nothing failed. The append then created a NEW
+ *  file under that name beside the target while every read followed the link (measured 2026-10-04 on
+ *  a global ledger: two commits answered normally and inspect showed none). The answer is read as a
+ *  Buffer and must survive a UTF-8 round trip (the test ownership.ts utf8OrNull applies); otherwise
+ *  the fallback applies, the link's own location, where every open follows the link. That is what
+ *  this function answered before D4, when the JS realpathSync threw on the decoded path. A rewrite
+ *  there still replaces the link with a regular file and leaves the earlier bytes in the old
+ *  target: the alias defect described above stays open for this one shape. */
 export function canonical(target: string): string {
-  try { return realpathSync.native(target); }
-  catch { return join(realpathSync.native(dirname(target)), basename(target)); }
+  try {
+    const real = realpathSync.native(target, { encoding: 'buffer' });
+    const text = real.toString('utf8');
+    if (Buffer.from(text, 'utf8').equals(real)) return text;
+  } catch { /* absent, or not resolvable: the physical parent plus the name, below */ }
+  return join(realpathSync.native(dirname(target)), basename(target));
 }
 
 export function lockPathOf(target: string): string { return canonical(target) + '.lock'; }
