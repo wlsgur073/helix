@@ -4,10 +4,12 @@
 // WARNING; a MAC-covered field moved under the current key is the tampered WARNING; a future macVersion
 // is the newer-version NOTE, while a deleted one is forged/legacy (R8); an aliased
 // project layer, and an unadopted cwd project whose memory file leads to an adopted project's file or
-// cannot be resolved (R9), print no scan line.
+// cannot be resolved (R9), print no scan line. Those three cases assert an ABSENCE, so each first requires
+// a line the SAME run must print (the global ledger's own warning, see plantGlobalWarning): without it they
+// also pass when the server printed nothing within serverStderr's fixed wait.
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bundleCli } from '../helpers/bundle-cli.js';
@@ -43,6 +45,22 @@ function verifiedProject() {
   const fact = store.commit({ content: 'the deploy target is the blue cluster', source: 'user' });
   store.confirm(fact.id);
   return { home, root, ledger: projectLedgerPath(root) };
+}
+
+/** Plants one baked non-Fresh assert in the home's GLOBAL ledger and returns the line the scan prints for
+ *  it. The scan reads the global scope first, whatever the cwd project is, so a run that reached its scan
+ *  has printed this line; a case that asserts a project ledger's absence requires it BEFORE its
+ *  `not.toContain`. Only those cases call this: another case's assertions on `forged/legacy` or
+ *  `WARNING` would see the line. */
+function plantGlobalWarning(home: string): string {
+  const ledger = join(home, 'memory.jsonl');
+  const ts = '2026-10-01T00:00:00.000Z';
+  appendFileSync(ledger, JSON.stringify({
+    id: 'g_baked', tx: ts, validFrom: ts, validTo: null, type: 'assert', state: 'Verified',
+    content: 'a baked global fact', provenance: { source: 'user', sessionId: 's' },
+    supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+  }) + '\n', { mode: 0o600 });
+  return `helix: WARNING - 1 forged/legacy elevated record(s) in ${ledger}; trust states there are not tool-minted`;
 }
 
 describe('the startup scan names each class of verify offender (IT-M15)', () => {
@@ -96,7 +114,9 @@ describe('the startup scan names each class of verify offender (IT-M15)', () => 
     const u = mkdtempSync(join(tmpdir(), 'helix-m15e-proj-'));
     mkdirSync(join(u, '.helix'));
     symlinkSync(bLedger, projectLedgerPath(u));                         // U (never adopted) reads B's file
+    const anchor = plantGlobalWarning(home);
     const err = await serverStderr(home, u);
+    expect(err, 'the run reached its scan: the global ledger line is there').toContain(anchor);
     expect(err).not.toContain(projectLedgerPath(u));
   }, 60_000);
 
@@ -109,7 +129,9 @@ describe('the startup scan names each class of verify offender (IT-M15)', () => 
     // (A dangling <0xff> link reads as an empty ledger and would pass on the old rule too: measured.)
     writeFileSync(Buffer.concat([Buffer.from(`${join(u, '.helix')}/`), Buffer.from([0xff])]), readFileSync(bLedger));
     symlinkSync(Buffer.from([0xff]), projectLedgerPath(u));
+    const anchor = plantGlobalWarning(home);
     const err = await serverStderr(home, u);
+    expect(err, 'the run reached its scan: the global ledger line is there').toContain(anchor);
     expect(err).not.toContain(projectLedgerPath(u));
   }, 60_000);
 
@@ -127,7 +149,9 @@ describe('the startup scan names each class of verify offender (IT-M15)', () => 
     const a = mkdtempSync(join(tmpdir(), 'helix-m15e-proj-'));
     stampOwnership(a, home, {});
     symlinkSync(bLedger, projectLedgerPath(a));                         // A's ledger is B's file
+    const anchor = plantGlobalWarning(home);
     const err = await serverStderr(home, a);
+    expect(err, 'the run reached its scan: the global ledger line is there').toContain(anchor);
     expect(err).not.toContain(projectLedgerPath(a));
   }, 60_000);
 });

@@ -14,6 +14,7 @@ import { resolveProjectLayer } from '../../src/memory/project-root.js';
 import { canonical, lockPathOf, withFileLock } from '../../src/memory/lock.js';
 import { appendRecord, parseLedger } from '../../src/memory/ledger.js';
 import { scopeKeyOf } from '../../src/memory/witness-store.js';
+import { ALIASED_LEDGER_NOTE } from '../../src/memory/content-frame.js';
 import type { MemoryRecord } from '../../src/types.js';
 
 const home = (): string => mkdtempSync(join(tmpdir(), 'helix-d4-home-'));
@@ -365,5 +366,11 @@ describe('the alias refusals name every cause (R7, P1)', () => {
     const h = home(); const a = project(h); const b = project(h);
     symlinkSync(projectLedgerPath(b), projectLedgerPath(a));
     expect(refusalOf(() => storeFor(h, a).erase('m_any', { scope: 'project' }))).toBe(ERASE_ALIAS_REFUSAL);
+  });
+
+  // The note recall, inspect and the SessionStart block print for an aliased project layer. Every test
+  // that reads it compares it with the constant itself, so a reworded or shortened note passes them all.
+  it('the read-side note names both causes, as constant text', () => {
+    expect(ALIASED_LEDGER_NOTE).toBe("(this project's memory file resolves to another adopted project's memory file, or through a path Helix cannot resolve, and is excluded from results)");
   });
 });

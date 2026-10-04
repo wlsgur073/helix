@@ -262,6 +262,16 @@ describe('classifyLegacyOffenders pairs each offender id with its own row', () =
     expect(c.forged).toEqual([]);
   });
 
+  it('a baked non-Fresh assert and a baked non-Fresh supersede ahead of an other-key verify keep the verify out of forged/legacy', () => {
+    const { subkey, records, verify, factId } = signedLedger();
+    const base = records.find((r) => r.id === factId)!;
+    const bakedAssert: MemoryRecord = { ...base, id: 'a_baked', state: 'Verified' };
+    const bakedSupersede = { ...base, id: 's_baked', type: 'supersede', state: 'Verified' } as MemoryRecord;
+    const c = classify([...records, bakedAssert, bakedSupersede, otherKeyRow(verify, 'v_x')], subkey);
+    expect(c.forged).toEqual(['a_baked', 's_baked']);
+    expect(c.otherKey).toEqual(['v_x']);
+  });
+
   it('an offender the walk cannot match falls back to forged/legacy; none is lost and none is counted twice', () => {
     const { subkey, records, verify } = signedLedger();
     const ledger = [...records, otherKeyRow(verify, 'v_other')];

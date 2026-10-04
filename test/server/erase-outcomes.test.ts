@@ -58,7 +58,27 @@ describe('erase outcomes through the tool (IT-M16, R1, R4)', () => {
     const f = store();
     const a = f.store.commit({ content: 'alpha deploy fact', source: 'user' });
     expect(text(handleErase(f.store, { id: a.id }, { auditPath: f.audit }))).toBe(`erased ${JSON.stringify({ id: a.id })}`);
-    expect(auditRows(f.audit).at(-1)).toEqual(expect.not.objectContaining({ outcome: expect.anything() }));
+    const audit = auditRows(f.audit);
+    expect(audit).toHaveLength(1);
+    expect(audit.at(-1)).toMatchObject({ kind: 'erase', id: a.id, soft: true });
+    expect(audit.at(-1)).not.toHaveProperty('outcome');
+  });
+
+  it('a live record created by a supersede is erased like any other, and unchanged writes the plain audit row', () => {
+    const f = store();
+    const a = f.store.commit({ content: 'alpha deploy fact', source: 'user' });
+    const b = f.store.commit({ content: 'alpha deploy fact, revised', source: 'user', supersedes: a.id });
+    const rowsBefore = parseLedger(f.ledger).length;
+    expect(text(handleErase(f.store, { id: b.id }, { auditPath: f.audit }))).toBe(`erased ${JSON.stringify({ id: b.id })}`);
+    const rows = parseLedger(f.ledger);
+    expect(rows).toHaveLength(rowsBefore + 1);
+    expect(rows.at(-1)).toMatchObject({ type: 'erase', supersedes: b.id });
+    const auditBefore = auditRows(f.audit).length;
+    expect(text(handleErase(f.store, { id: b.id }, { auditPath: f.audit }))).toBe(`unchanged ${JSON.stringify({ id: b.id })}`);
+    const audit = auditRows(f.audit);
+    expect(audit).toHaveLength(auditBefore + 1);
+    expect(audit.at(-1)).toMatchObject({ kind: 'erase', id: b.id, soft: true });
+    expect(audit.at(-1)).not.toHaveProperty('outcome');
   });
 
   it('an id nothing ever held: the error, a rejected audit row, nothing written', () => {
