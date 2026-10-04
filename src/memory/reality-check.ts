@@ -1,5 +1,6 @@
 import { existsSync, openSync, fstatSync, readSync, closeSync, constants } from 'node:fs';
 import type { VerifyOutcome } from './firewall.js';
+import type { Classification } from '../types.js';
 
 export type RealityCheck =
   | { kind: 'file-exists'; path: string }
@@ -76,15 +77,27 @@ export function runRealityCheck(check: RealityCheck): VerifyOutcome {
 }
 
 const MIN_PATTERN_CHARS = 3;
+
+/** IT-M3: appended to a path or pattern binding refusal when the record was redacted at commit (its
+ *  classification is 'secret-redacted'). Constant: no kind, path or pattern is interpolated. */
+export const REDACTED_BINDING_NOTE =
+  "this memory's content was redacted at commit ([redacted:<kind>] markers), so a path or pattern inside a redacted span can never bind";
+
 /**
  * Does this check actually exercise what the item claims? (spec §4) Promotion requires BOTH the
  * `path` AND the `pattern` to be RAW substrings of the item content (byte-for-byte, matching
  * runRealityCheck's raw includes), and a non-trivial pattern. Only `file-contains` may promote.
+ * IT-M3: a path or pattern refusal on a redacted record says so; the rule itself is unchanged.
+ * Ruling R10: "redacted" is the record's `classification` ('secret-redacted', set by the commit only
+ * when a span was actually replaced), never the text `[redacted:` in the content — a user can type
+ * that text into a fact nothing redacted, and the sentence then named a cause that did not happen.
+ * Omitted, the classification reads as not redacted.
  */
-export function checkBinding(content: string, check: RealityCheck): { bound: boolean; reason?: string } {
+export function checkBinding(content: string, check: RealityCheck, classification?: Classification): { bound: boolean; reason?: string } {
   if (check.kind !== 'file-contains') return { bound: false, reason: 'only file-contains may promote (file-exists is non-promoting)' };
   if (check.pattern.replace(/\s/g, '').length < MIN_PATTERN_CHARS) return { bound: false, reason: 'pattern too trivial (need >=3 non-whitespace chars)' };
-  if (!content.includes(check.path)) return { bound: false, reason: 'check.path is not present in the item content' };
-  if (!content.includes(check.pattern)) return { bound: false, reason: 'check.pattern is not present in the item content' };
+  const redactedTail = classification === 'secret-redacted' ? `; ${REDACTED_BINDING_NOTE}` : '';
+  if (!content.includes(check.path)) return { bound: false, reason: `check.path is not present in the item content${redactedTail}` };
+  if (!content.includes(check.pattern)) return { bound: false, reason: `check.pattern is not present in the item content${redactedTail}` };
   return { bound: true };
 }

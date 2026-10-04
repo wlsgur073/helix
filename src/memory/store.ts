@@ -153,6 +153,15 @@ const ALIASED_PROJECT_WRITE_REFUSAL =
   "is refused rather than written into the other project's memory. Pass scope 'global', or replace the " +
   "link with the project's own file.";
 
+/** What `commitScoped` reports: the record, the scope it was written to, and (IT-M3) `redactions`,
+ *  which counts, per marker kind, the spans the secret scan actually replaced (the write-policy
+ *  selection, one `[redacted:<kind>]` marker each); absent when nothing was replaced. */
+export interface CommitResult {
+  record: MemoryRecord;
+  scope: MemoryScope;
+  redactions?: Record<string, number>;
+}
+
 /** A refusal thrown by `resolveEraseTarget` / `erase` BEFORE any byte moves — the pre-write half of
  *  handlers.ts's three-way erase audit. Read by property (`isEraseRefusedError`), never instanceof,
  *  for the reason witness-store.ts's `isWitnessAdvanceError` sets out. */
@@ -273,7 +282,7 @@ export class MemoryStore {
   /** `commit`, plus the scope the record was actually written to — what `helix_memory_commit` reports.
    *  Issue #1: a result that did not name its scope let a project fact land in the global ledger with
    *  nothing to show for it. */
-  commitScoped(input: CommitInput): { record: MemoryRecord; scope: MemoryScope } {
+  commitScoped(input: CommitInput): CommitResult {
     // H3 (2026-08-18 review): the FIRST statement of validation, before the secret scan and before
     // any append -- an oversized commit must cost O(1), not pay for a scan of content that is about
     // to be rejected anyway. Schema-enforced too (helix-server.ts), so an MCP caller never reaches
@@ -388,6 +397,7 @@ export class MemoryStore {
     // counter). `secret-redacted` is set only when a span was actually replaced.
     const spans = findSecrets(input.content);
     const redactable = (this.opts.releaseWordChains ?? true) ? selectWriteRedactions(input.content, spans) : spans;
+    let redactions: Record<string, number> | undefined;
     if (redactable.length > 0) {
       // Span-level redaction: replace ONLY the secret tokens with a content-free marker, preserving
       // the surrounding text. A high-entropy false positive (e.g. a git SHA) no longer empties the
@@ -395,6 +405,10 @@ export class MemoryStore {
       const red = redactSecrets(input.content, redactable);
       content = red.content;
       classification = red.classification;
+      // IT-M3: count what was ACTUALLY replaced — `redactable` is exactly the span set redactSecrets
+      // replaced, one marker per span — never the unselected `spans`, which include released chains.
+      redactions = {};
+      for (const s of redactable) redactions[s.kind] = (redactions[s.kind] ?? 0) + 1;
     }
     const record: MemoryRecord = {
       id: this.id(), tx: ts, validFrom: input.validFrom ?? ts, validTo: input.validTo ?? null,
@@ -406,7 +420,9 @@ export class MemoryStore {
     };
     const ledger = this.targetLedger(input.scope);
     appendWitnessed(ledger, record, this.homeDir(), this.scopeRootOf(ledger), 'commit');
-    return { record, scope: ledger === this.global ? 'global' : 'project' };
+    const out: CommitResult = { record, scope: ledger === this.global ? 'global' : 'project' };
+    if (redactions) out.redactions = redactions;
+    return out;
   }
 
   /** ALIAS-P2P (item 7, fix round 1): the single condition + message for refusing a project-routed
@@ -889,7 +905,7 @@ export class MemoryStore {
   /** Content-bound mechanical reality-check. Mints at most Corroborated; never Verified. */
   recheck(id: string, check: RealityCheck): RecheckResult {
     const target = this.liveTarget(id);
-    const binding = checkBinding(target.content, check);
+    const binding = checkBinding(target.content, check, target.classification);   // R10: the record's classification decides the redaction sentence
     if (!binding.bound) throw new Error(`recheck: ${binding.reason}`);
     const outcome = runRealityCheck(check);
     const result = resolveTransition({

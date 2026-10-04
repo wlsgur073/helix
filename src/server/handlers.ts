@@ -124,9 +124,20 @@ function capRendered(total: number, render: (n: number) => string, budget: numbe
   return { text: omitted > 0 ? render(kept) + noteFor(omitted) : render(kept), omitted };
 }
 
+/** IT-M3: the commit result's `notice` when the secret scan replaced part of the fact. Constant: the
+ *  kinds and counts travel in the `redactions` field beside it, never interpolated here. */
+export const REDACTION_NOTICE =
+  'part of this fact was replaced with [redacted:<kind>] markers before storage; a recheck cannot bind a path or pattern that fell inside a redacted span';
+
+/** Success stays ONE JSON object after the verb (`<verb> {json}`, CHANGELOG contract; decision E1):
+ *  the disclosure is fields INSIDE it, never text after it. `redactions` and `notice` follow
+ *  `classification` and appear only when a span was replaced, so an ordinary commit's key list is
+ *  unchanged. */
 export function handleCommit(store: MemoryStore, args: CommitInput): ToolResult {
-  const { record: rec, scope } = store.commitScoped(args);
-  return ok(`committed ${JSON.stringify({ id: rec.id, scope, state: rec.state, classification: rec.classification })}`);
+  const { record: rec, scope, redactions } = store.commitScoped(args);
+  const result: Record<string, unknown> = { id: rec.id, scope, state: rec.state, classification: rec.classification };
+  if (redactions) { result.redactions = redactions; result.notice = REDACTION_NOTICE; }
+  return ok(`committed ${JSON.stringify(result)}`);
 }
 
 export function handleRecall(store: MemoryStore, args: { query: string; maxItems?: number; maxChars?: number }): ToolResult {

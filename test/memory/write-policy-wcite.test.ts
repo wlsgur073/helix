@@ -116,3 +116,36 @@ describe('W-CITE: the redaction marker is not indexable', () => {
     expect(hits).toHaveLength(1);
   });
 });
+
+// IT-M3 (second fix batch §4.6 item 1), Review Focus: `redactions` counts what the commit actually
+// REPLACED, per kind — the write-policy selection — never every span the scan found. A released word
+// chain is a span the scan finds and the default policy keeps verbatim, so beside a redacted hex token
+// only the hex token is counted; with persistence.releaseWordChains false both spans are replaced and
+// both are counted (measured on the prototype: {"high-entropy":1}, then {"high-entropy":2}).
+describe('IT-M3: commitScoped counts what the commit actually replaced, per kind', () => {
+  const content = `deployed ${HEX_SHA} per ${SPEC_PATH}`;
+
+  it('the default policy counts the hex token and not the released word chain', () => {
+    const out = storeAt().commitScoped({ content, source: 'user' });
+    expect(out.record.content).toContain(SPEC_PATH);
+    expect(out.redactions).toEqual({ 'high-entropy': 1 });
+  });
+
+  it('releaseWordChains false replaces both spans and counts both', () => {
+    const out = storeAt({ releaseWordChains: false }).commitScoped({ content, source: 'user' });
+    expect(out.record.content).toBe('deployed [redacted:high-entropy] per [redacted:high-entropy]');
+    expect(out.redactions).toEqual({ 'high-entropy': 2 });
+  });
+
+  it('two kinds are counted apart, and a commit that replaced nothing has no redactions field', () => {
+    const two = storeAt().commitScoped({ content: `aws key AKIAIOSFODNN7EXAMPLE and tag ${HEX_SHA}`, source: 'user' });
+    expect(two.redactions).toEqual({ 'aws-access-key': 1, 'high-entropy': 1 });
+    expect(storeAt().commitScoped({ content: `the spec at ${SPEC_PATH} is ratified`, source: 'user' })).not.toHaveProperty('redactions');
+  });
+
+  it('a marker the fact already carried is not counted: only the span this commit replaced', () => {
+    const out = storeAt().commitScoped({ content: `the log line reads [redacted:token] and the build is ${HEX_SHA}`, source: 'user' });
+    expect(out.record.content).toBe('the log line reads [redacted:token] and the build is [redacted:high-entropy]');
+    expect(out.redactions).toEqual({ 'high-entropy': 1 });
+  });
+});

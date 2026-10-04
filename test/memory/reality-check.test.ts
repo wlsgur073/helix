@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runRealityCheck, checkBinding } from '../../src/memory/reality-check.js';
+import { runRealityCheck, checkBinding, REDACTED_BINDING_NOTE } from '../../src/memory/reality-check.js';
 
 function tmpFile(content: string): string {
   const p = join(mkdtempSync(join(tmpdir(), 'helix-rc-')), 'f.txt');
@@ -58,6 +58,37 @@ describe('checkBinding (content-bound promotion gate)', () => {
   });
   it('rejects a non-file-contains check (file-exists is non-promoting)', () => {
     expect(checkBinding(content, { kind: 'file-exists', path: 'app.json' }).bound).toBe(false);
+  });
+});
+
+// IT-M3 with ruling R10 (second fix batch §4.6 item 3): the refusal's extra sentence follows the
+// RECORD's classification ('secret-redacted' = the commit really replaced a span), not the text
+// `[redacted:` in the content, which a user can type into a fact that nothing redacted.
+describe('checkBinding: the redaction sentence follows the classification (R10)', () => {
+  const unbound = { kind: 'file-contains' as const, path: 'other.conf', pattern: 'max_connections = 200' };
+  const tail = `; ${REDACTED_BINDING_NOTE}`;
+  it('a literal [redacted:…] typed into a normal record gets no redaction sentence', () => {
+    const typed = 'the log line reads [redacted:token] next to app.conf and max_connections = 200';
+    expect(checkBinding(typed, unbound, 'normal').reason).toBe('check.path is not present in the item content');
+    expect(checkBinding(typed, unbound).reason).toBe('check.path is not present in the item content');
+  });
+  it('a secret-redacted record gets it on the path and on the pattern refusal', () => {
+    const red = 'the staging config lives at [redacted:high-entropy] and sets max_connections = 200';
+    expect(checkBinding(red, unbound, 'secret-redacted').reason).toBe(`check.path is not present in the item content${tail}`);
+    expect(checkBinding(red, { kind: 'file-contains', path: 'staging', pattern: 'pool_size = 9' }, 'secret-redacted').reason)
+      .toBe(`check.pattern is not present in the item content${tail}`);
+  });
+  it('the classification alone decides: secret-redacted content without a marker still gets it; the trivial-pattern refusal never does', () => {
+    expect(checkBinding('the staging config sets max_connections = 200', unbound, 'secret-redacted').reason)
+      .toBe(`check.path is not present in the item content${tail}`);
+    expect(checkBinding('x [redacted:high-entropy] y', { kind: 'file-contains', path: 'y', pattern: 'x' }, 'secret-redacted').reason)
+      .toBe('pattern too trivial (need >=3 non-whitespace chars)');
+  });
+  it('only secret-redacted gets it: a personal record does not, and the kind refusal never does', () => {
+    const red = 'the staging config lives at [redacted:high-entropy] and sets max_connections = 200';
+    expect(checkBinding(red, unbound, 'personal').reason).toBe('check.path is not present in the item content');
+    expect(checkBinding(red, { kind: 'file-exists', path: 'staging' }, 'secret-redacted').reason)
+      .toBe('only file-contains may promote (file-exists is non-promoting)');
   });
 });
 

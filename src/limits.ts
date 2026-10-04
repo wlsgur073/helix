@@ -25,7 +25,7 @@
 // allocation, they do not duplicate the scan). Compare mode never hands classifyEgress `helixAnswer`
 // at all, so in that mode `question` alone reaches the scan limit, with no joint bound to speak of.
 // Recheck's `path`/`pattern` are bounded TRANSITIVELY: `store.recheck` (`MemoryStore.recheck`) runs
-// `checkBinding(target.content, check)` before any file read, and `checkBinding`
+// `checkBinding(target.content, check, target.classification)` before any file read, and `checkBinding`
 // (`src/memory/reality-check.ts`) refuses unless both strings are raw substrings of the item's own
 // `content` — so path and pattern can never exceed the 16,384-char commit cap that already bounds
 // `content`, even though nothing checks them against

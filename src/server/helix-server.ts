@@ -73,7 +73,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   server.registerTool('helix_memory_commit', {
     title: 'Commit memory',
-    description: 'Store a fact in Helix memory (secret-scanned; provenance recorded). Pass supersedes=<id> to update (replace) an existing item instead of adding a duplicate.',
+    description: 'Store a fact in Helix memory (secret-scanned; provenance recorded). Pass supersedes=<id> to update (replace) an existing item instead of adding a duplicate. When the secret scan replaced part of the fact, the result adds `redactions` (replaced spans per marker kind) and a `notice`: a recheck cannot bind a path or pattern that fell inside a redacted span.',
     inputSchema: {
       // H3: the character bound is declared here as well as enforced in the store, so an oversized
       // commit is refused by schema validation before the handler (and its secret scan) ever runs —
