@@ -72,6 +72,13 @@ acknowledgement within a few days.
   absolute one: a long pure-alphabetic token (no digit) never matched the entropy detector and is
   persisted verbatim with no exemption involved; the carve-out makes that boundary explicit
   instead of syntactically arbitrary.
+  A commit whose scan replaced a span says so in its result — `redactions`, the replaced spans per
+  marker kind, and a constant `notice` — and a reality-check binds only a `path` and a `pattern`
+  that appear in the stored content, so one that fell inside a redacted span binds only if the
+  stored text, markers included, still contains it; the refusal for a missing path or pattern says
+  the content was redacted when the record's classification is `secret-redacted`, which the commit
+  tool sets only when it replaced a span itself (a later record that only carries an older marker
+  forward keeps the classification its own commit gave it, `normal` or `personal`).
   The dual-verify egress guard hard-blocks **named provider credential tokens**
   (override-proof — a config policy of `allow` cannot release them); generic
   heuristic-detected (`password=`-style) and high-entropy secrets are blocked by
@@ -228,19 +235,22 @@ marker from that rewrite (`erasedIds` in `planCompaction`/`compactLedger`); a la
 it again only on a new trigger — another dropped forged `verify`, another planted marker-shaped row,
 or, for `horizon_marker`, more dropped closed history. This is **deliberately unreachable from the
 MCP tool surface**: `helix_memory_erase`'s schema is `{id}` only — it is always soft (a tombstone
-for a live record, and nothing at all, still reported as `erased`, for an id that names no live
-record, a marker included; when the global ledger and an adopted project whose ledger does not
-resolve to another adopted project's file both hold rows the id names and either both or neither hold
-a record row with that id, as with any `witness_fence_` id once each ledger has been rewritten, it
-writes nothing to either ledger and returns an `id present in more than one scope` error instead),
-and it can never pass `permanent: true`. So a
+for a live record, answered `erased`; nothing written and `unchanged` for a record already erased
+or superseded, or for a marker row carrying that exact id; nothing written and an error for an id
+that no memory record and no marker row carries, which includes a name that only matches a marker
+family and the id of a `verify` row or of a tombstone; when the global ledger and an adopted project
+whose ledger leads neither to another adopted project's file nor through a path Helix cannot
+resolve both hold a memory record or a marker row carrying the exact id, and either both or neither
+hold a record row with it, it writes nothing to either ledger and returns an
+`id present in more than one scope` error instead), and it can never pass `permanent: true`. So a
 prompt-injected agent cannot reach this path and cannot destroy a genuine forgery-audit signal; only
 an operator running code outside the agent's conversation (a script or REPL against `MemoryStore`)
 can.
 
 **Marker-erase routing; general non-live-id fallback (narrower residual).** A permanent erase
 of an adopted *project* ledger's planted marker does not risk landing on the global ledger unless
-that ledger resolves to another adopted project's file — such a project, like one that is not
+that ledger resolves to another adopted project's file or through a path Helix cannot resolve — such
+a project, like one that is not
 adopted, is never a candidate, so there `scope: 'project'` is refused and a no-scope erase acts on
 the global ledger whenever it holds a marker of that family: `erase()` resolves
 its target through `resolveEraseTarget`, which decides what an id names from the parsed rows rather
@@ -469,6 +479,25 @@ node bin/helix-trust-resolve.mjs --scope <absoluteProjectRoot> --fresh    # rota
   proves a single lineage (a verification whose fact was erased or superseded is dropped with its
   fact, key or no key), and after a rotation it cannot, so rotation is non-destructive on both the read and compaction
   paths.
+- The server's startup integrity scan names those rows rather than calling them forged. With the
+  scope's key resolved, it sorts each `verify` row whose MAC fails by the fields the check reads and
+  prints one line per class. The fields are read in this order and the first that applies decides: a
+  row with no MAC or no key id is forged/legacy whatever else it carries; a MAC version above the
+  current one is the newer-version NOTE whatever its key id; a version no Helix writes is
+  forged/legacy; then another key id; and last the current key id, where a failing MAC is the
+  tampered WARNING. Another key id, which is what `--fresh` and a re-minted key leave behind:
+  `helix: NOTE - <N> verify record(s) in <ledger> were signed under a different key (a nonce rotated by --fresh, a key lost and re-minted, or a forgery); their grades are not applied`.
+  The current key id with a failing MAC:
+  `helix: WARNING - <N> verify record(s) in <ledger> carry this scope's current key id but fail its MAC; they were altered after signing and their grades are not applied`.
+  A MAC version above the current one (the rows compaction keeps for a newer Helix), or a valid MAC
+  over a state this build does not know:
+  `helix: NOTE - <N> verify record(s) in <ledger> use a MAC format or state this Helix does not accept, likely written by a newer version or forged; their grades are not applied`.
+  A row with no MAC or key id, or with a version no Helix writes, keeps the `forged/legacy elevated
+  record(s)` WARNING, as a baked non-`Fresh` fact row does. A NOTE is not an all-clear: a forged row
+  can carry any key id or version, and no class's grade is applied. The scan also skips an aliased
+  project layer, and a working-directory project nobody adopted whose memory file leads to another
+  registered project's ledger or cannot be resolved; an unadopted working-directory project whose
+  memory file is a file of its own is still scanned.
 - It is **not** an MCP tool. No MCP tool parameter reaches it, and nothing invokes it
   automatically. Like the re-baseline ceremony, its terminal gate proves interface shape, not human
   presence: an agent that can drive a shell can run it under a pty and type the confirmation.
@@ -527,10 +556,11 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   closes wherever a start time becomes readable.
 - **What erase guarantees:** durable namespace removal by helix's own write paths (compaction
   fsyncs its temp AND the directory; a lock-losing compactor is fenced by orphan-temp sweeps so a
-  stale snapshot cannot resurrect erased plaintext), except through a ledger link that applies `..`
-  after a symlinked directory: the lock and the rewrite resolve that `..` as text, so a compaction
-  can replace the link itself and leave the file behind it holding its pre-rewrite plaintext, and a
-  writer that reaches the file by another path takes a different lock. It is NOT media
+  stale snapshot cannot resurrect erased plaintext). The lock, the append and the rewrite resolve a
+  ledger link whose target exists the way the kernel does, so a link that applies `..` after a
+  symlinked directory is locked and rewritten at the file it reaches. A link whose target does not
+  exist yet is locked at the link's own location for the one write that creates the target, so that
+  write does not exclude a writer that arrives once the file exists. It is NOT media
   sanitization: freed blocks,
   SSD remapping, filesystem snapshots, external backups/copies (`cp`, `ln`), and already-open file
   descriptors are all outside any userspace design's reach. Those write paths are the ledger's, and
@@ -544,15 +574,30 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   excluded instead: that project runs without its project layer, its reads leave the layer out with a note,
   its commits to that layer are refused, and an erase never reaches the other project's file (an id
   that lives only there is unknown to that project), so one file is never written under two project
-  scopes. A project not yet adopted is not checked before its first commit adopts it, so when its
-  ledger is a dangling link to another adopted project's ledger, that commit creates the other
-  project's file holding it; the project is excluded from then on. This check does not yet catch links it cannot resolve the way the kernel does: a `..`
-  after a symlinked directory inside the other project's own ledger link, a link that climbs out
-  through a directory tree deeper than the path limit, or a link or directory name that is not
-  valid UTF-8; the separate check against the global ledger does not resolve them the kernel's way
-  either: it misses a `..` after a symlinked directory in either ledger's link, and a link into a
-  global ledger that does not exist yet, which the project's first commit then creates. Each shape
-  needs links or directories planted inside a project's own tree.
+  scopes. Both sides of that comparison, and of the separate check against the global ledger, are
+  where an append through each ledger lands, resolved the way the kernel resolves it: a `..` after a
+  symlinked directory is applied to that directory's target, and a link into a file that does not
+  exist yet counts as that file, so two adopted projects linked to one file that does not exist yet
+  are both excluded before either writes it. A ledger Helix cannot resolve that way — a link or
+  directory name that is not valid UTF-8, a link that climbs out through a directory tree
+  deeper than
+  the path limit, or a chain of more than 40 links — is excluded exactly like an alias rather than
+  read at a guessed location (fail-closed). Both checks also run before a first commit adopts a
+  project, so a project whose memory file leads to another adopted project's ledger, or to
+  the global
+  ledger through a link that appeared after the server started, is refused before it is adopted, and
+  nothing is written through the link. A `.helix` whose memory file is a link to the global ledger
+  when the server starts, dangling or not, is the global store rather than a project: the
+  session has
+  no project layer, so a commit that omits `scope` or names `global` goes to the global ledger and
+  one that names `project` is refused. An adopted project is not compared with
+  the global ledger while the server runs: when a link to the global ledger appears in a project
+  that is already adopted, or that `helix_memory_adopt` then adopts, that project's commits are
+  written into the global ledger under the `project` scope and every record of the global ledger is
+  read twice, once under each scope, until the next server start gives the session no project
+  layer. Until then an erase, recheck, confirm or supersede of any record is refused, because every
+  id is present in both scopes. That shape needs a link planted inside the project's own tree while
+  the server runs.
 - **Appends are durable:** every append fsyncs the line before success is reported; a torn tail
   (power cut mid-append) is isolated by the next writer's tail repair and counted by parse health,
   and a complete-but-unacknowledged record commits (at-least-once). The **directory** fsync that

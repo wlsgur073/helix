@@ -22,7 +22,7 @@
  {
   "rowId": "r003",
   "surfaceItem": "tool:helix_memory_adopt",
-  "claimId": "CHANGELOG.md#c24fccc18622",
+  "claimId": "CHANGELOG.md#5de0cee2dd94",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Driven end to end through the INSTALLED bundle with a sequential MCP client, 2026-09-24: helix_memory_adopt {projectRoot} returned adopted; .helix/.owner was written and projects.json under the temporary HELIX_HOME named the path; a scope: project commit then returned Fresh.",
@@ -32,7 +32,7 @@
  {
   "rowId": "r004",
   "surfaceItem": "tool:helix_memory_commit",
-  "claimId": "README.md#ee079b09ef1b",
+  "claimId": "README.md#9e25c452fe94",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Through the INSTALLED bundle 2026-09-24 under temporary HELIX_HOMEs: global and project commits returned committed {id, state Fresh, classification normal}; every Block C and D journey was seeded this way.",
@@ -42,7 +42,7 @@
  {
   "rowId": "r005",
   "surfaceItem": "tool:helix_memory_confirm",
-  "claimId": "CHANGELOG.md#c24fccc18622",
+  "claimId": "CHANGELOG.md#5de0cee2dd94",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "C3 2026-09-24 through the installed bundle: confirm on a source=user item returned confirmed {state Verified} and inspect rendered DATA[Verified:global]; after only ledger-mac-master.key was deleted the row rendered DATA[Fresh:global] with content and contentDigest unchanged.",
@@ -52,7 +52,7 @@
  {
   "rowId": "r006",
   "surfaceItem": "tool:helix_memory_erase",
-  "claimId": "README.md#ee079b09ef1b",
+  "claimId": "README.md#9e25c452fe94",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "C4 2026-09-24 through the installed bundle: erase returned erased {id}; recall no longer served the row; history rendered DATA[erase:global:tx..txTo] with content blanked; asOf inside that interval returned the content in full, and asOf after txTo returned an empty memory.",
@@ -62,7 +62,7 @@
  {
   "rowId": "r007",
   "surfaceItem": "tool:helix_memory_inspect",
-  "claimId": "CHANGELOG.md#c24fccc18622",
+  "claimId": "CHANGELOG.md#5de0cee2dd94",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Through the installed bundle 2026-09-24: inspect {} rendered DATA[Fresh:global]| and DATA[Fresh:project]| rows side by side; history rendered an erase interval; asOf reconstructed erased content; inspect carried the rollback-witness mismatch note (C2, D1) and the not-yet-witnessed note (C3).",
@@ -82,7 +82,7 @@
  {
   "rowId": "r009",
   "surfaceItem": "tool:helix_memory_recheck",
-  "claimId": "CHANGELOG.md#c24fccc18622",
+  "claimId": "CHANGELOG.md#5de0cee2dd94",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Driven end to end through the INSTALLED bundle 2026-09-24: a file-contains check whose file agreed returned recheck {state Corroborated}; after the file was changed to contradict, the same check returned {state Suspect} and recall flagged the row for re-verification.",
@@ -282,7 +282,7 @@
  {
   "rowId": "r029",
   "surfaceItem": "config:metrics.enabled",
-  "claimId": "CHANGELOG.md#4ee246da086d",
+  "claimId": "CHANGELOG.md#35f114dfd866",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -292,7 +292,7 @@
  {
   "rowId": "r030",
   "surfaceItem": "env:HELIX_HOME",
-  "claimId": "CHANGELOG.md#4ee246da086d",
+  "claimId": "CHANGELOG.md#35f114dfd866",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Every Block C/D journey and all three C5 drill variants (R, U, D) ran 2026-09-24 under their own temporary HELIX_HOME with every HELIX_* stripped from the inherited environment, and the store landed there. Measured afterwards rather than asserted: at 2026-09-24 21:35 the real ~/.helix still showed memory.jsonl last modified 2026-09-11, audit.jsonl 2026-09-24 10:39 and witness.json 2026-09-24 10:44 — all BEFORE the journeys and drill ran at 20:20 — so the run wrote nothing there.",
@@ -302,7 +302,7 @@
  {
   "rowId": "r031",
   "surfaceItem": "env:HELIX_LEDGER",
-  "claimId": "CHANGELOG.md#4ee246da086d",
+  "claimId": "CHANGELOG.md#35f114dfd866",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -342,7 +342,7 @@
  {
   "rowId": "r035",
   "surfaceItem": "hook:SessionEnd",
-  "claimId": "CHANGELOG.md#4ee246da086d",
+  "claimId": "CHANGELOG.md#35f114dfd866",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Installed bin/hooks/session-end.mjs driven with a real stdin payload 2026-09-24: exit 0, appended a session-end row to sessions.jsonl at mode 600 under a temporary HELIX_HOME. A1 hooks.e2e re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files).",
@@ -352,7 +352,7 @@
  {
   "rowId": "r036",
   "surfaceItem": "hook:SessionStart",
-  "claimId": "CHANGELOG.md#4ee246da086d",
+  "claimId": "CHANGELOG.md#35f114dfd866",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "Installed bin/hooks/session-start.mjs driven from a project cwd 2026-09-24: exit 0, emitted ===HELIX <nonce> HELIX MEMORY (cross-session) — DATA … carrying DATA[Fresh:project], DATA[Fresh:global] and a flagged DATA[Suspect:project] row plus the verify-before-acting line.",
@@ -362,7 +362,7 @@
  {
   "rowId": "r037",
   "surfaceItem": "cli:bin/helix-rebaseline.mjs",
-  "claimId": "CHANGELOG.md#c24fccc18622",
+  "claimId": "CHANGELOG.md#5de0cee2dd94",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D1 2026-09-24 through the installed bundle: helix-rebaseline refused without a terminal (exit 2); under a pty a typed 'yes' was refused as a negative control (exit 1) with nothing written; the ceremony's own keyword path re-baselined and the next read rendered the row with no mismatch note. In the C5 drill the same installed ceremony cleared an interrupted transition, and after a restart the journal was gone and writes succeeded.",
@@ -442,7 +442,7 @@
  {
   "rowId": "r045",
   "surfaceItem": "cross-cutting",
-  "claimId": "README.md#4ea079373a06",
+  "claimId": "README.md#02d9579ea02c",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "inspect {} through the installed bundle 2026-09-24 rendered DATA[Fresh:global]| and DATA[Fresh:project]| rows together after an adopt and one commit per scope.",
@@ -612,7 +612,7 @@
  {
   "rowId": "r062",
   "surfaceItem": "cross-cutting",
-  "claimId": "SECURITY.md#3e09e76557f5",
+  "claimId": "SECURITY.md#1a2ed039d8e9",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "shipped-claims re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, the 2 skips later executed under D2): the resolver and family helper SECURITY.md names are declared in store.ts, and BOTH probes it cites exist, one exercising a permanent erase and one the shared-id soft erase.",

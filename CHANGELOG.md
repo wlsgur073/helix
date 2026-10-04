@@ -19,7 +19,10 @@ First release.
 - Layered memory scope: a global ledger plus an ownership-gated per-project ledger
   (`helix_memory_adopt`, default-deny). A session started in a subdirectory uses the nearest parent
   project once it is adopted; below one that is not, reads carry a constant note and a commit that
-  omits `scope` is refused rather than written globally. Commit results name the scope written.
+  omits `scope` is refused rather than written globally, with a refusal that leaves the choice
+  between adopting the project and global memory to the user. Commit results name the scope
+  written, and an explicit `global` commit made while the session's project memory is off says so
+  in a `notice` field.
 - Two-tier trust labels: machine-corroborated **Corroborated** (`helix_memory_recheck`, a
   content-bound mechanical file check) and human-attested **Verified** (`helix_memory_confirm`).
 - Lexical recall ranker (coverage / phrase-first, BM25-assisted), with an in-process recall cache
@@ -74,8 +77,18 @@ First release.
   its descriptor reports: a FIFO, a device or a directory at a ledger path — reached directly or
   through a symlink, which a repository can carry — is refused with an error instead of stalling the
   server or reading without bound, and the startup integrity scan skips such a ledger with a warning.
+- The startup integrity scan says why a `verify` row fails: a different key id (what
+  `helix-trust-resolve --fresh` or a re-minted key leaves behind) and a newer MAC format are NOTE
+  lines, the current key id with a failing MAC is a tampered WARNING, and a row with no MAC or key
+  id stays a forged/legacy WARNING; no class's grade is applied. The scan skips an aliased project
+  layer, and an unadopted working-directory project whose memory file leads to another registered
+  project's ledger or cannot be resolved.
+- A read that meets a compaction or erase rewrite still in flight waits for the writing process, up
+  to two seconds per scope, and reads once more, instead of leaving that scope out at once.
 - Untrusted-content quarantine: NFKC / control / bidi normalization, per-line datamarking, and a
-  per-call 128-bit nonce frame.
+  per-call 128-bit nonce frame. Recall and every inspect view print a record's content on `DATA[…]`
+  lines and its id on one `PROOF[…]` line after them, a line record content cannot produce; the
+  line also carries the record's `contentDigest` while the record is live.
 
 #### Optional Codex dual-verify — off by default
 
@@ -186,10 +199,17 @@ First release.
   and per compaction attempt (default on; `metrics.enabled: false`
   disables; the hook honours the global config only).
 - `helix_memory_inspect` takes an `ids` filter: up to 32 ids render only those records, each with
-  its `contentDigest` proof line, so a caller can read back exactly the records a dual-verify
+  its `PROOF[…]` line (id and `contentDigest`), so a caller can read back exactly the records
+  a dual-verify
   refusal named and declare them in `quotedMemory`. `ids`, `history` and `asOf` are mutually
   exclusive, and requested ids with no live record are reported as a count rather than dropped in
   silence.
+- `helix_memory_erase` answers `erased {"id":…}` for a live record, `unchanged {"id":…}` for a
+  record already erased or superseded (not an error, so a retry is safe), and an error naming the
+  PROOF line for an id no memory record and no marker row carries, appending no tombstone.
+- `helix_memory_commit`'s result adds `redactions` (replaced spans per marker kind) and a `notice`
+  when the secret scan replaced part of the fact, and a recheck refused for a missing path or
+  pattern on such a record says the content was redacted. An ordinary result keeps its four keys.
 
 ### Limits
 
