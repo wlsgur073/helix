@@ -158,10 +158,12 @@ function sleepSync(ms) {
 }
 function canonical(target) {
   try {
-    return realpathSync2.native(target);
+    const real = realpathSync2.native(target, { encoding: "buffer" });
+    const text = real.toString("utf8");
+    if (Buffer.from(text, "utf8").equals(real)) return text;
   } catch {
-    return join(realpathSync2.native(dirname(target)), basename(target));
   }
+  return join(realpathSync2.native(dirname(target)), basename(target));
 }
 function lockPathOf(target) {
   return canonical(target) + ".lock";
