@@ -114,6 +114,21 @@ saying it is being ignored.)
 A `mode`, `stakesFloor`, `model` or `effort` value that is present but invalid is ignored with a warning
 on stderr, not silently.
 
+**When a change applies.** The server reads `~/.helix/config.json` when it starts and again on every
+`helix_dual_verify` and `helix_codex_status` call, and a running server applies only the part of a
+change that narrows the outbound path. Turning dual-verify off, raising `stakesFloor`, setting an
+egress leg to `"block"`, turning `logContent` off, or moving `mode` from `critique` to `compare`
+takes effect at the next call; so does deleting the file or leaving it unreadable (not valid JSON, not
+a regular file, or larger than 1 MiB), which turns dual-verify off. A call already running keeps the
+settings it started with. Turning dual-verify on, lowering `stakesFloor`, setting a leg to `"allow"`, turning
+`logContent` on, moving to `critique`, and any change of `model`, `effort` or `timeoutMs` take effect
+only when the MCP server restarts (in Claude Code, restart Claude Code); until then
+`helix_codex_status` names those keys on a line of their own. The widening half waits so that a
+process able to write the file, but not to restart the server, cannot open the path mid-session. A
+value made invalid while the server runs counts as that key's default, without a stderr warning, so
+it can narrow the path at the next call or wait like any other change. `metrics`, `persistence` and
+`compaction` are read at start only.
+
 `HELIX_HOME` relocates all state; `HELIX_LEDGER` points the memory ledger **file** elsewhere. The
 split is deliberate: `HELIX_LEDGER` moves your data, never your trust store. The ledger signing key,
 the ownership registry and the rollback witness always live under `HELIX_HOME`, because a signing key
@@ -334,7 +349,7 @@ Helix keeps your memory on your machine, under `~/.helix/` and an owned `<projec
 - **Blocked before sending:** an egress guard refuses the call if the payload contains a named provider credential (override-proof), a heuristic- or entropy-detected secret (blocked by default, per-leg overridable), high-severity or bulk PII, or a verbatim copy of a stored memory (a shared run of at least 24 characters with a live memory, compared after normalization — SECURITY.md states the exact rule; a shorter memory or a shorter shared run is never matched). One entropy subclass is **released** by default — a token whose stripped core is pure hex (git SHA, digest) or a chain of individually low-entropy segments, with no credential keyword within the 40 characters on either side of it (a newline, `.` or `;` cuts that window short; a keyword farther away, even in the same sentence, does not keep it blocked). Close it with the `secretEntropyExempt` leg; on the write path the word-chain half of the same shape is released under `persistence.releaseWordChains` (default `true`) while hex always redacts. See [SECURITY.md](./SECURITY.md) for why the exemption exists. A block the memory-echo leg decided also tells you *where* it matched: for each record that still blocks, the refusal quotes the runs of your **own** payload text that matched it (in the normalized form the leg compared, so a run can differ from what you typed), inside a datamarked DATA frame (up to 10 records, 3 runs each, 160 characters per run, with a count of whatever was left out) — enough to reword the payload without opening the memory. The runs render in that tool response only; `audit.jsonl` never receives one.
 - **Refused rather than scanned:** the guard fails closed on size. A payload whose raw or outbound form is over 200,000 characters, or live memory whose content totals over 8,000,000 characters (every record the recall view serves, global plus an adopted project; erased and superseded rows do not count), is refused unscanned rather than sent, and a call the live-memory cap refuses names that cause (`ledger exceeds the egress scan limit`) — so a large enough call or a large enough live corpus makes dual-verify unavailable, which is the intended failure direction.
 - **Logging:** off by default. The exact prompt/response are written to `~/.helix/codex-log.jsonl` (`0o600`) only if you set `dualVerify.logContent: true`; the audit log stays content-free regardless. An erase does not reach that file: `helix_memory_erase` acts on the ledger, so a memory whose text a logged call carried stays in `codex-log.jsonl` after the record is erased. Deleting the file is the remedy.
-- **Disable:** set `dualVerify.enabled: false` (the default) — or never create the config.
+- **Disable:** set `dualVerify.enabled: false` (the default) — or never create the config. A running server applies it at the next call (see *When a change applies* under [Configuration](#configuration)).
 
 ## Security & threat model
 

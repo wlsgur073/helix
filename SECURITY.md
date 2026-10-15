@@ -726,10 +726,13 @@ not acceptable, run it under an OS-level sandbox or leave the feature off.
   `Verified` — which a loose mode may already have broken, and `audit.jsonl` carries no MAC, so its
   integrity rests on the permissions of the file and of `~/.helix` alone.
 - `~/.helix/codex-log.jsonl` is created only if you opt in (`dualVerify.logContent: true`), and
-  turning the option off later stops new entries once the MCP server restarts — a server that is
-  already running keeps the value it loaded at startup and goes on logging — without deleting the
-  file or what it already holds; it stores the exact prompt/response, is created `0o600`, and is
-  capped. A
+  turning the option off stops new entries from the next dual-verify call on (a call already running
+  keeps the settings it started with) — a running server
+  reads `config.json` again on each call and applies at once a change that narrows the outbound
+  path, while turning the option on, like every widening change, waits for the MCP server to
+  restart, so a process that can write that file but cannot restart the server cannot start the
+  logging mid-session — without deleting the file or what it already holds; it stores the exact
+  prompt/response, is created `0o600`, and is capped. A
   firewall-refused payload is never written there. No erase reaches this file: `helix_memory_erase`
   and the operator-only permanent path both act on the ledger, so a memory whose text a logged call
   carried survives here after that record is gone from memory. Deleting the file is the remedy.

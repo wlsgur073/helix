@@ -108,6 +108,13 @@ First release.
   window short) vetoes the release on both paths; one farther away, even in the same sentence, does
   not. Provider-format credentials are
   override-proof: no policy value releases them.
+- A running server reads `~/.helix/config.json` again on each `helix_dual_verify` and
+  `helix_codex_status` call and applies at once the part of a change that narrows the outbound path:
+  dual-verify off, a higher `stakesFloor`, a leg set to `block`, `logContent` off, `critique` moved to
+  `compare`, a deleted or unreadable file. A widening change, and any change of `model`, `effort` or
+  `timeoutMs`, waits for the server to restart, and `helix_codex_status` names those keys until then.
+  The file is read non-blocking and only when it is a regular file of at most 1 MiB, so a FIFO or a
+  device at that path counts as unreadable instead of stalling the server.
 - An invalid value on `mode`, `stakesFloor`, `model` or `effort` is refused with a bounded
   single-line stderr warning and the default is kept, so a crafted newline cannot forge a second
   diagnostic line. `enabled`, `timeoutMs` and `logContent` fall back to their defaults silently. An
