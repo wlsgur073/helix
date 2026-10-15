@@ -273,3 +273,51 @@ describe('handleCodexStatus shows the effective egress legs', () => {
     expect(text(await handleCodexStatus(deps(LIVE)))).not.toMatch(/changed from default/i);
   });
 });
+
+// Issue #11: config.json is read again on each call; a running server applies only what narrows the
+// outbound path, and names what waits for a restart.
+describe('handleCodexStatus re-reads config.json on each call (issue #11)', () => {
+  it('shows dual-verify disabled at once when the file turns it off', async () => {
+    const out = text(await handleCodexStatus(deps(LIVE, { config: enabledCfg(), currentConfig: () => structuredClone(DEFAULT_CONFIG) })));
+    expect(out).toMatch(/- dual-verify:\s+disabled/);
+  });
+
+  it('names a widening change as waiting for a restart instead of showing it as applied', async () => {
+    const out = text(await handleCodexStatus(deps(LIVE, { config: structuredClone(DEFAULT_CONFIG), currentConfig: () => enabledCfg() })));
+    expect(out).toMatch(/- dual-verify:\s+disabled/);
+    const pending = out.split('\n').find((l) => /until this server restarts/.test(l));
+    expect(pending, 'a pending line must name the waiting keys').toBeTruthy();
+    expect(pending!).toMatch(/\benabled\b/);
+  });
+
+  it('adds no pending line when the file asks for nothing beyond what is applied', async () => {
+    const out = text(await handleCodexStatus(deps(LIVE, { config: enabledCfg(), currentConfig: () => enabledCfg() })));
+    expect(out).toMatch(/- dual-verify:\s+enabled, mode=compare/);
+    expect(out).not.toMatch(/until this server restarts/);
+  });
+
+  it('names a file that can no longer be read and shows dual-verify off', async () => {
+    const broken: HelixConfig = { ...structuredClone(DEFAULT_CONFIG), unreadable: ['/tmp/hx-home/config.json'] };
+    const out = text(await handleCodexStatus(deps(LIVE, { config: enabledCfg(), currentConfig: () => broken })));
+    expect(out).toContain(JSON.stringify('/tmp/hx-home/config.json'));
+    expect(out).toMatch(/could not be read/i);
+    expect(out).toMatch(/- dual-verify:\s+disabled/);
+    expect(out).not.toMatch(/until this server restarts/);
+  });
+});
+
+describe('handleCodexStatus: one reading per call, and the content-log hint (issue #11 review)', () => {
+  it('reads config.json exactly once per call', async () => {
+    let reads = 0;
+    await handleCodexStatus(deps(LIVE, { config: enabledCfg(), currentConfig: () => { reads++; return enabledCfg(); } }));
+    expect(reads).toBe(1);
+  });
+
+  it('says that turning content logging on waits for a restart instead of telling the reader to set it', async () => {
+    const out = text(await handleCodexStatus(deps(LIVE, { config: cfg({ logContent: false }), currentConfig: () => cfg({ logContent: true }) })));
+    const line = out.split('\n').find((l) => l.startsWith('- content log:'));
+    expect(line).toMatch(/OFF/);
+    expect(line).toMatch(/restart/);
+    expect(line).not.toMatch(/set dualVerify\.logContent=true/);
+  });
+});

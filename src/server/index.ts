@@ -215,6 +215,11 @@ for (const { ledger, root } of scanScopes) {
 
 const server = buildServer(store, {
   config,
+  // Issue #11: config.json is read again on each dual-verify and status call, and the handlers apply
+  // only what narrows the outbound path (narrowDualVerify); a widening change waits for a restart.
+  // Silent: the start's load above already reported this file once, and helix_codex_status names an
+  // unreadable file and every waiting key on the surface an operator reads.
+  currentConfig: () => loadConfig({ globalPath: join(home, 'config.json'), warn: () => {} }),
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
   // inspect()'s own projection sets contentDigest unconditionally (store.ts:830), but the field is

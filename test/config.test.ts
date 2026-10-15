@@ -1,8 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, truncateSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig, DEFAULT_CONFIG, metricsEnabledFromGlobalConfig, compactionConfigFromGlobal } from '../src/config.js';
+import { loadConfig, DEFAULT_CONFIG, metricsEnabledFromGlobalConfig, compactionConfigFromGlobal, narrowDualVerify, type HelixConfig } from '../src/config.js';
+import * as configModule from '../src/config.js';
 
 function tmpDir() { return mkdtempSync(join(tmpdir(), 'helix-cfg-')); }
 
@@ -507,5 +509,162 @@ describe('a two-layer egressPolicy fixture: the warning names the value the merg
     expect(line!).toContain(`-> keeping ${DEFAULT_CONFIG.dualVerify.egressPolicy.piiHigh}`);
     // The project layer's legal 'allow' still wins in the final merge.
     expect(effective).toBe('allow');
+  });
+});
+
+// Issue #11. A running server keeps the config it loaded at start as a ceiling: each dual-verify and
+// status call reads config.json again and applies only what narrows the outbound path. A change that
+// widens it, and the values with no risk order, wait for a restart and are named as pending.
+describe('narrowDualVerify: a running server applies only the narrowing half of a config change', () => {
+  const at = (over: Partial<HelixConfig['dualVerify']>): HelixConfig => {
+    const c = structuredClone(DEFAULT_CONFIG);
+    return { ...c, dualVerify: { ...c.dualVerify, ...over } };
+  };
+
+  it('a file that turns dual-verify off applies at once', () => {
+    const r = narrowDualVerify(at({ enabled: true }), at({ enabled: false }));
+    expect(r.config.dualVerify.enabled).toBe(false);
+    expect(r.pending).toEqual([]);
+  });
+
+  it('a file that turns dual-verify on waits for a restart and is named as pending', () => {
+    const r = narrowDualVerify(at({ enabled: false }), at({ enabled: true }));
+    expect(r.config.dualVerify.enabled).toBe(false);
+    expect(r.pending).toEqual(['enabled']);
+  });
+
+  it('a higher stakes floor applies at once; a lower one waits', () => {
+    const up = narrowDualVerify(at({ stakesFloor: 'medium' }), at({ stakesFloor: 'xhigh' }));
+    expect(up.config.dualVerify.stakesFloor).toBe('xhigh');
+    expect(up.pending).toEqual([]);
+    const down = narrowDualVerify(at({ stakesFloor: 'high' }), at({ stakesFloor: 'low' }));
+    expect(down.config.dualVerify.stakesFloor).toBe('high');
+    expect(down.pending).toEqual(['stakesFloor']);
+  });
+
+  it('an egress leg set to block applies at once; a leg set to allow waits', () => {
+    const loaded = at({ egressPolicy: { ...DEFAULT_CONFIG.dualVerify.egressPolicy, secretEntropy: 'allow', piiBulk: 'block' } });
+    const file = at({ egressPolicy: { ...DEFAULT_CONFIG.dualVerify.egressPolicy, secretEntropy: 'block', piiBulk: 'allow' } });
+    const r = narrowDualVerify(loaded, file);
+    expect(r.config.dualVerify.egressPolicy.secretEntropy).toBe('block');
+    expect(r.config.dualVerify.egressPolicy.piiBulk).toBe('block');
+    expect(r.pending).toEqual(['egressPolicy.piiBulk']);
+  });
+
+  it('content logging can be turned off at once, but turning it on waits', () => {
+    expect(narrowDualVerify(at({ logContent: true }), at({ logContent: false })).config.dualVerify.logContent).toBe(false);
+    const on = narrowDualVerify(at({ logContent: false }), at({ logContent: true }));
+    expect(on.config.dualVerify.logContent).toBe(false);
+    expect(on.pending).toEqual(['logContent']);
+  });
+
+  it('critique narrows to compare at once (compare sends no answer); compare to critique waits', () => {
+    expect(narrowDualVerify(at({ mode: 'critique' }), at({ mode: 'compare' })).config.dualVerify.mode).toBe('compare');
+    const widen = narrowDualVerify(at({ mode: 'compare' }), at({ mode: 'critique' }));
+    expect(widen.config.dualVerify.mode).toBe('compare');
+    expect(widen.pending).toEqual(['mode']);
+  });
+
+  it('model, effort and timeout keep the values loaded at start and are named as pending', () => {
+    const r = narrowDualVerify(at({ model: 'gpt-a', effort: 'high', timeoutMs: 600_000 }), at({ model: 'gpt-b', effort: 'low', timeoutMs: 60_000 }));
+    expect(r.config.dualVerify.model).toBe('gpt-a');
+    expect(r.config.dualVerify.effort).toBe('high');
+    expect(r.config.dualVerify.timeoutMs).toBe(600_000);
+    expect(r.pending).toEqual(['model', 'effort', 'timeoutMs']);
+  });
+
+  it('a file that can no longer be read closes the path, carries its path, and names nothing as pending', () => {
+    // Values a load still carries next to `unreadable` are not trusted: the narrowing runs against the
+    // defaults, whatever the object holds (loadConfig fills in defaults today, so this pins the rule).
+    const broken: HelixConfig = { ...at({ enabled: true, stakesFloor: 'low' }), unreadable: ['/h/config.json'] };
+    const r = narrowDualVerify(at({ enabled: true, stakesFloor: 'low', model: 'gpt-a' }), broken);
+    expect(r.config.dualVerify.enabled).toBe(false);
+    expect(r.config.dualVerify.stakesFloor).toBe('high');
+    expect(r.config.dualVerify.model).toBe('gpt-a');
+    expect(r.config.unreadable).toEqual(['/h/config.json']);
+    expect(r.pending).toEqual([]);
+  });
+
+  it('the ceiling never moves: restoring the file restores every value loaded at start', () => {
+    const loaded = at({ enabled: true, stakesFloor: 'low', logContent: true, mode: 'critique' });
+    const snapshot = structuredClone(loaded);
+    narrowDualVerify(loaded, at({ enabled: false, stakesFloor: 'xhigh', logContent: false, mode: 'compare' }));
+    expect(loaded).toEqual(snapshot);
+    const back = narrowDualVerify(loaded, at({ enabled: true, stakesFloor: 'low', logContent: true, mode: 'critique' }));
+    expect(back.config.dualVerify).toEqual(snapshot.dualVerify);
+    expect(back.pending).toEqual([]);
+  });
+
+  it('settings outside dualVerify keep the values loaded at start', () => {
+    const loaded = structuredClone(DEFAULT_CONFIG);
+    const file: HelixConfig = { ...structuredClone(DEFAULT_CONFIG), metrics: { enabled: false }, persistence: { releaseWordChains: false } };
+    const r = narrowDualVerify(loaded, file);
+    expect(r.config.metrics.enabled).toBe(true);
+    expect(r.config.persistence.releaseWordChains).toBe(true);
+    expect(r.pending).toEqual([]);
+  });
+});
+
+// Issue #11 review: config.json is now read on every dual-verify and status call, so a path that is not
+// a regular file must not stall the server (a FIFO with no writer blocked readFileSync forever) nor be
+// read without bound. The bound ships with the check, so its presence is the precondition: on a checkout
+// without it this guard refuses instead of running a FIFO through a reader that would block.
+function requireConfigFileCheck(): number {
+  const max: unknown = (configModule as Record<string, unknown>).MAX_CONFIG_BYTES;
+  if (typeof max !== 'number') throw new Error('the config file-type check is not implemented yet: refusing to read a FIFO through a reader that would block');
+  return max;
+}
+
+describe.skipIf(process.platform === 'win32')('loadConfig reads config.json without blocking or reading without bound', () => {
+  it('a FIFO at config.json counts as unreadable at once', () => {
+    requireConfigFileCheck();
+    const p = join(tmpDir(), 'config.json');
+    execFileSync('mkfifo', [p]);
+    const warn = vi.fn();
+    const cfg = loadConfig({ globalPath: p, warn });
+    expect(cfg.unreadable).toEqual([p]);
+    expect(cfg.dualVerify.enabled).toBe(false);
+    expect(String(warn.mock.calls[0]?.[0])).toMatch(/not a regular file/);
+  }, 10_000);
+
+  it('a link to a character device counts as unreadable, not as an empty file', () => {
+    const p = join(tmpDir(), 'config.json');
+    symlinkSync('/dev/null', p);
+    const warn = vi.fn();
+    const cfg = loadConfig({ globalPath: p, warn });
+    expect(cfg.unreadable).toEqual([p]);
+    expect(String(warn.mock.calls[0]?.[0])).toMatch(/not a regular file/);
+  });
+
+  it('a file above the size bound counts as unreadable without being read', () => {
+    const max = requireConfigFileCheck();
+    const p = join(tmpDir(), 'config.json');
+    writeFileSync(p, '');
+    truncateSync(p, max + 1);
+    const warn = vi.fn();
+    const cfg = loadConfig({ globalPath: p, warn });
+    expect(cfg.unreadable).toEqual([p]);
+    expect(String(warn.mock.calls[0]?.[0])).toMatch(/larger than/);
+  });
+
+  it('a regular file at the size bound is still read', () => {
+    const max = requireConfigFileCheck();
+    const p = join(tmpDir(), 'config.json');
+    const body = JSON.stringify({ dualVerify: { enabled: true } });
+    writeFileSync(p, body + ' '.repeat(max - body.length));
+    const cfg = loadConfig({ globalPath: p, warn: () => {} });
+    expect(cfg.unreadable).toBeUndefined();
+    expect(cfg.dualVerify.enabled).toBe(true);
+  });
+});
+
+describe('narrowDualVerify after a file that was unreadable at start is repaired (issue #11 review)', () => {
+  it('drops the start-time unreadable mark and names the widening the repaired file asks for', () => {
+    const atStart: HelixConfig = { ...structuredClone(DEFAULT_CONFIG), unreadable: ['/h/config.json'] };
+    const repaired: HelixConfig = { ...structuredClone(DEFAULT_CONFIG), dualVerify: { ...DEFAULT_CONFIG.dualVerify, enabled: true } };
+    const r = narrowDualVerify(atStart, repaired);
+    expect(r.config.unreadable).toBeUndefined();
+    expect(r.config.dualVerify.enabled).toBe(false);
+    expect(r.pending).toEqual(['enabled']);
   });
 });

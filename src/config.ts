@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { openSync, fstatSync, readSync, closeSync, constants } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -81,10 +81,12 @@ export interface HelixConfig {
     timeoutMs: number;
     /** Per-leg egress policy (memory-echo / high-PII / bulk-PII / heuristic-secret / entropy-secret).
      *  User-edited only; every leg defaults to 'block'. A NAMED provider secret blocks regardless of
-     *  policy (deny-dominant, override-proof). Read once at startup (a mid-session flip needs a restart). */
+     *  policy (deny-dominant, override-proof). Read again on each dual-verify and status call: a leg
+     *  set to 'block' applies at the next call, a leg set to 'allow' after a restart (narrowDualVerify). */
     egressPolicy: EgressPolicy;
     /** Opt-in: persist the exact Codex prompt+response to ~/.helix/codex-log.jsonl. Default false
-     *  (OFF). audit.jsonl still records decision metadata regardless of this flag. */
+     *  (OFF). audit.jsonl still records decision metadata regardless of this flag. Turning it off applies
+     *  at the next call; turning it on waits for a restart (narrowDualVerify). */
     logContent: boolean;
   };
   /** W-CITE write-path persistence policy. A SEPARATE key from dualVerify.egressPolicy by design:
@@ -160,9 +162,40 @@ export interface LoadConfigOptions {
  *  has a file they believe is in effect and it is not, and every setting in it has just reverted.
  *  Before this split both took the same silent path, so a single trailing comma reverted the whole
  *  file and was indistinguishable from having written no file at all. */
+/** The most a config file may hold: a real one is a few hundred bytes. Exported because it ships with
+ *  the file-type check below, so a test can tell a checkout that has the check from one that lacks it. */
+export const MAX_CONFIG_BYTES = 1_048_576;
+
+/** Read config.json without blocking and without reading without bound. readFileSync opened a FIFO
+ *  with no writer and waited forever: at start that stalled the server once, but since issue #11 the
+ *  file is read again on every dual-verify and status call, so it would freeze a running server and
+ *  every tool with it. It also read a character device without bound. Same defence as the ledger
+ *  read (readLedgerFileBytes in src/memory/ledger.ts, IT-H4): open with O_NONBLOCK, fstat the
+ *  descriptor, and accept only a regular file of at most MAX_CONFIG_BYTES, read up to its size.
+ *  Anything else throws an Error without a code, which readJson reports as unusable, so the file
+ *  counts as unreadable and dual-verify fails closed. ENOENT propagates unchanged (no config). */
+function readConfigText(path: string): string {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) throw new Error('not a regular file');
+    if (st.size > MAX_CONFIG_BYTES) throw new Error(`larger than ${MAX_CONFIG_BYTES} bytes`);
+    const buf = Buffer.alloc(st.size);
+    let len = 0;
+    while (len < buf.length) {
+      const n = readSync(fd, buf, len, buf.length - len, null);
+      if (n === 0) break;   // shrank since the fstat: parse what is there
+      len += n;
+    }
+    return buf.subarray(0, len).toString('utf8');
+  } finally {
+    try { closeSync(fd); } catch { /* closing a finished descriptor changes nothing */ }
+  }
+}
+
 function readJson(path: string, onUnusable: (reason: string) => void): Record<string, unknown> | null {
   let text: string;
-  try { text = readFileSync(path, 'utf8'); }
+  try { text = readConfigText(path); }
   catch (e) {
     if ((e as NodeJS.ErrnoException).code !== 'ENOENT') onUnusable((e as Error).message);
     return null;
@@ -187,7 +220,10 @@ function readJson(path: string, onUnusable: (reason: string) => void): Record<st
  *  Ownership was considered as the gate instead and rejected: adoption consents to a MAC-protected
  *  ledger, not to an unsigned mutable file that a later `git pull` can change. "Tighten-only" was
  *  considered and rejected too — there is no risk ordering for `mode`, `model`, `effort` or
- *  `timeoutMs`, so the rule would have to fail open for every key it could not order. */
+ *  `timeoutMs`, so the rule would have to fail open for every key it could not order. That rejection
+ *  concerns a project layer. A running server's re-read of the global file (narrowDualVerify, issue
+ *  #11) is tighten-only, and it does not fail open: it orders `mode` (compare sends less than
+ *  critique) and holds every key it cannot order at the value loaded at start. */
 export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
   const globalPath = opts.globalPath ?? join(homedir(), '.helix', 'config.json');
   const merged: HelixConfig = structuredClone(DEFAULT_CONFIG);
@@ -276,6 +312,66 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
   // callers and tests compare against directly.
   if (unreadable.length > 0) merged.unreadable = unreadable;
   return merged;
+}
+
+/** What {@link narrowDualVerify} returns: the config one call applies, and the dualVerify keys whose
+ *  value in config.json that call does not apply yet (each waits for a restart of the server). */
+export interface NarrowedConfig {
+  config: HelixConfig;
+  pending: string[];
+}
+
+const STAKES_RANK: Record<StakesFloor, number> = { low: 0, medium: 1, high: 2, xhigh: 3 };
+
+/**
+ * Issue #11. A running server reads config.json again on each dual-verify and status call, and keeps
+ * the config it loaded at start as a CEILING: from the file it applies only what narrows the outbound
+ * path — dual-verify off, a higher stakes floor, an egress leg set to block, content logging off, and
+ * critique narrowed to compare (compare sends the question alone). A change that widens the path, and
+ * the values that have no risk order (model, effort, timeoutMs), wait for a restart; `pending` names
+ * them in field order.
+ *
+ * Why the widening half waits: at start the operator's file is read before anything else runs, while a
+ * file that changes mid-session may have been written by a process that can write files but cannot
+ * start a second server (a host with file access and no shell). Applying its widening at once would
+ * let that process open the path and send in the same session.
+ *
+ * A file that exists but cannot be read discards every setting in it, so the narrowing runs against
+ * DEFAULT_CONFIG (dual-verify off) and names nothing as pending: what the file asks for cannot be
+ * known. `unreadable` describes the file as it is now, not as it was at start. Settings outside
+ * dualVerify keep their start values. Pure: neither argument is changed, so the ceiling never moves.
+ */
+export function narrowDualVerify(loaded: HelixConfig, current: HelixConfig): NarrowedConfig {
+  const asked = current.unreadable ? DEFAULT_CONFIG.dualVerify : current.dualVerify;
+  const base = loaded.dualVerify;
+  const egressPolicy = {} as EgressPolicy;
+  for (const leg of EGRESS_LEGS) {
+    egressPolicy[leg] = base.egressPolicy[leg] === 'block' || asked.egressPolicy[leg] === 'block' ? 'block' : 'allow';
+  }
+  const dualVerify: HelixConfig['dualVerify'] = {
+    enabled: base.enabled && asked.enabled,
+    mode: base.mode === 'critique' && asked.mode === 'compare' ? 'compare' : base.mode,
+    stakesFloor: STAKES_RANK[asked.stakesFloor] > STAKES_RANK[base.stakesFloor] ? asked.stakesFloor : base.stakesFloor,
+    model: base.model,
+    effort: base.effort,
+    timeoutMs: base.timeoutMs,
+    egressPolicy,
+    logContent: base.logContent && asked.logContent,
+  };
+  const config: HelixConfig = { ...structuredClone(loaded), dualVerify };
+  delete config.unreadable;
+  if (current.unreadable) config.unreadable = [...current.unreadable];
+  const pending: string[] = [];
+  if (!current.unreadable) {
+    for (const key of ['enabled', 'mode', 'stakesFloor', 'model', 'effort', 'timeoutMs'] as const) {
+      if (asked[key] !== dualVerify[key]) pending.push(key);
+    }
+    for (const leg of EGRESS_LEGS) {
+      if (asked.egressPolicy[leg] !== egressPolicy[leg]) pending.push(`egressPolicy.${leg}`);
+    }
+    if (asked.logContent !== dualVerify.logContent) pending.push('logContent');
+  }
+  return { config, pending };
 }
 
 /** Hook-safe metrics gate: GLOBAL config only (a hook's cwd is unreliable, and honoring a foreign

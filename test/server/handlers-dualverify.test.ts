@@ -1032,3 +1032,92 @@ describe('H13: compare mode says helixAnswer was not sent', () => {
     expect(t).not.toContain('helixAnswer was not sent');
   });
 });
+
+// Issue #11: config.json is read again on each call; a running server applies only what narrows the
+// outbound path. `deps()` above loads dual-verify ENABLED; currentConfig plays the file as it is now.
+describe('handleDualVerify re-reads config.json on each call (issue #11)', () => {
+  const loadedOn = (): HelixConfig => deps({}).config;
+  const fileAs = (over: Partial<HelixConfig['dualVerify']>): HelixConfig => {
+    const c = loadedOn();
+    return { ...c, dualVerify: { ...c.dualVerify, ...over } };
+  };
+  const ask = { stakes: 'high' as const, question: 'db?', helixAnswer: 'use postgres' };
+
+  it('a file that turns dual-verify off stops the next call at the enabled gate, and the audit row says so', async () => {
+    let ran = false;
+    const d = deps({ runner: async () => { ran = true; return { ok: true, answer: 'use postgres' }; }, currentConfig: () => fileAs({ enabled: false }) });
+    const res = await handleDualVerify(ask, d);
+    expect(ran).toBe(false);
+    expect(text(res)).toContain('dual-verify did not run: dual-verify is disabled in config');
+    const row = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
+    expect(row.enabled).toBe(false);
+    expect(row.stoppedGate).toBe('enabled');
+  });
+
+  it('a file that turns dual-verify on does not open the path before a restart, and the result says why', async () => {
+    let ran = false;
+    const loaded: HelixConfig = { ...loadedOn(), dualVerify: { ...loadedOn().dualVerify, enabled: false } };
+    const d = deps({ config: loaded, runner: async () => { ran = true; return { ok: true, answer: 'use postgres' }; }, currentConfig: () => fileAs({ enabled: true }) });
+    const res = await handleDualVerify(ask, d);
+    expect(ran).toBe(false);
+    expect(text(res)).toMatch(/stopped at enabled/);
+    expect(text(res)).toMatch(/until this server restarts/i);
+  });
+
+  it('an egress leg set to block in the file stops the next call before anything is sent', async () => {
+    let ran = false;
+    const loaded = fileAs({ egressPolicy: { ...loadedOn().dualVerify.egressPolicy, secretEntropy: 'allow' } });
+    const d = deps({ config: loaded, runner: async () => { ran = true; return { ok: true, answer: 'ok' }; }, currentConfig: () => fileAs({}) });
+    const res = await handleDualVerify({ stakes: 'high', question: 'token n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf', helixAnswer: 'ok' }, d);
+    expect(ran).toBe(false);
+    expect(text(res)).toMatch(/stopped at egress/);
+  });
+
+  it('a higher stakes floor in the file applies to the next call', async () => {
+    let ran = false;
+    const d = deps({ runner: async () => { ran = true; return { ok: true, answer: 'use postgres' }; }, currentConfig: () => fileAs({ stakesFloor: 'xhigh' }) });
+    const res = await handleDualVerify(ask, d);
+    expect(ran).toBe(false);
+    expect(text(res)).toMatch(/stopped at stakesFloor/);
+  });
+
+  it('turning content logging off in the file stops the next entry', async () => {
+    const d = deps({ config: fileAs({ logContent: true }), currentConfig: () => fileAs({ logContent: false }) });
+    await handleDualVerify(ask, d);
+    expect(existsSync(d.codexLogPath)).toBe(false);
+  });
+});
+
+describe('handleDualVerify: one reading per call, records, and the restart note (issue #11 review)', () => {
+  const loadedOn = (): HelixConfig => deps({}).config;
+  const fileAs = (over: Partial<HelixConfig['dualVerify']>): HelixConfig => {
+    const c = loadedOn();
+    return { ...c, dualVerify: { ...c.dualVerify, ...over } };
+  };
+  const ask = { stakes: 'high' as const, question: 'db?', helixAnswer: 'use postgres' };
+
+  it('reads config.json exactly once per call, so the gates and the audit row see one config', async () => {
+    let reads = 0;
+    const d = deps({ currentConfig: () => { reads++; return reads === 1 ? fileAs({}) : fileAs({ enabled: false }); } });
+    await handleDualVerify(ask, d);
+    expect(reads).toBe(1);
+    const row = JSON.parse(readFileSync(d.auditPath, 'utf8').trim());
+    expect(row.enabled).toBe(true);
+    expect(row.spawned).toBe(true);
+  });
+
+  it('the content-log entry records the mode the call ran in, not the one loaded at start', async () => {
+    const d = deps({ config: fileAs({ mode: 'critique', logContent: true }), currentConfig: () => fileAs({ mode: 'compare', logContent: true }) });
+    await handleDualVerify(ask, d);
+    const entry = JSON.parse(readFileSync(d.codexLogPath, 'utf8').trim());
+    expect(entry.kind).toBe('compare');
+    expect(entry.prompt).not.toContain('use postgres');
+  });
+
+  it('a refusal with nothing waiting for a restart carries no restart note', async () => {
+    const d = deps({ currentConfig: () => fileAs({}) });
+    const res = await handleDualVerify({ ...ask, stakes: 'low' }, d);
+    expect(text(res)).toMatch(/stopped at stakesFloor/);
+    expect(text(res)).not.toMatch(/restart/);
+  });
+});

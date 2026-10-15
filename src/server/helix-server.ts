@@ -53,6 +53,8 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
   const dv: DualVerifyHandlerDeps = dualDeps ?? {
     config: loadConfig({ globalPath: join(home, 'config.json') }),
+    // Issue #11: read again on each call; only what narrows the outbound path applies (see index.ts).
+    currentConfig: () => loadConfig({ globalPath: join(home, 'config.json'), warn: () => {} }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
     // inspect()'s own projection sets contentDigest unconditionally (store.ts:830), but the field is
@@ -68,6 +70,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     inspect: () => checkCodexStatus(),
     resolveModel: () => checkCodexModel(),
     config: dv.config,
+    currentConfig: dv.currentConfig,
     codexLogPath: dv.codexLogPath,
   };
 

@@ -1,7 +1,7 @@
 import { EraseRefusedError, isEraseRefusedError, type MemoryStore, type CommitInput } from '../memory/store.js';
 import type { ProjectDisposition } from '../memory/ownership.js';
-import type { HelixConfig } from '../config.js';
-import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS, DEFAULT_CONFIG } from '../config.js';
+import type { HelixConfig, NarrowedConfig } from '../config.js';
+import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS, DEFAULT_CONFIG, narrowDualVerify } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type DualVerifyResult, type EchoSource, type GateTrace } from '../verify/dual-verify.js';
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, recordRows, type FrameLine } from '../memory/content-frame.js';
@@ -548,7 +548,10 @@ export interface CodexStatusDeps {
   /** Resolve the model codex would pick for itself. Default checkCodexModel. Called ONLY when
    *  dualVerify.model is null and the CLI is present + logged in; returns null when unresolved. */
   resolveModel: () => Promise<string | null>;
-  config: HelixConfig;                          // dual-verify enabled/mode + logContent
+  config: HelixConfig;                          // dual-verify enabled/mode + logContent, as loaded at start
+  /** Issue #11: config.json as it is NOW, read on each call (see configForCall). Absent = the
+   *  loaded config applies as it is (unit tests and embedders that pass a fixed config). */
+  currentConfig?: () => HelixConfig;
   codexLogPath: string;                         // for the content-log entry-count line
 }
 
@@ -565,11 +568,24 @@ const AUTH_MODE_LABEL: Record<CodexStatus['authMode'], string> = {
   unknown: 'unknown',
 };
 
+/** Issue #11: the config one call applies — config.json read again and narrowed to the config loaded
+ *  at start (narrowDualVerify) — and the keys of the file that wait for a restart. Read once per call,
+ *  so every gate and record of that call sees one config. Without a `currentConfig` source the loaded
+ *  config applies as it is. */
+function configForCall(deps: { config: HelixConfig; currentConfig?: () => HelixConfig }): NarrowedConfig {
+  return deps.currentConfig ? narrowDualVerify(deps.config, deps.currentConfig()) : { config: deps.config, pending: [] };
+}
+
+/** A call that did not run while config.json (or, for a key it lacks, the default) asks for a change
+ *  that waits for a restart: constant text, since helix_codex_status names the keys. */
+const RESTART_PENDING_NOTE = 'Until this server restarts, some settings keep the values it started with; helix_codex_status names them.';
+
 /** Free, on-demand Helix<->Codex visibility: CLI/version, stored login, auth mode, dual-verify
  *  state, and the content-log ON/OFF state. Always returns a readable block (never throws). */
 export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResult> {
   const s = await deps.inspect();
-  const dv = deps.config.dualVerify;
+  const { config, pending } = configForCall(deps);
+  const dv = config.dualVerify;
   const cli = s.cliFound && s.version
     ? `found — codex-cli ${s.version}`
     : 'NOT FOUND on PATH';
@@ -583,9 +599,13 @@ export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResu
   // M2: codexLogPath is built the same way as the config path fixed below (`join(home, …)`, where
   // `home` follows HELIX_HOME/an XDG override/a symlink target) — same caller/environment-controlled
   // class, same quarantine.
+  // When the file already turns logging on and only the restart is missing, telling the reader to set
+  // it would send them back to an edit they have made (issue #11 review).
   const contentLog = dv.logContent
     ? `ON — ${JSON.stringify(deps.codexLogPath)} (${codexLogCount(deps.codexLogPath)} entries)`
-    : 'OFF — set dualVerify.logContent=true to record prompts+responses';
+    : pending.includes('logContent')
+      ? 'OFF — dualVerify.logContent=true applies after this server restarts'
+      : 'OFF — set dualVerify.logContent=true to record prompts+responses';
 
   // An explicit model wins at argv, so codex's own default is irrelevant — do not spend ~1s asking.
   // Otherwise ask codex, but only if it can answer. A failed probe says "unresolved"; it never
@@ -612,9 +632,17 @@ export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResu
     // warns on stderr, but stderr is a debug channel nobody watches; this is the observable one.
     // M2: `p` is an unreadable config PATH — environment/caller-controlled (HELIX_HOME, an XDG
     // override, a symlink target) — same quarantine as erase's id above.
-    ...(deps.config.unreadable ?? []).map(
-      (p) => `! ${JSON.stringify(p)} could not be read — everything it sets is ignored; the values below are DEFAULTS`,
+    // The file as it is NOW (issue #11): everything in it is ignored, and the narrowing against
+    // DEFAULT_CONFIG has turned dual-verify off — at start (the defaults) and mid-session alike.
+    ...(config.unreadable ?? []).map(
+      (p) => `! ${JSON.stringify(p)} could not be read — everything it sets is ignored, so dual-verify is off`,
     ),
+    // Issue #11: a widening change in config.json reaches a running server only at its restart. The
+    // values below are the ones applied, so name the keys that do not follow the file yet; each keeps
+    // its start value (narrowDualVerify only ever holds a key at the value loaded at start). Worded
+    // without naming the file, because a deleted file or a key it lacks asks for the default. Each
+    // name comes from narrowDualVerify's fixed vocabulary of config keys, never from the file.
+    ...(pending.length > 0 ? [`! until this server restarts, these settings keep the values it started with: ${pending.join(', ')}`] : []),
     `- codex CLI:      ${cli}`,
     `- login:          ${login}`,
     `- auth mode:      ${auth}`,
@@ -656,7 +684,10 @@ export async function handleCodexStatus(deps: CodexStatusDeps): Promise<ToolResu
 }
 
 export interface DualVerifyHandlerDeps {
-  config: HelixConfig;
+  config: HelixConfig;   // as loaded at start: the ceiling of every call (issue #11)
+  /** Issue #11: config.json as it is NOW, read on each call (see configForCall). Absent = the
+   *  loaded config applies as it is (unit tests and embedders that pass a fixed config). */
+  currentConfig?: () => HelixConfig;
   runner: CodexRunner;
   checkAvailable: () => Promise<Availability>;
   echo: EchoSource;
@@ -780,7 +811,9 @@ export async function handleDualVerify(
   signal?: AbortSignal,
 ): Promise<ToolResult> {
   const ts = (deps.now ?? (() => new Date().toISOString()))();
-  const result = await dualVerify({ ...args, signal }, deps);
+  // One reading of config.json per call, so the gates, the audit row and the content log agree.
+  const { config, pending } = configForCall(deps);
+  const result = await dualVerify({ ...args, signal }, { ...deps, config });
   // Content-free reason for the persisted sinks (audit + opt-in content log). The live ToolResult
   // below still uses the full result.reason; only the durable records are constrained to enum/label.
   const persisted = persistedReason(result);
@@ -789,7 +822,7 @@ export async function handleDualVerify(
   appendAudit(deps.auditPath, {
     kind: 'dual-verify',
     ts,
-    enabled: deps.config.dualVerify.enabled,
+    enabled: config.dualVerify.enabled,
     spawned: result.attempted,
     mode: result.mode,
     verdict: result.agreement?.verdict,
@@ -811,14 +844,14 @@ export async function handleDualVerify(
   // Opt-in conversation log (default OFF). audit.jsonl above is the always-on content-free ledger;
   // this writes the exact prompt+response ONLY on a 'sent' outcome, metadata-only otherwise (a
   // firewall-refused payload is never persisted). Best-effort: appendCodexLog swallows write errors.
-  if (deps.config.dualVerify.logContent) {
+  if (config.dualVerify.logContent) {
     const sent = result.outcome === 'sent';
     appendCodexLog(deps.codexLogPath, {
       ts,
-      kind: deps.config.dualVerify.mode,
+      kind: config.dualVerify.mode,
       outcome: result.outcome,
-      model: deps.config.dualVerify.model,
-      effort: deps.config.dualVerify.effort,
+      model: config.dualVerify.model,
+      effort: config.dualVerify.effort,
       ...(sent ? { prompt: result.promptSent, response: result.codexAnswer } : { reason: persisted }),
     });
   }
@@ -854,6 +887,7 @@ export async function handleDualVerify(
     return ok([
       `dual-verify did not run: ${result.reason}. (No Codex answer — nothing fabricated.)`,
       guardLine(result.gates),
+      pending.length > 0 ? RESTART_PENDING_NOTE : '',
       echoedMemoriesLine(result.egress),
       echoSpansBlock(result.echoSpans, deps),
     ].filter(Boolean).join('\n'));
