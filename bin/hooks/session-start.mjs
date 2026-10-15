@@ -1577,12 +1577,34 @@ function createMetricsSink(path, enabled, deps = {}) {
 }
 
 // src/config.ts
-import { readFileSync as readFileSync7 } from "node:fs";
+import { openSync as openSync5, fstatSync as fstatSync3, readSync as readSync3, closeSync as closeSync5, constants as constants2 } from "node:fs";
 import { join as join8 } from "node:path";
+var MAX_CONFIG_BYTES = 1048576;
+function readConfigText(path) {
+  const fd = openSync5(path, constants2.O_RDONLY | constants2.O_NONBLOCK);
+  try {
+    const st = fstatSync3(fd);
+    if (!st.isFile()) throw new Error("not a regular file");
+    if (st.size > MAX_CONFIG_BYTES) throw new Error(`larger than ${MAX_CONFIG_BYTES} bytes`);
+    const buf = Buffer.alloc(st.size);
+    let len = 0;
+    while (len < buf.length) {
+      const n = readSync3(fd, buf, len, buf.length - len, null);
+      if (n === 0) break;
+      len += n;
+    }
+    return buf.subarray(0, len).toString("utf8");
+  } finally {
+    try {
+      closeSync5(fd);
+    } catch {
+    }
+  }
+}
 function readJson(path, onUnusable) {
   let text;
   try {
-    text = readFileSync7(path, "utf8");
+    text = readConfigText(path);
   } catch (e) {
     if (e.code !== "ENOENT") onUnusable(e.message);
     return null;

@@ -410,11 +410,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants3);
+          this.rhs = optimizeExpr(this.rhs, names, constants4);
         return this;
       }
       get names() {
@@ -431,10 +431,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants3);
+        this.rhs = optimizeExpr(this.rhs, names, constants4);
         return this;
       }
       get names() {
@@ -495,8 +495,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants3) {
-        this.code = optimizeExpr(this.code, names, constants3);
+      optimizeNames(names, constants4) {
+        this.code = optimizeExpr(this.code, names, constants4);
         return this;
       }
       get names() {
@@ -525,12 +525,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants3))
+          if (n.optimizeNames(names, constants4))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -583,12 +583,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants3);
-        if (!(super.optimizeNames(names, constants3) || this.else))
+        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants4);
+        if (!(super.optimizeNames(names, constants4) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants3);
+        this.condition = optimizeExpr(this.condition, names, constants4);
         return this;
       }
       get names() {
@@ -611,10 +611,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants3) {
-        if (!super.optimizeNames(names, constants3))
+      optimizeNames(names, constants4) {
+        if (!super.optimizeNames(names, constants4))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants3);
+        this.iteration = optimizeExpr(this.iteration, names, constants4);
         return this;
       }
       get names() {
@@ -650,10 +650,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants3) {
-        if (!super.optimizeNames(names, constants3))
+      optimizeNames(names, constants4) {
+        if (!super.optimizeNames(names, constants4))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants3);
+        this.iterable = optimizeExpr(this.iterable, names, constants4);
         return this;
       }
       get names() {
@@ -695,11 +695,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         var _a, _b;
-        super.optimizeNames(names, constants3);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants3);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants3);
+        super.optimizeNames(names, constants4);
+        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants4);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants4);
         return this;
       }
       get names() {
@@ -1000,7 +1000,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants3) {
+    function optimizeExpr(expr, names, constants4) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -1015,14 +1015,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants3[n.str];
+        const c = constants4[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants3[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants4[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -25367,7 +25367,7 @@ var EMPTY_COMPLETION_RESULT = {
 };
 
 // src/config.ts
-import { readFileSync as readFileSync8 } from "node:fs";
+import { openSync as openSync6, fstatSync as fstatSync4, readSync as readSync4, closeSync as closeSync6, constants as constants3 } from "node:fs";
 import { homedir } from "node:os";
 import { join as join9 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy", "secretEntropyExempt"];
@@ -25421,10 +25421,32 @@ var DEFAULT_CONFIG = {
   // Local metrics sensor ON by default ("local logs always, export opt-in"); content-free records.
   metrics: { enabled: true }
 };
+var MAX_CONFIG_BYTES = 1048576;
+function readConfigText(path) {
+  const fd = openSync6(path, constants3.O_RDONLY | constants3.O_NONBLOCK);
+  try {
+    const st = fstatSync4(fd);
+    if (!st.isFile()) throw new Error("not a regular file");
+    if (st.size > MAX_CONFIG_BYTES) throw new Error(`larger than ${MAX_CONFIG_BYTES} bytes`);
+    const buf = Buffer.alloc(st.size);
+    let len = 0;
+    while (len < buf.length) {
+      const n = readSync4(fd, buf, len, buf.length - len, null);
+      if (n === 0) break;
+      len += n;
+    }
+    return buf.subarray(0, len).toString("utf8");
+  } finally {
+    try {
+      closeSync6(fd);
+    } catch {
+    }
+  }
+}
 function readJson(path, onUnusable) {
   let text;
   try {
-    text = readFileSync8(path, "utf8");
+    text = readConfigText(path);
   } catch (e) {
     if (e.code !== "ENOENT") onUnusable(e.message);
     return null;
@@ -25504,6 +25526,39 @@ function loadConfig(opts = {}) {
   }
   if (unreadable.length > 0) merged.unreadable = unreadable;
   return merged;
+}
+var STAKES_RANK = { low: 0, medium: 1, high: 2, xhigh: 3 };
+function narrowDualVerify(loaded, current) {
+  const asked = current.unreadable ? DEFAULT_CONFIG.dualVerify : current.dualVerify;
+  const base = loaded.dualVerify;
+  const egressPolicy = {};
+  for (const leg of EGRESS_LEGS) {
+    egressPolicy[leg] = base.egressPolicy[leg] === "block" || asked.egressPolicy[leg] === "block" ? "block" : "allow";
+  }
+  const dualVerify2 = {
+    enabled: base.enabled && asked.enabled,
+    mode: base.mode === "critique" && asked.mode === "compare" ? "compare" : base.mode,
+    stakesFloor: STAKES_RANK[asked.stakesFloor] > STAKES_RANK[base.stakesFloor] ? asked.stakesFloor : base.stakesFloor,
+    model: base.model,
+    effort: base.effort,
+    timeoutMs: base.timeoutMs,
+    egressPolicy,
+    logContent: base.logContent && asked.logContent
+  };
+  const config3 = { ...structuredClone(loaded), dualVerify: dualVerify2 };
+  delete config3.unreadable;
+  if (current.unreadable) config3.unreadable = [...current.unreadable];
+  const pending = [];
+  if (!current.unreadable) {
+    for (const key of ["enabled", "mode", "stakesFloor", "model", "effort", "timeoutMs"]) {
+      if (asked[key] !== dualVerify2[key]) pending.push(key);
+    }
+    for (const leg of EGRESS_LEGS) {
+      if (asked.egressPolicy[leg] !== egressPolicy[leg]) pending.push(`egressPolicy.${leg}`);
+    }
+    if (asked.logContent !== dualVerify2.logContent) pending.push("logContent");
+  }
+  return { config: config3, pending };
 }
 function mergeCompaction(raw) {
   const c = { ...DEFAULT_COMPACTION };
@@ -25939,7 +25994,7 @@ function classifyEmission(content) {
 }
 
 // src/verify/dual-verify.ts
-var STAKES_RANK = { low: 0, medium: 1, high: 2, xhigh: 3 };
+var STAKES_RANK2 = { low: 0, medium: 1, high: 2, xhigh: 3 };
 function persistedReason(result) {
   if (result.outcome === "error") return "codex run failed";
   if (result.outcome === "unavailable" && result.reason?.startsWith("codex preflight failed:")) return "codex preflight failed";
@@ -25965,7 +26020,7 @@ async function dualVerify(params, deps) {
   evaluated.push("stakesFloor");
   const floor = deps.config.dualVerify.stakesFloor;
   const declared = params.stakes ?? "low";
-  if (STAKES_RANK[declared] < STAKES_RANK[floor]) {
+  if (STAKES_RANK2[declared] < STAKES_RANK2[floor]) {
     const what = params.stakes ? `stakes '${params.stakes}' below configured floor '${floor}'` : `stakes not declared (treated as '${declared}'), below configured floor '${floor}'`;
     return { ran: false, attempted: false, outcome: "skipped", reason: `${what} \u2014 lowest accepted: '${floor}' (dualVerify.stakesFloor in ~/.helix/config.json)`, gates: stoppedAt("stakesFloor") };
   }
@@ -26039,16 +26094,16 @@ function spansFor(verdict, input, ledger) {
 }
 
 // src/audit.ts
-import { openSync as openSync6, fsyncSync as fsyncSync4, closeSync as closeSync6 } from "node:fs";
+import { openSync as openSync7, fsyncSync as fsyncSync4, closeSync as closeSync7 } from "node:fs";
 import { dirname as dirname12 } from "node:path";
 function appendAudit(path, event, io = { fsyncDir }) {
   ensureHelixDir(dirname12(path));
-  const fd = openSync6(path, "a", 384);
+  const fd = openSync7(path, "a", 384);
   try {
     writeAll(realFsOps, fd, JSON.stringify(event) + "\n");
     fsyncSync4(fd);
   } finally {
-    closeSync6(fd);
+    closeSync7(fd);
   }
   try {
     io.fsyncDir(dirname12(path));
@@ -26057,22 +26112,22 @@ function appendAudit(path, event, io = { fsyncDir }) {
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync10 } from "node:fs";
+import { readFileSync as readFileSync9 } from "node:fs";
 
 // src/codex-log.ts
-import { readFileSync as readFileSync9, writeFileSync as writeFileSync2, openSync as openSync7, writeSync as writeSync3, closeSync as closeSync7 } from "node:fs";
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync2, openSync as openSync8, writeSync as writeSync3, closeSync as closeSync8 } from "node:fs";
 import { dirname as dirname13 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
   try {
     ensureHelixDir(dirname13(path));
-    const fd = openSync7(path, "a", 384);
+    const fd = openSync8(path, "a", 384);
     try {
       writeSync3(fd, JSON.stringify(entry) + "\n");
     } finally {
-      closeSync7(fd);
+      closeSync8(fd);
     }
-    const lines = readFileSync9(path, "utf8").split("\n").filter((l) => l !== "");
+    const lines = readFileSync8(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
       writeFileSync2(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
@@ -26329,7 +26384,7 @@ function handleConfirm(store2, args, deps) {
 }
 function codexLogCount(path) {
   try {
-    return readFileSync10(path, "utf8").split("\n").filter((l) => l !== "").length;
+    return readFileSync9(path, "utf8").split("\n").filter((l) => l !== "").length;
   } catch {
     return 0;
   }
@@ -26340,14 +26395,19 @@ var AUTH_MODE_LABEL = {
   none: "none",
   unknown: "unknown"
 };
+function configForCall(deps) {
+  return deps.currentConfig ? narrowDualVerify(deps.config, deps.currentConfig()) : { config: deps.config, pending: [] };
+}
+var RESTART_PENDING_NOTE = "Until this server restarts, some settings keep the values it started with; helix_codex_status names them.";
 async function handleCodexStatus(deps) {
   const s = await deps.inspect();
-  const dv = deps.config.dualVerify;
+  const { config: config3, pending } = configForCall(deps);
+  const dv = config3.dualVerify;
   const cli = s.cliFound && s.version ? `found \u2014 codex-cli ${s.version}` : "NOT FOUND on PATH";
   const login = s.available ? "stored credential found (not checked with the server)" : "not logged in \u2014 run `codex login`";
   const auth = AUTH_MODE_LABEL[s.authMode];
   const dualVerify2 = dv.enabled ? `enabled, mode=${dv.mode}` : "disabled";
-  const contentLog = dv.logContent ? `ON \u2014 ${JSON.stringify(deps.codexLogPath)} (${codexLogCount(deps.codexLogPath)} entries)` : "OFF \u2014 set dualVerify.logContent=true to record prompts+responses";
+  const contentLog = dv.logContent ? `ON \u2014 ${JSON.stringify(deps.codexLogPath)} (${codexLogCount(deps.codexLogPath)} entries)` : pending.includes("logContent") ? "OFF \u2014 dualVerify.logContent=true applies after this server restarts" : "OFF \u2014 set dualVerify.logContent=true to record prompts+responses";
   let model;
   if (dv.model !== null) {
     model = `${dv.model} (helix override)`;
@@ -26365,9 +26425,17 @@ async function handleCodexStatus(deps) {
     // warns on stderr, but stderr is a debug channel nobody watches; this is the observable one.
     // M2: `p` is an unreadable config PATH — environment/caller-controlled (HELIX_HOME, an XDG
     // override, a symlink target) — same quarantine as erase's id above.
-    ...(deps.config.unreadable ?? []).map(
-      (p) => `! ${JSON.stringify(p)} could not be read \u2014 everything it sets is ignored; the values below are DEFAULTS`
+    // The file as it is NOW (issue #11): everything in it is ignored, and the narrowing against
+    // DEFAULT_CONFIG has turned dual-verify off — at start (the defaults) and mid-session alike.
+    ...(config3.unreadable ?? []).map(
+      (p) => `! ${JSON.stringify(p)} could not be read \u2014 everything it sets is ignored, so dual-verify is off`
     ),
+    // Issue #11: a widening change in config.json reaches a running server only at its restart. The
+    // values below are the ones applied, so name the keys that do not follow the file yet; each keeps
+    // its start value (narrowDualVerify only ever holds a key at the value loaded at start). Worded
+    // without naming the file, because a deleted file or a key it lacks asks for the default. Each
+    // name comes from narrowDualVerify's fixed vocabulary of config keys, never from the file.
+    ...pending.length > 0 ? [`! until this server restarts, these settings keep the values it started with: ${pending.join(", ")}`] : [],
     `- codex CLI:      ${cli}`,
     `- login:          ${login}`,
     `- auth mode:      ${auth}`,
@@ -26452,14 +26520,15 @@ function egressLine(v) {
 }
 async function handleDualVerify(args, deps, signal) {
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
-  const result = await dualVerify({ ...args, signal }, deps);
+  const { config: config3, pending } = configForCall(deps);
+  const result = await dualVerify({ ...args, signal }, { ...deps, config: config3 });
   const persisted = persistedReason(result);
   const egress = result.egress;
   const decided = egress && egress.decision !== "pass";
   appendAudit(deps.auditPath, {
     kind: "dual-verify",
     ts,
-    enabled: deps.config.dualVerify.enabled,
+    enabled: config3.dualVerify.enabled,
     spawned: result.attempted,
     mode: result.mode,
     verdict: result.agreement?.verdict,
@@ -26478,14 +26547,14 @@ async function handleDualVerify(args, deps, signal) {
     // arriving at the reverse of it. Absent on a call that ran: passing every gate is what running is.
     stoppedGate: result.gates?.stoppedAt
   });
-  if (deps.config.dualVerify.logContent) {
+  if (config3.dualVerify.logContent) {
     const sent = result.outcome === "sent";
     appendCodexLog(deps.codexLogPath, {
       ts,
-      kind: deps.config.dualVerify.mode,
+      kind: config3.dualVerify.mode,
       outcome: result.outcome,
-      model: deps.config.dualVerify.model,
-      effort: deps.config.dualVerify.effort,
+      model: config3.dualVerify.model,
+      effort: config3.dualVerify.effort,
       ...sent ? { prompt: result.promptSent, response: result.codexAnswer } : { reason: persisted }
     });
   }
@@ -26508,6 +26577,7 @@ async function handleDualVerify(args, deps, signal) {
     return ok([
       `dual-verify did not run: ${result.reason}. (No Codex answer \u2014 nothing fabricated.)`,
       guardLine(result.gates),
+      pending.length > 0 ? RESTART_PENDING_NOTE : "",
       echoedMemoriesLine(result.egress),
       echoSpansBlock(result.echoSpans, deps)
     ].filter(Boolean).join("\n"));
@@ -26575,7 +26645,7 @@ async function handleDualVerify(args, deps, signal) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync8, mkdtempSync, readFileSync as readFileSync11, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync8, mkdtempSync, readFileSync as readFileSync10, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join11, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
@@ -26917,7 +26987,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
       }
       let answer = "";
       try {
-        answer = readFileSync11(outFile, "utf8").trim();
+        answer = readFileSync10(outFile, "utf8").trim();
       } catch {
       }
       return answer ? { ok: true, answer } : { ok: false, error: "codex produced no output" };
@@ -27056,6 +27126,9 @@ function buildServer(store2, dualDeps, metrics2) {
   const home2 = process.env.HELIX_HOME ?? join12(homedir2(), ".helix");
   const dv = dualDeps ?? {
     config: loadConfig({ globalPath: join12(home2, "config.json") }),
+    // Issue #11: read again on each call; only what narrows the outbound path applies (see index.ts).
+    currentConfig: () => loadConfig({ globalPath: join12(home2, "config.json"), warn: () => {
+    } }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
     // inspect()'s own projection sets contentDigest unconditionally (store.ts:830), but the field is
@@ -27070,6 +27143,7 @@ function buildServer(store2, dualDeps, metrics2) {
     inspect: () => checkCodexStatus(),
     resolveModel: () => checkCodexModel(),
     config: dv.config,
+    currentConfig: dv.currentConfig,
     codexLogPath: dv.codexLogPath
   };
   server2.registerTool("helix_memory_commit", {
@@ -27355,6 +27429,12 @@ for (const { ledger, root } of scanScopes) {
 }
 var server = buildServer(store, {
   config: config2,
+  // Issue #11: config.json is read again on each dual-verify and status call, and the handlers apply
+  // only what narrows the outbound path (narrowDualVerify); a widening change waits for a restart.
+  // Silent: the start's load above already reported this file once, and helix_codex_status names an
+  // unreadable file and every waiting key on the surface an operator reads.
+  currentConfig: () => loadConfig({ globalPath: join13(home, "config.json"), warn: () => {
+  } }),
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
   // inspect()'s own projection sets contentDigest unconditionally (store.ts:830), but the field is

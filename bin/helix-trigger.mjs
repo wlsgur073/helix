@@ -1,5 +1,5 @@
 // scripts/trigger-measure.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync3 } from "node:fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync2 } from "node:fs";
 import { dirname as dirname2, join as join3 } from "node:path";
 import { homedir } from "node:os";
 
@@ -211,12 +211,34 @@ function aliasesGlobalLedger(projectLedger, globalLedger) {
 }
 
 // src/config.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { openSync as openSync3, fstatSync as fstatSync2, readSync as readSync2, closeSync as closeSync3, constants } from "node:fs";
 import { join as join2 } from "node:path";
+var MAX_CONFIG_BYTES = 1048576;
+function readConfigText(path) {
+  const fd = openSync3(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const st = fstatSync2(fd);
+    if (!st.isFile()) throw new Error("not a regular file");
+    if (st.size > MAX_CONFIG_BYTES) throw new Error(`larger than ${MAX_CONFIG_BYTES} bytes`);
+    const buf = Buffer.alloc(st.size);
+    let len = 0;
+    while (len < buf.length) {
+      const n = readSync2(fd, buf, len, buf.length - len, null);
+      if (n === 0) break;
+      len += n;
+    }
+    return buf.subarray(0, len).toString("utf8");
+  } finally {
+    try {
+      closeSync3(fd);
+    } catch {
+    }
+  }
+}
 function readJson(path, onUnusable) {
   let text;
   try {
-    text = readFileSync2(path, "utf8");
+    text = readConfigText(path);
   } catch (e) {
     if (e.code !== "ENOENT") onUnusable(e.message);
     return null;
@@ -457,7 +479,7 @@ function tsOf(line) {
 }
 function acknowledgeLatest(deps = {}) {
   const env = deps.env ?? process.env;
-  const readFile = deps.readFile ?? ((p) => readFileSync3(p));
+  const readFile = deps.readFile ?? ((p) => readFileSync2(p));
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const home = resolveHome(env);
   let text;
@@ -496,7 +518,7 @@ function acknowledgeLatest(deps = {}) {
 }
 function measureAndRecord(input, deps = {}) {
   const env = deps.env ?? process.env;
-  const readFile = deps.readFile ?? ((p) => readFileSync3(p));
+  const readFile = deps.readFile ?? ((p) => readFileSync2(p));
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const fsOps = deps.fs ?? realFsOps;
   const home = resolveHome(env);
