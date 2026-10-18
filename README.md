@@ -105,9 +105,12 @@ saying it is being ignored.)
 
   `secretEntropyExempt` is the one leg that ships open, so a git SHA in your prose does not block the
   call. Set it to `"block"` to close the exemption. On the write path, the word-chain half of that
-  shape (dated paths, note slugs, citations — no credential keyword within the 40 characters on
-  either side of it, a newline, `.` or `;` cutting that window short) persists verbatim under its
-  own key, `persistence.releaseWordChains` (default `true`), and a keyword farther away, even in the
+  shape (dated paths, note slugs, citations, and on this path also Windows paths,
+  environment-variable references such as `%USERPROFILE%` or `$HOME`, and `NAME=value` settings
+  whose names, written as an upper-case variable, a lower-case option or a Java `-D` property,
+  carry no credential word — no credential keyword within the 40 characters on either
+  side of it, a newline, `.` or `;` cutting that window short) persists verbatim under its own key,
+  `persistence.releaseWordChains` (default `true`), and a keyword farther away, even in the
   same sentence, does not keep it redacted; a hex-core token
   still redacts on write regardless of either setting.
 

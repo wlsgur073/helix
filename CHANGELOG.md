@@ -103,7 +103,10 @@ First release.
   `secretEntropyExempt`, which defaults to `allow` and is what releases a hex-shaped or
   low-entropy-chain token — a git SHA quoted in design prose — past the guard. On the write path the
   word-chain arm of that shape has its own key, `persistence.releaseWordChains` (default `true`), so
-  a dated path or note slug persists verbatim while a hex-core token still redacts; a credential
+  a dated path or note slug persists verbatim while a hex-core token still redacts; on that path the
+  arm also accepts a Windows path, an environment-variable reference and a `NAME=value` setting or
+  `--flag=value` option whose names, written as an upper-case variable, a lower-case option or a
+  Java `-D` property, carry no credential word, which egress does not; a credential
   keyword within the 40 characters on either side of the token (a newline, `.` or `;` cuts that
   window short) vetoes the release on both paths; one farther away, even in the same sentence, does
   not. Provider-format credentials are

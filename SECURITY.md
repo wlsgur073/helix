@@ -57,9 +57,16 @@ acknowledgement within a few days.
   redacted — a **syntactically bounded false-positive exclusion, not a promise that a ledger
   contains no secrets**. What is redacted: named provider tokens, `password=`-style heuristic
   matches, and high-entropy tokens, each replaced with `[redacted:<kind>]`. The one write-path
-  carve-out: an ENTROPY-ONLY benign word chain (segments individually low-entropy — dated filenames,
-  doc paths, note slugs, citations) with no credential keyword within the 40 characters on either
-  side of it (a newline, `.` or `;` between the two cuts that window short) is persisted VERBATIM
+  carve-out: an ENTROPY-ONLY benign word chain (segments individually low-entropy — dated
+  filenames, doc paths, note slugs, citations; on this path the chain test also splits on `\`,
+  splits on `=` right after a setting name as such names are written (an upper-case variable, a
+  lower-case option or a Java `-D` property, so a mixed-case base64 body does not split off its
+  padding), drops a leading drive prefix and judges an environment-variable reference such as
+  `%USERPROFILE%` or `$HOME` by its name, so Windows paths and `NAME=value` settings qualify,
+  except a token in which a name to the left of an `=` carries a credential word: key, token,
+  secret, pass and the like anywhere in the name, short ones such as pw or pin as a part of it or
+  at the end of one) with no credential keyword within the 40 characters on either side of it (a
+  newline, `.` or `;` between the two cuts that window short) is persisted VERBATIM
   (`persistence.releaseWordChains`, default `true`; set `false` to restore unconditional entropy
   redaction); a keyword farther away, even in the same sentence, does not keep it redacted. The
   keyword test also matches inside longer words, so `passed`, `bypass` or `compass` within that
@@ -71,7 +78,13 @@ acknowledgement within a few days.
   persistence cannot tell a git object from a key. This was always an ACCIDENT guarantee, not an
   absolute one: a long pure-alphabetic token (no digit) never matched the entropy detector and is
   persisted verbatim with no exemption involved; the carve-out makes that boundary explicit
-  instead of syntactically arbitrary.
+  instead of syntactically arbitrary. The wider write-path shape inherits the chain's residual: a
+  secret written as words and short numbers (a passphrase, grouped digits) passes the segment
+  rules, so behind a name the credential list does not know it is persisted, as its `-`-joined
+  twin already was. Random material whose pieces happen to look like words passes too: measured on
+  20,000 random values per shape, about 0.07 to 1.1% of base64url values behind a setting name or
+  inside a Windows path, and 4% of values made of 4-character alphanumeric groups joined by `\`, the same
+  rate as for groups joined by `-` before this shape existed.
   A commit whose scan replaced a span says so in its result — `redactions`, the replaced spans per
   marker kind, and a constant `notice` — and a reality-check binds only a `path` and a `pattern`
   that appear in the stored content, so one that fell inside a redacted span binds only if the
@@ -92,12 +105,15 @@ acknowledgement within a few days.
   digests quoted in it, the word-chain arm because the entropy leg fired twice on real artifact
   names (dated filenames). It is gated by its own leg,
   `secretEntropyExempt` (default `allow`); set it to `block` to close the exemption.
-  The release is applied at the policy layer, so that leg genuinely governs it. The write/egress asymmetry that
-  remains by design sits on the HEX arm: egress treats a hex core as exempt-shaped
-  (releasable under `secretEntropyExempt`), while the write path always redacts it;
-  the word-chain arm is symmetric — released on both paths, each under its own key
-  (`secretEntropyExempt` for egress, `persistence.releaseWordChains` for the write
-  path), with the same shared `nearCredential` keyword-window guard on both.
+  The release is applied at the policy layer, so that leg genuinely governs it. The write/egress asymmetries that
+  remain by design: on the HEX arm, egress treats a hex core as exempt-shaped
+  (releasable under `secretEntropyExempt`), while the write path always redacts it; on the
+  word-chain arm, the write path accepts the wider shape above (Windows paths,
+  environment-variable references, settings) and egress only the plain chain, so a Windows path
+  that persists verbatim still trips the entropy leg on the way out. Egress releases both arms
+  under `secretEntropyExempt`; the write path releases only the word-chain arm, under
+  `persistence.releaseWordChains`; the same shared `nearCredential` keyword-window guard applies on
+  both.
   A trailing source-citation line reference (`path/to/file.ts:112`, `:44-45`, `:45:7`)
   is removed before the chain test, so a code pointer is judged on its path. The removal
   is conditional on the prefix being file-shaped (a dot plus a 1–5 character alphanumeric
