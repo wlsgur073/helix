@@ -2,7 +2,7 @@
  {
   "rowId": "r001",
   "surfaceItem": "tool:helix_codex_status",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "helix_codex_status called LIVE on 2026-09-24 from a Claude Code session started AFTER the Block B reinstall, through the host's own MCP connection: codex-cli 0.156.1 found, logged in, ChatGPT subscription inferred, stakes floor high, model gpt-6-astra inherited from the codex config, effort max as a helix override, timeout 1500000 ms, every egress leg with its value, content log OFF. The serving process was verified, not assumed: the only helix-mcp.mjs processes running were started 2026-09-24 22:18 from ~/.claude/plugins/cache/helix/helix/0.1.0/bin/helix-mcp.mjs, whose sha256 equals the receipt's bundle entry.",
@@ -12,7 +12,7 @@
  {
   "rowId": "r002",
   "surfaceItem": "tool:helix_dual_verify",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 metered, RUN (not skipped) 2026-09-24 with codex-cli 0.156.1: HELIX_REAL_CODEX=1 over test/acceptance/ passed 7 of 7 files and 40 of 40 tests, and grep for 'skipped' over the run log counts zero, so both opt-in cases executed rather than being reported as skips. Those two are the same pair the ordinary suite reports as '2 skipped'.",
@@ -152,7 +152,7 @@
  {
   "rowId": "r016",
   "surfaceItem": "config:dualVerify.effort",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -162,7 +162,7 @@
  {
   "rowId": "r017",
   "surfaceItem": "config:dualVerify.egressPolicy.memoryEcho",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -172,7 +172,7 @@
  {
   "rowId": "r018",
   "surfaceItem": "config:dualVerify.egressPolicy.piiBulk",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -182,7 +182,7 @@
  {
   "rowId": "r019",
   "surfaceItem": "config:dualVerify.egressPolicy.piiHigh",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -192,7 +192,7 @@
  {
   "rowId": "r020",
   "surfaceItem": "config:dualVerify.egressPolicy.secretEntropy",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -202,7 +202,7 @@
  {
   "rowId": "r021",
   "surfaceItem": "config:dualVerify.egressPolicy.secretEntropyExempt",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -212,7 +212,7 @@
  {
   "rowId": "r022",
   "surfaceItem": "config:dualVerify.egressPolicy.secretHeuristic",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "D2 codex_status printed every leg and its value; A1 config.test.ts; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -222,7 +222,7 @@
  {
   "rowId": "r023",
   "surfaceItem": "config:dualVerify.enabled",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -232,7 +232,7 @@
  {
   "rowId": "r024",
   "surfaceItem": "config:dualVerify.logContent",
-  "claimId": "README.md#aa8092e0fbdb",
+  "claimId": "README.md#87ed78effc5c",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -242,7 +242,7 @@
  {
   "rowId": "r025",
   "surfaceItem": "config:dualVerify.mode",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -252,7 +252,7 @@
  {
   "rowId": "r026",
   "surfaceItem": "config:dualVerify.model",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -262,7 +262,7 @@
  {
   "rowId": "r027",
   "surfaceItem": "config:dualVerify.stakesFloor",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -272,7 +272,7 @@
  {
   "rowId": "r028",
   "surfaceItem": "config:dualVerify.timeoutMs",
-  "claimId": "CHANGELOG.md#fea5df667b20",
+  "claimId": "CHANGELOG.md#e813342b334b",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 config.test.ts drives the parser; A5 inventory recovers the leaf by execution; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",
@@ -332,7 +332,7 @@
  {
   "rowId": "r034",
   "surfaceItem": "env:OPENAI_API_KEY",
-  "claimId": "README.md#aa8092e0fbdb",
+  "claimId": "README.md#87ed78effc5c",
   "verdict": "MET",
   "repairTarget": null,
   "evidence": "A1 shipped-claims pins it as documented; A5 recovers it from the bundles; re-run 2026-09-24 (suite 2729 passed | 2 skipped (2731), 210 files, both later executed under D2).",

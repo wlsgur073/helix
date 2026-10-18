@@ -141,8 +141,14 @@ First release.
   pair whose figures differ cannot render `agree` — the verdict withholds and names both values.
   Every `agree` is labelled lexical agreement in the response itself: matched claims share tokens
   and polarity, and that is not a semantic check.
-- The egress guard scans what each mode actually transmits. `compare` sends the normalized
-  `question` alone, so `helixAnswer` — which never leaves the machine in that mode — is not scanned
+- The egress guard scans what each mode actually transmits. `compare` sends the `question` alone,
+  with control and format characters removed and nothing else changed, so code keeps its
+  compatibility characters and fence runs; the guard also scans the question and the text sent
+  after NFKC and removal of control and format characters except newlines and tabs (scan-only
+  copies, never sent), so what folds into a secret or a card number is still refused, and
+  a payload whose fold outgrows the scan limit is refused unscanned. The secret and PII checks also
+  scan that fold with each fence run replaced by one space, so a token glued to a run such as `====`
+  is also checked on its own. Since the question is all that leaves in that mode, `helixAnswer` — which never leaves the machine there — is not scanned
   against the ledger and cannot refuse a call over bytes that stay local; its own 65,536-character
   cap is enforced directly in `dualVerify` instead, so no entry path escapes it.
   `critique` sends both fields inside the prompt, and both are scanned.

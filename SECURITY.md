@@ -107,20 +107,21 @@ acknowledgement within a few days.
   an interior `label:<secret>` pair. The residual limit, stated plainly: a token
   syntactically indistinguishable from a citation is released, and no local test can
   separate the two.
-- **The egress scan fails closed on size, and the caps are hard.** A payload whose raw or
-  outbound form exceeds **200,000 characters**, or live memory whose content totals more than
-  **8,000,000 characters** (every record the recall view serves, global plus an adopted project;
-  erased and superseded rows do not count), is REFUSED unscanned rather than sent — the decision is
-  `blocked` with `decidedBy: 'scan_limit'`. No policy key releases either cap; they sit
-  upstream of `dualVerify.egressPolicy` entirely. The direction is deliberate: an
-  adversary who can grow the ledger can therefore cause **availability** loss on
-  dual-verify, which is far cheaper than unbounded scanning of adversary-sized input.
-  Nothing bounds a legitimate corpus below that cap — 489 facts at the 16,384-character content
-  limit already exceed it — so a user whose corpus does grow past it sees every dual-verify call
-  refused. Each call the cap refuses names that cause in its reply (`ledger exceeds the egress scan
-  limit`); a call stopped earlier — by input validation, the enabled gate, the stakes floor, or a
-  payload over the 200,000-character cap — names that stop instead. README's dual-verify notes state
-  the same refusal.
+- **The egress scan fails closed on size, and the caps are hard.** A payload whose raw or outbound
+  form, or either after NFKC and control/format stripping (newlines and tabs kept; these folded
+  forms are scanned, never sent), exceeds **200,000 characters**, or live memory whose content
+  totals more than **8,000,000 characters** (every record the recall view serves, global plus an
+  adopted project; erased and superseded rows do not count), is REFUSED unscanned rather than sent
+  — the decision is `blocked` with `decidedBy: 'scan_limit'`. No policy key releases either cap;
+  they sit upstream of `dualVerify.egressPolicy` entirely. The direction is deliberate: an
+  adversary who can grow the ledger can therefore cause **availability** loss on dual-verify,
+  which is far cheaper than unbounded scanning of adversary-sized input. Nothing bounds a
+  legitimate corpus below that cap — 489 facts at the 16,384-character content limit already
+  exceed it — so a user whose corpus does grow past it sees every dual-verify call refused. Each
+  call the cap refuses names that cause in its reply (`ledger exceeds the egress scan limit`); a
+  call stopped earlier — by input validation, the enabled gate, the stakes floor, or a payload
+  over the 200,000-character cap — names that stop instead. README's dual-verify notes state the
+  same refusal.
 - **Untrusted content** (recalled memory, external-model output) is treated as DATA,
   never instructions: NFKC/control/bidi normalization + per-line datamarking + a
   per-call nonce frame.
@@ -687,12 +688,12 @@ block, the refusal says where it matched (a named credential in the same payload
 and that refusal names no echoed record or run; the audit row still lists their ids): for each record
 that still blocks — an exempted record is one the caller already proved it read — the tool response
 quotes the runs of the caller's OWN payload that matched that record, in the form the leg compared
-(lower-cased, whitespace collapsed, control characters dropped, fence runs broken), so a quoted run
-can differ from the typed text, bounded to 10 records, 3 runs each and 160 characters per run, and
-carried
-inside a datamarked DATA frame, because that text is content rather than advisory prose. Those runs
-render in that response only. `audit.jsonl` never receives a matched span; its row keeps counts, ids
-and labels, exactly as it does for every other leg.
+(compatibility characters folded, lower-cased, whitespace collapsed, control and format characters
+dropped). For display, fence runs are also broken in both modes, so a quoted run can differ from the
+typed text. The runs are bounded to 10 records, 3 runs each and 160 characters per run before display
+normalization, and carried inside a datamarked DATA frame, because that text is content rather than
+advisory prose. Those runs render in that response only. `audit.jsonl` never receives a matched
+span; its row keeps counts, ids and labels, exactly as it does for every other leg.
 
 **The egress guard governs the payload Helix composes — it is not a sandbox around the
 Codex CLI.** The CLI is a separate program with its own model and its own connection to
