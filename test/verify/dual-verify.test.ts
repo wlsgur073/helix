@@ -569,15 +569,17 @@ describe('G1: what the gate scanned is what the runner is sent', () => {
 
   // Regression lock for the "build once, never rebuild" invariant (8a3bb1a): the string handed to
   // deps.runner must be BYTE-IDENTICAL to result.promptSent (what the gate scanned and what the opt-in
-  // content log records), and it must differ from the raw question whenever normalizeUntrusted actually
-  // changes it. Every other prompt assertion in this file (e.g. 'which db?') uses a pure-ASCII question
-  // where normalizeUntrusted is the identity, so none of them can distinguish "sent the already-built
-  // prompt" from "rebuilt the raw question at the call site" -- a bug this exact shape shipped once
-  // already (8a3bb1a) and every existing test stayed green through it. This question contains a fence
-  // run ("===") that normalizeUntrusted breaks ("= = ="), so a rebuild-at-send-site regression is
-  // observable: the runner would see the untouched raw question instead.
+  // content log records), and it must differ from the raw question whenever the outbound transform
+  // actually changes it. Every other prompt assertion in this file (e.g. 'which db?') uses a
+  // pure-ASCII question where the outbound transform is the identity, so none of them can distinguish
+  // "sent the already-built prompt" from "rebuilt the raw question at the call site" -- a bug this
+  // exact shape shipped once already (8a3bb1a) and every existing test stayed green through it. This
+  // question contains a zero-width space that the compare-mode transform removes (issue #13: compare
+  // mode no longer breaks fence runs or folds NFKC, so a run like "===" would no longer tell the two
+  // apart), so a rebuild-at-send-site regression is observable: the runner would see the untouched
+  // raw question.
   it('compare mode: the runner receives the SAME bytes the gate scanned, not a rebuilt raw question', async () => {
-    const question = 'what does === mean in js?';
+    const question = 'what does =\u200B== mean in js?';
     let runnerSaw: string | null = null;
     const result = await dualVerify(
       { stakes: 'high', question, helixAnswer: 'strict equality, no type coercion' },
@@ -605,5 +607,93 @@ describe('dualVerify: auth rejection pass-through (H12)', () => {
     const r = await dualVerify({ stakes: 'high', question: 'q', helixAnswer: 'a' },
       deps({ config: enabled(), runner: async () => ({ ok: false, error: 'timeout' }) }));
     expect('authRejected' in r).toBe(false);
+  });
+});
+
+// Issue #13: compare mode sends the question with the control and format characters removed, and
+// nothing else (no NFC either: it maps canonical singletons such as U+037E to ';'). NFKC and fence-run
+// breaking changed code on the way out (U+2026 became "...", a fullwidth slash became "/", "===" became
+// "= = ="), so Codex reviewed code the host never wrote. The egress guard keeps the NFKC view as a
+// scan-only form, so what folds into a secret or a card number is still refused.
+describe('dualVerify compare mode sends the code the host wrote (issue #13)', () => {
+  const send = async (question: string): Promise<{ saw: string | null; outcome: string }> => {
+    let saw: string | null = null;
+    const r = await dualVerify({ stakes: 'high', question, helixAnswer: 'a' }, deps({
+      config: enabled(),
+      runner: async (prompt: string) => { saw = prompt; return { ok: true, answer: 'x' }; },
+    }));
+    return { saw, outcome: r.outcome };
+  };
+  const fullwidth = (s: string): string => s.replace(/[!-~]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0));
+
+  it('compatibility characters and fence runs reach Codex unchanged', async () => {
+    const q = 'return s.substring(0, 299) + "\u2026"; name.replace("/", "\uff0f"); label = "\u3231" + "\u2460"; if (a === b) n = \uff13; // ---';
+    const { saw, outcome } = await send(q);
+    expect(outcome).toBe('sent');
+    expect(saw).toBe(q);
+  });
+
+  it('control and format characters are removed; newlines and tabs are kept', async () => {
+    const { saw } = await send('a\u200Bb\u202Ec\u0007d\n\te');
+    expect(saw).toBe('abcd\n\te');
+  });
+
+  it('a decomposed sequence and canonical singletons reach Codex as written', async () => {
+    const q = 'cafe\u0301; x = 1\u037e \u212b \uf900';   // U+037E is not ";", whatever NFC says
+    const { saw } = await send(q);
+    expect(saw).toBe(q);
+  });
+
+  it('a card number in fullwidth digits is still refused before anything is sent', async () => {
+    const { saw, outcome } = await send('card ' + fullwidth('4111 1111 1111 1111') + ' exp 12/29');
+    expect(outcome).toBe('refused');
+    expect(saw).toBeNull();
+  });
+
+  it('a provider key in fullwidth characters is still refused before anything is sent', async () => {
+    const { saw, outcome } = await send('the key is ' + fullwidth('AKIAQZ3MXW7TB4RN5KJD'));
+    expect(outcome).toBe('refused');
+    expect(saw).toBeNull();
+  });
+
+  it('a PEM header hidden by fullwidth or zero-width characters is refused in either mode', async () => {
+    const pem = '-----BEGIN RSA PRIVATE KEY-----';
+    const zw = (s: string): string => s.split('').join('\u200B');
+    for (const hidden of [fullwidth(pem), zw(pem)]) {
+      expect((await send(hidden)).outcome).toBe('refused');
+      let ran = false;
+      const r = await dualVerify({ stakes: 'high', question: 'review this', helixAnswer: hidden }, deps({
+        config: critiqueCfg(),
+        runner: async () => { ran = true; return { ok: true, answer: 'x' }; },
+      }));
+      expect(r.outcome).toBe('refused');
+      expect(ran).toBe(false);
+    }
+  });
+
+  // Pins the documented echo rule (a shared run of 24 characters after normalization) on what compare
+  // mode now sends. While compare mode broke fence runs, "---" left as "- - -" and that copy of the
+  // memory was refused; the bytes sent now do not contain it, so the call goes out. A change here is a
+  // change of the matching rule, not of this issue.
+  it('a question that differs from a memory only by the spacing of a fence run is sent', async () => {
+    let saw: string | null = null;
+    const memory = 'zulu mesa - - - kilo tango';
+    const r = await dualVerify({ stakes: 'high', question: 'zulu mesa --- kilo tango', helixAnswer: 'a' }, deps({
+      config: enabled(),
+      runner: async (p: string) => { saw = p; return { ok: true, answer: 'x' }; },
+      echo: { mode: 'enforce', ledgerTexts: () => [{ id: 'm_f', content: memory, contentDigest: digestContent(memory) }] },
+    }));
+    expect(r.outcome).toBe('sent');
+    expect(saw).toBe('zulu mesa --- kilo tango');
+  });
+
+  it('critique mode still folds and breaks the text it frames', async () => {
+    let saw = '';
+    await dualVerify({ stakes: 'high', question: 'q "\u2026"', helixAnswer: 'a === b' }, deps({
+      config: critiqueCfg(),
+      runner: async (prompt: string) => { saw = prompt; return { ok: true, answer: 'x' }; },
+    }));
+    expect(saw).toContain('q "..."');
+    expect(saw).toContain('a = = = b');
   });
 });

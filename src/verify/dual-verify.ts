@@ -1,7 +1,7 @@
 import type { HelixConfig } from '../config.js';
 import type { Availability, CodexRunner } from './codex.js';
 import { buildAgreementMap, type AgreementMap } from './agreement-map.js';
-import { normalizeUntrusted } from '../memory/content-frame.js';
+import { normalizeUntrusted, stripControls } from '../memory/content-frame.js';
 import { classifyEgress, echoSpans, scannedForms, type EgressVerdict, type LedgerItem, type QuotedMemory } from '../risk/trifecta.js';
 import type { CodexOutcome } from '../codex-log.js';
 import { MAX_DV_ANSWER_CHARS, MAX_ECHO_SPAN_IDS, MAX_ECHO_SPANS_PER_ID } from '../limits.js';
@@ -168,12 +168,19 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
   // Build the EXACT outbound payload first, then gate it. The gate must clear the bytes that actually
   // leave the machine (G1) -- scanning a stand-in is how the echo leg was bypassed.
   const mode = deps.config.dualVerify.mode;
+  // Issue #13: compare mode sends the question alone, with no frame around it, so only the removal of
+  // control and format characters applies. NFKC and fence-run breaking (normalizeUntrusted) changed
+  // code on the way out: U+2026 became "...", a fullwidth slash became "/", "===" became "= = =",
+  // and Codex reviewed code the host never wrote. NFC is left out too: it maps canonical singletons
+  // such as U+037E to ";", which would hide a real syntax error. The NFKC view is still SCANNED:
+  // scannedForms adds the folded forms as scan-only forms (src/risk/trifecta.ts). Critique mode
+  // frames the answer, so its prompt keeps the full normalization.
   const prompt = mode === 'critique'
     ? buildCritiquePrompt(params.question, params.helixAnswer)
-    : normalizeUntrusted(params.question);
+    : stripControls(params.question);
 
   const ledger = deps.echo.mode === 'enforce' ? deps.echo.ledgerTexts() : null;
-  // G1 applies to what is TRANSMITTED. Compare mode sends the normalized question alone, so gating
+  // G1 applies to what is TRANSMITTED. Compare mode sends the question alone (control-stripped), so gating
   // helixAnswer there blocks on bytes that never leave the machine; critique mode sends both fields
   // inside buildCritiquePrompt, so both are scanned. The audit row stays a record of the payload.
   // Hoisted into a const (rather than built inline) so the A2 span diagnosis below scans the

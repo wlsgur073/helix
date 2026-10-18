@@ -351,9 +351,13 @@ describe('handleDualVerify', () => {
   it('A2: the span path scans the same outbound form classifyEgress blocked on (scannedForms is the one derivation)', async () => {
     // Isolate-A's fixture (test/risk/trifecta.test.ts): the memory matches ONLY the fence-broken
     // outbound form. If the span path built its forms from the raw text alone, the block would name
-    // m_fence and show no span for it.
+    // m_fence and show no span for it. Critique mode, since issue #13: the fixture relies on fence-run
+    // breaking, which only critique mode's framed prompt still applies (compare mode sends the question
+    // with control characters removed and nothing else).
     const FENCE_MEMO = 'zulu mesa - - - kilo tango';
+    const loaded = deps({}).config;
     const d = deps({
+      config: { ...loaded, dualVerify: { ...loaded.dualVerify, mode: 'critique' } },
       echo: { mode: 'enforce', ledgerTexts: () => [item('m_fence', FENCE_MEMO)] },
       runner: async () => { throw new Error('must not spawn'); },
     });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { frameAsData, makeDataFrame, normalizeUntrusted, newNonce, datamark, PROOF_LEGEND, DATA_SEMANTICS } from '../../src/memory/content-frame.js';
+import { frameAsData, makeDataFrame, normalizeUntrusted, collapseFenceRuns, newNonce, datamark, PROOF_LEGEND, DATA_SEMANTICS } from '../../src/memory/content-frame.js';
 import type { MemoryRecord } from '../../src/types.js';
 import type { ScopedRecord } from '../../src/types.js';
 
@@ -35,6 +35,15 @@ describe('normalizeUntrusted', () => {
   it('caps to maxChars with an ellipsis', () => {
     expect(normalizeUntrusted('x'.repeat(100), 10)).toHaveLength(10);
     expect(normalizeUntrusted('x'.repeat(100), 10).endsWith('…')).toBe(true);
+  });
+});
+
+describe('collapseFenceRuns (issue #13: a scan-only view for the egress guard)', () => {
+  it('replaces each run of three or more fence characters with one space', () => {
+    expect(collapseFenceRuns('a===b --- c ── d == e')).toBe('a b   c ── d == e');
+  });
+  it('never lengthens its input, so the guard needs no scan-limit check for it', () => {
+    expect(collapseFenceRuns('='.repeat(199_999))).toBe(' ');
   });
 });
 

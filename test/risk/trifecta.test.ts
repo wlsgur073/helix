@@ -988,3 +988,117 @@ describe('blockedLegs is described by its own docstring', () => {
       .not.toMatch(/scan_limit\/named\/clean/);
   });
 });
+
+// Issue #13: compare mode no longer sends an NFKC-folded question, but the guard must still see what
+// the text folds into: PII detection has no compatibility fold of its own, so scannedForms adds the
+// NFKC + control-stripped folds of the outbound form and of the raw texts as scan-only forms, and the
+// secret and PII legs also scan the raw fold with its fence runs collapsed.
+describe('scannedForms adds the folded views of the outbound form and the raw texts (issue #13)', () => {
+  const wide = (s: string): string => s.replace(/[!-~]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0));
+
+  it('adds the NFKC fold of the outbound form when it differs from both other forms', () => {
+    expect(scannedForms({ texts: [wide('card')], outbound: wide('card') })).toEqual([wide('card'), 'card']);
+  });
+
+  it('the fold strips control and format characters as the outbound normalizer does', () => {
+    expect(scannedForms({ texts: ['a\u200Bb'], outbound: 'a\u200B' + wide('b') })).toEqual(['a\u200Bb', 'a\u200B' + wide('b'), 'ab']);
+  });
+
+  it('keeps a single form when the text is already folded', () => {
+    expect(scannedForms({ texts: ['abc'], outbound: 'abc' })).toEqual(['abc']);
+  });
+
+  it('an outbound form normalizeUntrusted already folded adds only the raw fold, whose fence runs stay whole', () => {
+    const payload = 'a === b ' + wide('x');
+    const outbound = normalizeUntrusted(payload);
+    expect(scannedForms({ texts: [payload], outbound })).toEqual([payload, outbound, 'a === b x']);
+  });
+
+  it('a payload whose folded form outgrows the scan limit is refused unscanned, as when it was sent folded', () => {
+    const q = '\uFDFA'.repeat(15_000);   // NFKC spells each of these out in 18 characters
+    expect(q.normalize('NFKC').length).toBeGreaterThan(200_000);
+    const v = classifyEgress({ texts: [q], outbound: q, ledger: null, policy: ALL('block') });
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('scan_limit');
+  });
+
+  it('adds the raw text folded as well, where an invisible character changes how NFKC composes', () => {
+    // NFKC cannot compose across U+200B, so folding before and after the strip differ here.
+    const raw = wide('x@example.c') + '\uff4f\u200B\u0301';
+    const outbound = raw.replace('\u200B', '');
+    const forms = scannedForms({ texts: [raw], outbound });
+    expect(forms).toContain('x@example.co\u0301');
+    expect(forms).toContain('x@example.c\u00f3');
+  });
+
+  it('three emails whose last letters carry an invisible character and a mark are refused as bulk PII', () => {
+    const q = ['x', 'y', 'z'].map((name) => wide(`${name}@example.c`) + '\uff4f\u200B\u0301').join(' ');
+    const v = classifyEgress({ texts: [q], outbound: q.replace(/\u200B/g, ''), ledger: null, policy: ALL('block') });
+    expect(v.decision).toBe('blocked');
+  });
+
+  it('a key that only the folded outbound form completes is refused', () => {
+    // NFKC composes E + U+0301 into a letter that ends the key only once U+200B is gone, so the raw
+    // fold (decomposed) and the raw form see no key, and only the outbound fold does.
+    const q = wide('AKIAQZ3MXW7TB4RN5KJDE') + '\u200B\u0301';
+    const outbound = q.replace('\u200B', '');
+    const v = classifyEgress({ texts: [q], outbound, ledger: null, policy: ALL('block') });
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('named');
+  });
+
+  it('a raw fold over the scan limit is refused even when the outbound fold stays under it', () => {
+    // U+FDFA folds to 18 characters in both folds; each e + U+200B + U+0301 folds to one character
+    // in the outbound fold (composed) and to two in the raw fold (U+200B blocks the composition).
+    const q = '\uFDFA'.repeat(11_100) + 'e\u200B\u0301'.repeat(150);
+    const outbound = q.replace(/\u200B/g, '');
+    expect(outbound.normalize('NFKC').length).toBeLessThanOrEqual(200_000);
+    expect(q.normalize('NFKC').replace(/\u200B/g, '').length).toBeGreaterThan(200_000);
+    const v = classifyEgress({ texts: [q], outbound, ledger: null, policy: ALL('block') });
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('scan_limit');
+  });
+
+  // Owner ruling (issue #13 recheck): compare mode no longer breaks fence runs, and a run of about
+  // forty fence characters glued to a token lowers the token's entropy below the floor. The secret and
+  // PII legs therefore also scan the raw fold with each fence run collapsed to one space.
+  for (const ch of ['=', '-', '_', '\u2500']) {
+    for (const at of ['before', 'after'] as const) {
+      it(`a high-entropy token with forty ${JSON.stringify(ch)} glued ${at} it is still refused`, () => {
+        const run = ch.repeat(40);
+        const tok = 'n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf';
+        const q = 'value ' + (at === 'before' ? run + tok : tok + run);
+        const v = classifyEgress({ texts: [q], outbound: q, ledger: null, policy: ALL('block') });
+        expect(v.decision).toBe('blocked');
+        expect(v.decidedBy).toBe('secretEntropy');
+      });
+    }
+  }
+
+  it('a token glued to a run that becomes a fence run only after NFKC is still refused', () => {
+    // Fullwidth equals signs (U+FF1D) form no fence run as typed, so the collapsed view is built from
+    // the fold of the raw texts, where they are forty ASCII "=".
+    const q = 'value n2Xk9Lp4Qa7Zr3Vy8Wb1Mc6Td0Hs5Jf' + '＝'.repeat(40);
+    const v = classifyEgress({ texts: [q], outbound: q, ledger: null, policy: ALL('block') });
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('secretEntropy');
+  });
+
+  it('the memory-echo leg does not compare the fence-collapsed view', () => {
+    // Only the collapsed view would join the two halves into the memory's text: the echo leg keeps
+    // comparing what is sent and its folds, as the owner ruled for the fence-spacing echo cases.
+    const memory = 'abcdefghijkl mnopqrstuvwx';
+    const q = 'abcdefghijkl ==== mnopqrstuvwx';
+    const ledger = [{ id: 'm_1', content: memory, contentDigest: digestContent(memory) }];
+    const v = classifyEgress({ texts: [q], outbound: q, ledger, policy: ALL('block') });
+    expect(v.echoMemoryIds).toEqual([]);
+    expect(v.decision).toBe('pass');
+  });
+
+  it('a card number in fullwidth digits is refused through the folded form', () => {
+    const q = 'card ' + wide('4111 1111 1111 1111');
+    const v = classifyEgress({ texts: [q], outbound: q, ledger: null, policy: ALL('block') });
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('piiHigh');
+  });
+});

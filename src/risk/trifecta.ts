@@ -5,6 +5,7 @@
 
 import { findSecrets, nearCredential } from '../memory/secret-scan.js';
 import { detectPII, type PiiKind } from '../memory/pii-scan.js';
+import { stripControls, collapseFenceRuns } from '../memory/content-frame.js';
 import type { EgressPolicy, EgressLeg } from '../config.js';
 import { MAX_ECHO_SPAN_CHARS } from '../limits.js';
 
@@ -34,7 +35,8 @@ export interface DetectEchoOptions {
   k?: number;
   /** Cap on payload chars scanned PER FORM (DoS bound). detectEcho slices each element of `forms`
    *  to this length independently, so the real total bound across a call is `forms.length × maxScan`
-   *  (classifyEgress passes up to 2 forms: raw and outbound), not maxScan alone. */
+   *  (classifyEgress passes up to 4 forms: raw, outbound and the two folds of scannedForms), not
+   *  maxScan alone. */
   maxScan?: number;
 }
 
@@ -52,7 +54,8 @@ const MAX_LEDGER_SCAN = 8_000_000;
 /** Match-only normalization: NFKC + strip control/format chars + casefold + whitespace-collapse. NOT
  *  normalizeUntrusted (which also breaks fence runs, for safe display).
  *
- *  The Cf strip is load-bearing. normalizeUntrusted (the OUTBOUND normalizer) removes `\p{Cc}\p{Cf}`;
+ *  The Cf strip is load-bearing. The outbound transforms (normalizeUntrusted in critique mode,
+ *  stripControls in compare mode) remove `\p{Cc}\p{Cf}`;
  *  this one used to keep them, because JS `\s` does not match U+200B. So a memory interleaved with
  *  zero-width spaces matched nothing here, and then folded back into the verbatim memory on the wire.
  *  Stripping invisibles can only ever ADD matches (fail-safe): it cannot invent a false echo. */
@@ -160,9 +163,10 @@ export interface EgressInput {
    *  `[question]` ALONE in compare mode, where `helixAnswer` is never transmitted (G1). */
   texts: string[];
   /** The EXACT string the caller will transmit. The gate must clear the bytes that actually leave the
-   *  machine, not a stand-in: the prompt builder normalizes on the way out (NFKC + control-strip +
-   *  fence-break), so a confusable that is inert in the raw form can fold back into a live secret — or a
-   *  verbatim memory — inside the outbound prompt. */
+   *  machine, not a stand-in: critique mode's prompt builder normalizes on the way out (NFKC +
+   *  control-strip + fence-break), so a confusable that is inert in the raw form can fold back into a
+   *  live secret — or a verbatim memory — inside the outbound prompt; compare mode strips control
+   *  characters only, and scannedForms adds the folded views. */
   outbound: string;
   ledger: LedgerItem[] | null;     // null = echo leg explicitly disabled (EchoSource 'disabled')
   policy: EgressPolicy;            // dualVerify.egressPolicy (per-leg block/allow; named secrets ignore it)
@@ -288,10 +292,27 @@ function scanText(text: string): Scan {
  *  diagnosis in dual-verify.ts — must scan exactly what the gate scanned: a caller that rebuilds
  *  this list is free to drift from it, which is the G1 defect (the gate clearing a stand-in) in a
  *  new place. `raw` is the joined texts; the dedupe keeps a single scan when the outbound form is
- *  byte-identical to it. */
+ *  byte-identical to it.
+ *
+ *  Issue #13: two more forms are scanned and never sent, each folded the way the read path folds
+ *  text (NFKC, then control and format characters stripped): the outbound string folded and the
+ *  raw texts folded. These views reveal compatibility forms without changing the bytes sent.
+ *  Compare mode now transmits the question with control characters stripped and nothing else, so
+ *  without them a leg with no fold of its own (PII detection) would miss a card number in fullwidth
+ *  digits. Folding the raw texts as well matters where an invisible character sits between a letter
+ *  and its combining mark, since NFKC cannot compose across it, and in critique mode, whose outbound
+ *  prompt has its fence runs broken: a multi-token pattern hidden by fullwidth or zero-width
+ *  characters (a PEM header) is visible only in the folded raw text. A form equal to one already
+ *  listed is not added. classifyEgress gives its secret and PII legs one view more (the raw fold
+ *  with its fence runs collapsed); it is not listed here, because the echo leg and the span
+ *  diagnosis never compare against it. */
 export function scannedForms(input: Pick<EgressInput, 'texts' | 'outbound'>): string[] {
   const raw = input.texts.join('\n');
-  return input.outbound === raw ? [raw] : [raw, input.outbound];
+  const forms = input.outbound === raw ? [raw] : [raw, input.outbound];
+  for (const folded of [stripControls(input.outbound.normalize('NFKC')), stripControls(raw.normalize('NFKC'))]) {
+    if (!forms.includes(folded)) forms.push(folded);
+  }
+  return forms;
 }
 
 /**
@@ -303,29 +324,37 @@ export function scannedForms(input: Pick<EgressInput, 'texts' | 'outbound'>): st
  * gated by their own egressPolicy key. When `ledger` is null the echo leg is skipped (explicit
  * EchoSource:'disabled').
  *
- * SCANS BOTH FORMS — EVERY leg, echo included (G1). `input.outbound` is the exact string the caller
- * will transmit; the prompt builder normalizes untrusted text on the way out (normalizeUntrusted:
- * NFKC + control-strip + fence-break), so scanning only the raw string is blind to full-width/
+ * SCANS EVERY FORM — EVERY leg, echo included (G1): the raw texts, the outbound string, and both
+ * folded (NFKC + control-strip; scannedForms, issue #13); the secret and PII legs also scan the raw
+ * fold with its fence runs collapsed (see below). `input.outbound` is the exact string the caller
+ * will transmit: critique mode's prompt builder normalizes untrusted text on the way out
+ * (normalizeUntrusted: NFKC + control-strip + fence-break), and compare mode sends the question
+ * with the control-strip only. Scanning only the raw string is blind to full-width/
  * zero-width confusables that fold back into a live card, API key, or VERBATIM MEMORY inside the
  * outbound prompt — a `pass` verdict on text that leaves as a working secret or an exfiltrated
  * memory. Scanning only the outbound form is not sound either: fence-breaking can destroy a token
  * the raw form reveals, and a caller whose outbound bytes are a strict subset of `texts` would leave
  * part of the payload unscanned (dual-verify no longer constructs that shape: since 2026-09-20
  * compare mode's `texts` holds only the question it transmits, and critique mode's holds both
- * fields, matching what `buildCritiquePrompt` sends — see dual-verify.ts). So both forms are still
+ * fields, matching what `buildCritiquePrompt` sends — see dual-verify.ts). So every form is
  * scanned here and the signals combined CONSERVATIVELY (any-form hit ⇒ hit), while counts take the
- * max per form — never the sum, which would double-count an ASCII email that appears in both forms
+ * max per form — never the sum, which would double-count an ASCII email that appears in two forms
  * and could trip the bulk-PII floor on a benign payload. detectEcho normalizes each form internally
  * (normalizeForMatch), so the leg is confusable-safe on WHATEVER forms it is given — but that only
  * helps if the dangerous bytes are in one of the scanned forms in the first place, which is exactly
- * why both are required here.
+ * why every form is required here.
  */
 export function classifyEgress(input: EgressInput): EgressVerdict {
   const raw = input.texts.join('\n');
   const outbound = input.outbound;
-  // Fail CLOSED: we cannot clear bytes we did not inspect. Checked before any scanning so an oversized
-  // payload costs O(1), not O(n). Content-free reason (a length, never a span).
-  if (raw.length > MAX_FORM_SCAN || outbound.length > MAX_FORM_SCAN) {
+  // Fail CLOSED: we cannot clear bytes we did not inspect. Check the raw and outbound lengths before
+  // normalization or scanning. Content-free reason (a length, never a span).
+  // The folded scan form (issue #13) is checked as well, once the two O(1) checks have bounded its
+  // input: NFKC can spell one character out in up to 18, so a payload under the limit can fold past
+  // it. While compare mode sent the folded question, that payload was refused here as an oversized
+  // outbound form; it still is, instead of being scanned without a bound.
+  const forms = raw.length > MAX_FORM_SCAN || outbound.length > MAX_FORM_SCAN ? null : scannedForms(input);
+  if (forms === null || forms.some((f) => f.length > MAX_FORM_SCAN)) {
     return {
       decision: 'blocked', legs: [], piiKinds: [], echoMemoryIds: [], echoExemptIds: [], decidedBy: 'scan_limit',
       reason: `blocked: payload exceeds the egress scan limit (${MAX_FORM_SCAN} chars)`,
@@ -343,11 +372,17 @@ export function classifyEgress(input: EgressInput): EgressVerdict {
       };
     }
   }
-  // Two-form, conservative (any-form hit => hit). Neither form alone is sound: the outbound form is
-  // blind to a token that fence-breaking destroys, and the raw form is blind to a confusable that
-  // normalization folds back into a live secret. Counts take the max per form, never the sum.
-  const forms = scannedForms(input);
-  const scans = forms.map(scanText);
+  // Every scanned form, conservative (any-form hit => hit). No form alone is sound: critique mode's
+  // outbound form is blind to a token that fence-breaking destroys, and a form that is not folded is
+  // blind to a confusable that NFKC folds back into a live secret or card number (the folded forms,
+  // issue #13). Counts take the max per form, never the sum.
+  // Owner ruling (issue #13 recheck): the secret and PII legs also scan the raw fold with each fence run
+  // collapsed to one space. While compare mode sent the question with its fence runs broken, a token
+  // glued to a long run stood alone in the outbound form; it is sent whole now, and the run would lower
+  // the whole token's entropy below the floor. The echo leg does not see this view: it compares the
+  // bytes sent and their folds only. The view is never longer than the raw fold the limit checked.
+  const unfenced = collapseFenceRuns(stripControls(raw.normalize('NFKC')));
+  const scans = (forms.includes(unfenced) ? forms : [...forms, unfenced]).map(scanText);
   const any = (f: (s: Scan) => boolean): boolean => scans.some(f);
 
   const secretHit = any((s) => s.secretHit);

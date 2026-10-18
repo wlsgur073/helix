@@ -19,6 +19,14 @@ function breakFenceRuns(s: string): string {
   return s.replace(FENCE_RUN, (run) => [...run].join(' '));
 }
 
+/** Replace each fence run with one ASCII space ("a===b" -> "a b"). A scan-only view for the egress
+ *  guard (issue #13): compare mode sends fence runs whole, and a long run glued to a token lowers the
+ *  token's entropy, so the secret and PII legs also see the token on its own. Never longer than its
+ *  input, so it needs no scan-limit check of its own. */
+export function collapseFenceRuns(s: string): string {
+  return s.replace(FENCE_RUN, ' ');
+}
+
 /** Strip Unicode control (Cc) and format/bidi/zero-width (Cf) chars, keeping only \n and \t.
  *
  *  EXPORTED for the write-path secret scanner (F6 round 2), which must model what THIS path
