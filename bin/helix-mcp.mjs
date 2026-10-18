@@ -15570,6 +15570,9 @@ var FENCE_RUN = /[=\-~`*_‐‑‒–—―−─-╿]{3,}/gu;
 function breakFenceRuns(s) {
   return s.replace(FENCE_RUN, (run) => [...run].join(" "));
 }
+function collapseFenceRuns(s) {
+  return s.replace(FENCE_RUN, " ");
+}
 function stripControls(s) {
   return s.replace(/[\p{Cc}\p{Cf}]/gu, (ch) => ch === "\n" || ch === "	" ? ch : "");
 }
@@ -25871,12 +25874,17 @@ function scanText(text) {
 }
 function scannedForms(input) {
   const raw = input.texts.join("\n");
-  return input.outbound === raw ? [raw] : [raw, input.outbound];
+  const forms = input.outbound === raw ? [raw] : [raw, input.outbound];
+  for (const folded of [stripControls(input.outbound.normalize("NFKC")), stripControls(raw.normalize("NFKC"))]) {
+    if (!forms.includes(folded)) forms.push(folded);
+  }
+  return forms;
 }
 function classifyEgress(input) {
   const raw = input.texts.join("\n");
   const outbound = input.outbound;
-  if (raw.length > MAX_FORM_SCAN || outbound.length > MAX_FORM_SCAN) {
+  const forms = raw.length > MAX_FORM_SCAN || outbound.length > MAX_FORM_SCAN ? null : scannedForms(input);
+  if (forms === null || forms.some((f) => f.length > MAX_FORM_SCAN)) {
     return {
       decision: "blocked",
       legs: [],
@@ -25908,8 +25916,8 @@ function classifyEgress(input) {
       };
     }
   }
-  const forms = scannedForms(input);
-  const scans = forms.map(scanText);
+  const unfenced = collapseFenceRuns(stripControls(raw.normalize("NFKC")));
+  const scans = (forms.includes(unfenced) ? forms : [...forms, unfenced]).map(scanText);
   const any = (f) => scans.some(f);
   const secretHit = any((s) => s.secretHit);
   const secretNamed = any((s) => s.secretNamed);
@@ -26029,7 +26037,7 @@ async function dualVerify(params, deps) {
     return { ran: false, attempted: false, outcome: "skipped", reason: `helixAnswer exceeds ${MAX_DV_ANSWER_CHARS} characters`, gates: stoppedAt("egress") };
   }
   const mode = deps.config.dualVerify.mode;
-  const prompt = mode === "critique" ? buildCritiquePrompt(params.question, params.helixAnswer) : normalizeUntrusted(params.question);
+  const prompt = mode === "critique" ? buildCritiquePrompt(params.question, params.helixAnswer) : stripControls(params.question);
   const ledger = deps.echo.mode === "enforce" ? deps.echo.ledgerTexts() : null;
   const egressInput = {
     texts: mode === "critique" ? [params.question, params.helixAnswer] : [params.question],
