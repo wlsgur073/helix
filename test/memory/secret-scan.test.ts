@@ -356,3 +356,112 @@ describe('E-CITE: a source citation with a line reference is a benign word chain
     expect(r.content).toBe('the clamp lives at [redacted:high-entropy] today');
   });
 });
+
+// Issue #5: the write path's chain test (isBenignStoredChain, read by selectWriteRedactions through
+// entropyStoredChain) also accepts the spellings a Windows path, an environment-variable reference
+// and a NAME=value setting take. The egress exemption keeps the C2.2 test (owner ruling 2026-10-18:
+// egress is decided with issue #12), so entropyWordChain stays false for the same tokens.
+describe('issue #5: findSecrets tags entropy spans with entropyStoredChain for the write path', () => {
+  const span = (text: string) => findSecrets(text).find((s) => s.tier === 'entropy');
+  const KEPT: Array<[string, string]> = [
+    ['a drive path with backslashes', 'the config is C:\\Users\\dev\\projects\\app2\\src\\main.ts here'],
+    ['a drive path with forward slashes', 'the config is C:/Users/dev/projects/app2/src/main.ts here'],
+    ['a relative backslash path', 'the config is projects\\app2\\src\\main.ts here'],
+    ['the hosts file', 'the hosts file is C:\\Windows\\System32\\drivers\\etc\\hosts here'],
+    ['a UNC path', 'the share is \\\\fileserver\\builds\\app2\\release\\notes.txt here'],
+    ['a cmd environment variable', 'the settings are in %USERPROFILE%\\.m2\\settings.xml here'],
+    ['a PowerShell environment variable', 'the modules are in $env:APPDATA\\npm\\node_modules\\pkg2 here'],
+    ['a POSIX environment variable', 'the config is $HOME/.config/app2/settings.json here'],
+    ['a braced POSIX environment variable', 'the config is ${XDG_CONFIG_HOME}/app2/settings.json here'],
+    ['a setting in a code span', 'set `PYTHONIOENCODING=utf-8` before printing'],
+    ['a setting in double quotes', 'set "PYTHONIOENCODING=utf-8" before printing'],
+    ['a --flag=value option', 'run node with --max-old-space-size=4096 for big builds'],
+    ['a setting whose value is another setting', 'set JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF-8 for the JVM'],
+    ['a backslash path with a line reference', 'the clamp is at src\\memory\\verified-projection.ts:112 today'],
+    ['a PowerShell reference written $Env:', 'the modules are in $Env:APPDATA\\npm\\node_modules\\pkg2 here'],
+    ['a short credential word inside a longer name part', 'the value SPINNER_MODE=blue-sky-2024-mango-kiwi was set'],
+    ['a camelCase Java system property', 'run with -Dhttp.proxyHost=proxy2.example.org now'],
+  ];
+  for (const [name, text] of KEPT) {
+    it(`true for ${name}, and the egress flag stays false`, () => {
+      const e = span(text);
+      expect(e).toBeDefined();
+      expect(e!.entropyStoredChain).toBe(true);
+      expect(e!.entropyWordChain).toBe(false);
+    });
+  }
+  it('true wherever the egress chain test is true (the write path test is a superset)', () => {
+    for (const text of ['see docs/release/gate-decision-2026-07-22.md for the policy', 'the clamp lives at src/memory/verified-projection.ts:112 today']) {
+      const e = span(text);
+      expect(e!.entropyWordChain).toBe(true);
+      expect(e!.entropyStoredChain).toBe(true);
+    }
+  });
+
+  const REDACTED: Array<[string, string]> = [
+    ['a random token', 'the synthetic token Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3 is not a real secret'],
+    ['a setting whose name carries a credential word', 'the value AUTH_TOKEN=blue-sky-2024-mango-kiwi was set'],
+    ['a key-named setting', 'the value MASTER_KEY=zebra-mango-2024-kiwi-lemon was set'],
+    ['a credential word in a later name of the chain', 'run with NODE_OPTIONS=--auth-token=blue-sky-2024-mango-kiwi now'],
+    ['an option named after a token', 'run with --deploy-token=blue-sky-2024-mango-kiwi now'],
+    ['a setting with a random value', 'set BUILD_ID=Zx9fQ2Lm8Kp3Vt5Rw7Aq1Bc2 here'],
+    ['a drive path with one random segment', 'the config is C:\\Users\\dev\\Zx9fQ2Lm8Kp3Vt5Rw7\\main.ts here'],
+    ['a backslash path with a long digit run', 'the log is C:\\builds\\1234567\\app2\\out.log here'],
+    ['a drive prefix with a single segment', 'the blob is C:\\Zx9fQ2Lm8Kp3Vt5Rw7Aq1Bc2 here'],
+    ['a drive-shaped colon inside the token', 'the pair is app2\\cfg\\D:\\data\\notes.txt here'],
+    ['an environment reference whose name is random', 'the blob is %Zx9fQ2Lm8Kp3Vt5Rw7Aq1Bc2%\\app2\\notes.txt here'],
+    ['a colon-separated credential pair', 'creds deploybot:Zx9fQ2Lm8Kp3Vt5Rw7Aq1Bc2 rotated'],
+    ['padded base64 whose pieces look like words', 'the blob is Sb6/TpCTGo/OhIheobTuig== here'],
+    ['a drive letter with no separator after the colon', 'the value k:blue-sky-2024-mango-kiwi-lemon was set'],
+    ['a credential word the sigils split', 'set %SEC%RET=correct-horse-battery-2024 now'],
+    ['names the sigils join into one segment', 'ref (${A}%B%$env:C${D}%E%$F1 here'],
+    ['base64 padding followed by a separator', 'the blob is Sb6/TpCTGo/OhIheobTuig==/ here'],
+    ['a padding run after word-like urlsafe pieces, then a suffix', 'the blob is Abcdef-Ghijkl_Mnopqr-Stuvw2==/old here'],
+    ['a single trailing = after word-like urlsafe pieces (a 32-byte key)', 'the key is Abcdef-Ghijkl_Mnopqr-Stuvwx_Yzabcd-Efgh12= here'],
+    ['an = after text that is not a setting name', 'the pair is app2/cfg=blue-sky-2024-mango-kiwi here'],
+    ['a single pad after a mixed-case base64 body, then a path', 'the blob AbCdEfGhIjKlMnOpQrStUvW=/cfg2 here'],
+    ['a single trailing = after a lower-case chain (an = before no value)', 'the key is abcdef-ghijkl-mnopqr-stuvwx-2024= here'],
+    ['a mixed-case name is not taken for a setting name', 'set ProgramFiles=Tools-2024-release-x64 here'],
+    ['a credential part inside a camelCase Java property name', 'the value -Dapp.adminCode=correct-horse-battery-2024 was set'],
+  ];
+  for (const [name, text] of REDACTED) {
+    it(`false for ${name}`, () => {
+      const e = span(text);
+      expect(e).toBeDefined();
+      expect(e!.entropyStoredChain).toBe(false);
+    });
+  }
+  // Every credential word is pinned: a word dropped from the list would persist a secret value
+  // written as a word chain behind that name. Long words count anywhere in the name, short ones
+  // only as a whole part of it.
+  for (const w of ['key', 'token', 'secret', 'pass', 'pwd', 'auth', 'cred', 'cookie', 'sess', 'private', 'sign', 'salt', 'pepper', 'bearer', 'hmac', 'nonce', 'mnemonic', 'seed', 'recovery', 'license', 'serial', 'cipher', 'kennwort', 'contrasen', 'senha', 'parola', 'wachtwoord', 'haslo', 'heslo', 'salasana', 'jelszo', 'losenord', 'adgangskode', 'geheim', 'clave', 'chave', 'schluessel']) {
+    it(`false for a setting whose name holds "${w}"`, () => {
+      const e = span(`the value MY${w.toUpperCase()}X=correct-horse-battery-2024 was set`);
+      expect(e).toBeDefined();
+      expect(e!.entropyStoredChain).toBe(false);
+    });
+  }
+  // Short words that rarely end an English word are also caught at the end of a name part, where
+  // a real key often glues them on (`rootpw` is an OpenLDAP and kickstart key).
+  for (const name of ['ROOTPW', 'rootpw', 'ADMINPW2', 'DBPW', 'USERPIN', 'ADMINPin', 'WIFIPSK', 'MYOTP', 'APPTOTP', 'APPJWT', 'USERSID', 'ADMINMFA', 'USER2FA', 'ROOT2FA', 'ADMINMDP', 'ADMIN_PW12', 'PINCODE', 'OTPCODES', 'MFACODE']) {
+    it(`false for a setting whose name ends in a short credential word: ${name}`, () => {
+      const e = span(`the value ${name}=correct-horse-battery-2024 was set`);
+      expect(e).toBeDefined();
+      expect(e!.entropyStoredChain).toBe(false);
+    });
+  }
+  for (const w of ['p', 'pw', 'pin', 'otp', 'totp', 'hotp', 'mfa', '2fa', 'psk', 'jwt', 'sig', 'sid', 'sk', 'pk', 'mdp', 'code', 'codes', 'phrase', 'answer']) {
+    it(`false for a setting with "${w}" as a part of its name`, () => {
+      for (const name of [`ADMIN_${w.toUpperCase()}`, `admin${w[0]!.toUpperCase()}${w.slice(1)}`, `--${w}`, `ADMIN_${w.toUpperCase()}2`]) {
+        const e = span(`the value ${name}=correct-horse-battery-2024 was set`);
+        expect(e, name).toBeDefined();
+        expect(e!.entropyStoredChain, name).toBe(false);
+      }
+    });
+  }
+  it('a code span still counts toward the 24-character floor (the length is judged on the token as written)', () => {
+    const e = span('the code is `Zx9fQ2Lm8Kp3Vt5Rw7Aq1B` here');   // 22 characters inside the span
+    expect(e).toBeDefined();
+    expect(e!.entropyStoredChain).toBe(false);
+  });
+});

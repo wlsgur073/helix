@@ -1102,3 +1102,20 @@ describe('scannedForms adds the folded views of the outbound form and the raw te
     expect(v.decidedBy).toBe('piiHigh');
   });
 });
+
+// Issue #5 (owner ruling 2026-10-18): the write path's wider chain test does not reach the egress
+// exemption, which keeps the C2.2 shape until issue #12 decides it. A Windows path and a quoted
+// setting still trip the entropy leg here.
+describe('issue #5: the egress exemption keeps the C2.2 chain shape', () => {
+  const policy: EgressPolicy = { ...ALL('block'), secretEntropyExempt: 'allow' };
+  for (const q of [
+    'the config is C:\\Users\\dev\\projects\\app2\\src\\main.ts here',
+    'set `PYTHONIOENCODING=utf-8` before printing',
+  ]) {
+    it(`still blocks on the entropy leg: ${q}`, () => {
+      const v = classifyEgress({ texts: [q], outbound: q, ledger: null, policy });
+      expect(v.decision).toBe('blocked');
+      expect(v.decidedBy).toBe('secretEntropy');
+    });
+  }
+});

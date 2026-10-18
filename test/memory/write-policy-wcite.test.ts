@@ -9,7 +9,7 @@
 // the release (nearCredential, the single shared definition). `secret-redacted` is set only when
 // a span was actually replaced, so an all-exempt record keeps the caller's classification.
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -147,5 +147,85 @@ describe('IT-M3: commitScoped counts what the commit actually replaced, per kind
     const out = storeAt().commitScoped({ content: `the log line reads [redacted:token] and the build is ${HEX_SHA}`, source: 'user' });
     expect(out.record.content).toBe('the log line reads [redacted:token] and the build is [redacted:high-entropy]');
     expect(out.redactions).toEqual({ 'high-entropy': 1 });
+  });
+});
+
+// Issue #5: a fact that names its file the Windows way, or quotes a setting, is persisted as written
+// (measured on 862e13d: every one of these was stored as [redacted:high-entropy]). The controls keep
+// a random token, a credential-named setting and a credential keyword nearby redacting, and
+// persistence.releaseWordChains false redacts the wider shapes as before.
+describe('issue #5: the write path keeps Windows paths and NAME=value settings', () => {
+  for (const content of [
+    'set `PYTHONIOENCODING=utf-8` before printing',
+    'set "PYTHONIOENCODING=utf-8" before printing',
+    'run node with --max-old-space-size=4096 for big builds',
+    'set JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF-8 for the JVM',
+    'the build config is C:\\Users\\dev\\projects\\app2\\src\\main.ts on this box',
+    'the build config is C:/Users/dev/projects/app2/src/main.ts on this box',
+    'the build config is projects\\app2\\src\\main.ts on this box',
+    'the hosts file is C:\\Windows\\System32\\drivers\\etc\\hosts on this box',
+    'the Maven settings are in %USERPROFILE%\\.m2\\settings.xml on this box',
+  ]) {
+    it(`persists verbatim: ${content}`, () => {
+      const out = storeAt().commitScoped({ content, source: 'agent-inference' });
+      expect(out.record.content).toBe(content);
+      expect(out.record.classification).toBe('normal');
+      expect(out).not.toHaveProperty('redactions');
+    });
+  }
+
+  it('a path whose only digit is fullwidth is judged on its folded form, and persists as written', () => {
+    // The raw token has no ASCII digit, so only the folded scan (F6) puts it in the entropy net, and
+    // the write path's chain test must be asked of that folded form as well.
+    const content = 'the build config is C:\\Users\\dev\\projects\\app\uFF12\\main.ts on this box';
+    const out = storeAt().commitScoped({ content, source: 'agent-inference' });
+    expect(out.record.content).toBe(content);
+    expect(out).not.toHaveProperty('redactions');
+  });
+
+  it('control: a random token still redacts', () => {
+    const out = storeAt().commitScoped({ content: 'the synthetic token Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3 is not a real secret', source: 'agent-inference' });
+    expect(out.record.content).toBe('the synthetic token [redacted:high-entropy] is not a real secret');
+  });
+
+  it('control: a setting whose name carries a credential word still redacts', () => {
+    const out = storeAt().commitScoped({ content: 'the value AUTH_TOKEN=blue-sky-2024-mango-kiwi was set', source: 'agent-inference' });
+    expect(out.record.content).toBe('the value [redacted:high-entropy] was set');
+    expect(out.redactions).toEqual({ 'high-entropy': 1 });
+  });
+
+  it('control: a passphrase behind a short credential name and a padded base64 value still redact', () => {
+    const out = storeAt().commitScoped({ content: 'set ADMIN_PW=correct-horse-battery-2024 and the blob Sb6/TpCTGo/OhIheobTuig== now', source: 'agent-inference' });
+    expect(out.record.content).toBe('set [redacted:high-entropy] and the blob [redacted:high-entropy] now');
+    expect(out.redactions).toEqual({ 'high-entropy': 2 });
+  });
+
+  it('control: a credential keyword in the same statement still vetoes the release', () => {
+    const out = storeAt().commitScoped({ content: 'the password file is C:\\Users\\dev\\vault\\app2\\pw.txt now', source: 'agent-inference' });
+    expect(out.record.content).toBe('the password file is [redacted:high-entropy] now');
+  });
+
+  it('releaseWordChains false redacts a Windows path as before', () => {
+    const out = storeAt({ releaseWordChains: false }).commitScoped({ content: 'the hosts file is C:\\Windows\\System32\\drivers\\etc\\hosts here', source: 'agent-inference' });
+    expect(out.record.content).toBe('the hosts file is [redacted:high-entropy] here');
+  });
+
+  it("a backslash path stored verbatim binds a file-contains recheck (the issue's R3)", () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-i5-'));
+    const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1' });
+    const rel = 'app2\\config\\dev\\notes.txt';
+    const cwd = process.cwd();
+    process.chdir(home);
+    try {
+      // A nested file on Windows; elsewhere one file whose name holds the backslashes.
+      mkdirSync(join(home, 'app2', 'config', 'dev'), { recursive: true });
+      writeFileSync(join(home, rel), 'always use the dry run flag\n');
+      const a = store.commit({ content: `the file ${rel} contains the line: always use the dry run flag`, source: 'user-relayed' });
+      expect(a.content).toContain(rel);
+      const r = store.recheck(a.id, { kind: 'file-contains', path: rel, pattern: 'dry run flag' });
+      expect(r.result).toEqual({ kind: 'state', state: 'Corroborated' });
+    } finally {
+      process.chdir(cwd);
+    }
   });
 });

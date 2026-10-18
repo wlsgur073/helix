@@ -99,8 +99,9 @@ export interface HelixConfig {
      *  overlaps and credential-adjacent spans keep redacting regardless (selectWriteRedactions).
      *  Default true: the digit-free twin of every such chain was already persisted verbatim, so the
      *  released arm's marginal exposure is the digit-bearing word chain alone — measured 0 of 7
-     *  real values on this box (falsifier, 2026-09-01). Set false to restore unconditional entropy
-     *  redaction. */
+     *  real values on this box (falsifier, 2026-09-01). Issue #5 widened the shape on this path to
+     *  Windows paths, environment-variable references and NAME=value settings (isBenignStoredChain);
+     *  this key governs those too. Set false to restore unconditional entropy redaction. */
     releaseWordChains: boolean;
   };
   /** Local-only, content-free latency/size records (spec 2026-07-05). Read once at startup. */

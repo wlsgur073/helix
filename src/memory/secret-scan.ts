@@ -27,14 +27,19 @@ export interface SecretSpan {
    *  read this set; display/redaction code keeps reading `tier`. */
   tiers: SecretTier[];
   /** EH-4: set on entropy-tier spans only — true iff the token's wrapper-punctuation-stripped core
-   *  is pure hex >= 24 (git SHA / digest / hex id). Read ONLY by the egress gate; never affects
-   *  write-path redaction. */
+   *  is pure hex >= 24 (git SHA / digest / hex id). Read by the egress gate, and by
+   *  selectWriteRedactions only to keep a hex core redacting. */
   entropyHex?: boolean;
   /** C2.2: set on entropy-tier spans only — true iff the stripped core is a separator-joined chain
    *  of individually low-entropy segments (dated filenames, governance doc paths — the FP class
-   *  that fired twice on real artifact names). Read ONLY by the egress gate, exactly like
-   *  entropyHex; never affects write-path redaction. */
+   *  that fired twice on real artifact names). Read ONLY by the egress gate; the write path reads
+   *  entropyStoredChain. */
   entropyWordChain?: boolean;
+  /** Issue #5: set on entropy-tier spans only — true iff the stripped core passes the write path's
+   *  chain test (isBenignStoredChain), a superset of entropyWordChain that also accepts a Windows
+   *  path, an environment-variable reference and a NAME=value setting. Read ONLY by
+   *  selectWriteRedactions. */
+  entropyStoredChain?: boolean;
 }
 
 // Named patterns run before the entropy net so redactions carry a precise kind
@@ -127,15 +132,90 @@ function stripLineRef(t: string): string {
  *  NOT exempt. Deliberate NON-GOAL: covert re-encoding of a secret as an all-benign chain — a
  *  char-level low-confidence net cannot police re-encoding (an adversary can always spell a secret
  *  as words); this net exists for ACCIDENTAL inclusions, and accidental keys virtually always carry
- *  a high-entropy segment. Read only by the egress gate (like isHexCore); write-path redaction is
- *  unaffected. A trailing source-citation line reference is removed first (stripLineRef) so a
+ *  a high-entropy segment. Read only by the egress gate; the write path asks isBenignStoredChain,
+ *  its superset. A trailing source-citation line reference is removed first (stripLineRef) so a
  *  `path.ext:112` pointer is judged on its path, with the segment rules applying unchanged. */
 export function isBenignWordChain(t: string): boolean {
   const segments = stripLineRef(stripWrapper(t)).split(/[-._/]+/).filter((s) => s !== '');
   if (segments.length < 2) return false;
-  return segments.every(
-    (s) => /^[A-Za-z]+$/.test(s) || /^[0-9]{1,4}$/.test(s) || (s.length <= 8 && /^[A-Za-z]+[0-9]{1,3}$/.test(s)),
-  );
+  return segments.every(isLowEntropySegment);
+}
+
+/** The C2.2 segment rules, shared by both chain tests. */
+function isLowEntropySegment(s: string): boolean {
+  return /^[A-Za-z]+$/.test(s) || /^[0-9]{1,4}$/.test(s) || (s.length <= 8 && /^[A-Za-z]+[0-9]{1,3}$/.test(s));
+}
+
+const DRIVE_PREFIX = /^[A-Za-z]:(?=[\\/])/;
+const ENV_REFERENCE = /%([A-Za-z_][A-Za-z0-9_]*)%|\$env:([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/gi;
+// A credential word in a name to the left of an `=` keeps the setting redacted. Matched anywhere in
+// the name (`DB_PASSWORD`, `PHPSESSID`, `KENNWORT`). A spurious match only keeps the redaction the
+// token had before `=` became a separator, while a missed word persists a secret value written as a
+// word chain (`ADMIN_PW=<passphrase>`), so the list is broad on purpose, other languages included.
+const CREDENTIAL_WORD = /key|token|secret|pass|pwd|auth|cred|cookie|sess|private|sign|salt|pepper|bearer|hmac|nonce|mnemonic|seed|recovery|license|serial|cipher|kennwort|contrasen|senha|parola|wachtwoord|haslo|heslo|salasana|jelszo|losenord|adgangskode|geheim|clave|chave|schluessel/i;
+// Short credential words, matched as a whole part of the name (`ADMIN_PW`, `-p`, `wifiPsk`, `PIN2`)
+// and, for the ones that rarely end an English word, also at the end of a part, a trailing `code` or
+// `codes` included (`ROOTPW`, `USERPIN`, `PINCODE`): anywhere inside longer words they are too common
+// (`spinner`, `inside`, `footprint`).
+const CREDENTIAL_PART = new Set(['p', 'sig', 'sk', 'pk', 'code', 'codes', 'phrase', 'answer']);
+const CREDENTIAL_SUFFIX = /(pw|pin|otp|mfa|psk|jwt|sid|mdp)[0-9]*(codes?)?$/;
+function namesCredential(name: string): boolean {
+  if (CREDENTIAL_WORD.test(name)) return true;
+  return name.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/)
+    .some((part) => CREDENTIAL_PART.has(part) || CREDENTIAL_PART.has(part.replace(/[0-9]+$/, '')) || CREDENTIAL_SUFFIX.test(part));
+}
+
+// `=` separates a name from its value only right after a setting name as such names are written: an
+// environment variable in upper case (`NODE_OPTIONS=`), an option in lower case
+// (`--max-old-space-size=`) or a Java system property (`-Dfile.encoding=`, `-Dhttp.proxyHost=`), and
+// only before a value that is not empty. A name in mixed case is not taken for one, nor text with
+// other characters in it: so a base64 body, whose case is mixed, never splits off its padding
+// (`...ig==`, a urlsafe `...Q=` followed by `/cfg`), and the `=` stays in a segment that fails the
+// segment rules. A second `=` of a run is never right after a name.
+const SETTING_NAME = /^(?:-{0,2}[A-Z_][A-Z0-9_]*|-{0,2}[a-z_][a-z0-9_.-]*|-D[A-Za-z][A-Za-z0-9_.-]*)$/;
+function splitSettings(core: string): string[] {
+  const parts: string[] = [];
+  let rest = core;
+  for (let i = rest.indexOf('='); i > 0 && i + 1 < rest.length && SETTING_NAME.test(rest.slice(0, i)); i = rest.indexOf('=')) {
+    parts.push(rest.slice(0, i));
+    rest = rest.slice(i + 1);
+  }
+  parts.push(rest);
+  return parts;
+}
+
+/** Issue #5: the WRITE path's chain test — isBenignWordChain widened to the spellings a Windows
+ *  path, an environment-variable reference and a NAME=value setting take, so a fact that names its
+ *  file the native way, or quotes a setting in a code span, is persisted as written:
+ *  - `\` separates segments, as `/` does (a UNC prefix leaves only empty segments, dropped);
+ *  - a LEADING drive prefix (`C:\`, `C:/`) is dropped; any other colon keeps the token in the net,
+ *    for the reason E-CITE gives against `:` as a separator (the colon of `$env:` and a trailing
+ *    line reference are removed before the segments are judged);
+ *  - an environment-variable reference (`%NAME%`, `$env:NAME` in any case, `${NAME}`, `$NAME`) is
+ *    judged by its name: the sigils carry nothing a secret could hide in;
+ *  - `=` separates a setting name, as such names are written, from its value (splitSettings: a
+ *    mixed-case base64 body never splits off its padding), unless a name to the left of an `=`
+ *    carries a credential word (namesCredential). That name sits INSIDE the token, where
+ *    nearCredential does not look, so the check is not redundant with it.
+ *  The rules apply to any token, not only to one that reads as a path or a setting. The segment rules
+ *  are unchanged, so a path or a value with one long mixed-alnum or long-digit segment is still
+ *  redacted, and the length floor is still judged on the token as written. Every token
+ *  isBenignWordChain accepts is accepted here: its segments are alphanumeric, so the added
+ *  separators cannot split them, and it holds no `=`, `%`, `$` or colon for the other steps to read.
+ *  ACCEPTED RESIDUAL, as for the plain chain: a secret written as words and short numbers (a
+ *  passphrase, grouped digits) passes the segment rules, so behind a name outside the credential
+ *  list it is persisted, as its `-`-joined twin already was. Read only by the write path
+ *  (selectWriteRedactions, through entropyStoredChain); the egress exemption keeps
+ *  isBenignWordChain (owner ruling 2026-10-18: egress is decided with issue #12). */
+export function isBenignStoredChain(t: string): boolean {
+  const core = stripLineRef(stripWrapper(t))
+    .replace(DRIVE_PREFIX, '')
+    .replace(ENV_REFERENCE, (_m, ...names: Array<string | undefined>) => names.slice(0, 4).find((n) => n !== undefined) ?? '');
+  const setting = splitSettings(core);
+  if (setting.slice(0, -1).some(namesCredential)) return false;
+  const segments = setting.flatMap((part) => part.split(/[-._/\\]+/)).filter((s) => s !== '');
+  if (segments.length < 2) return false;
+  return segments.every(isLowEntropySegment);
 }
 
 /** Merge overlapping spans into non-overlapping ones (required for safe in-place redaction).
@@ -201,6 +281,7 @@ function foldedTokenSpans(content: string): SecretSpan[] {
     if (hit.tier === 'entropy') {
       span.entropyHex = isHexCore(folded);
       span.entropyWordChain = isBenignWordChain(folded);
+      span.entropyStoredChain = isBenignStoredChain(folded);
     }
     out.push(span);
   }
@@ -228,6 +309,7 @@ export function findSecrets(content: string): SecretSpan[] {
         start: m.index, end: m.index + m[0].length, kind: 'high-entropy', tier: 'entropy',
         tiers: ['entropy'],
         entropyHex: isHexCore(m[0]), entropyWordChain: isBenignWordChain(m[0]),
+        entropyStoredChain: isBenignStoredChain(m[0]),
       });
     }
   }
@@ -284,8 +366,10 @@ export function nearCredential(text: string, start: number, end: number): boolea
 }
 
 /** W-CITE write-policy selector: which spans `redactSecrets` must still replace on the WRITE path.
- *  A span is RELEASED (persisted verbatim) iff its `tiers` is exactly ['entropy'] AND its core is
- *  a benign word chain AND NOT hex-shaped AND no credential keyword sits in the same statement.
+ *  A span is RELEASED (persisted verbatim) iff its `tiers` is exactly ['entropy'] AND its core
+ *  passes the write path's chain test (isBenignStoredChain, issue #5: also a Windows path, an
+ *  environment-variable reference or a NAME=value setting) AND NOT hex-shaped AND no credential
+ *  keyword sits in the same statement.
  *  Deny-dominant on `tiers` (read the accumulated list, never the display `tier`): any
  *  named/heuristic overlap in a merged span keeps it redacting. Hex keeps redacting because hex is
  *  the native representation of random secret material — a 40-char hex value may be a git object
@@ -299,7 +383,7 @@ export function nearCredential(text: string, start: number, end: number): boolea
 export function selectWriteRedactions(content: string, spans: SecretSpan[]): SecretSpan[] {
   return spans.filter((s) => !(
     s.tiers.length === 1 && s.tiers[0] === 'entropy' &&
-    s.entropyWordChain === true && s.entropyHex !== true &&
+    s.entropyStoredChain === true && s.entropyHex !== true &&
     !nearCredential(content, s.start, s.end)
   ));
 }

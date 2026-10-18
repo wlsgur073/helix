@@ -59,7 +59,9 @@ export interface MemoryStoreOptions {
    *  only; absent => disabled. */
   compaction?: CompactionConfig;
   /** W-CITE write policy: persist entropy-only benign word chains verbatim instead of redacting
-   *  them (selectWriteRedactions decides span by span; hex, named/heuristic overlaps and
+   *  them, in the write path's wider shape since issue #5 (Windows paths, environment-variable
+   *  references, NAME=value settings: isBenignStoredChain). selectWriteRedactions decides span by
+   *  span; hex, named/heuristic overlaps and
    *  credential-adjacent spans keep redacting regardless). Injected by the server from the GLOBAL
    *  config (`persistence.releaseWordChains`); ABSENT => true, the shipped default. */
   releaseWordChains?: boolean;
