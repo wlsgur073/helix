@@ -2345,9 +2345,38 @@ function stripLineRef(t) {
 function isBenignWordChain(t) {
   const segments = stripLineRef(stripWrapper(t)).split(/[-._/]+/).filter((s) => s !== "");
   if (segments.length < 2) return false;
-  return segments.every(
-    (s) => /^[A-Za-z]+$/.test(s) || /^[0-9]{1,4}$/.test(s) || s.length <= 8 && /^[A-Za-z]+[0-9]{1,3}$/.test(s)
-  );
+  return segments.every(isLowEntropySegment);
+}
+function isLowEntropySegment(s) {
+  return /^[A-Za-z]+$/.test(s) || /^[0-9]{1,4}$/.test(s) || s.length <= 8 && /^[A-Za-z]+[0-9]{1,3}$/.test(s);
+}
+var DRIVE_PREFIX = /^[A-Za-z]:(?=[\\/])/;
+var ENV_REFERENCE = /%([A-Za-z_][A-Za-z0-9_]*)%|\$env:([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/gi;
+var CREDENTIAL_WORD = /key|token|secret|pass|pwd|auth|cred|cookie|sess|private|sign|salt|pepper|bearer|hmac|nonce|mnemonic|seed|recovery|license|serial|cipher|kennwort|contrasen|senha|parola|wachtwoord|haslo|heslo|salasana|jelszo|losenord|adgangskode|geheim|clave|chave|schluessel/i;
+var CREDENTIAL_PART = /* @__PURE__ */ new Set(["p", "sig", "sk", "pk", "code", "codes", "phrase", "answer"]);
+var CREDENTIAL_SUFFIX = /(pw|pin|otp|mfa|psk|jwt|sid|mdp)[0-9]*(codes?)?$/;
+function namesCredential(name) {
+  if (CREDENTIAL_WORD.test(name)) return true;
+  return name.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).some((part) => CREDENTIAL_PART.has(part) || CREDENTIAL_PART.has(part.replace(/[0-9]+$/, "")) || CREDENTIAL_SUFFIX.test(part));
+}
+var SETTING_NAME = /^(?:-{0,2}[A-Z_][A-Z0-9_]*|-{0,2}[a-z_][a-z0-9_.-]*|-D[A-Za-z][A-Za-z0-9_.-]*)$/;
+function splitSettings(core) {
+  const parts = [];
+  let rest = core;
+  for (let i = rest.indexOf("="); i > 0 && i + 1 < rest.length && SETTING_NAME.test(rest.slice(0, i)); i = rest.indexOf("=")) {
+    parts.push(rest.slice(0, i));
+    rest = rest.slice(i + 1);
+  }
+  parts.push(rest);
+  return parts;
+}
+function isBenignStoredChain(t) {
+  const core = stripLineRef(stripWrapper(t)).replace(DRIVE_PREFIX, "").replace(ENV_REFERENCE, (_m, ...names) => names.slice(0, 4).find((n) => n !== void 0) ?? "");
+  const setting = splitSettings(core);
+  if (setting.slice(0, -1).some(namesCredential)) return false;
+  const segments = setting.flatMap((part) => part.split(/[-._/\\]+/)).filter((s) => s !== "");
+  if (segments.length < 2) return false;
+  return segments.every(isLowEntropySegment);
 }
 function mergeSpans(spans) {
   const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
@@ -2393,6 +2422,7 @@ function foldedTokenSpans(content) {
     if (hit.tier === "entropy") {
       span.entropyHex = isHexCore(folded);
       span.entropyWordChain = isBenignWordChain(folded);
+      span.entropyStoredChain = isBenignStoredChain(folded);
     }
     out.push(span);
   }
@@ -2417,7 +2447,8 @@ function findSecrets(content) {
         tier: "entropy",
         tiers: ["entropy"],
         entropyHex: isHexCore(m[0]),
-        entropyWordChain: isBenignWordChain(m[0])
+        entropyWordChain: isBenignWordChain(m[0]),
+        entropyStoredChain: isBenignStoredChain(m[0])
       });
     }
   }
@@ -2444,7 +2475,7 @@ function nearCredential(text, start, end) {
   return CREDENTIAL_CONTEXT.test(pre) || CREDENTIAL_CONTEXT.test(post);
 }
 function selectWriteRedactions(content, spans) {
-  return spans.filter((s) => !(s.tiers.length === 1 && s.tiers[0] === "entropy" && s.entropyWordChain === true && s.entropyHex !== true && !nearCredential(content, s.start, s.end)));
+  return spans.filter((s) => !(s.tiers.length === 1 && s.tiers[0] === "entropy" && s.entropyStoredChain === true && s.entropyHex !== true && !nearCredential(content, s.start, s.end)));
 }
 
 // src/memory/reality-check.ts
