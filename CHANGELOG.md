@@ -95,22 +95,26 @@ First release.
 - `helix_dual_verify` with a deterministic egress guard (secret / PII / memory-echo), plus
   `helix_codex_status` and an opt-in content log.
 - Configuration is read from the global `~/.helix/config.json` only — a checkout's
-  `.helix/config.json` can neither enable the outbound path nor loosen it. Keys: `enabled` (default
-  `false`), `mode`, `model` (≤ 64 characters, or `null` to inherit `~/.codex/config.toml`), `effort`,
-  `stakesFloor`, `timeoutMs` (integer ≥ 1 s, clamped to 1 hour), and `egressPolicy` — a per-leg map
-  over `memoryEcho`, `piiHigh`, `piiBulk`, `secretHeuristic`, `secretEntropy` and
-  `secretEntropyExempt`. Each leg is `block` or `allow`; all default to `block` except
-  `secretEntropyExempt`, which defaults to `allow` and is what releases a hex-shaped or
-  low-entropy-chain token — a git SHA quoted in design prose — past the guard. On the write path the
-  word-chain arm of that shape has its own key, `persistence.releaseWordChains` (default `true`), so
-  a dated path or note slug persists verbatim while a hex-core token still redacts; on that path the
-  arm also accepts a Windows path, an environment-variable reference and a `NAME=value` setting or
-  `--flag=value` option whose names, written as an upper-case variable, a lower-case option or a
-  Java `-D` property, carry no credential word, which egress does not; a credential
-  keyword within the 40 characters on either side of the token (a newline, `.` or `;` cuts that
-  window short) vetoes the release on both paths; one farther away, even in the same sentence, does
-  not. Provider-format credentials are
-  override-proof: no policy value releases them.
+  `.helix/config.json` can neither enable the outbound path nor loosen it. Keys: `enabled`
+  (default `false`), `mode`, `model` (≤ 64 characters, or `null` to inherit
+  `~/.codex/config.toml`), `effort`, `stakesFloor`, `timeoutMs` (integer ≥ 1 s, clamped to 1
+  hour), and `egressPolicy` — a per-leg map over `memoryEcho`, `piiHigh`, `piiBulk`,
+  `secretHeuristic`, `secretEntropy` and `secretEntropyExempt`. Each leg is `block` or `allow`;
+  all default to `block` except `secretEntropyExempt`, which defaults to `allow` and is what
+  releases a hex-shaped or low-entropy-chain token — a git SHA quoted in design prose — past the
+  guard. On the write path the word-chain arm of that shape has its own key,
+  `persistence.releaseWordChains` (default `true`), so a dated path or note slug persists verbatim
+  while a hex-core token still redacts; on both paths the chain also covers a Windows path, an
+  environment-variable reference, a `NAME=value` setting or `--flag=value` option whose names,
+  written as an upper-case variable, a lower-case option or a Java `-D` property, carry no
+  credential word, and source code judged by its words (brackets, quotes and the punctuation code
+  writes between words separate them, a lone symbol of a password alphabet does not, a URL is
+  judged with its scheme and without its port, and code or a URL that names a credential keyword,
+  or whose letters in mixed case do not read as words (a share-link id in mixed case among them),
+  stays in the net); a credential keyword within the 40 characters on either side of the token (a
+  newline, `.` or `;` cuts that window short) vetoes the release on both paths; one farther away,
+  even in the same sentence, does not. Provider-format credentials are override-proof: no policy
+  value releases them.
 - A running server reads `~/.helix/config.json` again on each `helix_dual_verify` and
   `helix_codex_status` call and applies at once the part of a change that narrows the outbound path:
   dual-verify off, a higher `stakesFloor`, a leg set to `block`, `logContent` off, `critique` moved to
@@ -162,6 +166,11 @@ First release.
   in the normalized form the leg compared (so a run can differ from the typed text) — up to 10 records, 3 runs each, 160 characters per run, with a count of whatever was left out —
   inside a datamarked DATA frame, because the runs are content rather than advisory prose. The
   audit row stays content-free: it never receives a span.
+- A refusal in which a secret leg blocks, whichever leg decided it, names *where* the blocking
+  tokens sit: for up to 10 of them, the field (`question` or `helixAnswer`), line, column, length,
+  first two characters and kind, inside a datamarked DATA frame with a count of the rest; a
+  blocking token found only after normalization has no position and is not listed, and the frame
+  says that one exists. Like the echo runs, these lines never reach the audit row.
 
 #### Automatic compaction — opt-in, default OFF
 

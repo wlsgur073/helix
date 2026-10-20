@@ -58,71 +58,100 @@ acknowledgement within a few days.
   contains no secrets**. What is redacted: named provider tokens, `password=`-style heuristic
   matches, and high-entropy tokens, each replaced with `[redacted:<kind>]`. The one write-path
   carve-out: an ENTROPY-ONLY benign word chain (segments individually low-entropy — dated
-  filenames, doc paths, note slugs, citations; on this path the chain test also splits on `\`,
-  splits on `=` right after a setting name as such names are written (an upper-case variable, a
-  lower-case option or a Java `-D` property, so a mixed-case base64 body does not split off its
-  padding), drops a leading drive prefix and judges an environment-variable reference such as
-  `%USERPROFILE%` or `$HOME` by its name, so Windows paths and `NAME=value` settings qualify,
-  except a token in which a name to the left of an `=` carries a credential word: key, token,
-  secret, pass and the like anywhere in the name, short ones such as pw or pin as a part of it or
-  at the end of one) with no credential keyword within the 40 characters on either side of it (a
-  newline, `.` or `;` between the two cuts that window short) is persisted VERBATIM
-  (`persistence.releaseWordChains`, default `true`; set `false` to restore unconditional entropy
-  redaction); a keyword farther away, even in the same sentence, does not keep it redacted. The
-  keyword test also matches inside longer words, so `passed`, `bypass` or `compass` within that
-  window keeps the chain redacted, and the window is measured from the ends of the whole
-  whitespace-delimited token, so a `.` attached to the chain (a sentence that ends right after a
-  path) does not cut it. A
-  hex-core entropy token (git SHA / digest shape) always
-  redacts on the write path — hex is the native representation of random secret material, and
-  persistence cannot tell a git object from a key. This was always an ACCIDENT guarantee, not an
-  absolute one: a long pure-alphabetic token (no digit) never matched the entropy detector and is
-  persisted verbatim with no exemption involved; the carve-out makes that boundary explicit
-  instead of syntactically arbitrary. The wider write-path shape inherits the chain's residual: a
-  secret written as words and short numbers (a passphrase, grouped digits) passes the segment
-  rules, so behind a name the credential list does not know it is persisted, as its `-`-joined
-  twin already was. Random material whose pieces happen to look like words passes too: measured on
-  20,000 random values per shape, about 0.07 to 1.1% of base64url values behind a setting name or
-  inside a Windows path, and 4% of values made of 4-character alphanumeric groups joined by `\`, the same
-  rate as for groups joined by `-` before this shape existed.
-  A commit whose scan replaced a span says so in its result — `redactions`, the replaced spans per
-  marker kind, and a constant `notice` — and a reality-check binds only a `path` and a `pattern`
-  that appear in the stored content, so one that fell inside a redacted span binds only if the
-  stored text, markers included, still contains it; the refusal for a missing path or pattern says
-  the content was redacted when the record's classification is `secret-redacted`, which the commit
-  tool sets only when it replaced a span itself (a later record that only carries an older marker
-  forward keeps the classification its own commit gave it, `normal` or `personal`).
-  The dual-verify egress guard hard-blocks **named provider credential tokens**
-  (override-proof — a config policy of `allow` cannot release them); generic
-  heuristic-detected (`password=`-style) and high-entropy secrets are blocked by
-  default but are per-leg policy-overridable (`dualVerify.egressPolicy`).
-  **One documented exception to "blocked by default":** a high-entropy token whose stripped core is
-  pure hex (git SHA / digest) or a chain of individually low-entropy segments (dated filenames, doc
-  paths), with no credential keyword within the 40 characters on either side of it (the same window
-  as the write-path carve-out above: a newline, `.` or `;` between the two cuts it short, a `.`
-  attached to the token does not, and a keyword inside a longer word such as `passed` still counts),
-  is RELEASED by default — a false-positive mitigation for design prose: the hex arm for the git SHAs and
+  filenames, doc paths, note slugs, citations, Windows paths, settings and source code: the chain
+  test splits on `-._/\`, on brackets, quotes, the backtick, `,` and `;`, on three pairs code
+  writes (`${`, `?.`, and `!` before `.`, a bracket, `,` or `;`), on `#` inside a URL, and on `=`
+  right after a setting name as such names are written (an upper-case variable, a lower-case
+  option or a Java `-D` property, so a mixed-case base64 body does not split off its padding); it
+  judges a URL with its scheme as a segment and without the port after its host, drops a leading
+  drive prefix and judges an environment-variable reference such as `%USERPROFILE%` or `$HOME` by
+  its name; a lone symbol of a password alphabet (`!@#$%^&*` and the like), `+`, any other `=` and
+  `:` never split; a code token or a URL that names a keyword of the window test below stays
+  redacted, and so does one with a run of six or more letters in mixed case that does not read as
+  camelCase words (averaging under 2.5 letters a word) or, in a token that carries a URL, any
+  segment in mixed case, so a share or reset link whose random id mixes case stays redacted, and
+  so does a URL with a camelCase segment such as `Microsoft/TypeScript`; and a token in which a
+  name to the left of an `=`
+  carries a credential word stays redacted: key, token, secret, pass and the like anywhere in the
+  name, short ones such as pw or pin as a part of it or at the end of one) with no credential
+  keyword within the 40 characters on either side of it (a newline, `.` or `;` between the two
+  cuts that window short) is persisted VERBATIM (`persistence.releaseWordChains`, default `true`;
+  set `false` to restore unconditional entropy redaction); a keyword farther away, even in the
+  same sentence, does not keep it redacted. The keyword test also matches inside longer words, so
+  `passed`, `bypass` or `compass` within that window keeps the chain redacted (`pw` and `pwd` count
+  at the end of a word, as in `adminpw`, `ROOTPW` or `dbPw`, so `$PWD`, the `pwd` command, Python's
+  `import pwd` and the C field `pw_dir` count too, and `api key` also when written with a space),
+  and the window is measured from the ends of the whole whitespace-delimited token, so a `.`
+  attached to the chain (a sentence that ends right after a path) does not cut it. A hex-core entropy token (git SHA / digest shape) always redacts
+  on the write path — hex is the native representation of random secret material, and persistence
+  cannot tell a git object from a key. This was always an ACCIDENT guarantee, not an absolute one:
+  a long pure-alphabetic token (no digit) never matched the entropy detector and is persisted
+  verbatim with no exemption involved; the carve-out makes that boundary explicit instead of
+  syntactically arbitrary. Every shape the chain test accepts inherits its residual: a secret
+  written as words and short numbers (a passphrase, grouped digits) passes the segment rules, so
+  behind a name the credential list does not know, or as a piece of a code token that names no
+  keyword of the window test (`setToken("<passphrase>")` and `login(user, "<passphrase>")` are
+  not covered), it is persisted and, under the default egress policy, sent, as its `-`-joined
+  twin already was. Random material whose pieces happen to look like words passes too: measured
+  on 20,000 random values per shape, about 0.07 to 1.1% of base64url values behind a setting name
+  or inside a Windows path, and 4% of values made of 4-character alphanumeric groups joined by
+  `\`, the same rate as for groups joined by `-` before this shape existed; set into source code,
+  with a uniform draw, about 2.5% of 8-character, 0.4% of 16-character and 0.1% of 24-character
+  random alphanumeric values in mixed case, and 0.03% or less at 32 characters or more, that a
+  digit or a URL scheme in the same token used to keep in the net; values in one case, which the
+  camelCase test cannot read, pass more often: about 6% of 8-character and 1% of 12-character
+  lowercase base36 values, 1.4% of 16-character base32 values and three quarters of values made
+  of letters alone in one case; values of letters alone in mixed case pass about 8% of the time at 8
+  and 12 characters and 12% from 16 to 32, about half the time (a third at 12) in code whose token
+  carries a digit elsewhere (`client2.connect("<value>")`), because a third to a half of such values
+  average 2.5 letters a word or more at every length, while a digit inside a value fails the segment
+  rules whatever its letters. Each of them is a value that also passed before when written alone as
+  a bare value, a check that cannot fail for a value under 24 characters or without a digit, which
+  the entropy detector never flagged. A share or reset link around a random id in mixed case passes
+  for about 0.4% of 8-character ids, 0.01% of 12-character ones and none from 16 characters; around
+  an id in one case it passes as often as the same link written without its scheme always did (about
+  12% of 8-character lowercase base36 ids, 2% of 12-character ones and every id of letters alone,
+  when a digit elsewhere in the link makes it a candidate at all). Of the random values over the 94
+  printable ASCII characters that the guard blocked before, 0.15% at 24 characters and 0.02% at 32
+  pass when written alone, those whose symbols happen to be code punctuation (none over letters,
+  digits and `!@#$%^&*`; 500,000 values per shape). A commit whose scan replaced a span
+  says so in its result — `redactions`, the replaced spans per marker kind, and a constant
+  `notice` — and a reality-check binds only a `path` and a `pattern` that appear in the stored
+  content, so one that fell inside a redacted span binds only if the stored text, markers
+  included, still contains it; the refusal for a missing path or pattern says the content was
+  redacted when the record's classification is `secret-redacted`, which the commit tool sets only
+  when it replaced a span itself (a later record that only carries an older marker forward keeps
+  the classification its own commit gave it, `normal` or `personal`). The dual-verify egress guard
+  hard-blocks **named provider credential tokens** (override-proof — a config policy of `allow`
+  cannot release them); generic heuristic-detected (`password=`-style) and high-entropy secrets
+  are blocked by default but are per-leg policy-overridable (`dualVerify.egressPolicy`).
+  **One documented exception to "blocked by default":** a high-entropy token whose stripped core
+  is pure hex (git SHA / digest) or a chain of individually low-entropy segments (the chain test
+  above: dated filenames, doc paths, Windows paths, settings, source code), with no credential
+  keyword within the 40 characters on either side of it (the same window as the write-path
+  carve-out above: a newline, `.` or `;` between the two cuts it short, a `.` attached to the
+  token does not, and a keyword inside a longer word such as `passed` still counts), is RELEASED
+  by default — a false-positive mitigation for design prose: the hex arm for the git SHAs and
   digests quoted in it, the word-chain arm because the entropy leg fired twice on real artifact
-  names (dated filenames). It is gated by its own leg,
-  `secretEntropyExempt` (default `allow`); set it to `block` to close the exemption.
-  The release is applied at the policy layer, so that leg genuinely governs it. The write/egress asymmetries that
-  remain by design: on the HEX arm, egress treats a hex core as exempt-shaped
-  (releasable under `secretEntropyExempt`), while the write path always redacts it; on the
-  word-chain arm, the write path accepts the wider shape above (Windows paths,
-  environment-variable references, settings) and egress only the plain chain, so a Windows path
-  that persists verbatim still trips the entropy leg on the way out. Egress releases both arms
-  under `secretEntropyExempt`; the write path releases only the word-chain arm, under
-  `persistence.releaseWordChains`; the same shared `nearCredential` keyword-window guard applies on
-  both.
-  A trailing source-citation line reference (`path/to/file.ts:112`, `:44-45`, `:45:7`)
-  is removed before the chain test, so a code pointer is judged on its path. The removal
-  is conditional on the prefix being file-shaped (a dot plus a 1–5 character alphanumeric
-  extension that begins with a letter) with each number at most five digits — a word-labelled
-  numeric value such as
-  `backup.recovery.identifier:593821` is **not** a citation and stays in the net, as does
-  an interior `label:<secret>` pair. The residual limit, stated plainly: a token
-  syntactically indistinguishable from a citation is released, and no local test can
-  separate the two.
+  names (dated filenames). It is gated by its own leg, `secretEntropyExempt` (default `allow`);
+  set it to `block` to close the exemption. The release is applied at the policy layer, so that
+  leg genuinely governs it. The write/egress asymmetry that remains by design sits on the HEX arm:
+  egress treats a hex core as exempt-shaped (releasable under `secretEntropyExempt`), while the
+  write path always redacts it. The word-chain arm is symmetric: both paths ask the same chain
+  test, so a token that persists verbatim is also released on the way out under the default
+  policy. Egress releases both arms under `secretEntropyExempt`; the write path releases only the
+  word-chain arm, under `persistence.releaseWordChains`; the same shared `nearCredential`
+  keyword-window guard applies on both. A trailing source-citation line reference
+  (`path/to/file.ts:112`, `:44-45`, `:45:7`) is removed before the chain test, so a code pointer
+  is judged on its path. The removal is conditional on the prefix being file-shaped (a dot plus a
+  1–5 character alphanumeric extension that begins with a letter) with each number at most five
+  digits — a word-labelled numeric value such as `backup.recovery.identifier:593821` is **not** a
+  citation and stays in the net, as does an interior `label:<secret>` pair. The residual limit,
+  stated plainly: a token syntactically indistinguishable from a citation is released, and no
+  local test can separate the two. The removals add up with the port of each URL in the token
+  (`http://h:54321/x.js:12345:67890` loses 15 digits), and in a token that carries a URL `#`
+  separates anywhere in it: a token built that way to carry a secret is the deliberate
+  re-encoding the chain test does not police.
 - **The egress scan fails closed on size, and the caps are hard.** A payload whose raw or outbound
   form, or either after NFKC and control/format stripping (newlines and tabs kept; these folded
   forms are scanned, never sent), exceeds **200,000 characters**, or live memory whose content
@@ -709,7 +738,18 @@ dropped). For display, fence runs are also broken in both modes, so a quoted run
 typed text. The runs are bounded to 10 records, 3 runs each and 160 characters per run before display
 normalization, and carried inside a datamarked DATA frame, because that text is content rather than
 advisory prose. Those runs render in that response only. `audit.jsonl` never receives a matched
-span; its row keeps counts, ids and labels, exactly as it does for every other leg.
+span; its row keeps counts, ids and labels, exactly as it does for every other leg. A refusal in
+which a secret leg blocks (a provider credential, a keyword assignment, a high-entropy token, or a
+hex- or chain-shaped token with the exemption closed), whichever leg decided it, also says where:
+for up to 10 blocking tokens, the
+field (`question` or `helixAnswer`), line, column, length, first two characters and kind, inside a
+datamarked DATA frame, with a count of the rest; a blocking token the scan found only in a
+normalized view (folded fullwidth or invisible characters, a collapsed fence run) has no position
+and is not listed, and the frame says that one exists whenever the guard would still block on a
+secret leg with every listed token blanked. Lines are counted at `\n` only. A named credential
+that only the folded text spells out across tokens (a PEM header spread with fullwidth spaces) is
+listed by the piece of it the raw scan found, under that piece's kind. Those lines render in that
+response only, and `audit.jsonl` never receives them.
 
 **The egress guard governs the payload Helix composes — it is not a sandbox around the
 Codex CLI.** The CLI is a separate program with its own model and its own connection to

@@ -103,16 +103,23 @@ saying it is being ignored.)
   | `secretEntropy` | `block` | a high-entropy token with no known shape |
   | `secretEntropyExempt` | `allow` | the entropy subclass described below — pure-hex cores and low-entropy chains |
 
-  `secretEntropyExempt` is the one leg that ships open, so a git SHA in your prose does not block the
-  call. Set it to `"block"` to close the exemption. On the write path, the word-chain half of that
-  shape (dated paths, note slugs, citations, and on this path also Windows paths,
-  environment-variable references such as `%USERPROFILE%` or `$HOME`, and `NAME=value` settings
-  whose names, written as an upper-case variable, a lower-case option or a Java `-D` property,
-  carry no credential word — no credential keyword within the 40 characters on either
-  side of it, a newline, `.` or `;` cutting that window short) persists verbatim under its own key,
-  `persistence.releaseWordChains` (default `true`), and a keyword farther away, even in the
-  same sentence, does not keep it redacted; a hex-core token
-  still redacts on write regardless of either setting.
+  `secretEntropyExempt` is the one leg that ships open, so a git SHA in your prose, or ordinary
+  source code, does not block the call. Set it to `"block"` to close the exemption. The chain half of
+  that shape covers dated paths, note slugs, citations, Windows paths, environment-variable
+  references such as `%USERPROFILE%` or `$HOME`, `NAME=value` settings whose names, written as an
+  upper-case variable, a lower-case option or a Java `-D` property, carry no credential word, and
+  source code judged by its words (brackets, quotes, `,` and `;` separate them, and so do the `${`
+  of a template, the `?.` of optional chaining, the `!` of a non-null assertion and, inside a URL,
+  `#`; a symbol such as `!`, `@`, `$`, `%`, `&` or `*` on its own does not, nor do `+`, `:` and an
+  `=` that does not follow a setting name; code or a URL that names a credential keyword stays in
+  the net, and so do letters in mixed case that do not read as camelCase words and, in a token that
+  carries a URL, any segment in mixed case, such as a share link's random id in mixed case; an id
+  in one case passes as often as the same link written without `https://` always did) — as long as
+  no credential keyword sits within the 40 characters on either side of it, a newline, `.` or `;`
+  cutting that window short. On the write path the same chain shape
+  persists verbatim under its own key, `persistence.releaseWordChains` (default `true`), and a
+  keyword farther away, even in the same sentence, does not keep it redacted; a hex-core token still
+  redacts on write regardless of either setting.
 
 A `mode`, `stakesFloor`, `model` or `effort` value that is present but invalid is ignored with a warning
 on stderr, not silently.
@@ -352,7 +359,7 @@ Helix keeps your memory on your machine, under `~/.helix/` and an owned `<projec
   locale, and a Windows platform block. Everything else in the server's environment is dropped.
   `helix_codex_status` also reads whether `OPENAI_API_KEY` is set — its presence, never its value —
   as a secondary signal when `codex login`'s own output does not say which route is in use.
-- **Blocked before sending:** an egress guard refuses the call if the payload contains a named provider credential (override-proof), a heuristic- or entropy-detected secret (blocked by default, per-leg overridable), high-severity or bulk PII, or a verbatim copy of a stored memory (a shared run of at least 24 characters with a live memory, compared after normalization — SECURITY.md states the exact rule; a shorter memory or a shorter shared run is never matched). One entropy subclass is **released** by default — a token whose stripped core is pure hex (git SHA, digest) or a chain of individually low-entropy segments, with no credential keyword within the 40 characters on either side of it (a newline, `.` or `;` cuts that window short; a keyword farther away, even in the same sentence, does not keep it blocked). Close it with the `secretEntropyExempt` leg; on the write path the word-chain half of the same shape is released under `persistence.releaseWordChains` (default `true`) while hex always redacts. See [SECURITY.md](./SECURITY.md) for why the exemption exists. A block the memory-echo leg decided also tells you *where* it matched: for each record that still blocks, the refusal quotes the runs of your **own** payload text that matched it (in the normalized form the leg compared, so a run can differ from what you typed), inside a datamarked DATA frame (up to 10 records, 3 runs each, 160 characters per run, with a count of whatever was left out) — enough to reword the payload without opening the memory. The runs render in that tool response only; `audit.jsonl` never receives one.
+- **Blocked before sending:** an egress guard refuses the call if the payload contains a named provider credential (override-proof), a heuristic- or entropy-detected secret (blocked by default, per-leg overridable), high-severity or bulk PII, or a verbatim copy of a stored memory (a shared run of at least 24 characters with a live memory, compared after normalization — SECURITY.md states the exact rule; a shorter memory or a shorter shared run is never matched). One entropy subclass is **released** by default — a token whose stripped core is pure hex (git SHA, digest) or a chain of individually low-entropy segments (source code included), with no credential keyword within the 40 characters on either side of it (a newline, `.` or `;` cuts that window short; a keyword farther away, even in the same sentence, does not keep it blocked). Close it with the `secretEntropyExempt` leg; on the write path the word-chain half of the same shape is released under `persistence.releaseWordChains` (default `true`) while hex always redacts. See [SECURITY.md](./SECURITY.md) for why the exemption exists. A block the memory-echo leg decided also tells you *where* it matched: for each record that still blocks, the refusal quotes the runs of your **own** payload text that matched it (in the normalized form the leg compared, so a run can differ from what you typed), inside a datamarked DATA frame (up to 10 records, 3 runs each, 160 characters per run, with a count of whatever was left out) — enough to reword the payload without opening the memory. The runs render in that tool response only; `audit.jsonl` never receives one. A refusal in which a secret leg blocks, whichever leg decided it, tells you where as well: for up to 10 blocking tokens, the field, line, column, length, first two characters and kind, inside a datamarked DATA frame with a count of the rest (a blocking token found only after normalization has no position and is not listed, and the frame says that one exists); these lines, too, render in that tool response only.
 - **Refused rather than scanned:** the guard fails closed on size. A payload whose raw, outbound or folded form is over 200,000 characters (a folded form is the raw or the outbound text after NFKC and removal of control and format characters except newlines and tabs; NFKC can spell one character out in up to 18; folded forms are scanned, never sent), or live memory whose content totals over 8,000,000 characters (every record the recall view serves, global plus an adopted project; erased and superseded rows do not count), is refused unscanned rather than sent, and a call the live-memory cap refuses names that cause (`ledger exceeds the egress scan limit`) — so a large enough call or a large enough live corpus makes dual-verify unavailable, which is the intended failure direction.
 - **Logging:** off by default. The exact prompt/response are written to `~/.helix/codex-log.jsonl` (`0o600`) only if you set `dualVerify.logContent: true`; the audit log stays content-free regardless. An erase does not reach that file: `helix_memory_erase` acts on the ledger, so a memory whose text a logged call carried stays in `codex-log.jsonl` after the record is erased. Deleting the file is the remedy.
 - **Disable:** set `dualVerify.enabled: false` (the default) — or never create the config. A running server applies it at the next call (see *When a change applies* under [Configuration](#configuration)).
