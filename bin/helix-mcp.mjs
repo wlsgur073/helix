@@ -15724,11 +15724,6 @@ var CITATION_LINE_REF = /^(.*\.[A-Za-z][A-Za-z0-9]{0,4}):\d{1,5}(?:[-:]\d{1,5})?
 function stripLineRef(t) {
   return CITATION_LINE_REF.exec(t)?.[1] ?? t;
 }
-function isBenignWordChain(t) {
-  const segments = stripLineRef(stripWrapper(t)).split(/[-._/]+/).filter((s) => s !== "");
-  if (segments.length < 2) return false;
-  return segments.every(isLowEntropySegment);
-}
 function isLowEntropySegment(s) {
   return /^[A-Za-z]+$/.test(s) || /^[0-9]{1,4}$/.test(s) || s.length <= 8 && /^[A-Za-z]+[0-9]{1,3}$/.test(s);
 }
@@ -15752,12 +15747,31 @@ function splitSettings(core) {
   parts.push(rest);
   return parts;
 }
-function isBenignStoredChain(t) {
-  const core = stripLineRef(stripWrapper(t)).replace(DRIVE_PREFIX, "").replace(ENV_REFERENCE, (_m, ...names) => names.slice(0, 4).find((n) => n !== void 0) ?? "");
+var CHAIN_SEPARATORS = /(?:[-._/\\()[\]{}<>"'`,;]|\$(?=\{)|\?(?=\.)|!(?=[.)\][,;]))+/;
+var URL_SEPARATORS = /(?:[-._/\\()[\]{}<>"'`,;]|\$(?=\{)|\?(?=\.)|!(?=[.)\][,;])|#)+/;
+var URL_AUTHORITY = /(^|[^A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*):\/\/([A-Za-z0-9.-]+)(?::\d{1,5})?(?=[/?#"'`)\]}>,;]|$)/g;
+var CODE_PUNCTUATION = /[()[\]{}<>"'`,;]|[?!]\./;
+var ONE_CASE_SEGMENT = /^(?:[a-z]+|[A-Z]+|[A-Z][a-z]+)[0-9]{0,3}$|^[0-9]{1,4}$/;
+function readsAsWords(s) {
+  const letters = s.replace(/[0-9]+$/, "");
+  if (letters.length < 6 || letters === letters.toLowerCase() || letters === letters.toUpperCase()) return true;
+  const words = letters.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+/g) ?? [];
+  return letters.length / Math.max(1, words.length) >= 2.5;
+}
+function isBenignWordChain(t) {
+  let url = false;
+  const core = stripLineRef(stripWrapper(t)).replace(URL_AUTHORITY, (_m, before, scheme, host) => {
+    url = true;
+    return `${before}${scheme.replace(/\+/g, "/")}/${host}`;
+  }).replace(DRIVE_PREFIX, "").replace(ENV_REFERENCE, (_m, ...names) => names.slice(0, 4).find((n) => n !== void 0) ?? "");
+  const widened = url || CODE_PUNCTUATION.test(core);
+  if (widened && mentionsCredential(core)) return false;
   const setting = splitSettings(core);
   if (setting.slice(0, -1).some(namesCredential)) return false;
-  const segments = setting.flatMap((part) => part.split(/[-._/\\]+/)).filter((s) => s !== "");
+  const segments = setting.flatMap((part) => part.split(url ? URL_SEPARATORS : CHAIN_SEPARATORS)).filter((s) => s !== "");
   if (segments.length < 2) return false;
+  if (url && !segments.every((s) => ONE_CASE_SEGMENT.test(s))) return false;
+  if (widened && !segments.every(readsAsWords)) return false;
   return segments.every(isLowEntropySegment);
 }
 function mergeSpans(spans) {
@@ -15804,7 +15818,6 @@ function foldedTokenSpans(content) {
     if (hit.tier === "entropy") {
       span.entropyHex = isHexCore(folded);
       span.entropyWordChain = isBenignWordChain(folded);
-      span.entropyStoredChain = isBenignStoredChain(folded);
     }
     out.push(span);
   }
@@ -15829,8 +15842,7 @@ function findSecrets(content) {
         tier: "entropy",
         tiers: ["entropy"],
         entropyHex: isHexCore(m[0]),
-        entropyWordChain: isBenignWordChain(m[0]),
-        entropyStoredChain: isBenignStoredChain(m[0])
+        entropyWordChain: isBenignWordChain(m[0])
       });
     }
   }
@@ -15844,9 +15856,12 @@ function redactSecrets(content, spans) {
   }
   return { content: out, classification: "secret-redacted", kinds: [...new Set(spans.map((s) => s.kind))] };
 }
-var CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[_-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token)/i;
+var CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[ _-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token|pwd?(?![a-z]))/i;
 var CRED_WINDOW = 24;
 var KW_PAD = 16;
+function mentionsCredential(s) {
+  return CREDENTIAL_CONTEXT.test(s.replace(/([a-z])([A-Z])/g, "$1 $2"));
+}
 function nearCredential(text, start, end) {
   let pre = text.slice(Math.max(0, start - CRED_WINDOW - KW_PAD), start);
   let post = text.slice(end, Math.min(text.length, end + CRED_WINDOW + KW_PAD));
@@ -15854,10 +15869,10 @@ function nearCredential(text, start, end) {
   if (b >= 0) pre = pre.slice(b + 1);
   const m = post.search(/[\n.;]/);
   if (m >= 0) post = post.slice(0, m);
-  return CREDENTIAL_CONTEXT.test(pre) || CREDENTIAL_CONTEXT.test(post);
+  return mentionsCredential(pre) || mentionsCredential(post);
 }
 function selectWriteRedactions(content, spans) {
-  return spans.filter((s) => !(s.tiers.length === 1 && s.tiers[0] === "entropy" && s.entropyStoredChain === true && s.entropyHex !== true && !nearCredential(content, s.start, s.end)));
+  return spans.filter((s) => !(s.tiers.length === 1 && s.tiers[0] === "entropy" && s.entropyWordChain === true && s.entropyHex !== true && !nearCredential(content, s.start, s.end)));
 }
 
 // src/memory/reality-check.ts
@@ -16129,6 +16144,7 @@ var MAX_INSPECT_IDS = 32;
 var MAX_ECHO_SPAN_IDS = 10;
 var MAX_ECHO_SPANS_PER_ID = 3;
 var MAX_ECHO_SPAN_CHARS = 160;
+var MAX_SECRET_SPANS = 10;
 var MAX_RECHECK_PATH_CHARS = 4096;
 var MAX_RECHECK_PATTERN_CHARS = 2048;
 var RECALL_MAX_ITEMS_CAP = 200;
@@ -26068,10 +26084,12 @@ async function dualVerify(params, deps) {
     return { ran: false, attempted: false, outcome: "skipped", reason: `helixAnswer exceeds ${MAX_DV_ANSWER_CHARS} characters`, gates: stoppedAt("egress") };
   }
   const mode = deps.config.dualVerify.mode;
-  const prompt = mode === "critique" ? buildCritiquePrompt(params.question, params.helixAnswer) : stripControls(params.question);
+  const outboundFor = (question, helixAnswer) => mode === "critique" ? buildCritiquePrompt(question, helixAnswer) : stripControls(question);
+  const textsFor = (question, helixAnswer) => mode === "critique" ? [question, helixAnswer] : [question];
+  const prompt = outboundFor(params.question, params.helixAnswer);
   const ledger = deps.echo.mode === "enforce" ? deps.echo.ledgerTexts() : null;
   const egressInput = {
-    texts: mode === "critique" ? [params.question, params.helixAnswer] : [params.question],
+    texts: textsFor(params.question, params.helixAnswer),
     outbound: prompt,
     ledger,
     policy: deps.config.dualVerify.egressPolicy,
@@ -26086,7 +26104,18 @@ async function dualVerify(params, deps) {
       reason: verdict.reason,
       egress: verdict,
       gates: stoppedAt("egress"),
-      echoSpans: spansFor(verdict, egressInput, ledger)
+      echoSpans: spansFor(verdict, egressInput, ledger),
+      secretSpans: secretSpansFor(
+        params.question,
+        mode === "critique" ? params.helixAnswer : null,
+        egressInput.policy,
+        (question, helixAnswer) => classifyEgress({
+          texts: textsFor(question, helixAnswer),
+          outbound: outboundFor(question, helixAnswer),
+          ledger: null,
+          policy: { ...egressInput.policy, piiHigh: "allow", piiBulk: "allow" }
+        })
+      )
     };
   }
   evaluated.push("available");
@@ -26117,6 +26146,61 @@ async function dualVerify(params, deps) {
   }
   const agreement = buildAgreementMap(params.helixAnswer, res.answer);
   return { ran: true, attempted: true, outcome: "sent", promptSent: prompt, mode, codexAnswer: res.answer, agreement, egress: verdict };
+}
+var SECRET_DECIDERS = /* @__PURE__ */ new Set(["named", "secretHeuristic", "secretEntropy", "secretEntropyExempt"]);
+function secretSpansFor(question, helixAnswer, policy, gate) {
+  const secretBlocks = (v) => v.decision === "blocked" && v.decidedBy !== void 0 && SECRET_DECIDERS.has(v.decidedBy);
+  if (!secretBlocks(gate(question, helixAnswer ?? ""))) return void 0;
+  const text = helixAnswer === null ? question : `${question}
+${helixAnswer}`;
+  const found = findSecrets(text).flatMap((s) => {
+    const kind = blockingKind(s, text, policy);
+    return kind === null ? [] : [{ s, kind }];
+  });
+  const all = found.map(({ s, kind }) => {
+    const inAnswer = helixAnswer !== null && s.start > question.length;
+    const offset = inAnswer ? question.length + 1 : 0;
+    const before = text.slice(offset, s.start);
+    return {
+      field: inAnswer ? "helixAnswer" : "question",
+      line: before.split("\n").length,
+      column: s.start - offset - before.lastIndexOf("\n"),
+      length: s.end - s.start,
+      head: text.slice(s.start, s.start + 2),
+      kind
+    };
+  });
+  const ranges = [];
+  for (const { s } of found) {
+    const last = ranges[ranges.length - 1];
+    if (last !== void 0 && s.end <= last[1]) continue;
+    let start = s.start;
+    while (start > (last?.[1] ?? 0) && !/\s/.test(text[start - 1])) start--;
+    let end = s.end;
+    while (end < text.length && !/\s/.test(text[end])) end++;
+    if (last !== void 0 && start <= last[1]) last[1] = end;
+    else ranges.push([start, end]);
+  }
+  const pieces = [];
+  let at = 0;
+  for (const [start, end] of ranges) {
+    pieces.push(text.slice(at, start), text.slice(start, end).replace(/[^\n.;]/g, " "));
+    at = end;
+  }
+  pieces.push(text.slice(at));
+  const blanked = pieces.join("");
+  const after = helixAnswer === null ? gate(blanked, "") : gate(blanked.slice(0, question.length), blanked.slice(question.length + 1));
+  return { entries: all.slice(0, MAX_SECRET_SPANS), omitted: Math.max(0, all.length - MAX_SECRET_SPANS), unlocated: secretBlocks(after) };
+}
+function blockingKind(s, text, policy) {
+  if (s.tiers.includes("named")) return `provider credential (${s.kind})`;
+  if (s.tiers.includes("heuristic") && policy.secretHeuristic !== "allow") return "keyword assignment";
+  if (s.tiers.includes("entropy")) {
+    const shaped = (s.entropyHex === true || s.entropyWordChain === true) && !nearCredential(text, s.start, s.end);
+    if (!shaped && policy.secretEntropy !== "allow") return "high-entropy token";
+    if (shaped && policy.secretEntropyExempt === "block") return "hex or chain-shaped token (exemption closed by policy)";
+  }
+  return null;
 }
 function spansFor(verdict, input, ledger) {
   if (verdict.decidedBy !== "memoryEcho" || ledger === null) return void 0;
@@ -26544,6 +26628,15 @@ function echoSpansBlock(d, deps) {
   if (d.omittedIds > 0) lines.push(row(`(${d.omittedIds} more echoed records not shown)`));
   return "\n" + makeDataFrame({ label: "ECHOED SPANS", nonce, lines });
 }
+function secretSpansBlock(d, deps) {
+  if (!d) return "";
+  const nonce = (deps.genNonce ?? newNonce)();
+  const row = (text) => ({ text: normalizeUntrusted(text), mark: "DATA| ", normalized: true });
+  const lines = d.entries.map((e) => row(`${e.field} line ${e.line}, column ${e.column}: ${e.kind}, ${e.length} characters, starts with ${JSON.stringify(e.head)}`));
+  if (d.omitted > 0) lines.push(row(`(${d.omitted} more blocking tokens not shown)`));
+  if (d.unlocated) lines.push(row("at least one blocking token was found only after normalization (fullwidth or invisible characters folded, or a fence run collapsed): it has no position in the text as written and is not listed"));
+  return "\n" + makeDataFrame({ label: "SECRET SPANS", nonce, lines });
+}
 function guardLine(g) {
   if (!g) return "";
   return `guards: ${g.evaluated.join(" -> ")} \u2014 stopped at ${g.stoppedAt}`;
@@ -26618,7 +26711,8 @@ async function handleDualVerify(args, deps, signal) {
       guardLine(result.gates),
       pending.length > 0 ? RESTART_PENDING_NOTE : "",
       echoedMemoriesLine(result.egress),
-      echoSpansBlock(result.echoSpans, deps)
+      echoSpansBlock(result.echoSpans, deps),
+      secretSpansBlock(result.secretSpans, deps)
     ].filter(Boolean).join("\n"));
   }
   const nonce = (deps.genNonce ?? newNonce)();

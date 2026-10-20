@@ -2342,11 +2342,6 @@ var CITATION_LINE_REF = /^(.*\.[A-Za-z][A-Za-z0-9]{0,4}):\d{1,5}(?:[-:]\d{1,5})?
 function stripLineRef(t) {
   return CITATION_LINE_REF.exec(t)?.[1] ?? t;
 }
-function isBenignWordChain(t) {
-  const segments = stripLineRef(stripWrapper(t)).split(/[-._/]+/).filter((s) => s !== "");
-  if (segments.length < 2) return false;
-  return segments.every(isLowEntropySegment);
-}
 function isLowEntropySegment(s) {
   return /^[A-Za-z]+$/.test(s) || /^[0-9]{1,4}$/.test(s) || s.length <= 8 && /^[A-Za-z]+[0-9]{1,3}$/.test(s);
 }
@@ -2370,12 +2365,31 @@ function splitSettings(core) {
   parts.push(rest);
   return parts;
 }
-function isBenignStoredChain(t) {
-  const core = stripLineRef(stripWrapper(t)).replace(DRIVE_PREFIX, "").replace(ENV_REFERENCE, (_m, ...names) => names.slice(0, 4).find((n) => n !== void 0) ?? "");
+var CHAIN_SEPARATORS = /(?:[-._/\\()[\]{}<>"'`,;]|\$(?=\{)|\?(?=\.)|!(?=[.)\][,;]))+/;
+var URL_SEPARATORS = /(?:[-._/\\()[\]{}<>"'`,;]|\$(?=\{)|\?(?=\.)|!(?=[.)\][,;])|#)+/;
+var URL_AUTHORITY = /(^|[^A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*):\/\/([A-Za-z0-9.-]+)(?::\d{1,5})?(?=[/?#"'`)\]}>,;]|$)/g;
+var CODE_PUNCTUATION = /[()[\]{}<>"'`,;]|[?!]\./;
+var ONE_CASE_SEGMENT = /^(?:[a-z]+|[A-Z]+|[A-Z][a-z]+)[0-9]{0,3}$|^[0-9]{1,4}$/;
+function readsAsWords(s) {
+  const letters = s.replace(/[0-9]+$/, "");
+  if (letters.length < 6 || letters === letters.toLowerCase() || letters === letters.toUpperCase()) return true;
+  const words = letters.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+/g) ?? [];
+  return letters.length / Math.max(1, words.length) >= 2.5;
+}
+function isBenignWordChain(t) {
+  let url = false;
+  const core = stripLineRef(stripWrapper(t)).replace(URL_AUTHORITY, (_m, before, scheme, host) => {
+    url = true;
+    return `${before}${scheme.replace(/\+/g, "/")}/${host}`;
+  }).replace(DRIVE_PREFIX, "").replace(ENV_REFERENCE, (_m, ...names) => names.slice(0, 4).find((n) => n !== void 0) ?? "");
+  const widened = url || CODE_PUNCTUATION.test(core);
+  if (widened && mentionsCredential(core)) return false;
   const setting = splitSettings(core);
   if (setting.slice(0, -1).some(namesCredential)) return false;
-  const segments = setting.flatMap((part) => part.split(/[-._/\\]+/)).filter((s) => s !== "");
+  const segments = setting.flatMap((part) => part.split(url ? URL_SEPARATORS : CHAIN_SEPARATORS)).filter((s) => s !== "");
   if (segments.length < 2) return false;
+  if (url && !segments.every((s) => ONE_CASE_SEGMENT.test(s))) return false;
+  if (widened && !segments.every(readsAsWords)) return false;
   return segments.every(isLowEntropySegment);
 }
 function mergeSpans(spans) {
@@ -2422,7 +2436,6 @@ function foldedTokenSpans(content) {
     if (hit.tier === "entropy") {
       span.entropyHex = isHexCore(folded);
       span.entropyWordChain = isBenignWordChain(folded);
-      span.entropyStoredChain = isBenignStoredChain(folded);
     }
     out.push(span);
   }
@@ -2447,8 +2460,7 @@ function findSecrets(content) {
         tier: "entropy",
         tiers: ["entropy"],
         entropyHex: isHexCore(m[0]),
-        entropyWordChain: isBenignWordChain(m[0]),
-        entropyStoredChain: isBenignStoredChain(m[0])
+        entropyWordChain: isBenignWordChain(m[0])
       });
     }
   }
@@ -2462,9 +2474,12 @@ function redactSecrets(content, spans) {
   }
   return { content: out, classification: "secret-redacted", kinds: [...new Set(spans.map((s) => s.kind))] };
 }
-var CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[_-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token)/i;
+var CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[ _-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token|pwd?(?![a-z]))/i;
 var CRED_WINDOW = 24;
 var KW_PAD = 16;
+function mentionsCredential(s) {
+  return CREDENTIAL_CONTEXT.test(s.replace(/([a-z])([A-Z])/g, "$1 $2"));
+}
 function nearCredential(text, start, end) {
   let pre = text.slice(Math.max(0, start - CRED_WINDOW - KW_PAD), start);
   let post = text.slice(end, Math.min(text.length, end + CRED_WINDOW + KW_PAD));
@@ -2472,10 +2487,10 @@ function nearCredential(text, start, end) {
   if (b >= 0) pre = pre.slice(b + 1);
   const m = post.search(/[\n.;]/);
   if (m >= 0) post = post.slice(0, m);
-  return CREDENTIAL_CONTEXT.test(pre) || CREDENTIAL_CONTEXT.test(post);
+  return mentionsCredential(pre) || mentionsCredential(post);
 }
 function selectWriteRedactions(content, spans) {
-  return spans.filter((s) => !(s.tiers.length === 1 && s.tiers[0] === "entropy" && s.entropyStoredChain === true && s.entropyHex !== true && !nearCredential(content, s.start, s.end)));
+  return spans.filter((s) => !(s.tiers.length === 1 && s.tiers[0] === "entropy" && s.entropyWordChain === true && s.entropyHex !== true && !nearCredential(content, s.start, s.end)));
 }
 
 // src/memory/reality-check.ts
