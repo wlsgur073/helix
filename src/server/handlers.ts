@@ -774,6 +774,21 @@ function echoSpansBlock(d: DualVerifyResult['echoSpans'], deps: DualVerifyHandle
   return '\n' + makeDataFrame({ label: 'ECHOED SPANS', nonce, lines });
 }
 
+/** Issue #12: where the blocking tokens of a secret-leg refusal sit in the caller's own text. Each line
+ *  carries two characters of the caller's bytes (`head`), so the block is a datamarked DATA frame like
+ *  echoSpansBlock, and each composed line is normalized once. Constant wording otherwise: the field,
+ *  line, column and length are numbers or enum literals, the kind a fixed label. Rendered in this
+ *  tool response only; audit.jsonl never receives it. */
+function secretSpansBlock(d: DualVerifyResult['secretSpans'], deps: DualVerifyHandlerDeps): string {
+  if (!d) return '';
+  const nonce = (deps.genNonce ?? newNonce)();
+  const row = (text: string): { text: string; mark: string; normalized: true } => ({ text: normalizeUntrusted(text), mark: 'DATA| ', normalized: true });
+  const lines = d.entries.map((e) => row(`${e.field} line ${e.line}, column ${e.column}: ${e.kind}, ${e.length} characters, starts with ${JSON.stringify(e.head)}`));
+  if (d.omitted > 0) lines.push(row(`(${d.omitted} more blocking tokens not shown)`));
+  if (d.unlocated) lines.push(row('at least one blocking token was found only after normalization (fullwidth or invisible characters folded, or a fence run collapsed): it has no position in the text as written and is not listed'));
+  return '\n' + makeDataFrame({ label: 'SECRET SPANS', nonce, lines });
+}
+
 /** H7: the guard chain, as a TRUSTED advisory line -- every name is a fixed enum literal from
  *  dual-verify, never caller or Codex bytes, so it needs no datamark and no quarantine frame. */
 function guardLine(g: GateTrace | undefined): string {
@@ -890,6 +905,7 @@ export async function handleDualVerify(
       pending.length > 0 ? RESTART_PENDING_NOTE : '',
       echoedMemoriesLine(result.egress),
       echoSpansBlock(result.echoSpans, deps),
+      secretSpansBlock(result.secretSpans, deps),
     ].filter(Boolean).join('\n'));
   }
   // Codex output is untrusted DATA: frame it with a per-call nonce delimiter + instruction

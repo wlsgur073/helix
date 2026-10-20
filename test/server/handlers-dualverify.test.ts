@@ -1125,3 +1125,41 @@ describe('handleDualVerify: one reading per call, records, and the restart note 
     expect(text(res)).not.toMatch(/restart/);
   });
 });
+
+// Issue #12: the handler renders the secret spans of a secret-leg refusal inside a DATA frame, and the
+// audit row stays content-free (no position, no characters of the token).
+describe('handleDualVerify: secret spans (issue #12)', () => {
+  it('renders where the blocking token sits, inside a SECRET SPANS frame', async () => {
+    const d = deps({ runner: async () => { throw new Error('must not spawn'); } });
+    const res = await handleDualVerify({ question: 'first line\nthe value Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3 here', helixAnswer: 'n/a', stakes: 'high' }, d);
+    const out = text(res);
+    expect(out).toContain('SECRET SPANS');
+    expect(out).toContain('DATA| question line 2, column 11: high-entropy token, 24 characters, starts with "Zx"');
+    expect(out).not.toContain('Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3');
+    const audit = readFileSync(d.auditPath!, 'utf8');
+    expect(audit).not.toContain('Zx9');
+    expect(audit).not.toContain('column');
+  });
+
+  it('normalizes each row, so a format character at the start of a token does not render', async () => {
+    const d = deps({ runner: async () => { throw new Error('must not spawn'); } });
+    const out = text(await handleDualVerify({ question: 'the value ‮Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3 here', helixAnswer: 'n/a', stakes: 'high' }, d));
+    expect(out).toContain('DATA| question line 1, column 11: high-entropy token, 25 characters, starts with "Z');
+    expect(out).not.toContain('‮');
+  });
+
+  it('counts the blocking tokens it does not list', async () => {
+    const d = deps({ runner: async () => { throw new Error('must not spawn'); } });
+    const tokens = Array.from({ length: 12 }, (_, i) => `Zx9Qv4Lm2Rt7Kp1Wc8Ny5H${String.fromCharCode(97 + i)}3`);
+    const out = text(await handleDualVerify({ question: tokens.join('\n'), helixAnswer: 'n/a', stakes: 'high' }, d));
+    expect(out).toContain('(2 more blocking tokens not shown)');
+  });
+
+  it('says so when the blocking token has no position in the text as written', async () => {
+    const d = deps({ runner: async () => { throw new Error('must not spawn'); } });
+    const hidden = '-----BEGIN RSA PRIVATE KEY-----'.split('').join('​');
+    const out = text(await handleDualVerify({ question: hidden, helixAnswer: 'n/a', stakes: 'high' }, d));
+    expect(out).toContain('SECRET SPANS');
+    expect(out).toContain('DATA| at least one blocking token was found only after normalization (fullwidth or invisible characters folded, or a fence run collapsed): it has no position in the text as written and is not listed');
+  });
+});

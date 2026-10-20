@@ -229,3 +229,34 @@ describe('issue #5: the write path keeps Windows paths and NAME=value settings',
     }
   });
 });
+
+// Issue #12 (owner ruling 2026-10-18: one chain test for both paths): a fact that quotes source code
+// keeps it, a random value inside the code is still redacted, and `pw` or `api key` near a chain keeps
+// it redacted.
+describe('issue #12: the write path keeps code by its words', () => {
+  it('persists a code token verbatim', () => {
+    const content = 'the call items.get(0).equals(order.getCustomerId())) throws on an empty list';
+    const out = storeAt().commitScoped({ content, source: 'agent-inference' });
+    expect(out.record.content).toBe(content);
+    expect(out).not.toHaveProperty('redactions');
+  });
+
+  it('control: a random value inside code is still redacted', () => {
+    const out = storeAt().commitScoped({ content: 'the call client.connect("Zx9Qv4Lm2Rt7Kp1Wc8Ny5") hangs', source: 'agent-inference' });
+    expect(out.record.content).toBe('the call [redacted:high-entropy] hangs');
+  });
+
+  it('control: pw or api key near a chain keeps it redacted', () => {
+    for (const content of ['the pw is in projects/app2/vault-2024-recovery now', 'the api key sits in docs/keys/2026-vault-recovery.md now']) {
+      const out = storeAt().commitScoped({ content, source: 'agent-inference' });
+      expect(out.record.content, content).toContain('[redacted:high-entropy]');
+    }
+  });
+
+  it('control: a random value with symbols, a setter that names a password, or a share link is redacted', () => {
+    for (const content of ['the value Gq&Lw*Tz!Rb^Mx@Nc#Pv$Kd9 was set', 'the call db.setPassword("tiger-lily-2024"); runs at boot', 'the share link http://localhost:8080/s/nZTDAGXu expires friday']) {
+      const out = storeAt().commitScoped({ content, source: 'agent-inference' });
+      expect(out.record.content, content).toContain('[redacted:high-entropy]');
+    }
+  });
+});

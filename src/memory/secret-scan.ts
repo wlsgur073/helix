@@ -30,16 +30,11 @@ export interface SecretSpan {
    *  is pure hex >= 24 (git SHA / digest / hex id). Read by the egress gate, and by
    *  selectWriteRedactions only to keep a hex core redacting. */
   entropyHex?: boolean;
-  /** C2.2: set on entropy-tier spans only — true iff the stripped core is a separator-joined chain
-   *  of individually low-entropy segments (dated filenames, governance doc paths — the FP class
-   *  that fired twice on real artifact names). Read ONLY by the egress gate; the write path reads
-   *  entropyStoredChain. */
+  /** C2.2: set on entropy-tier spans only — true iff the stripped core passes the chain test
+   *  (isBenignWordChain): a separator-joined chain of individually low-entropy segments (dated
+   *  filenames, doc paths, Windows paths, settings, source code). Read by the egress exemption and by
+   *  the write path (selectWriteRedactions) alike, owner ruling 2026-10-18 (issue #12). */
   entropyWordChain?: boolean;
-  /** Issue #5: set on entropy-tier spans only — true iff the stripped core passes the write path's
-   *  chain test (isBenignStoredChain), a superset of entropyWordChain that also accepts a Windows
-   *  path, an environment-variable reference and a NAME=value setting. Read ONLY by
-   *  selectWriteRedactions. */
-  entropyStoredChain?: boolean;
 }
 
 // Named patterns run before the entropy net so redactions carry a precise kind
@@ -123,25 +118,7 @@ function stripLineRef(t: string): string {
   return CITATION_LINE_REF.exec(t)?.[1] ?? t;
 }
 
-/** C2.2: true iff T's stripped core is a chain (>= 2 segments over -._/ separators) in which EVERY
- *  segment is individually low-entropy: pure alphabetic (any length), pure digits of <= 4 (years,
- *  months, days, small counters), or a word with a short trailing digit suffix (v2, specs2, api03,
- *  sha256 — <= 8 chars total, digits only at the end). ONE disqualifying segment keeps the whole
- *  token in the entropy net — no partial credit (anti-greedy, mirroring the EH-4 lesson): a chain
- *  smuggling one long mixed-alnum or long-digit segment (an embedded key chunk, a 12-digit id) is
- *  NOT exempt. Deliberate NON-GOAL: covert re-encoding of a secret as an all-benign chain — a
- *  char-level low-confidence net cannot police re-encoding (an adversary can always spell a secret
- *  as words); this net exists for ACCIDENTAL inclusions, and accidental keys virtually always carry
- *  a high-entropy segment. Read only by the egress gate; the write path asks isBenignStoredChain,
- *  its superset. A trailing source-citation line reference is removed first (stripLineRef) so a
- *  `path.ext:112` pointer is judged on its path, with the segment rules applying unchanged. */
-export function isBenignWordChain(t: string): boolean {
-  const segments = stripLineRef(stripWrapper(t)).split(/[-._/]+/).filter((s) => s !== '');
-  if (segments.length < 2) return false;
-  return segments.every(isLowEntropySegment);
-}
-
-/** The C2.2 segment rules, shared by both chain tests. */
+/** The C2.2 segment rules. */
 function isLowEntropySegment(s: string): boolean {
   return /^[A-Za-z]+$/.test(s) || /^[0-9]{1,4}$/.test(s) || (s.length <= 8 && /^[A-Za-z]+[0-9]{1,3}$/.test(s));
 }
@@ -184,37 +161,113 @@ function splitSettings(core: string): string[] {
   return parts;
 }
 
-/** Issue #5: the WRITE path's chain test — isBenignWordChain widened to the spellings a Windows
- *  path, an environment-variable reference and a NAME=value setting take, so a fact that names its
- *  file the native way, or quotes a setting in a code span, is persisted as written:
- *  - `\` separates segments, as `/` does (a UNC prefix leaves only empty segments, dropped);
- *  - a LEADING drive prefix (`C:\`, `C:/`) is dropped; any other colon keeps the token in the net,
- *    for the reason E-CITE gives against `:` as a separator (the colon of `$env:` and a trailing
- *    line reference are removed before the segments are judged);
+// Issue #12: the separators of the chain test. The C2.2 set `-._/`, the Windows `\` (issue #5), the
+// punctuation of source code (brackets, quotes, the backtick, `,` and `;`) and three pairs that code
+// writes and a password rarely does: `${` (a template), `?.` (optional chaining) and `!` before `.`, a
+// bracket, `,` or `;` (a non-null assertion). A symbol of a password alphabet (`!@#$%^&*` and the
+// like) does not separate on its own: while it did, 1.85% of 24-character random values over letters,
+// digits and `!@#$%^&*` passed when written alone (review of issue #12, round 1; 100,000 uniform
+// draws). Not `+` or `=`, which base64 uses (its padding would split off), and not `:`, for the reason
+// E-CITE gives (`label:<secret>`).
+const CHAIN_SEPARATORS = /(?:[-._/\\()[\]{}<>"'`,;]|\$(?=\{)|\?(?=\.)|!(?=[.)\][,;]))+/;
+// In a token that carries a URL, `#` separates as well, anywhere in the token: it starts the fragment
+// (`x.ts#L42`).
+const URL_SEPARATORS = /(?:[-._/\\()[\]{}<>"'`,;]|\$(?=\{)|\?(?=\.)|!(?=[.)\][,;])|#)+/;
+// A URL anywhere in the token (`fetch("http://localhost:3000/x")`) is judged with its scheme as a
+// segment, split on `+` (`svn+ssh`), and without the port right after its host. Only there: a bare
+// `word:12345` is not a URL, and stripping its digits would launder them past the segment rules;
+// userinfo (`admin:pw@host`) does not match, so its colon stays and keeps the token in the net. Each
+// URL of a token loses its port, at most 5 digits after a scheme and a host, and the removals add
+// up with each other and with stripLineRef's (`http://h:54321/x.js:12345:67890` loses 15 digits): a
+// token built that way is the re-encoding the chain test does not police (isBenignWordChain).
+const URL_AUTHORITY = /(^|[^A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*):\/\/([A-Za-z0-9.-]+)(?::\d{1,5})?(?=[/?#"'`)\]}>,;]|$)/g;
+// The tokens issue #12 widened are those split by the punctuation of code or carrying a URL. They
+// are read for the credential keywords of nearCredential as well: a setter or a builder names the
+// credential in the same token as its value (`db.setPassword("<passphrase>")`), where nearCredential
+// does not look. Other tokens (paths, settings) are judged as before issue #12.
+const CODE_PUNCTUATION = /[()[\]{}<>"'`,;]|[?!]\./;
+// In a widened token a run of six or more letters in mixed case must read as camelCase words
+// averaging at least 2.5 letters (`getCustomerId`, `toBeNull`; `aBcDeF` changes case at every
+// letter). Random letters in mixed case still average that much a third to a half of the time, at
+// every length (`nZTDAGXu`: 2.67); the rates for random values with digits fall with length because
+// a digit inside a value fails the segment rules whatever its letters (2026-10-20 check of issue
+// #12: 31% to 50% of the values of letters alone in mixed case pass in a code token that carries a
+// digit elsewhere, by length). In a token with a URL every segment is also written in one case or
+// Capitalized, digits as the segment rules allow: the random id of a share, invite or reset link
+// mixes case (`nZTDAGXu`), while a path written by hand rarely does (review of issue #12, round 2:
+// about 30% of 8-character random ids in mixed case behind `http://localhost:8080/s/` passed
+// without these two tests, 0.45% with them). An id in one case passes as often as 10035b8 already
+// let the same link through written without its scheme (round 3: about 12% of 8-character lowercase
+// base36 ids). A URL with a camelCase segment (`Microsoft/TypeScript`) stays in the net, as before
+// issue #12.
+const ONE_CASE_SEGMENT = /^(?:[a-z]+|[A-Z]+|[A-Z][a-z]+)[0-9]{0,3}$|^[0-9]{1,4}$/;
+function readsAsWords(s: string): boolean {
+  const letters = s.replace(/[0-9]+$/, '');
+  if (letters.length < 6 || letters === letters.toLowerCase() || letters === letters.toUpperCase()) return true;
+  const words = letters.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+/g) ?? [];
+  return letters.length / Math.max(1, words.length) >= 2.5;
+}
+
+/** C2.2: true iff T's stripped core is a chain (>= 2 segments) in which EVERY segment is
+ *  individually low-entropy: pure alphabetic (any length), pure digits of <= 4 (years, months, days,
+ *  small counters), or a word with a short trailing digit suffix (v2, specs2, api03, sha256 — <= 8
+ *  chars total, digits only at the end). ONE disqualifying segment keeps the whole token in the
+ *  entropy net — no partial credit (anti-greedy, mirroring the EH-4 lesson): a chain smuggling one
+ *  long mixed-alnum or long-digit segment (an embedded key chunk, a 12-digit id) is NOT exempt.
+ *  Deliberate NON-GOAL: covert re-encoding of a secret as an all-benign chain — a char-level
+ *  low-confidence net cannot police re-encoding (an adversary can always spell a secret as words);
+ *  this net exists for ACCIDENTAL inclusions, and accidental keys virtually always carry a
+ *  high-entropy segment.
+ *
+ *  Before the segments are judged:
+ *  - a trailing source-citation line reference is removed (stripLineRef), so a `path.ext:112`
+ *    pointer is judged on its path;
+ *  - a URL anywhere in the token keeps its scheme as a segment, split on `+`, and loses the port
+ *    right after its host (`https://host:3000/x` -> `https/host/x`);
+ *  - a LEADING drive prefix (`C:\`, `C:/`) is dropped (issue #5); any other colon keeps the token in
+ *    the net;
  *  - an environment-variable reference (`%NAME%`, `$env:NAME` in any case, `${NAME}`, `$NAME`) is
  *    judged by its name: the sigils carry nothing a secret could hide in;
  *  - `=` separates a setting name, as such names are written, from its value (splitSettings: a
  *    mixed-case base64 body never splits off its padding), unless a name to the left of an `=`
  *    carries a credential word (namesCredential). That name sits INSIDE the token, where
  *    nearCredential does not look, so the check is not redundant with it.
- *  The rules apply to any token, not only to one that reads as a path or a setting. The segment rules
- *  are unchanged, so a path or a value with one long mixed-alnum or long-digit segment is still
- *  redacted, and the length floor is still judged on the token as written. Every token
- *  isBenignWordChain accepts is accepted here: its segments are alphanumeric, so the added
- *  separators cannot split them, and it holds no `=`, `%`, `$` or colon for the other steps to read.
- *  ACCEPTED RESIDUAL, as for the plain chain: a secret written as words and short numbers (a
- *  passphrase, grouped digits) passes the segment rules, so behind a name outside the credential
- *  list it is persisted, as its `-`-joined twin already was. Read only by the write path
- *  (selectWriteRedactions, through entropyStoredChain); the egress exemption keeps
- *  isBenignWordChain (owner ruling 2026-10-18: egress is decided with issue #12). */
-export function isBenignStoredChain(t: string): boolean {
+ *  A token split by the punctuation of code (CODE_PUNCTUATION) or carrying a URL is not exempt when
+ *  it mentions a credential keyword of nearCredential (`db.setPassword("<passphrase>")`).
+ *  Segments are then split on CHAIN_SEPARATORS, or URL_SEPARATORS in a token with a URL (issue #12:
+ *  source code is judged by its words); in such a widened token every segment must also read as
+ *  words (readsAsWords), and in a token with a URL be written in one case or Capitalized
+ *  (ONE_CASE_SEGMENT). The length floor is still judged on the token as written.
+ *  ACCEPTED RESIDUAL: a secret written as words and short numbers (a passphrase, grouped digits)
+ *  passes the segment rules, so behind a name outside the credential list, or as a piece of a code
+ *  token that names no keyword of nearCredential (`setToken("<passphrase>")`), it is persisted and
+ *  sent; measured on random values, the pieces of a random value can still look like words (issue
+ *  #12, against 10035b8, uniform draws: 2.5% of 8-char, 0.4% of 16-char and 0.1% of 24-char
+ *  mixed-case alphanumeric values set into code, which 10035b8 blocked only for the code around
+ *  them, and more in one case, which readsAsWords cannot read: 6% of 8-char lowercase base36
+ *  values, three quarters of letters alone in one case; letters alone in mixed case 8% at 8 and 12
+ *  chars and 12% from 16 to 32, about half where the code token carries a digit elsewhere; 0.4% of
+ *  8-char mixed-case ids in a share link, 0.01% at 12 and none from 16, one-case ids as often as
+ *  10035b8 released the link written without its scheme; and 0.15% of 24-char values over the 94
+ *  printable ASCII characters written alone, whose symbols happened to be code punctuation). Read
+ *  by the egress exemption and the write path alike (owner ruling 2026-10-18). */
+export function isBenignWordChain(t: string): boolean {
+  let url = false;
   const core = stripLineRef(stripWrapper(t))
+    .replace(URL_AUTHORITY, (_m, before: string, scheme: string, host: string) => {
+      url = true;
+      return `${before}${scheme.replace(/\+/g, '/')}/${host}`;
+    })
     .replace(DRIVE_PREFIX, '')
     .replace(ENV_REFERENCE, (_m, ...names: Array<string | undefined>) => names.slice(0, 4).find((n) => n !== undefined) ?? '');
+  const widened = url || CODE_PUNCTUATION.test(core);
+  if (widened && mentionsCredential(core)) return false;
   const setting = splitSettings(core);
   if (setting.slice(0, -1).some(namesCredential)) return false;
-  const segments = setting.flatMap((part) => part.split(/[-._/\\]+/)).filter((s) => s !== '');
+  const segments = setting.flatMap((part) => part.split(url ? URL_SEPARATORS : CHAIN_SEPARATORS)).filter((s) => s !== '');
   if (segments.length < 2) return false;
+  if (url && !segments.every((s) => ONE_CASE_SEGMENT.test(s))) return false;
+  if (widened && !segments.every(readsAsWords)) return false;
   return segments.every(isLowEntropySegment);
 }
 
@@ -281,7 +334,6 @@ function foldedTokenSpans(content: string): SecretSpan[] {
     if (hit.tier === 'entropy') {
       span.entropyHex = isHexCore(folded);
       span.entropyWordChain = isBenignWordChain(folded);
-      span.entropyStoredChain = isBenignStoredChain(folded);
     }
     out.push(span);
   }
@@ -309,7 +361,6 @@ export function findSecrets(content: string): SecretSpan[] {
         start: m.index, end: m.index + m[0].length, kind: 'high-entropy', tier: 'entropy',
         tiers: ['entropy'],
         entropyHex: isHexCore(m[0]), entropyWordChain: isBenignWordChain(m[0]),
-        entropyStoredChain: isBenignStoredChain(m[0]),
       });
     }
   }
@@ -351,10 +402,15 @@ export function redactSecrets(content: string, spans: SecretSpan[]): Redaction {
 // so the two paths cannot drift. A credential keyword within ~CRED_WINDOW chars of the span,
 // restricted to the SAME statement (window clipped at \n / . / ; — comma is intentionally NOT a
 // boundary), keeps the span protected (bias toward protection). Locked tunables (spec §6):
-// boundary set \n . ; ; CRED_WINDOW 24 ; KW_PAD 16 ; keyword set below.
-const CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[_-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token)/i;
+// boundary set \n . ; ; CRED_WINDOW 24 ; KW_PAD 16 ; keyword set below (issue #12 added `pw` and `pwd`
+// at the end of a word, `adminpw` and `dbPw` included: no English word ends that way, while `upward`
+// and `pwm` go on with a letter; and `api key` written with a space).
+const CREDENTIAL_CONTEXT = /(pass(word|wd)?|secret|credential|api[ _-]?key|client[_-]?secret|webhook[_-]?secret|signing[_-]?secret|(access|refresh|auth|session|csrf|bearer)[ _-]?token|pwd?(?![a-z]))/i;
 const CRED_WINDOW = 24; // proximity cap (chars)
 const KW_PAD = 16;      // longest guard keyword; pad the raw slice so an edge keyword is not truncated
+function mentionsCredential(s: string): boolean {
+  return CREDENTIAL_CONTEXT.test(s.replace(/([a-z])([A-Z])/g, '$1 $2'));
+}
 export function nearCredential(text: string, start: number, end: number): boolean {
   let pre = text.slice(Math.max(0, start - CRED_WINDOW - KW_PAD), start);
   let post = text.slice(end, Math.min(text.length, end + CRED_WINDOW + KW_PAD));
@@ -362,14 +418,13 @@ export function nearCredential(text: string, start: number, end: number): boolea
   if (b >= 0) pre = pre.slice(b + 1);
   const m = post.search(/[\n.;]/);
   if (m >= 0) post = post.slice(0, m);
-  return CREDENTIAL_CONTEXT.test(pre) || CREDENTIAL_CONTEXT.test(post);
+  return mentionsCredential(pre) || mentionsCredential(post);
 }
 
 /** W-CITE write-policy selector: which spans `redactSecrets` must still replace on the WRITE path.
  *  A span is RELEASED (persisted verbatim) iff its `tiers` is exactly ['entropy'] AND its core
- *  passes the write path's chain test (isBenignStoredChain, issue #5: also a Windows path, an
- *  environment-variable reference or a NAME=value setting) AND NOT hex-shaped AND no credential
- *  keyword sits in the same statement.
+ *  passes the chain test (isBenignWordChain, the same one the egress exemption reads) AND NOT
+ *  hex-shaped AND no credential keyword sits in the same statement.
  *  Deny-dominant on `tiers` (read the accumulated list, never the display `tier`): any
  *  named/heuristic overlap in a merged span keeps it redacting. Hex keeps redacting because hex is
  *  the native representation of random secret material — a 40-char hex value may be a git object
@@ -383,7 +438,7 @@ export function nearCredential(text: string, start: number, end: number): boolea
 export function selectWriteRedactions(content: string, spans: SecretSpan[]): SecretSpan[] {
   return spans.filter((s) => !(
     s.tiers.length === 1 && s.tiers[0] === 'entropy' &&
-    s.entropyStoredChain === true && s.entropyHex !== true &&
+    s.entropyWordChain === true && s.entropyHex !== true &&
     !nearCredential(content, s.start, s.end)
   ));
 }

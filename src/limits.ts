@@ -95,6 +95,11 @@ export const MAX_ECHO_SPAN_IDS = 10;
 export const MAX_ECHO_SPANS_PER_ID = 3;
 export const MAX_ECHO_SPAN_CHARS = 160;
 
+/** Secret-span cap (issue #12): a refusal a secret leg decided lists at most this many blocking tokens
+ *  (field, line, column, length, first two characters, kind) and counts the rest. A DISPLAY bound,
+ *  like MAX_ECHO_SPAN_IDS: every blocking token is still detected and still blocks. */
+export const MAX_SECRET_SPANS = 10;
+
 /** `helix_memory_recheck`'s `check.path` field. */
 export const MAX_RECHECK_PATH_CHARS = 4_096;
 

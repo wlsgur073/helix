@@ -697,3 +697,152 @@ describe('dualVerify compare mode sends the code the host wrote (issue #13)', ()
     expect(saw).toContain('a = = = b');
   });
 });
+
+// Issue #12: a refusal that a secret leg decided says where the blocking tokens sit in the caller's
+// own text (field, line, column, length, the first two characters, the kind), so a false positive can
+// be reworded without re-implementing the detector. LIVE only: the handler renders it, audit.jsonl
+// never receives it.
+describe('dualVerify: secret spans for a refusal a secret leg decided (issue #12)', () => {
+  const refuse = (question: string, helixAnswer = 'a', cfg: HelixConfig = enabled()) =>
+    dualVerify({ stakes: 'high', question, helixAnswer }, deps({ config: cfg, runner: async () => { throw new Error('must not run'); } }));
+
+  it('names the line, column, length, first two characters and kind of a high-entropy token', async () => {
+    const r = await refuse('first line\nthe value Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3 here');
+    expect(r.outcome).toBe('refused');
+    expect(r.secretSpans).toEqual({ entries: [{ field: 'question', line: 2, column: 11, length: 24, head: 'Zx', kind: 'high-entropy token' }], omitted: 0, unlocated: false });
+  });
+
+  it('names a provider credential by its kind and a keyword assignment as such', async () => {
+    const named = await refuse('aws AKIAQZ3MXW7TB4RN5KJD now');
+    expect(named.secretSpans?.entries).toEqual([{ field: 'question', line: 1, column: 5, length: 20, head: 'AK', kind: 'provider credential (aws-access-key)' }]);
+    const heuristic = await refuse('set password=hunter2xyzzy now');
+    expect(heuristic.secretSpans?.entries).toEqual([{ field: 'question', line: 1, column: 5, length: 21, head: 'pa', kind: 'keyword assignment' }]);
+  });
+
+  it('lists at most ten tokens and counts the rest', async () => {
+    const tokens = Array.from({ length: 12 }, (_, i) => `Zx9Qv4Lm2Rt7Kp1Wc8Ny5H${String.fromCharCode(97 + i)}3`);
+    const r = await refuse(tokens.join('\n'));
+    expect(r.secretSpans?.entries).toHaveLength(10);
+    expect(r.secretSpans?.omitted).toBe(2);
+    expect(r.secretSpans?.entries.map((e) => e.line)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it('lists only the tokens that block: a released code token is left out', async () => {
+    const r = await refuse('response.setStatusCode(200); and Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3');
+    expect(r.secretSpans?.entries.map((e) => e.head)).toEqual(['Zx']);
+  });
+
+  it('says that a token only a normalized view revealed has no position', async () => {
+    const hidden = '-----BEGIN RSA PRIVATE KEY-----'.split('').join('​');
+    const r = await refuse(hidden);
+    expect(r.outcome).toBe('refused');
+    expect(r.secretSpans).toEqual({ entries: [], omitted: 0, unlocated: true });
+  });
+
+  // Review round 1: a located token no longer hides one that only a normalized view revealed.
+  it('lists the located token and still says that another one has no position', async () => {
+    const hidden = '-----BEGIN RSA PRIVATE KEY-----'.split('').join('​');
+    const r = await refuse(`the value Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3 here\n${hidden}`);
+    expect(r.secretSpans).toEqual({ entries: [{ field: 'question', line: 1, column: 11, length: 24, head: 'Zx', kind: 'high-entropy token' }], omitted: 0, unlocated: true });
+  });
+
+  // The token glued to a fence run is found only once the run is collapsed. After the listed key is
+  // blanked the card number would decide the recheck under the default policy, so the recheck allows
+  // the PII legs: only a secret leg can say that a blocking token is left.
+  it('a card number in the payload does not hide a token that has no position', async () => {
+    const q = `aws AKIAQZ3MXW7TB4RN5KJD now\ncard 4111 1111 1111 1111 exp 12/29\nvalue Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3${'='.repeat(40)} end`;
+    const r = await refuse(q);
+    expect(r.egress?.decidedBy).toBe('named');
+    expect(r.secretSpans).toEqual({ entries: [{ field: 'question', line: 1, column: 5, length: 20, head: 'AK', kind: 'provider credential (aws-access-key)' }], omitted: 0, unlocated: true });
+    const located = await refuse('aws AKIAQZ3MXW7TB4RN5KJD now\ncard 4111 1111 1111 1111 exp 12/29');
+    expect(located.secretSpans?.unlocated).toBe(false);
+  });
+
+  it('lists a chain-shaped token near a credential keyword as a high-entropy token', async () => {
+    const r = await refuse('the password lives in response.setStatusCode(200); for now');
+    expect(r.secretSpans?.entries.map((e) => [e.column, e.kind])).toEqual([[23, 'high-entropy token']]);
+  });
+
+  it('places a token of the answer under helixAnswer in critique mode', async () => {
+    const r = await refuse('review this', 'ok\n  Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3', critiqueCfg());
+    expect(r.secretSpans?.entries).toEqual([{ field: 'helixAnswer', line: 2, column: 3, length: 24, head: 'Zx', kind: 'high-entropy token' }]);
+    expect(r.secretSpans?.unlocated).toBe(false);
+  });
+
+  it('in critique mode the recheck reads the answer too', async () => {
+    const hidden = '-----BEGIN RSA PRIVATE KEY-----'.split('').join('​');
+    const r = await refuse('review this', `ok\n${hidden}`, critiqueCfg());
+    expect(r.secretSpans).toEqual({ entries: [], omitted: 0, unlocated: true });
+  });
+
+  it('labels a chain-shaped token the policy blocks by closing the exemption', async () => {
+    const cfg = enabled();
+    cfg.dualVerify.egressPolicy.secretEntropyExempt = 'block';
+    const r = await refuse('response.setStatusCode(200);', 'a', cfg);
+    expect(r.egress?.decidedBy).toBe('secretEntropyExempt');
+    expect(r.secretSpans?.entries.map((e) => e.kind)).toEqual(['hex or chain-shaped token (exemption closed by policy)']);
+  });
+
+  it('leaves out a keyword assignment the policy allows, and lists the token that still blocks', async () => {
+    const cfg = enabled();
+    cfg.dualVerify.egressPolicy.secretHeuristic = 'allow';
+    const r = await refuse('set password=hunter2xyzzy and Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3 now', 'a', cfg);
+    expect(r.egress?.decidedBy).toBe('secretEntropy');
+    expect(r.secretSpans?.entries.map((e) => e.kind)).toEqual(['high-entropy token']);
+  });
+
+  it('is absent when no secret leg blocks', async () => {
+    const r = await refuse('card 4111 1111 1111 1111 exp 12/29');
+    expect(r.egress?.decidedBy).toBe('piiHigh');
+    expect(r.secretSpans).toBeUndefined();
+  });
+
+  // Review round 2.
+  it('is present when another leg decided a refusal in which a secret leg also blocks', async () => {
+    const r = await refuse('card 4111 1111 1111 1111 value Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3');
+    expect(r.egress?.decidedBy).toBe('piiHigh');
+    expect(r.secretSpans).toEqual({ entries: [{ field: 'question', line: 1, column: 32, length: 24, head: 'Zx', kind: 'high-entropy token' }], omitted: 0, unlocated: false });
+  });
+
+  it('a memory echo in the payload hides neither the secret spans nor a token that has no position', async () => {
+    const memo = 'the deploy runbook lives under the shared ops folder for the platform team';
+    const q = `${memo}\nthe value Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3 here\nvalue Qm4Xr8Lt2Vn6Bc9Pz3Kw7Jd5Hf1${'='.repeat(40)} end`;
+    const r = await dualVerify({ stakes: 'high', question: q, helixAnswer: 'a' }, deps({
+      config: enabled(), runner: async () => { throw new Error('must not run'); },
+      echo: { mode: 'enforce', ledgerTexts: () => [{ id: 'm_echo', content: memo, contentDigest: digestContent(memo) }] },
+    }));
+    expect(r.egress?.decidedBy).toBe('memoryEcho');
+    expect(r.secretSpans).toEqual({ entries: [{ field: 'question', line: 2, column: 11, length: 24, head: 'Zx', kind: 'high-entropy token' }], omitted: 0, unlocated: true });
+  });
+
+  it('blanks a listed token whole, so what is left of it cannot stand as a new token', async () => {
+    const r = await refuse(`npm_${'a'.repeat(200)}-Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3`);
+    expect(r.egress?.decidedBy).toBe('named');
+    expect(r.secretSpans).toEqual({ entries: [{ field: 'question', line: 1, column: 1, length: 204, head: 'np', kind: 'provider credential (npm-token)' }], omitted: 0, unlocated: false });
+    const tail = await refuse(`see Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3-npm_${'a'.repeat(36)} now`);
+    expect(tail.secretSpans).toEqual({ entries: [{ field: 'question', line: 1, column: 30, length: 40, head: 'np', kind: 'provider credential (npm-token)' }], omitted: 0, unlocated: false });
+  });
+
+  it('blanking a listed token keeps its line breaks, dots and semicolons, so no keyword window grows', async () => {
+    for (const q of ['pw: aB3dE5fG7hJ9kL1mN3pQ5rS7.x foo-bar-baz-2024-qux-quux', 'the password Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3; foo-bar-baz-2024-qux-quux', 'pw: aB3dE5fG7hJ9kL1mN3pQ5rS7\nfoo-bar-baz-2024-qux-quux']) {
+      const r = await refuse(q);
+      expect(r.secretSpans?.entries, q).toHaveLength(1);
+      expect(r.secretSpans?.unlocated, q).toBe(false);
+    }
+  });
+
+  it('in critique mode a keyword assignment that runs from the question into the answer is placed where it starts', async () => {
+    const r = await refuse('what should the password:', 'hunter2xyzzy be?', critiqueCfg());
+    expect(r.egress?.decidedBy).toBe('secretHeuristic');
+    expect(r.secretSpans?.entries.map((e) => [e.field, e.line, e.column, e.kind])).toEqual([['question', 1, 17, 'keyword assignment']]);
+    expect(r.secretSpans?.unlocated).toBe(false);
+  });
+
+  it('leaves out an entropy token the policy allows, and lists the keyword assignment that still blocks', async () => {
+    const cfg = enabled();
+    cfg.dualVerify.egressPolicy.secretEntropy = 'allow';
+    const r = await refuse('set password=hunter2xyzzy and Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3 now', 'a', cfg);
+    expect(r.egress?.decidedBy).toBe('secretHeuristic');
+    expect(r.secretSpans?.entries.map((e) => e.kind)).toEqual(['keyword assignment']);
+  });
+});

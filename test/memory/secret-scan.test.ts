@@ -357,11 +357,10 @@ describe('E-CITE: a source citation with a line reference is a benign word chain
   });
 });
 
-// Issue #5: the write path's chain test (isBenignStoredChain, read by selectWriteRedactions through
-// entropyStoredChain) also accepts the spellings a Windows path, an environment-variable reference
-// and a NAME=value setting take. The egress exemption keeps the C2.2 test (owner ruling 2026-10-18:
-// egress is decided with issue #12), so entropyWordChain stays false for the same tokens.
-describe('issue #5: findSecrets tags entropy spans with entropyStoredChain for the write path', () => {
+// Issues #5 and #12: the chain test (isBenignWordChain, read through entropyWordChain by the write path
+// and by the egress exemption alike, owner ruling 2026-10-18) also accepts the spellings a Windows
+// path, an environment-variable reference and a NAME=value setting take.
+describe('issues #5 and #12: the chain test accepts Windows paths, environment-variable references and settings', () => {
   const span = (text: string) => findSecrets(text).find((s) => s.tier === 'entropy');
   const KEPT: Array<[string, string]> = [
     ['a drive path with backslashes', 'the config is C:\\Users\\dev\\projects\\app2\\src\\main.ts here'],
@@ -383,20 +382,12 @@ describe('issue #5: findSecrets tags entropy spans with entropyStoredChain for t
     ['a camelCase Java system property', 'run with -Dhttp.proxyHost=proxy2.example.org now'],
   ];
   for (const [name, text] of KEPT) {
-    it(`true for ${name}, and the egress flag stays false`, () => {
+    it(`true for ${name}`, () => {
       const e = span(text);
       expect(e).toBeDefined();
-      expect(e!.entropyStoredChain).toBe(true);
-      expect(e!.entropyWordChain).toBe(false);
+      expect(e!.entropyWordChain).toBe(true);
     });
   }
-  it('true wherever the egress chain test is true (the write path test is a superset)', () => {
-    for (const text of ['see docs/release/gate-decision-2026-07-22.md for the policy', 'the clamp lives at src/memory/verified-projection.ts:112 today']) {
-      const e = span(text);
-      expect(e!.entropyWordChain).toBe(true);
-      expect(e!.entropyStoredChain).toBe(true);
-    }
-  });
 
   const REDACTED: Array<[string, string]> = [
     ['a random token', 'the synthetic token Zx9Qv4Lm2Rt7Kp1Wc8Ny5Hb3 is not a real secret'],
@@ -428,7 +419,7 @@ describe('issue #5: findSecrets tags entropy spans with entropyStoredChain for t
     it(`false for ${name}`, () => {
       const e = span(text);
       expect(e).toBeDefined();
-      expect(e!.entropyStoredChain).toBe(false);
+      expect(e!.entropyWordChain).toBe(false);
     });
   }
   // Every credential word is pinned: a word dropped from the list would persist a secret value
@@ -438,7 +429,7 @@ describe('issue #5: findSecrets tags entropy spans with entropyStoredChain for t
     it(`false for a setting whose name holds "${w}"`, () => {
       const e = span(`the value MY${w.toUpperCase()}X=correct-horse-battery-2024 was set`);
       expect(e).toBeDefined();
-      expect(e!.entropyStoredChain).toBe(false);
+      expect(e!.entropyWordChain).toBe(false);
     });
   }
   // Short words that rarely end an English word are also caught at the end of a name part, where
@@ -447,7 +438,7 @@ describe('issue #5: findSecrets tags entropy spans with entropyStoredChain for t
     it(`false for a setting whose name ends in a short credential word: ${name}`, () => {
       const e = span(`the value ${name}=correct-horse-battery-2024 was set`);
       expect(e).toBeDefined();
-      expect(e!.entropyStoredChain).toBe(false);
+      expect(e!.entropyWordChain).toBe(false);
     });
   }
   for (const w of ['p', 'pw', 'pin', 'otp', 'totp', 'hotp', 'mfa', '2fa', 'psk', 'jwt', 'sig', 'sid', 'sk', 'pk', 'mdp', 'code', 'codes', 'phrase', 'answer']) {
@@ -455,13 +446,124 @@ describe('issue #5: findSecrets tags entropy spans with entropyStoredChain for t
       for (const name of [`ADMIN_${w.toUpperCase()}`, `admin${w[0]!.toUpperCase()}${w.slice(1)}`, `--${w}`, `ADMIN_${w.toUpperCase()}2`]) {
         const e = span(`the value ${name}=correct-horse-battery-2024 was set`);
         expect(e, name).toBeDefined();
-        expect(e!.entropyStoredChain, name).toBe(false);
+        expect(e!.entropyWordChain, name).toBe(false);
       }
     });
   }
   it('a code span still counts toward the 24-character floor (the length is judged on the token as written)', () => {
     const e = span('the code is `Zx9fQ2Lm8Kp3Vt5Rw7Aq1B` here');   // 22 characters inside the span
     expect(e).toBeDefined();
-    expect(e!.entropyStoredChain).toBe(false);
+    expect(e!.entropyWordChain).toBe(false);
+  });
+});
+
+// Issue #12: the chain test also splits on code punctuation (brackets, quotes, the backtick, `,` and
+// `;`, the pairs `${`, `?.` and `!.`, `#` inside a URL) and judges a URL with its scheme as a segment and
+// without the port after its host, so ordinary source code is judged by its words. A lone password
+// symbol, `+`, `:` and an `=` outside a setting are not separators (random passwords, base64 padding,
+// `label:secret`). A widened token (code punctuation or a URL) that names a credential keyword, or
+// whose mixed case does not read as words, stays in the net, and so does a URL with a segment in
+// mixed case; the segment rules are unchanged. All of it applies on the write path and at egress alike.
+describe('issue #12: the chain test judges code by its words', () => {
+  const span = (text: string) => findSecrets(text).find((s) => s.tier === 'entropy');
+  for (const tok of [
+    'items.get(0).equals(order.getCustomerId()))',
+    'response.setStatusCode(200);',
+    'result.setRetryCount(0);',
+    'list.subList(1,list.size());',
+    '"2".equals(status.trim());',
+    'Pattern.compile("[A-Za-z][A-Za-z0-9_]*");',
+    '"http://mybatis.org/dtd/mybatis-3-mapper.dtd">',
+    'fetch("http://localhost:3000/api/v2/items");',
+    'members[0]!.targetDigest.slice(0,8)',
+    'cfg.get("node.retry_limit")?.value2',
+    '`${lockPath}.lk-${randomBytes(16).toString("hex")}.tmp`;',
+    'out.indexOf(openMatch![0]);',
+    'https://github.com/org/repo/blob/main/src/x.ts#L42',
+    'svn+ssh://repo.example.org/trunk/app2/src',
+    'fetch("http://localhost:12345/v1/items");',
+    'expect(t1.supersedes).toBeNull();',
+    'https://github.com/org/repo/issues/12',
+    'https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404',
+    'expect(t1.kind).toBe("a2");',
+    'response.getHTTPStatusCode(404);',
+    'client2.connect("aBcDe12");',
+  ]) {
+    it(`true for the code token ${tok}`, () => {
+      const e = span(`code ${tok} here`);
+      expect(e, tok).toBeDefined();
+      expect(e!.entropyWordChain, tok).toBe(true);
+    });
+  }
+  for (const [name, tok] of [
+    ['a random value in a call', 'client.connect("Zx9Qv4Lm2Rt7Kp1Wc8Ny5");'],
+    ['a random value among arguments', 'fn(a,"Ab3dEf9hIj2kLm4nOp6q")'],
+    ['base64 with a + inside a call', 'atob("U2VjcmV0K2tleQ+Zm9vYmFy2a==")'],
+    ['a value whose pieces between + look like words (+ never splits)', 'fn("Abcdefgh+Ijklmnop+Qrst12")'],
+    ['a random path segment in a URL', 'fetch("https://api.example.com/v1/files/Zx9Qv4Lm2Rt7Kp1Wc8");'],
+    ['credentials in a URL', 'https://admin:hunter2@db.example.com/app2'],
+    ['a port with no scheme before it', 'see deploy.bot:12345/x2/release-notes'],
+    ['five digits behind a label', 'code backup.recovery.identifier:59382 issued'],
+    ['an internal-digit identifier (not widened)', 'import org.slf4j.LoggerFactory;'],
+    ['an = comparison inside a token', "process.platform2==='win32';"],
+    ['a random value over letters, digits and !@#$%^&* (a lone symbol never separates)', 'Gq&Lw*Tz!Rb^Mx@Nc#Pv$Kd9'],
+    ['the same value after -p on a command line', '-pGq&Lw*Tz!Rb^Mx@Nc#Pv$Kd9'],
+    ['a # outside a URL', 'Gq#Lw#Tz#Rb#Mx#Nc#Pv#Kd9'],
+    ['a random scheme (the scheme is a segment)', 'Xk9Qm2Lp7Rt4Vz8Nw3Bc6Hy1Jd5://localhost/x'],
+    ['a numeric password in URL userinfo', 'https://admin:84213@db.example.com/app2'],
+    ['a port of six digits (no URL is read)', 'fetch("http://localhost:123456/v1/items");'],
+    ['a setter that names a password', 'db.setPassword("tiger-lily-2024");'],
+    ['a builder that names a client secret', 'withClientSecret(`maple-otter-77`)'],
+    ['a camelCase pw in a setter', 'db.setPw("tiger-lily-2024-otter");'],
+    ['a URL that names a password', 'https://vault.example.org/password/tiger-lily-2024'],
+    ['an optional chain that names a password', 'user?.password.reset.v2.token'],
+    ['a non-null chain that names a password', 'opts!.password.reset2.flowName'],
+    ['a $ inside an identifier (a bundler rename)', 'exports$1.push(...fileExports);'],
+    // review round 2
+    ['a random mixed-case id in a share link (every URL segment in one case)', 'http://localhost:8080/s/nZTDAGXu'],
+    ['a camelCase segment in a URL', 'https://github.com/Microsoft/TypeScript/pull/9163'],
+    ['a random mixed-case value in code (it does not read as camelCase words)', 'client2.connect("hQrYTofCgUEf");'],
+    ['a mixed-case value whose words average two letters', 'client2.connect("qRtyUiOpAsDf");'],
+    ['six mixed-case letters that do not read as words (the floor is six)', 'client2.connect("aBcDeF");'],
+    ['seven of them', 'client2.connect("aBcDeFg");'],
+    ['digits after a port of five', 'http://h:12345678/files/report'],
+    ['a scheme that does not start its run', '9.https://files.example.org/v2/docs'],
+    ['a tag that names a password', '<password>tiger-lily-dawn-2024</password>'],
+    ['quotes that name a secret', '"secret"."tiger-lily-dawn-2024"'],
+    ['an index that names a secret', 'secrets[tiger-lily-dawn-2024]'],
+  ] as const) {
+    it(`false for ${name}`, () => {
+      const e = span(`code ${tok} here`);
+      expect(e, tok).toBeDefined();
+      expect(e!.entropyWordChain, tok).toBe(false);
+    });
+  }
+  // Review round 1: each separator splits on its own, a symbol of a password alphabet does not, and
+  // `!` separates only before `.`, a bracket, `,` or `;`, `?` only before `.`.
+  for (const sep of ['-', '.', '_', '/', '\\', '(', ')', '[', ']', '{', '}', '<', '>', '"', "'", '`', ',', ';', '?.', '!.', '![', '!)', '!]', '!,', '!;']) {
+    it(`${JSON.stringify(sep)} separates`, () => {
+      expect(span(`code Alpha${sep}Bravo${sep}Charlie${sep}Delta2${sep}Echo here`)!.entropyWordChain).toBe(true);
+    });
+  }
+  for (const sym of ['?', '&', '#', '$', '%', '|', '^', '*', '!', '@', '~', '+', '=', ':']) {
+    it(`${JSON.stringify(sym)} alone does not separate`, () => {
+      expect(span(`code Alpha${sym}Bravo${sym}Charlie${sym}Delta2${sym}Echo here`)!.entropyWordChain).toBe(false);
+    });
+  }
+  // Review round 3 and the check after it: two parts of the residual SECURITY.md states, pinned so that
+  // a change to either shows. A share link whose random id is in one case passes, as 10035b8 passed the
+  // same link written without its scheme, and letters alone in mixed case can average 2.5 letters a
+  // word (`nZTDAGXu`: 2.67), so in code they pass.
+  it('the documented residual: a one-case id in a share link and mixed-case letters that read as words', () => {
+    for (const tok of ['http://localhost:8080/s/ombqfxiv', 'client2.connect("nZTDAGXu");']) {
+      expect(span(`code ${tok} here`)!.entropyWordChain, tok).toBe(true);
+    }
+  });
+  // A path or a quoted path is not a widened token, so neither the credential check nor the camelCase
+  // test applies to it.
+  it('a path that names a credential keyword, or carries a bundler hash, is judged as before issue #12', () => {
+    for (const tok of ['docs/secret-rotation/2024-plan.md', '"docs/secret-rotation/2024-plan.md"', "'./chunks/environment.d.CrsxCzP1.js';"]) {
+      expect(span(`code ${tok} here`)!.entropyWordChain, tok).toBe(true);
+    }
   });
 });

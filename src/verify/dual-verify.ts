@@ -1,10 +1,11 @@
-import type { HelixConfig } from '../config.js';
+import type { EgressPolicy, HelixConfig } from '../config.js';
 import type { Availability, CodexRunner } from './codex.js';
 import { buildAgreementMap, type AgreementMap } from './agreement-map.js';
 import { normalizeUntrusted, stripControls } from '../memory/content-frame.js';
+import { findSecrets, nearCredential, type SecretSpan } from '../memory/secret-scan.js';
 import { classifyEgress, echoSpans, scannedForms, type EgressVerdict, type LedgerItem, type QuotedMemory } from '../risk/trifecta.js';
 import type { CodexOutcome } from '../codex-log.js';
-import { MAX_DV_ANSWER_CHARS, MAX_ECHO_SPAN_IDS, MAX_ECHO_SPANS_PER_ID } from '../limits.js';
+import { MAX_DV_ANSWER_CHARS, MAX_ECHO_SPAN_IDS, MAX_ECHO_SPANS_PER_ID, MAX_SECRET_SPANS } from '../limits.js';
 
 /** Compile-time-required ledger source for the echo leg. No silent fail-open: a server that forgets
  *  to wire it fails to compile; a test that genuinely skips echo writes { mode: 'disabled' }. */
@@ -82,6 +83,20 @@ export interface DualVerifyResult {
   echoSpans?: {
     entries: ReadonlyArray<{ id: string; spans: ReadonlyArray<{ text: string; fullLength: number }>; omittedSpans: number }>;
     omittedIds: number;
+  };
+  /** Issue #12: for a refusal in which a secret leg blocks (named, secretHeuristic, secretEntropy,
+   *  secretEntropyExempt), whichever leg decided it, where the blocking tokens sit in the caller's own
+   *  text, so a false positive can be reworded without re-implementing the detector. LIVE ONLY, like echoSpans: never reaches
+   *  audit.jsonl or codex-log.jsonl (`head` is two characters of the caller's own bytes). Lines and
+   *  columns count from 1, lines split at `\n` only, columns in UTF-16 code units. */
+  secretSpans?: {
+    entries: ReadonlyArray<{ field: 'question' | 'helixAnswer'; line: number; column: number; length: number; head: string; kind: string }>;
+    omitted: number;
+    /** True when the gate still blocks on a secret leg once every listed token (the omitted ones
+     *  included) is blanked: at least one blocking token was found only in a normalized view
+     *  (fullwidth or invisible characters folded, fence runs collapsed), so it has no position in
+     *  the text as written and is not listed. */
+    unlocated: boolean;
   };
 }
 
@@ -175,9 +190,13 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
   // such as U+037E to ";", which would hide a real syntax error. The NFKC view is still SCANNED:
   // scannedForms adds the folded forms as scan-only forms (src/risk/trifecta.ts). Critique mode
   // frames the answer, so its prompt keeps the full normalization.
-  const prompt = mode === 'critique'
-    ? buildCritiquePrompt(params.question, params.helixAnswer)
-    : stripControls(params.question);
+  // One builder for the bytes sent, so the span diagnosis below asks the gate about the same payload
+  // shape it decided on (secretSpansFor blanks the listed tokens and asks again).
+  const outboundFor = (question: string, helixAnswer: string): string => (mode === 'critique'
+    ? buildCritiquePrompt(question, helixAnswer)
+    : stripControls(question));
+  const textsFor = (question: string, helixAnswer: string): string[] => (mode === 'critique' ? [question, helixAnswer] : [question]);
+  const prompt = outboundFor(params.question, params.helixAnswer);
 
   const ledger = deps.echo.mode === 'enforce' ? deps.echo.ledgerTexts() : null;
   // G1 applies to what is TRANSMITTED. Compare mode sends the question alone (control-stripped), so gating
@@ -187,7 +206,7 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
   // IDENTICAL object classifyEgress just decided on, via scannedForms -- never a second,
   // independently-assembled argument that could drift from what was actually gated.
   const egressInput = {
-    texts: mode === 'critique' ? [params.question, params.helixAnswer] : [params.question],
+    texts: textsFor(params.question, params.helixAnswer),
     outbound: prompt,
     ledger,
     policy: deps.config.dualVerify.egressPolicy,
@@ -198,6 +217,13 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
     return {
       ran: false, attempted: false, outcome: 'refused', reason: verdict.reason, egress: verdict,
       gates: stoppedAt('egress'), echoSpans: spansFor(verdict, egressInput, ledger),
+      secretSpans: secretSpansFor(
+        params.question, mode === 'critique' ? params.helixAnswer : null, egressInput.policy,
+        (question, helixAnswer) => classifyEgress({
+          texts: textsFor(question, helixAnswer), outbound: outboundFor(question, helixAnswer), ledger: null,
+          policy: { ...egressInput.policy, piiHigh: 'allow', piiBulk: 'allow' },
+        }),
+      ),
     };
   }
 
@@ -228,6 +254,81 @@ export async function dualVerify(params: DualVerifyParams, deps: DualVerifyDeps)
   }
   const agreement = buildAgreementMap(params.helixAnswer, res.answer);
   return { ran: true, attempted: true, outcome: 'sent', promptSent: prompt, mode, codexAnswer: res.answer, agreement, egress: verdict };
+}
+
+const SECRET_DECIDERS: ReadonlySet<string> = new Set(['named', 'secretHeuristic', 'secretEntropy', 'secretEntropyExempt']);
+
+/** Issue #12: the blocking tokens of a refusal in which a secret leg blocks, whichever leg decided it,
+ *  read from the fields as the caller wrote them (findSecrets folds token by token, so a fullwidth key
+ *  is still placed). A span is listed when the policy would block it on its own: a named credential
+ *  always, a keyword assignment unless that leg is allowed, an entropy token unless it is released
+ *  (hex- or chain-shaped with no credential keyword near it, while secretEntropyExempt allows that).
+ *  `helixAnswer` is null when it is not sent (compare mode); when it is sent, the two fields are read
+ *  joined by a newline, as the gate reads them, so a token that runs from the end of the question
+ *  into the answer is placed where it starts. `gate` is classifyEgress over the payload built from the
+ *  two fields, with no ledger and the PII legs allowed, so only a secret leg can decide a block: it
+ *  says whether a secret leg blocks at all and, with every listed token blanked (line breaks, `.`
+ *  and `;` kept, so no keyword window reaches farther than before), whether a token found in a
+ *  normalized view only is left, which `unlocated` reports. The kind is that of the token as written:
+ *  a named credential that only the folded text spells out across tokens (a PEM header spread with
+ *  fullwidth spaces) is listed under the kind of the piece the raw scan found. */
+function secretSpansFor(
+  question: string,
+  helixAnswer: string | null,
+  policy: EgressPolicy,
+  gate: (question: string, helixAnswer: string) => EgressVerdict,
+): DualVerifyResult['secretSpans'] {
+  const secretBlocks = (v: EgressVerdict): boolean => v.decision === 'blocked' && v.decidedBy !== undefined && SECRET_DECIDERS.has(v.decidedBy);
+  if (!secretBlocks(gate(question, helixAnswer ?? ''))) return undefined;
+  const text = helixAnswer === null ? question : `${question}\n${helixAnswer}`;
+  const found = findSecrets(text).flatMap((s) => {
+    const kind = blockingKind(s, text, policy);
+    return kind === null ? [] : [{ s, kind }];
+  });
+  const all = found.map(({ s, kind }) => {
+    const inAnswer = helixAnswer !== null && s.start > question.length;
+    const offset = inAnswer ? question.length + 1 : 0;
+    const before = text.slice(offset, s.start);
+    return {
+      field: inAnswer ? 'helixAnswer' as const : 'question' as const, line: before.split('\n').length,
+      column: s.start - offset - before.lastIndexOf('\n'), length: s.end - s.start, head: text.slice(s.start, s.start + 2), kind,
+    };
+  });
+  // Each listed span is blanked with the whole whitespace-delimited token around it, so what is left of
+  // a token cannot stand alone as a new one (review of issue #12, round 3: an npm token glued to a
+  // random tail), in one pass over the text: a refusal near the scan limit lists thousands of tokens.
+  const ranges: Array<[number, number]> = [];
+  for (const { s } of found) {
+    const last = ranges[ranges.length - 1];
+    if (last !== undefined && s.end <= last[1]) continue;
+    let start = s.start;
+    while (start > (last?.[1] ?? 0) && !/\s/.test(text[start - 1]!)) start--;
+    let end = s.end;
+    while (end < text.length && !/\s/.test(text[end]!)) end++;
+    if (last !== undefined && start <= last[1]) last[1] = end;
+    else ranges.push([start, end]);
+  }
+  const pieces: string[] = [];
+  let at = 0;
+  for (const [start, end] of ranges) {
+    pieces.push(text.slice(at, start), text.slice(start, end).replace(/[^\n.;]/g, ' '));
+    at = end;
+  }
+  pieces.push(text.slice(at));
+  const blanked = pieces.join('');
+  const after = helixAnswer === null ? gate(blanked, '') : gate(blanked.slice(0, question.length), blanked.slice(question.length + 1));
+  return { entries: all.slice(0, MAX_SECRET_SPANS), omitted: Math.max(0, all.length - MAX_SECRET_SPANS), unlocated: secretBlocks(after) };
+}
+
+function blockingKind(s: SecretSpan, text: string, policy: EgressPolicy): string | null {
+  if (s.tiers.includes('named')) return `provider credential (${s.kind})`;
+  if (s.tiers.includes('heuristic') && policy.secretHeuristic !== 'allow') return 'keyword assignment';
+  if (s.tiers.includes('entropy')) {
+    const shaped = (s.entropyHex === true || s.entropyWordChain === true) && !nearCredential(text, s.start, s.end);
+    if (!shaped && policy.secretEntropy !== 'allow') return 'high-entropy token';
+    if (shaped && policy.secretEntropyExempt === 'block') return 'hex or chain-shaped token (exemption closed by policy)';
+  }
+  return null;
 }
 
 /** Only for a block the echo leg decided, and only for records that STILL block: an exempted record

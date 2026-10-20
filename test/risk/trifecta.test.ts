@@ -1103,16 +1103,58 @@ describe('scannedForms adds the folded views of the outbound form and the raw te
   });
 });
 
-// Issue #5 (owner ruling 2026-10-18): the write path's wider chain test does not reach the egress
-// exemption, which keeps the C2.2 shape until issue #12 decides it. A Windows path and a quoted
-// setting still trip the entropy leg here.
-describe('issue #5: the egress exemption keeps the C2.2 chain shape', () => {
+// Issue #12 (owner ruling 2026-10-18: one chain test for both paths): the egress exemption accepts
+// what the write path keeps, code included. Released under the default policy (secretEntropyExempt
+// allow), the token is still reported as an audit-only secret leg.
+describe('issue #12: the egress exemption shares the chain test of the write path', () => {
   const policy: EgressPolicy = { ...ALL('block'), secretEntropyExempt: 'allow' };
   for (const q of [
     'the config is C:\\Users\\dev\\projects\\app2\\src\\main.ts here',
     'set `PYTHONIOENCODING=utf-8` before printing',
+    'Is this Java line correct?\nif (items.size() == 1 && items.get(0).equals(order.getCustomerId())) { return; }',
+    'response.setStatusCode(200);',
   ]) {
-    it(`still blocks on the entropy leg: ${q}`, () => {
+    it(`passes, audit-only: ${q}`, () => {
+      const v = classifyEgress({ texts: [q], outbound: q, ledger: null, policy });
+      expect(v.decision).toBe('pass');
+      expect(v.auditOnlyLegs).toContain('secret');
+    });
+  }
+  it('closing the exemption blocks the same code again', () => {
+    const q = 'response.setStatusCode(200);';
+    const v = classifyEgress({ texts: [q], outbound: q, ledger: null, policy: ALL('block') });
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('secretEntropyExempt');
+  });
+  it('a random value inside code still blocks on the entropy leg', () => {
+    const q = 'client.connect("Zx9Qv4Lm2Rt7Kp1Wc8Ny5");';
+    const v = classifyEgress({ texts: [q], outbound: q, ledger: null, policy });
+    expect(v.decision).toBe('blocked');
+    expect(v.decidedBy).toBe('secretEntropy');
+  });
+  it('a line link into a repository passes: # separates inside a URL', () => {
+    const q = 'see https://github.com/org/repo/blob/main/src/x.ts#L42 for the call';
+    expect(classifyEgress({ texts: [q], outbound: q, ledger: null, policy }).decision).toBe('pass');
+  });
+  // `pw` counts only as a word of its own: not inside `upward`, not in front of more letters (`pwm`).
+  for (const q of ['the upward path is build/linux-x64-2024/main-entry.js now', 'the pwm output is in build/linux-x64-2024/main-entry.js now']) {
+    it(`passes, pw is not a word here: ${q}`, () => {
+      expect(classifyEgress({ texts: [q], outbound: q, ledger: null, policy }).decision).toBe('pass');
+    });
+  }
+  // Review rounds 1 and 2: a symbol of a password alphabet does not separate, a code token that names
+  // a credential keyword is not released, and neither is a share link whose id mixes case.
+  for (const q of ['the value Gq&Lw*Tz!Rb^Mx@Nc#Pv$Kd9 was set', 'mysql -u root -pGq&Lw*Tz!Rb^Mx@Nc#Pv$Kd9 appdb', 'db.setPassword("tiger-lily-2024");', 'open http://localhost:8080/s/nZTDAGXu now']) {
+    it(`blocks on the entropy leg: ${q}`, () => {
+      const v = classifyEgress({ texts: [q], outbound: q, ledger: null, policy });
+      expect(v.decision).toBe('blocked');
+      expect(v.decidedBy).toBe('secretEntropy');
+    });
+  }
+  // nearCredential also knows `pw`/`pwd` at the end of a word (glued or camelCase too) and `api key`
+  // written with a space.
+  for (const q of ['the pw is X=correct-horse-battery-2024 here', 'the api key is in docs/keys/2026-vault-recovery.md now', 'set ROOT_PWD to projects/app2/vault-2024 now', 'const dbPw = "tiger-lily-2024-otter";', 'the adminpw is build/linux-x64-2024/main-entry.js now', 'the dbPwHash is build/linux-x64-2024/main-entry.js now']) {
+    it(`a credential word near a chain keeps it blocked: ${q}`, () => {
       const v = classifyEgress({ texts: [q], outbound: q, ledger: null, policy });
       expect(v.decision).toBe('blocked');
       expect(v.decidedBy).toBe('secretEntropy');
