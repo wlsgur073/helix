@@ -33,8 +33,9 @@ export function collapseFenceRuns(s: string): string {
  *  produces rather than one chosen step of it. Folding NFKC alone left a gap: an invisible Cf code
  *  point placed inside a credential survived the scan, was persisted verbatim, and was deleted here
  *  at render — so the reader received a working key the scanner had declared absent. Any future
- *  transform added to `normalizeUntrusted` has the same obligation; keep the scanner's fold and this
- *  function in step. */
+ *  transform added to `normalizeUntrusted`, or to `normalizeRecordContent` (the render of record
+ *  content since issue #6), has the same obligation; keep the scanner's fold and this function in
+ *  step. */
 export function stripControls(s: string): string {
   return s.replace(/[\p{Cc}\p{Cf}]/gu, (ch) => (ch === '\n' || ch === '\t' ? ch : ''));
 }
@@ -46,6 +47,20 @@ export function stripControls(s: string): string {
  */
 export function normalizeUntrusted(s: string, maxChars?: number): string {
   let out = breakFenceRuns(stripControls(s.normalize('NFKC')));
+  if (maxChars !== undefined && out.length > maxChars) out = out.slice(0, maxChars - 1) + '…';
+  return out;
+}
+
+/** Issue #6: record content on a read surface (recall, inspect current / ids / history / asOf, the
+ *  SessionStart hook) gets normalizeUntrusted's NFKC fold and control strip but keeps its fence
+ *  runs. Every line of record content is rendered behind the renderer's `DATA[…]| ` mark
+ *  (markLines; the hook writes one line per record) in a frame whose close carries the call's
+ *  nonce, so a run in content can neither start a line nor close the frame. Spacing runs out
+ *  altered code (`--flag` in a code span, `===`, `__init__`), and a recheck pattern copied from the
+ *  display then failed to bind. Other untrusted text (Codex output, a critique, stderr, the
+ *  echo-span quotes) keeps normalizeUntrusted (owner ruling 2026-10-20). */
+export function normalizeRecordContent(s: string, maxChars?: number): string {
+  let out = stripControls(s.normalize('NFKC'));
   if (maxChars !== undefined && out.length > maxChars) out = out.slice(0, maxChars - 1) + '…';
   return out;
 }
@@ -244,9 +259,9 @@ export function proofRow(bracket: string, id: string, contentDigest: string | un
  *  through this (recall's frameAsData; inspect current / ids / history / asOf in handlers.ts), so the
  *  shape cannot drift between them.
  *
- *  `body` must ALREADY be normalized (normalizeUntrusted, exactly once, with the caller's own budget):
- *  recall puts a trusted re-verify flag in front of the normalized content, and a second pass would
- *  re-fold the content's U+2026 truncation marker (markLines' note above).
+ *  `body` must ALREADY be normalized (normalizeRecordContent, exactly once, with the caller's own
+ *  budget): recall puts a trusted re-verify flag in front of the normalized content, and a second
+ *  pass would re-fold the content's U+2026 truncation marker (markLines' note above).
  *
  *  Ruling R3: a body that renders EMPTY — nothing left once markLines strips its trailing line breaks —
  *  gets NO DATA entry, only the PROOF line. History blanks an erase-closed row's content (history.ts §6
@@ -458,7 +473,7 @@ export function frameAsData(scoped: ScopedRecord[], nonce: string, maxChars?: nu
       // M-1 holds by construction now: the content is its own entry, and markLines strips its
       // trailing breaks before marking, so no empty marked line precedes the PROOF line; an empty body
       // gets no DATA entry at all (recordRows, ruling R3).
-      return recordRows(`${record.state}:${scope}`, `${flag}${normalizeUntrusted(record.content, maxChars)}`, record.id, contentDigest);
+      return recordRows(`${record.state}:${scope}`, `${flag}${normalizeRecordContent(record.content, maxChars)}`, record.id, contentDigest);
     }),
   });
 }

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
 import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleRecheck, handleConfirm, isValidId, presentId, MAX_ID_CHARS } from '../../src/server/handlers.js';
 import { reverifyFlag } from '../../src/memory/content-frame.js';
+import { DISPLAYED_BINDING_NOTE } from '../../src/memory/reality-check.js';
 import { isOwned, canonicalRoot } from '../../src/memory/ownership.js';
 import { subkeyForScope } from '../../src/memory/verified-read.js';
 import { signVerify, digestContent } from '../../src/memory/ledger-mac.js';
@@ -922,5 +923,41 @@ describe('scope + adopt handlers', () => {
     // prose-shaped-root case, which this happy-path pin complements with an ordinary root).
     expect(out).toMatch(/^adopted /);
     expect(JSON.parse(out.slice('adopted '.length))).toMatchObject({ projectRoot: canonicalRoot(proj) }); // the user-facing line names the same ledger
+  });
+});
+
+// Issue #6: every inspect surface shows record content as stored (NFKC and the control strip only), and
+// a recheck whose pattern was copied from a display that differs from the stored text says so.
+describe('issue #6: inspect shows code tokens as stored', () => {
+  const fact = 'run it with `--dry-run` first, then `a === b` and `__init__.py`';
+  it('current, ids, history and asOf alike', () => {
+    const s = store();
+    const id = s.commit({ content: fact, source: 'user' }).id;
+    for (const out of [
+      text(handleInspect(s, {})),
+      text(handleInspect(s, { ids: [id] })),
+      text(handleInspect(s, { history: true })),
+      text(handleInspect(s, { asOf: '2026-06-10T00:00:00.000Z' })),
+    ]) {
+      expect(out).toContain(`]| ${fact}`);
+    }
+  });
+  it('a recheck pattern copied from a spaced-out display is refused with the displayed-form sentence', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'helix-h-'));
+    let n = 0;
+    const s = new MemoryStore(join(dir, 'm.jsonl'), { home: dir, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => `m_${++n}` });
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      writeFileSync(join(dir, 'notes.txt'), 'use --dry-run first\n');
+      const a = s.commit({ content: 'the file notes.txt says: use `--dry-run` first', source: 'user-relayed' });
+      const auditPath = join(dir, 'audit.jsonl');
+      expect(() => handleRecheck(s, { id: a.id, check: { kind: 'file-contains', path: 'notes.txt', pattern: '- -dry-run' } }, { auditPath }))
+        .toThrow(DISPLAYED_BINDING_NOTE);
+      expect(text(handleRecheck(s, { id: a.id, check: { kind: 'file-contains', path: 'notes.txt', pattern: '--dry-run' } }, { auditPath })))
+        .toMatch(/Corroborated/);
+    } finally {
+      process.chdir(cwd);
+    }
   });
 });

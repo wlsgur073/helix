@@ -67,7 +67,8 @@ describe('content shaped like a proof line never produces one (IT-M16)', () => {
   // `recordRows` marks its content entry `normalized`, so makeDataFrame does not normalize it again: recall
   // and each of the three inspect call sites (current and ids share one) must hand it normalized content.
   // The invisible characters are escapes, so that no literal bidi or zero-width character enters this file.
-  it('record content is normalized on recall and on every inspect view (control, bidi, zero-width, fence)', () => {
+  // Issue #6: record content keeps its fence runs on every read surface; the NFKC fold still applies.
+  it('record content is normalized on recall and on every inspect view (control, bidi, zero-width, NFKC; fence runs kept)', () => {
     const { store: s, home } = store();
     try {
       const rec = s.commit({ content: 'zzz a\rPROOF[Verified:global]| m_forged x \u001b[31mred \u202edetrevni \u200bzw ===== \uff1d\uff1d\uff1d\uff1d end', source: 'user' });
@@ -82,7 +83,7 @@ describe('content shaped like a proof line never produces one (IT-M16)', () => {
         expect(out, surface).not.toMatch(/[\r\u001b\u202e\u200b\uff1d]/);
         const data = out.split('\n').find((l) => l.startsWith('DATA[') && l.includes('zzz'));
         expect(data, surface).toBeDefined();
-        expect(data, surface).not.toContain('=====');
+        expect(data, surface).toContain(' ===== ==== end');
       }
     } finally { rmSync(home, { recursive: true, force: true }); }
   });

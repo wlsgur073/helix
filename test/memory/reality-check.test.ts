@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runRealityCheck, checkBinding, REDACTED_BINDING_NOTE } from '../../src/memory/reality-check.js';
+import { runRealityCheck, checkBinding, REDACTED_BINDING_NOTE, DISPLAYED_BINDING_NOTE } from '../../src/memory/reality-check.js';
 
 function tmpFile(content: string): string {
   const p = join(mkdtempSync(join(tmpdir(), 'helix-rc-')), 'f.txt');
@@ -131,5 +131,50 @@ posixOnly('file-contains refuses non-regular files', () => {
       .toEqual({ ran: true, indeterminate: false, passed: true });
     expect(runRealityCheck({ kind: 'file-contains', path: f, pattern: 'haystack' }))
       .toEqual({ ran: true, indeterminate: false, passed: false });
+  });
+});
+
+// Issue #6: binding reads the stored spelling. When a displayed form of the content holds the path or
+// pattern and the stored content does not (NFKC folded, invisible characters removed, the SessionStart
+// line's whitespace joined, or a run spaced out as a dual-verify echo span or an earlier version shows
+// it), the refusal says so in a constant sentence, before the redaction sentence.
+describe('checkBinding: a refusal names a displayed form that holds the path or pattern (issue #6)', () => {
+  const check = (path: string, pattern: string) => ({ kind: 'file-contains' as const, path, pattern });
+  const shown = `; ${DISPLAYED_BINDING_NOTE}`;
+  it('a pattern copied from the folded display', () => {
+    expect(checkBinding('notes.txt says run ｎｐｍ ci', check('notes.txt', 'npm ci')).reason)
+      .toBe(`check.pattern is not present in the item content${shown}`);
+  });
+  it('a pattern copied from a display that spaced a run out', () => {
+    expect(checkBinding('notes.txt says use `--dry-run` first', check('notes.txt', '- -dry-run')).reason)
+      .toBe(`check.pattern is not present in the item content${shown}`);
+  });
+  it('a pattern copied from the SessionStart line, whose whitespace is joined', () => {
+    expect(checkBinding('notes.txt says\nuse the flag', check('notes.txt', 'says use the')).reason)
+      .toBe(`check.pattern is not present in the item content${shown}`);
+  });
+  it('a path only a display holds', () => {
+    expect(checkBinding('config at ｃｆｇ/app.json holds x=1', check('cfg/app.json', 'x=1')).reason)
+      .toBe(`check.path is not present in the item content${shown}`);
+  });
+  it('no sentence when no displayed form holds it either', () => {
+    expect(checkBinding('notes.txt says use --dry-run', check('notes.txt', '--force')).reason)
+      .toBe('check.pattern is not present in the item content');
+  });
+  it('the redaction sentence follows the displayed one', () => {
+    expect(checkBinding('notes.txt says run ｎｐｍ ci [redacted:high-entropy]', check('notes.txt', 'npm ci'), 'secret-redacted').reason)
+      .toBe(`check.pattern is not present in the item content${shown}; ${REDACTED_BINDING_NOTE}`);
+  });
+  it('the stored spelling binds', () => {
+    expect(checkBinding('notes.txt says use `--dry-run` first', check('notes.txt', '--dry-run')).bound).toBe(true);
+  });
+  // Review of issue #6, F3: each of the other two forms on its own.
+  it('a pattern copied from the SessionStart line of an earlier version (whitespace joined, runs spaced)', () => {
+    expect(checkBinding('notes.txt says\nuse `--dry-run` first', check('notes.txt', 'says use ` - -dry-run`')).reason)
+      .toBe(`check.pattern is not present in the item content${shown}`);
+  });
+  it('a pattern copied from the recall display that keeps a tab next to a run', () => {
+    expect(checkBinding('notes.txt x\t---ｙ', check('notes.txt', 'x\t---y')).reason)
+      .toBe(`check.pattern is not present in the item content${shown}`);
   });
 });

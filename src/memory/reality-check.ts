@@ -1,6 +1,7 @@
 import { existsSync, openSync, fstatSync, readSync, closeSync, constants } from 'node:fs';
 import type { VerifyOutcome } from './firewall.js';
 import type { Classification } from '../types.js';
+import { normalizeRecordContent, normalizeUntrusted } from './content-frame.js';
 
 export type RealityCheck =
   | { kind: 'file-exists'; path: string }
@@ -83,6 +84,23 @@ const MIN_PATTERN_CHARS = 3;
 export const REDACTED_BINDING_NOTE =
   "this memory's content was redacted at commit ([redacted:<kind>] markers), so a path or pattern inside a redacted span can never bind";
 
+/** Issue #6: appended to a path or pattern binding refusal when a displayed form of the content
+ *  holds what the stored content does not. A read surface folds NFKC and removes control and
+ *  invisible characters (normalizeRecordContent), the SessionStart line also joins whitespace, and
+ *  a read surface of an earlier Helix version (an installed copy not yet updated, or an earlier
+ *  SessionStart block still in a resumed conversation) also spaced out fence runs
+ *  (normalizeUntrusted); binding reads the stored spelling. A dual-verify echo span is not a
+ *  display of the content: it quotes the caller's own payload, lower-cased. Constant: no path or
+ *  pattern is interpolated. */
+export const DISPLAYED_BINDING_NOTE =
+  'a displayed form of the content contains it, but binding reads the stored spelling (a display folds compatibility characters, removes control and invisible characters and, in the SessionStart block, joins whitespace; an earlier Helix version also spaced out runs of three or more fence characters: = - ~ ` * _, dashes, box drawing)';
+
+function inDisplayedForm(content: string, s: string): boolean {
+  const joined = content.replace(/\s+/g, ' ').trim();
+  return [normalizeRecordContent(content), normalizeRecordContent(joined), normalizeUntrusted(content), normalizeUntrusted(joined)]
+    .some((form) => form.includes(s));
+}
+
 /**
  * Does this check actually exercise what the item claims? (spec §4) Promotion requires BOTH the
  * `path` AND the `pattern` to be RAW substrings of the item content (byte-for-byte, matching
@@ -97,7 +115,8 @@ export function checkBinding(content: string, check: RealityCheck, classificatio
   if (check.kind !== 'file-contains') return { bound: false, reason: 'only file-contains may promote (file-exists is non-promoting)' };
   if (check.pattern.replace(/\s/g, '').length < MIN_PATTERN_CHARS) return { bound: false, reason: 'pattern too trivial (need >=3 non-whitespace chars)' };
   const redactedTail = classification === 'secret-redacted' ? `; ${REDACTED_BINDING_NOTE}` : '';
-  if (!content.includes(check.path)) return { bound: false, reason: `check.path is not present in the item content${redactedTail}` };
-  if (!content.includes(check.pattern)) return { bound: false, reason: `check.pattern is not present in the item content${redactedTail}` };
+  const shownTail = (s: string): string => (inDisplayedForm(content, s) ? `; ${DISPLAYED_BINDING_NOTE}` : '');
+  if (!content.includes(check.path)) return { bound: false, reason: `check.path is not present in the item content${shownTail(check.path)}${redactedTail}` };
+  if (!content.includes(check.pattern)) return { bound: false, reason: `check.pattern is not present in the item content${shownTail(check.pattern)}${redactedTail}` };
   return { bound: true };
 }

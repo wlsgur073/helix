@@ -4,7 +4,7 @@ import type { HelixConfig, NarrowedConfig } from '../config.js';
 import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS, DEFAULT_CONFIG, narrowDualVerify } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type DualVerifyResult, type EchoSource, type GateTrace } from '../verify/dual-verify.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, recordRows, type FrameLine } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, normalizeRecordContent, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, recordRows, type FrameLine } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
 import { isWitnessAdvanceError, isWitnessBlockedError } from '../memory/witness-store.js';
 import { appendAudit, type VerifyAudit, type EraseAudit } from '../audit.js';
@@ -91,7 +91,7 @@ function witnessNotesText(notes: string[]): string {
  *  failure than a dropped item (an unclosed `===HELIX ... ===` frame is exactly the shape the
  *  datamark quarantine exists to prevent). `render(n)` must render the FULL frame (open + semantics +
  *  lines + close) for the first `n` of the caller's own ordered items, so a shrunk item count re-runs
- *  the SAME datamark/normalizeUntrusted quarantine the full render already goes through — never a
+ *  the SAME datamark and record normalization the full render already goes through — never a
  *  substring cut of a finished string.
  *
  *  Binary-searches the largest `n` whose render, plus its own omission note, fits `budget`. Valid
@@ -216,8 +216,8 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
 /** Shared by handleInspect's two "live/current records" branches — the unfiltered listing at the
  *  bottom of this function and the ids-filtered lookup below — so the two cannot drift into
  *  rendering the same row shape two different ways. Frames `rows` through the SAME DATA quarantine
- *  recall/SessionStart use (nonce frame + per-line datamark/normalizeUntrusted on the content) and
- *  applies the M1 response-cap (`capRendered`) exactly once.
+ *  recall/SessionStart use (nonce frame + per-line datamark, normalizeRecordContent on the content)
+ *  and applies the M1 response-cap (`capRendered`) exactly once.
  *
  *  M1: total response bound — one record is one item; every record's PROOF line (id + contentDigest,
  *  not restricted to Verified rows since 2026-09-02) is built from the SAME element of `rows` as its
@@ -255,9 +255,10 @@ function renderCurrentRows(rows: ScopedRecord[], label: string, trailingNotes: s
         // mismatch between the two was itself half of why the escape went unfound. The cost is 64 hex
         // characters per row, which `capRendered` absorbs by showing fewer rows; it discloses nothing,
         // since a reader holding this line already holds the content it digests.
-        // The content is normalized here, once (no `maxChars` reaches inspect), and recordRows drops
-        // the DATA entry of a record whose body renders empty (ruling R3).
-        return recordRows(`${record.state}:${scope}`, normalizeUntrusted(record.content), record.id, contentDigest);
+        // The content is normalized here, once (no `maxChars` reaches inspect), as record content
+        // is on every read surface (normalizeRecordContent, issue #6), and recordRows drops the
+        // DATA entry of a record whose body renders empty (ruling R3).
+        return recordRows(`${record.state}:${scope}`, normalizeRecordContent(record.content), record.id, contentDigest);
       }),
     }),
     RESPONSE_MAX_CHARS - trailingNotes.length,
@@ -266,12 +267,13 @@ function renderCurrentRows(rows: ScopedRecord[], label: string, trailingNotes: s
 }
 
 /** Inspect is a READ surface: both id and content of every row are attacker-controllable (a forged
- *  record in an owned ledger, parsed by a raw JSON.parse, can embed newlines). Route the rows through
- *  the SAME DATA quarantine recall/SessionStart use — nonce frame + per-line datamark/normalizeUntrusted
- *  on the content — with the id sanitized and the known-enum state/scope in the (trusted) datamark, so
- *  no single record can forge an extra labelled line or break out of the frame. `ids` is a fourth mode
- *  alongside plain/history/asOf — the SAME quarantine and cap (renderCurrentRows above), narrowed to
- *  the caller's own requested set instead of the whole store. */
+ *  record in an owned ledger, parsed by a raw JSON.parse, can embed newlines). Route the rows
+ *  through the SAME DATA quarantine recall/SessionStart use — nonce frame + per-line datamark,
+ *  normalizeRecordContent on the content — with the id sanitized and the known-enum state/scope in
+ *  the (trusted) datamark, so no single record can forge an extra labelled line or break out of the
+ *  frame. `ids` is a fourth mode alongside plain/history/asOf — the SAME quarantine and cap
+ *  (renderCurrentRows above), narrowed to the caller's own requested set instead of the whole
+ *  store. */
 export function handleInspect(store: MemoryStore, args: { history?: boolean; asOf?: string; ids?: string[] }): ToolResult {
   const iso = (s: string): string => (isIsoInstant(s) ? s : '??');
   if (args.ids !== undefined) {
@@ -316,7 +318,7 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
       // can never split the digest from the record it digests. No `maxChars` reaches this branch.
       // The evidence rows keep the id on a `DATA[verify:<scope>]| ` mark: record content is always
       // marked with the fact's grade, never `verify`, so content cannot produce one either.
-      const out: FrameLine[] = recordRows(`${f.grade}:${f.scope}`, normalizeUntrusted(f.record.content), f.record.id, f.contentDigest);
+      const out: FrameLine[] = recordRows(`${f.grade}:${f.scope}`, normalizeRecordContent(f.record.content), f.record.id, f.contentDigest);
       for (const e of f.evidence) {
         const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? 'Y' : 'N'} applicable=${e.applicable ? 'Y' : 'N'}${e.winner ? ' WINNER' : ''}`;
         out.push({ text: `${presentId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
@@ -357,7 +359,7 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
           // the same `<verb>:<scope>:<interval>` bracket content; both entries come from ONE row, so
           // `capRendered` drops them together rather than orphaning the PROOF line. An erase-closed row,
           // whose content history blanks, renders its PROOF line alone (recordRows, ruling R3).
-          return recordRows(`${verb}:${r.scope}:${interval}`, normalizeUntrusted(r.record.content), r.record.id, r.contentDigest);
+          return recordRows(`${verb}:${r.scope}:${interval}`, normalizeRecordContent(r.record.content), r.record.id, r.contentDigest);
         }),
       }),
       RESPONSE_MAX_CHARS - trailingNotes.length,

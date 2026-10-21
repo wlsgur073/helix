@@ -1,5 +1,5 @@
 import type { MemoryState, ScopedRecord } from '../types.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, reverifyFlag, safeId, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, SUPERSEDE_NOTE } from '../memory/content-frame.js';
+import { markLines, normalizeRecordContent, frameOpen, frameClose, DATA_SEMANTICS, reverifyFlag, safeId, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, SUPERSEDE_NOTE } from '../memory/content-frame.js';
 import { classifyEmission } from '../risk/trifecta.js';
 import { isVerifyingSource } from '../memory/firewall.js';
 
@@ -112,7 +112,9 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
     // Suspect precedence + source naming live in the shared helper (content-frame.ts, H8/H9).
     const flag = reverifyFlag({ state: r.state, blastRadius: r.blastRadius, source: r.provenance.source });
     return {
-      text: datamark(`${flag}${r.content.replace(/\s+/g, ' ').trim()}`, `DATA[${r.state}:${scope}]| `, maxItemChars),
+      // Record content is normalized as on every read surface (normalizeRecordContent, issue #6): the
+      // whitespace is joined first, so the record is one line, behind the mark markLines writes.
+      text: markLines(normalizeRecordContent(`${flag}${r.content.replace(/\s+/g, ' ').trim()}`, maxItemChars), `DATA[${r.state}:${scope}]| `),
       reserved: reserved.includes(s),
       // ids are attacker-controllable; clamp so a newline can't forge an in-frame line
       id: safeId(r.id),
