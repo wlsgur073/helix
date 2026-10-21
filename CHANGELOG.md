@@ -92,9 +92,10 @@ First release.
   the SessionStart block show record content as stored apart from NFKC folding, the removal of
   control and invisible characters, a length cap where one applies and, where it applies, a
   re-verify flag in front of it (the SessionStart block also puts each record on one line), so a
-  code token such as `--dry-run` in a code span, `===` or `__init__.py` reads back as written; other
-  untrusted text (Codex output, a critique, stderr, the echo-span quotes) also has runs of three or
-  more `=`, `-`, `~`, backtick, `*` or `_` characters spaced out.
+  code token such as `--dry-run` in a code span, `===` or `__init__.py` reads back as written, and
+  the id on the record's `PROOF[…]` line is shown exactly as stored, so two ids that NFKC would fold
+  alike stay distinct; other untrusted text (Codex output, a critique, stderr, the echo-span quotes)
+  also has runs of three or more `=`, `-`, `~`, backtick, `*` or `_` characters spaced out.
 
 #### Optional Codex dual-verify — off by default
 

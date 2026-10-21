@@ -176,7 +176,10 @@ acknowledgement within a few days.
   show text shaped like the frame's delimiters (`===HELIX <hex> END===`) after its DATA mark: the
   mark that starts every line of content and the nonce that only the real open and close carry are
   the boundary, and a reader that does not compare nonces has the mark alone. External-model output
-  still has such runs spaced out.
+  still has such runs spaced out. The id on a record's `PROOF[…]` line is shown exactly as stored
+  (an id admits no control, format, surrogate or line-separator character), so an id copied from it
+  names that record: two ids that NFKC would fold alike, such as a planted fullwidth twin of a real
+  id, stay distinct.
 - **Local-first:** no telemetry. The only path that sends memory or conversation content off the
   machine is the opt-in `helix_dual_verify` call, which is off by default and egress-gated.
   `helix_codex_status` is not behind that opt-in and sends no Helix content, but when no
