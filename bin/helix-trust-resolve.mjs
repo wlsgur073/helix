@@ -2261,7 +2261,7 @@ function makeDataFrame(opts) {
 }
 function proofRow(bracket, id, contentDigest) {
   const span = contentDigest === void 0 ? presentId(id) : `${presentId(id)} contentDigest: ${contentDigest}`;
-  return { text: normalizeUntrusted(span), mark: `PROOF[${bracket}]| `, normalized: true, proof: true };
+  return { text: span, mark: `PROOF[${bracket}]| `, normalized: true, proof: true };
 }
 function recordRows(bracket, body, id, contentDigest) {
   const proof = proofRow(bracket, id, contentDigest);
