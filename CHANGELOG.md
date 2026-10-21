@@ -87,8 +87,14 @@ First release.
   to two seconds per scope, and reads once more, instead of leaving that scope out at once.
 - Untrusted-content quarantine: NFKC / control / bidi normalization, per-line datamarking, and a
   per-call 128-bit nonce frame. Recall and every inspect view print a record's content on `DATA[…]`
-  lines and its id on one `PROOF[…]` line after them, a line record content cannot produce; the
-  line also carries the record's `contentDigest` while the record is live.
+  lines and its id on one `PROOF[…]` line after them, a line record content cannot produce; the line
+  also carries the record's `contentDigest` while the record is live. Recall, every inspect view and
+  the SessionStart block show record content as stored apart from NFKC folding, the removal of
+  control and invisible characters, a length cap where one applies and, where it applies, a
+  re-verify flag in front of it (the SessionStart block also puts each record on one line), so a
+  code token such as `--dry-run` in a code span, `===` or `__init__.py` reads back as written; other
+  untrusted text (Codex output, a critique, stderr, the echo-span quotes) also has runs of three or
+  more `=`, `-`, `~`, backtick, `*` or `_` characters spaced out.
 
 #### Optional Codex dual-verify — off by default
 
@@ -234,7 +240,10 @@ First release.
   PROOF line for an id no memory record and no marker row carries, appending no tombstone.
 - `helix_memory_commit`'s result adds `redactions` (replaced spans per marker kind) and a `notice`
   when the secret scan replaced part of the fact, and a recheck refused for a missing path or
-  pattern on such a record says the content was redacted. An ordinary result keeps its four keys.
+  pattern on such a record says the content was redacted. An ordinary result keeps its four keys. A
+  recheck refused for a path or pattern that only a displayed form of the content contains (NFKC
+  folded, control and invisible characters removed, whitespace joined, or runs of fence characters
+  spaced out as an earlier version showed them) says that binding reads the stored spelling.
 
 ### Limits
 

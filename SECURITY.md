@@ -121,10 +121,13 @@ acknowledgement within a few days.
   included, still contains it; the refusal for a missing path or pattern says the content was
   redacted when the record's classification is `secret-redacted`, which the commit tool sets only
   when it replaced a span itself (a later record that only carries an older marker forward keeps
-  the classification its own commit gave it, `normal` or `personal`). The dual-verify egress guard
-  hard-blocks **named provider credential tokens** (override-proof — a config policy of `allow`
-  cannot release them); generic heuristic-detected (`password=`-style) and high-entropy secrets
-  are blocked by default but are per-leg policy-overridable (`dualVerify.egressPolicy`).
+  the classification its own commit gave it, `normal` or `personal`), and says that binding reads
+  the stored spelling when a displayed form of the content contains it (NFKC folded, control and
+  invisible characters removed, whitespace joined, or runs of fence characters spaced out as an
+  earlier Helix version showed them); binding itself never reads a displayed form. The dual-verify
+  egress guard hard-blocks **named provider credential tokens** (override-proof — a config policy of
+  `allow` cannot release them); generic heuristic-detected (`password=`-style) and high-entropy
+  secrets are blocked by default but are per-leg policy-overridable (`dualVerify.egressPolicy`).
   **One documented exception to "blocked by default":** a high-entropy token whose stripped core
   is pure hex (git SHA / digest) or a chain of individually low-entropy segments (the chain test
   above: dated filenames, doc paths, Windows paths, settings, source code), with no credential
@@ -167,9 +170,13 @@ acknowledgement within a few days.
   call stopped earlier — by input validation, the enabled gate, the stakes floor, or a payload
   over the 200,000-character cap — names that stop instead. README's dual-verify notes state the
   same refusal.
-- **Untrusted content** (recalled memory, external-model output) is treated as DATA,
-  never instructions: NFKC/control/bidi normalization + per-line datamarking + a
-  per-call nonce frame.
+- **Untrusted content** (recalled memory, external-model output) is treated as DATA, never
+  instructions: NFKC/control/bidi normalization + per-line datamarking + a per-call nonce frame.
+  Record content keeps its runs of `=`, `-`, `~`, backticks, `*` and `_` (issue #6), so a record can
+  show text shaped like the frame's delimiters (`===HELIX <hex> END===`) after its DATA mark: the
+  mark that starts every line of content and the nonce that only the real open and close carry are
+  the boundary, and a reader that does not compare nonces has the mark alone. External-model output
+  still has such runs spaced out.
 - **Local-first:** no telemetry. The only path that sends memory or conversation content off the
   machine is the opt-in `helix_dual_verify` call, which is off by default and egress-gated.
   `helix_codex_status` is not behind that opt-in and sends no Helix content, but when no
