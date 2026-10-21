@@ -15581,6 +15581,11 @@ function normalizeUntrusted(s, maxChars) {
   if (maxChars !== void 0 && out.length > maxChars) out = out.slice(0, maxChars - 1) + "\u2026";
   return out;
 }
+function normalizeRecordContent(s, maxChars) {
+  let out = stripControls(s.normalize("NFKC"));
+  if (maxChars !== void 0 && out.length > maxChars) out = out.slice(0, maxChars - 1) + "\u2026";
+  return out;
+}
 var UNADOPTED_LEDGER_NOTE = "(an unadopted project memory file is present and excluded from results; adoption requires explicit user approval)";
 var ALIASED_LEDGER_NOTE = "(this project's memory file resolves to another adopted project's memory file, or through a path Helix cannot resolve, and is excluded from results)";
 var ANCESTOR_UNADOPTED_NOTE = "(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval; storing a fact in global memory makes it visible in every project, and that choice belongs to the user)";
@@ -15673,7 +15678,7 @@ function frameAsData(scoped, nonce, maxChars) {
     nonce,
     lines: scoped.flatMap(({ record: record2, scope, contentDigest }) => {
       const flag = reverifyFlag({ state: record2.state, blastRadius: record2.blastRadius, source: record2.provenance.source });
-      return recordRows(`${record2.state}:${scope}`, `${flag}${normalizeUntrusted(record2.content, maxChars)}`, record2.id, contentDigest);
+      return recordRows(`${record2.state}:${scope}`, `${flag}${normalizeRecordContent(record2.content, maxChars)}`, record2.id, contentDigest);
     })
   });
 }
@@ -15926,12 +15931,18 @@ function runRealityCheck(check2) {
 }
 var MIN_PATTERN_CHARS = 3;
 var REDACTED_BINDING_NOTE = "this memory's content was redacted at commit ([redacted:<kind>] markers), so a path or pattern inside a redacted span can never bind";
+var DISPLAYED_BINDING_NOTE = "a displayed form of the content contains it, but binding reads the stored spelling (a display folds compatibility characters, removes control and invisible characters and, in the SessionStart block, joins whitespace; an earlier Helix version also spaced out runs of three or more fence characters: = - ~ ` * _, dashes, box drawing)";
+function inDisplayedForm(content, s) {
+  const joined = content.replace(/\s+/g, " ").trim();
+  return [normalizeRecordContent(content), normalizeRecordContent(joined), normalizeUntrusted(content), normalizeUntrusted(joined)].some((form) => form.includes(s));
+}
 function checkBinding(content, check2, classification) {
   if (check2.kind !== "file-contains") return { bound: false, reason: "only file-contains may promote (file-exists is non-promoting)" };
   if (check2.pattern.replace(/\s/g, "").length < MIN_PATTERN_CHARS) return { bound: false, reason: "pattern too trivial (need >=3 non-whitespace chars)" };
   const redactedTail = classification === "secret-redacted" ? `; ${REDACTED_BINDING_NOTE}` : "";
-  if (!content.includes(check2.path)) return { bound: false, reason: `check.path is not present in the item content${redactedTail}` };
-  if (!content.includes(check2.pattern)) return { bound: false, reason: `check.pattern is not present in the item content${redactedTail}` };
+  const shownTail = (s) => inDisplayedForm(content, s) ? `; ${DISPLAYED_BINDING_NOTE}` : "";
+  if (!content.includes(check2.path)) return { bound: false, reason: `check.path is not present in the item content${shownTail(check2.path)}${redactedTail}` };
+  if (!content.includes(check2.pattern)) return { bound: false, reason: `check.pattern is not present in the item content${shownTail(check2.pattern)}${redactedTail}` };
   return { bound: true };
 }
 
@@ -26349,7 +26360,7 @@ function renderCurrentRows(rows, label, trailingNotes) {
       label,
       nonce: newNonce(),
       lines: rows.slice(0, n).flatMap(({ record: record2, scope, contentDigest }) => {
-        return recordRows(`${record2.state}:${scope}`, normalizeUntrusted(record2.content), record2.id, contentDigest);
+        return recordRows(`${record2.state}:${scope}`, normalizeRecordContent(record2.content), record2.id, contentDigest);
       })
     }),
     RESPONSE_MAX_CHARS - trailingNotes.length
@@ -26390,7 +26401,7 @@ function handleInspect(store2, args) {
 ${n}`);
     const trailingNotes2 = notes.join("");
     const buildLines = (n) => facts.slice(0, n).flatMap((f) => {
-      const out = recordRows(`${f.grade}:${f.scope}`, normalizeUntrusted(f.record.content), f.record.id, f.contentDigest);
+      const out = recordRows(`${f.grade}:${f.scope}`, normalizeRecordContent(f.record.content), f.record.id, f.contentDigest);
       for (const e of f.evidence) {
         const flags = `gen=${e.gen} ${e.state} tx=${iso(e.tx)} auth=${e.txAuthenticated ? "Y" : "N"} applicable=${e.applicable ? "Y" : "N"}${e.winner ? " WINNER" : ""}`;
         out.push({ text: `${presentId(f.record.id)} ${flags}`, mark: `DATA[verify:${f.scope}]| ` });
@@ -26426,7 +26437,7 @@ ${n}`);
         lines: rows2.slice(0, n).flatMap((r) => {
           const verb = r.closedBy ? r.closedBy.kind : r.record.state;
           const interval = `${iso(r.record.tx)}..${r.txTo === null ? "" : iso(r.txTo)}`;
-          return recordRows(`${verb}:${r.scope}:${interval}`, normalizeUntrusted(r.record.content), r.record.id, r.contentDigest);
+          return recordRows(`${verb}:${r.scope}:${interval}`, normalizeRecordContent(r.record.content), r.record.id, r.contentDigest);
         })
       }),
       RESPONSE_MAX_CHARS - trailingNotes2.length

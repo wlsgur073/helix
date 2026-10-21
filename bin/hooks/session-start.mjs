@@ -1258,15 +1258,11 @@ function requiresReverifyBeforeUse(item) {
 function newNonce() {
   return randomBytes5(16).toString("hex");
 }
-var FENCE_RUN = /[=\-~`*_‐‑‒–—―−─-╿]{3,}/gu;
-function breakFenceRuns(s) {
-  return s.replace(FENCE_RUN, (run) => [...run].join(" "));
-}
 function stripControls(s) {
   return s.replace(/[\p{Cc}\p{Cf}]/gu, (ch) => ch === "\n" || ch === "	" ? ch : "");
 }
-function normalizeUntrusted(s, maxChars) {
-  let out = breakFenceRuns(stripControls(s.normalize("NFKC")));
+function normalizeRecordContent(s, maxChars) {
+  let out = stripControls(s.normalize("NFKC"));
   if (maxChars !== void 0 && out.length > maxChars) out = out.slice(0, maxChars - 1) + "\u2026";
   return out;
 }
@@ -1313,9 +1309,6 @@ var LINE_BREAK = /\n|\u2028|\u2029/;
 var TRAILING_LINE_BREAKS = /(?:\n|\u2028|\u2029)+$/;
 function markLines(text, mark) {
   return text.replace(TRAILING_LINE_BREAKS, "").split(LINE_BREAK).map((line) => mark + line).join("\n");
-}
-function datamark(text, mark, maxChars) {
-  return markLines(normalizeUntrusted(text, maxChars), mark);
 }
 var safeId = (id) => id.replace(/[^A-Za-z0-9_-]/g, "");
 var NON_VERIFYING_FLAG = {
@@ -1371,7 +1364,9 @@ function formatSessionStartContext(records, nonce, opts = {}) {
     const { record: r, scope } = s;
     const flag = reverifyFlag({ state: r.state, blastRadius: r.blastRadius, source: r.provenance.source });
     return {
-      text: datamark(`${flag}${r.content.replace(/\s+/g, " ").trim()}`, `DATA[${r.state}:${scope}]| `, maxItemChars),
+      // Record content is normalized as on every read surface (normalizeRecordContent, issue #6): the
+      // whitespace is joined first, so the record is one line, behind the mark markLines writes.
+      text: markLines(normalizeRecordContent(`${flag}${r.content.replace(/\s+/g, " ").trim()}`, maxItemChars), `DATA[${r.state}:${scope}]| `),
       reserved: reserved.includes(s),
       // ids are attacker-controllable; clamp so a newline can't forge an in-frame line
       id: safeId(r.id),

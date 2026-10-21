@@ -2202,6 +2202,11 @@ function normalizeUntrusted(s, maxChars) {
   if (maxChars !== void 0 && out.length > maxChars) out = out.slice(0, maxChars - 1) + "\u2026";
   return out;
 }
+function normalizeRecordContent(s, maxChars) {
+  let out = stripControls(s.normalize("NFKC"));
+  if (maxChars !== void 0 && out.length > maxChars) out = out.slice(0, maxChars - 1) + "\u2026";
+  return out;
+}
 var WITNESS_MISMATCH_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; elevated grades are clamped to Fresh until an authorized re-baseline)";
 var WITNESS_MISMATCH_ASOF_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; this as-of view preserves the reconstructed historical grades present in the available bytes, which may omit later corrections and are not a current-authority verdict)";
 var WITNESS_TRANSITION_NOTE = "(a ledger rewrite for this scope was interrupted; its records are excluded until the transition is re-driven or re-baselined)";
@@ -2291,7 +2296,7 @@ function frameAsData(scoped, nonce, maxChars) {
     nonce,
     lines: scoped.flatMap(({ record, scope, contentDigest }) => {
       const flag = reverifyFlag({ state: record.state, blastRadius: record.blastRadius, source: record.provenance.source });
-      return recordRows(`${record.state}:${scope}`, `${flag}${normalizeUntrusted(record.content, maxChars)}`, record.id, contentDigest);
+      return recordRows(`${record.state}:${scope}`, `${flag}${normalizeRecordContent(record.content, maxChars)}`, record.id, contentDigest);
     })
   });
 }
@@ -2544,12 +2549,18 @@ function runRealityCheck(check) {
 }
 var MIN_PATTERN_CHARS = 3;
 var REDACTED_BINDING_NOTE = "this memory's content was redacted at commit ([redacted:<kind>] markers), so a path or pattern inside a redacted span can never bind";
+var DISPLAYED_BINDING_NOTE = "a displayed form of the content contains it, but binding reads the stored spelling (a display folds compatibility characters, removes control and invisible characters and, in the SessionStart block, joins whitespace; an earlier Helix version also spaced out runs of three or more fence characters: = - ~ ` * _, dashes, box drawing)";
+function inDisplayedForm(content, s) {
+  const joined = content.replace(/\s+/g, " ").trim();
+  return [normalizeRecordContent(content), normalizeRecordContent(joined), normalizeUntrusted(content), normalizeUntrusted(joined)].some((form) => form.includes(s));
+}
 function checkBinding(content, check, classification) {
   if (check.kind !== "file-contains") return { bound: false, reason: "only file-contains may promote (file-exists is non-promoting)" };
   if (check.pattern.replace(/\s/g, "").length < MIN_PATTERN_CHARS) return { bound: false, reason: "pattern too trivial (need >=3 non-whitespace chars)" };
   const redactedTail = classification === "secret-redacted" ? `; ${REDACTED_BINDING_NOTE}` : "";
-  if (!content.includes(check.path)) return { bound: false, reason: `check.path is not present in the item content${redactedTail}` };
-  if (!content.includes(check.pattern)) return { bound: false, reason: `check.pattern is not present in the item content${redactedTail}` };
+  const shownTail = (s) => inDisplayedForm(content, s) ? `; ${DISPLAYED_BINDING_NOTE}` : "";
+  if (!content.includes(check.path)) return { bound: false, reason: `check.path is not present in the item content${shownTail(check.path)}${redactedTail}` };
+  if (!content.includes(check.pattern)) return { bound: false, reason: `check.pattern is not present in the item content${shownTail(check.pattern)}${redactedTail}` };
   return { bound: true };
 }
 
