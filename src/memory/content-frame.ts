@@ -244,14 +244,18 @@ export function makeDataFrame(opts: {
  *  structural fix for a content line shaped like the old `    <id> contentDigest: <hex>` proof line.
  *
  *  The id is `presentId`'d (an IN-FRAME site, see presentId's site split) and the span holding id and
- *  digest is normalized EXACTLY ONCE, apart from the content (the rule `frameAsData` already kept):
- *  a valid id reaches the line as bytes that still pass isValidId after normalization, so the span
- *  holds no line break and the line stays one line. The caller keeps this entry in the SAME item as
- *  the record's DATA entry, so `capRendered` (handlers.ts), which drops whole records, never splits
- *  the two. */
+ *  digest is shown exactly as presentId returns it, with no normalization (review of issue #6, F8,
+ *  and the owner's ruling of 2026-10-21): the id read off this line is the id `inspect ids` and
+ *  `erase` take. Normalizing it spaced out a fence run in an id an adopted or planted ledger holds
+ *  (`m_a---b`), and NFKC folded a planted fullwidth `m_abc` onto the real `m_abc`, so a copied id
+ *  named the wrong record. presentId returns the id only when isValidId admits it (no Cc, Cf or Cs
+ *  character, no U+2028 or U+2029, at most MAX_ID_CHARS) before and after normalizeUntrusted, and
+ *  otherwise its `safeId` form (`[A-Za-z0-9_-]` only); the digest is hex. So the span holds no line
+ *  break and the line stays one line. The caller keeps this entry in the SAME item as the record's
+ *  DATA entry, so `capRendered` (handlers.ts), which drops whole records, never splits the two. */
 export function proofRow(bracket: string, id: string, contentDigest: string | undefined): FrameLine {
   const span = contentDigest === undefined ? presentId(id) : `${presentId(id)} contentDigest: ${contentDigest}`;
-  return { text: normalizeUntrusted(span), mark: `PROOF[${bracket}]| `, normalized: true, proof: true };
+  return { text: span, mark: `PROOF[${bracket}]| `, normalized: true, proof: true };
 }
 
 /** IT-M16: one record's entries in a data frame — its body as ONE `DATA[<bracket>]| ` entry, then its

@@ -110,3 +110,40 @@ describe('the PROOF legend belongs to frames that carry a PROOF line (IT-M16, R2
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });
+
+// Review of issue #6, F8: a PROOF line shows the id as stored, so an id holding a fence run (only an
+// adopted or planted ledger can hold one; production ids are m_<uuid>) can be copied from it into
+// `inspect ids` or `erase`, as README tells the reader to.
+describe('a PROOF-line id holding a fence run reads as stored (issue #6, F8)', () => {
+  it('on recall and on inspect, and the copied id finds the record', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-proof-line-'));
+    try {
+      const s = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's1', now: () => '2026-10-01T00:00:00.000Z', genId: () => 'm_a---b' });
+      s.commit({ content: 'zzz the fence id fact', source: 'user' });
+      for (const out of [text(handleRecall(s, { query: 'zzz' })), text(handleInspect(s, {}))]) {
+        const proof = out.split('\n').find((l) => l.startsWith('PROOF['));
+        expect(proof).toMatch(/^PROOF\[[^\]]+\]\| m_a---b( contentDigest: [0-9a-f]{64})?$/);
+      }
+      expect(text(handleInspect(s, { ids: ['m_a---b'] }))).toContain('zzz the fence id fact');
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+  // Owner's ruling on the follow-up (2026-10-21): the PROOF line shows the id exactly as stored. An id
+  // that NFKC folds onto another (a planted fullwidth `m_abc` next to the real one) stays distinct, so
+  // the id read off a PROOF line names that record and no other.
+  it('ids that NFKC would fold alike stay distinct, and each copied id finds its own record', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-proof-line-'));
+    try {
+      const ids = ['m_abc', 'ｍ＿ａｂｃ'];
+      let n = 0;
+      const s = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's1', now: () => '2026-10-01T00:00:00.000Z', genId: () => ids[n++]! });
+      s.commit({ content: 'zzz the real fact', source: 'user' });
+      s.commit({ content: 'zzz the planted fact', source: 'user' });
+      const shown = text(handleInspect(s, {})).split('\n').filter((l) => l.startsWith('PROOF['))
+        .map((l) => l.replace(/^PROOF\[[^\]]+\]\| /, '').replace(/ contentDigest: [0-9a-f]{64}$/, ''));
+      expect([...shown].sort()).toEqual([...ids].sort());
+      const planted = text(handleInspect(s, { ids: [ids[1]!] }));
+      expect(planted).toContain('zzz the planted fact');
+      expect(planted).not.toContain('zzz the real fact');
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+});
