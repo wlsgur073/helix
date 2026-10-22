@@ -13,6 +13,7 @@ import {
 } from '../limits.js';
 import { handleCommit, handleRecall, handleInspect, handleErase, handleAdopt, handleDualVerify, handleCodexStatus, handleRecheck, handleConfirm, MAX_ID_CHARS, isValidId, type DualVerifyHandlerDeps, type CodexStatusDeps } from './handlers.js';
 import { loadConfig } from '../config.js';
+import { serverInstructionsFor } from './instructions.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus, checkCodexModel } from '../verify/codex.js';
 import { noopMetricsSink, type MetricsSink } from '../metrics.js';
 import { isReviewableRoot } from '../memory/ownership.js';
@@ -46,7 +47,6 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   // Single dispatch seam: every tool handler runs inside m.runOp so store.emitReplay calls made
   // synchronously inside self-stamp the current op id (spec §5). Default noop = zero behavior change.
   const m = metrics ?? noopMetricsSink;
-  const server = new McpServer({ name: 'helix', version: '0.1.0' });
   // The no-deps fallback must honor HELIX_HOME too, or it would silently read the real
   // ~/.helix/config.json and write the real audit log under test isolation (the index.ts
   // entry always passes explicit deps; this keeps a future caller from breaking isolation).
@@ -65,6 +65,11 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
     auditPath: join(home, 'audit.jsonl'),
     codexLogPath: join(home, 'codex-log.jsonl'),
   };
+  // Issue #4: the opt-in instructions come from dv.config, the config loaded at start (index.ts passes it;
+  // the fallback above loads it here). dv.currentConfig is the issue #11 re-read and never feeds them.
+  // Off passes no option, so the initialize result carries no instructions field at all.
+  const instructions = serverInstructionsFor(dv.config);
+  const server = new McpServer({ name: 'helix', version: '0.1.0' }, instructions === undefined ? undefined : { instructions });
 
   const codexStatusDeps: CodexStatusDeps = {
     inspect: () => checkCodexStatus(),

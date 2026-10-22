@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { SURFACE_PATH, type Surface } from '../../scripts/inventory/build-inventory.js';
 import { fromBundle, compareSurfaces } from '../../scripts/inventory/extract-tools.js';
 import { extractEnvVars } from '../../scripts/inventory/extract-config.js';
+import { instructionsFromBundle } from '../../scripts/inventory/extract-instructions.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -39,6 +40,28 @@ describe('the extractors recover an injected mutation', () => {
       expect(planted.map((t) => t.name)).toContain('helix_memory_planted');
       expect(planted.map((t) => t.name)).not.toContain('helix_memory_commit');
       expect(() => compareSurfaces(shipped, planted)).toThrow(/tool-surface-disagreement/);
+    } finally {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  }, 90_000);
+
+  // The server instructions (issue #4). The text is changed in a temporary copy of the shipped bundle,
+  // and the extractor is asked whether it reads that copy. An extractor returning a constant fails.
+  it('reports a planted instructions text when the bundle it reads carries one', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'helix-mut-instr-'));
+    try {
+      const mutated = join(dir, 'helix-mcp.mjs');
+      const original = readFileSync(join(ROOT, 'bin', 'helix-mcp.mjs'), 'utf8');
+      writeFileSync(mutated, original.replaceAll('Helix provides optional persistent memory', 'Helix provides PLANTED persistent memory'));
+
+      const shipped = await instructionsFromBundle();
+      const planted = await instructionsFromBundle(mutated);
+
+      expect(shipped[1]?.instructions).not.toContain('PLANTED');
+      expect(planted[1]?.instructions).toContain('PLANTED');
+      // The switch-off case reads no text from either bundle.
+      expect(shipped[0]?.instructions).toBeNull();
+      expect(planted[0]?.instructions).toBeNull();
     } finally {
       try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
     }
@@ -79,7 +102,7 @@ describe('the extractors recover an injected mutation', () => {
 
 // Narrowed to `keyof Surface`: `Record<string, unknown[]>` is treated as a string index signature,
 // which under `noUncheckedIndexedAccess` types every property access — `live.tools` and the rest —
-// as `unknown[] | undefined`. Restricting it to the five fields keeps each array element `unknown`
+// as `unknown[] | undefined`. Restricting it to the six fields keeps each array element `unknown`
 // (so a mutation can still be injected) while guaranteeing the array itself is always present.
 const committed = (): Record<keyof Surface, unknown[]> => JSON.parse(readFileSync(SURFACE_PATH, 'utf8'));
 
@@ -102,6 +125,12 @@ describe('the snapshot comparison is field-level, not merely length-level', () =
   it('a changed CLI usage line makes the two objects differ', () => {
     const live = committed();
     live.clis = live.clis.map((c, i) => (i === 0 ? { ...(c as object), usage: 'planted' } : c));
+    expect(live).not.toEqual(committed());
+  });
+
+  it('a changed instructions text makes the two objects differ', () => {
+    const live = committed();
+    live.serverInstructions = live.serverInstructions.map((f, i) => (i === 1 ? { ...(f as object), instructions: 'planted' } : f));
     expect(live).not.toEqual(committed());
   });
 

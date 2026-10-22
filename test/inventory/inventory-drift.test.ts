@@ -18,5 +18,9 @@ describe('surface snapshot', () => {
     expect(s.envVars.length).toBeGreaterThan(1);
     expect(s.hooks.length).toBe(2);
     expect(s.clis.length).toBe(3); // helix-trigger, helix-rebaseline, helix-trust-resolve (C1.4-③)
+    // Issue #4: the switch-off case first (no field), then the switch-on case (the text).
+    expect(s.serverInstructions).toHaveLength(2);
+    expect(s.serverInstructions[0].instructions).toBeNull();
+    expect(typeof s.serverInstructions[1].instructions).toBe('string');
   });
 });

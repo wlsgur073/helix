@@ -106,6 +106,11 @@ export interface HelixConfig {
   };
   /** Local-only, content-free latency/size records (spec 2026-07-05). Read once at startup. */
   metrics: { enabled: boolean };
+  /** Issue #4: opt-in fixed MCP server instructions. `true` makes the server pass the constant text in
+   *  src/server/instructions.ts in its `initialize` response; anything else leaves the field out. Read
+   *  once at server start, from the GLOBAL config only (index.ts passes no projectPath), so a checkout
+   *  cannot turn it on, and the text never carries a config value. */
+  serverInstructions: boolean;
   /** Paths that EXIST but could not be parsed or read, so nothing they set is in this object.
    *  ABSENT (not `[]`) when every named path either loaded or simply was not there — an absent
    *  config is the ordinary case, not a fault, and DEFAULT_CONFIG must stay deep-equal to a
@@ -142,6 +147,8 @@ export const DEFAULT_CONFIG: HelixConfig = {
   persistence: { releaseWordChains: true },
   // Local metrics sensor ON by default ("local logs always, export opt-in"); content-free records.
   metrics: { enabled: true },
+  // Server instructions OFF by default (issue #4): the initialize result then carries no instructions field.
+  serverInstructions: false,
 };
 
 export interface LoadConfigOptions {
@@ -308,6 +315,9 @@ export function loadConfig(opts: LoadConfigOptions = {}): HelixConfig {
       if (typeof pers.releaseWordChains === 'boolean') merged.persistence.releaseWordChains = pers.releaseWordChains;
       else if (pers.releaseWordChains !== undefined) warn(`helix: invalid persistence.releaseWordChains ${q(pers.releaseWordChains)} (boolean) -> ignored`);
     }
+    const si = raw?.serverInstructions;
+    if (typeof si === 'boolean') merged.serverInstructions = si;
+    else if (si !== undefined) warn(`helix: invalid serverInstructions ${q(si)} (valid: true, false) -> ignored`);
   }
   // Set ONLY when non-empty: a clean load must stay deep-equal to DEFAULT_CONFIG, which several
   // callers and tests compare against directly.

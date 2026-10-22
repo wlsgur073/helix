@@ -18,9 +18,9 @@ export interface ToolFacet {
 }
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const BUNDLE = join(ROOT, 'bin', 'helix-mcp.mjs');
+export const BUNDLE = join(ROOT, 'bin', 'helix-mcp.mjs');
 
-function cleanEnv(): Record<string, string> {
+export function cleanEnv(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(process.env).filter(([k, v]) => v !== undefined && !k.startsWith('HELIX_')),
   ) as Record<string, string>;

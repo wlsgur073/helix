@@ -668,3 +668,44 @@ describe('narrowDualVerify after a file that was unreadable at start is repaired
     expect(r.pending).toEqual(['enabled']);
   });
 });
+
+// Issue #4: the opt-in server instructions switch. Only the JSON value true turns it on; the text it
+// enables is a constant in src/server/instructions.ts, tested in test/server/server-instructions.test.ts.
+describe('serverInstructions (issue #4)', () => {
+  const write = (v: unknown): string => {
+    const p = join(tmpDir(), 'config.json');
+    writeFileSync(p, JSON.stringify(v));
+    return p;
+  };
+
+  it('defaults to false, and a clean load stays deep-equal to DEFAULT_CONFIG', () => {
+    expect(DEFAULT_CONFIG.serverInstructions).toBe(false);
+    expect(loadConfig({ globalPath: join(tmpDir(), 'none.json') })).toEqual(DEFAULT_CONFIG);
+  });
+
+  it('accepts the literal true and false', () => {
+    const warn = vi.fn();
+    expect(loadConfig({ globalPath: write({ serverInstructions: true }), warn }).serverInstructions).toBe(true);
+    expect(loadConfig({ globalPath: write({ serverInstructions: false }), warn }).serverInstructions).toBe(false);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('ignores and warns on a non-boolean value, on one bounded line', () => {
+    for (const value of ['true', 1, null, {}, 'x\ny'.repeat(80)]) {
+      const warn = vi.fn();
+      expect(loadConfig({ globalPath: write({ serverInstructions: value }), warn }).serverInstructions, JSON.stringify(value)).toBe(false);
+      expect(warn, JSON.stringify(value)).toHaveBeenCalledTimes(1);
+      const msg = warn.mock.calls[0]![0] as string;
+      expect(msg.startsWith('helix: invalid serverInstructions '), msg).toBe(true);
+      expect(msg.endsWith(' (valid: true, false) -> ignored'), msg).toBe(true);
+      expect(msg.split('\n')).toHaveLength(1);
+      expect(msg.length).toBeLessThan(200);
+    }
+  });
+
+  it('misplaced keys leave it off', () => {
+    for (const cfg of [{ dualVerify: { serverInstructions: true } }, { instructions: true }, { ServerInstructions: true }]) {
+      expect(loadConfig({ globalPath: write(cfg), warn: () => {} }).serverInstructions, JSON.stringify(cfg)).toBe(false);
+    }
+  });
+});

@@ -68,6 +68,7 @@ describe('config leaf extraction', () => {
           logContent: true,
         },
         metrics: { enabled: false },
+        serverInstructions: true,
       }));
       const accepted = leafPaths(loadConfig({ globalPath: join(home, 'config.json') })).sort();
       const inventoried = new Set(extractConfigLeaves().map((l) => l.path));
