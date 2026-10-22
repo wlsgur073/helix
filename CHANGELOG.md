@@ -245,6 +245,11 @@ First release.
   recheck refused for a path or pattern that only a displayed form of the content contains (NFKC
   folded, control and invisible characters removed, whitespace joined, or runs of fence characters
   spaced out as an earlier version showed them) says that binding reads the stored spelling.
+- Opt-in server instructions: `serverInstructions: true` in `~/.helix/config.json` makes the MCP
+  server return a fixed, compiled-in text in its `initialize` response, describing the memory tools
+  and the trust boundary. Off by default, read at server start, and never built from config, ledger
+  or project content. README's Quick start starts with an explicit first use and gives a
+  `CLAUDE.md` rule for routing requests to remember.
 
 ### Limits
 
@@ -283,6 +288,10 @@ First release.
   `helix_memory_adopt` replaces the tracked `.helix/.owner` stamp with the adopter's own, so a
   teammate's adoption locks the previous owner out, and a `verify` row is signed with a key that
   lives in one user's `~/.helix`.
+- **That an assistant chooses Helix.** On a host with its own memory, Helix makes no claim that an
+  assistant routes requests to remember to it, with or without the opt-in server instructions:
+  their effect on routing has not been measured. README's routing rule is the user's own
+  configuration.
 
 ### Dependencies
 

@@ -180,6 +180,7 @@ acknowledgement within a few days.
   (an id admits no control, format, surrogate or line-separator character), so an id copied from it
   names that record: two ids that NFKC would fold alike, such as a planted fullwidth twin of a real
   id, stay distinct.
+- **Server instructions (opt-in):** with `serverInstructions: true` in the config under `HELIX_HOME`, the MCP server returns a fixed text in its `initialize` response (README, *Server instructions*), and the host adds it to the assistant's context. It is trusted prompt text, so it is a constant compiled into the bundle: no config value, ledger content, path or environment value goes into it, and a project's `.helix/config.json` cannot turn it on or change it. It is read once when the server starts. MCP defines `instructions` as an optional hint to the client, so the switch is your control over what Helix adds to the context, not a sandbox: a later release can change the text, which is why every change to it is called out in the CHANGELOG, and the text does not make the assistant follow it or choose Helix.
 - **Local-first:** no telemetry. The only path that sends memory or conversation content off the
   machine is the opt-in `helix_dual_verify` call, which is off by default and egress-gated.
   `helix_codex_status` is not behind that opt-in and sends no Helix content, but when no
