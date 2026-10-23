@@ -97,13 +97,29 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
           "Provenance (required). 'user' = a fact the user stated as their own knowledge/preference/instruction. " +
           "'user-relayed' = content the user pasted/forwarded from a third party (web page, email, README, tool output) " +
           '— use this whenever the user is relaying, not authoring. ' +
-          "'agent-inference' = a conclusion you derived this session, not yet confirmed against reality. " +
+          "'agent-inference' = a conclusion you derived, not yet confirmed against reality. " +
           "'agent-test-verified' = a conclusion you derived AND mechanically verified this session (e.g. by running tests); " +
-          'still non-authoritative — it does not elevate trust.',
+          'still non-authoritative — it does not elevate trust. ' +
+          // Issue #8: a fact brought over from an earlier session or another memory had no stated source.
+          "A fact carried over from an earlier session or another memory system: 'user' only when the user states it " +
+          "again now, otherwise 'agent-inference'. A check made earlier does not carry over: helix_memory_recheck " +
+          "corroborates a fact against files, and helix_memory_confirm takes only a 'user' fact.",
         ),
-      blastRadius: z.enum(['read-only', 'local-reversible', 'hard-to-reverse', 'external']).optional(),
-      classification: z.enum(['normal', 'personal']).optional(),
-      supersedes: ID_SCHEMA.optional(),
+      // Issue #8: the one reader is requiresReverifyBeforeUse (src/memory/state-machine.ts).
+      blastRadius: z.enum(['read-only', 'local-reversible', 'hard-to-reverse', 'external']).optional()
+        .describe(
+          "How hard acting on this fact would be to undo: 'read-only', 'local-reversible', 'hard-to-reverse', or " +
+          "'external' (reaches beyond this machine). It matters only for a 'user' fact that has become Suspect: " +
+          "'read-only' and 'local-reversible' leave it unflagged, while 'hard-to-reverse', 'external' or an unset " +
+          'value flag it for re-verification before use. Facts from any other source are flagged whatever this says.',
+        ),
+      // Issue #8: `classification` is no longer an input. Its one non-default value, 'personal', was stored and
+      // never read; a record already stored with it still reads, and the store keeps the field for redaction.
+      supersedes: ID_SCHEMA.optional()
+        .describe(
+          "The id of the record this fact replaces, as printed on that record's PROOF line by helix_memory_recall " +
+          'or helix_memory_inspect. Omit it to add a new fact.',
+        ),
       supersedesDigest: z
         .string()
         .regex(/^[0-9a-f]{64}$/, 'supersedesDigest must be a 64-character lowercase hex digest')

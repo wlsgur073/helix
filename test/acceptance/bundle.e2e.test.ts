@@ -142,7 +142,7 @@ describe('helix bundle e2e (hermetic)', () => {
     const client = await connect(home);
     const committed = text(await client.callTool({
       name: 'helix_memory_commit',
-      arguments: { content: 'personal note: kim lives in seoul', classification: 'personal', source: 'user' },
+      arguments: { content: 'personal note: kim lives in seoul', source: 'user' },
     }));
     const id = (JSON.parse(committed.replace(/^committed /, '')) as { id: string }).id;
     await client.callTool({ name: 'helix_memory_erase', arguments: { id } }); // soft-only tool
