@@ -884,3 +884,202 @@ describe('real dogfood compare traffic', () => {
     });
   }
 });
+
+// Issue #14: Korean attaches particles and endings to its words, and its negation is not English. Before
+// the fix, Korean claims that said the same thing rarely paired (the token sets differed in their endings),
+// and Korean contradictions that did pair read 'agree', because the polarity scan knew English negators
+// only: the false-'agree' direction this module ranks as the most dangerous.
+describe('Korean answers (issue #14)', () => {
+  it('pairs the issue example that paired nothing before, in the shape of its English twin', () => {
+    const map = buildAgreementMap(
+      '[중간] Scheduler.run - 여러 서버 사이의 동시 실행을 막지 못한다.\n[중간] Planner.check - 원천이 일부만 조회되면 대량 퇴직을 막지 못한다.',
+      '[높음] Scheduler.run - 실행 잠금이 서버 간 중복 실행을 막지 못합니다.\n[높음] Planner.check - 일부 원천 조회가 대량 퇴직으로 이어지는 것을 막지 못합니다.',
+    );
+    expect(map.pairs).toBe(1);
+    expect(map.agreements).toEqual(['[중간] Planner.check - 원천이 일부만 조회되면 대량 퇴직을 막지 못한다']);
+    expect(map.unmatched).toHaveLength(2);
+  });
+
+  it('reads Korean negation, so a contradiction that pairs diverges', () => {
+    const contradictions: Array<[string, string]> = [
+      ['Scheduler.run 잠금은 서버 간 실행을 막는다.', 'Scheduler.run 잠금은 서버 간 실행을 막지 못한다.'],
+      ['이 잠금은 서버 간 중복 실행을 막는다.', '이 잠금은 서버 간 중복 실행을 막지 않는다.'],
+      ['배포 스크립트는 설정 파일을 읽는다.', '배포 스크립트는 설정 파일을 안 읽는다.'],
+      ['이 경로에는 잠금이 있다.', '이 경로에는 잠금이 없다.'],
+      ['이 값은 기본값이다.', '이 값은 기본값이 아니다.'],
+      ['이 값을 직접 수정하라.', '이 값을 직접 수정하지 마라.'],
+    ];
+    for (const [a, b] of contradictions) {
+      const map = buildAgreementMap(a, b);
+      expect(map.pairs, `${a} / ${b}`).toBe(1);
+      expect(map.verdict, `${a} / ${b}`).toBe('diverge');
+    }
+  });
+
+  it('agrees across plain and polite endings and attached particles', () => {
+    const paraphrases: Array<[string, string]> = [
+      ['planner가 입력 객체를 직접 변경한다.', 'Planner는 입력으로 받은 객체를 직접 변경합니다.'],
+      ['재시도 횟수에 상한이 없다.', '재시도 횟수에 상한이 없습니다.'],
+      ['비밀번호를 평문으로 저장한다.', '비밀번호가 평문으로 저장됩니다.'],
+    ];
+    for (const [a, b] of paraphrases) {
+      expect(buildAgreementMap(a, b).verdict, `${a} / ${b}`).toBe('agree');
+    }
+  });
+
+  it('leaves unrelated Korean findings unpaired', () => {
+    const map = buildAgreementMap('재시도 횟수에 상한이 없다.', '비밀번호가 평문으로 저장됩니다.');
+    expect(map.pairs).toBe(0);
+    expect(map.verdict).toBe('indeterminate');
+  });
+
+  it('compares a figure without its attached ending, and still withholds a different figure', () => {
+    expect(buildAgreementMap('배치 작업이 실패해도 종료 코드가 0이다.', '배치 작업이 실패해도 종료 코드는 0입니다.').verdict).toBe('agree');
+    const map = buildAgreementMap('재시도 상한은 3회이다.', '재시도 상한은 30회이다.');
+    expect(map.verdict).toBe('indeterminate');
+    expect(map.withheldPairs).toBe(1);
+  });
+
+  // 없앤다 (removes), 안에 (inside), 아니면 (or else) and 안전 (safety) hold a negation syllable and negate
+  // nothing. Each case pairs an affirmative sentence with an affirmative paraphrase that lacks the word, so a
+  // scan that read the word as negation would turn the pair into a 'diverge'.
+  it('does not read ordinary words that hold a negation syllable as negation', () => {
+    const affirmative: Array<[string, string]> = [
+      ['오래된 캐시 항목을 정리 단계에서 없앤다.', '오래된 캐시 항목을 정리 단계에서 지운다.'],
+      ['로그 파일은 홈 디렉터리 안에 저장된다.', '로그 파일은 홈 디렉터리에 저장된다.'],
+      ['세션 시작 시 설정 파일 또는 환경 변수를 읽는다.', '세션 시작 시 설정 파일 아니면 환경 변수를 읽는다.'],
+      ['키를 안전한 저장소에 보관한다.', '키를 저장소에 보관한다.'],
+    ];
+    for (const [a, b] of affirmative) {
+      const map = buildAgreementMap(a, b);
+      expect(map.pairs, `${a} / ${b}`).toBe(1);
+      expect(map.verdict, `${a} / ${b}`).toBe('agree');
+    }
+    // Control: next to 안전, a real 않 still negates.
+    expect(buildAgreementMap('키를 안전한 저장소에 보관한다.', '키를 안전한 저장소에 보관하지 않는다.').verdict).toBe('diverge');
+  });
+
+  // Documented limits of the bounded Korean negator set, pinned so they cannot drift unseen. 못지않다
+  // ("no less than") carries 않 and reads as negation: a false 'diverge', the visible direction.
+  it('pins the idiom 못지않다 as a known false negation', () => {
+    expect(buildAgreementMap('이 방식은 기존 방식 못지않게 빠르다.', '이 방식은 기존 방식만큼 빠르다.').verdict).toBe('diverge');
+  });
+
+  // Review I1: after a figure, 만 is the numeral ten thousand and 도 the unit degrees, not the particles
+  // "only" and "also", so neither comes off a figure's unit: 3만 and 3 are different figures. The note
+  // quotes each figure as written.
+  it('keeps 만 and 도 on a figure, withholds the difference, and quotes the figures as written', () => {
+    const tenThousand = buildAgreementMap('요청 한도는 3만이다.', '요청 한도는 3이다.');
+    expect(tenThousand.verdict).toBe('indeterminate');
+    expect(tenThousand.withheldPairs).toBe(1);
+    expect(tenThousand.divergences[0]).toContain('cites 3만이다;');
+    const degrees = buildAgreementMap('실내 온도 상한은 30도이다.', '실내 온도 상한은 30이다.');
+    expect(degrees.verdict).toBe('indeterminate');
+    expect(degrees.withheldPairs).toBe(1);
+    // 만 after 십, 백 or 천 is part of the numeral too (십만, 백만, 천만).
+    const numerals: Array<[string, string]> = [['요청 한도는 1천만 건이다.', '요청 한도는 1천 건이다.'], ['요청 한도는 5백만이다.', '요청 한도는 5백이다.']];
+    for (const [x, y] of numerals) {
+      const map = buildAgreementMap(x, y);
+      expect(map.verdict, `${x} / ${y}`).toBe('indeterminate');
+      expect(map.withheldPairs, `${x} / ${y}`).toBe(1);
+    }
+    // After a unit word, 만 is the particle "only": 3번만 and 3번 quote the same figure.
+    expect(buildAgreementMap('재시도는 3번만 한다.', '재시도는 3번 한다.').verdict).toBe('agree');
+  });
+
+  // Review I2, code half: the past copula and stacked particles no longer split the same figure or word.
+  it('compares the past copula and stacked particles like their plain forms', () => {
+    expect(buildAgreementMap('종료 코드는 0이었다.', '종료 코드는 0이다.').verdict).toBe('agree');
+    expect(buildAgreementMap('재시도는 3회까지는 허용된다.', '재시도는 3회까지 허용된다.').verdict).toBe('agree');
+  });
+
+  // Review I3: attached 없 (필요없다, 수없다), unspaced 안되-, and the prohibitives 말, 말도록 and 말아라
+  // after a -지 word are negation; 없어지다 (disappear) and manner adverbs ending in 없이 are not.
+  it('reads attached 없, unspaced 안되- and more prohibitives as negation, and not 없어지다 or 없이 adverbs', () => {
+    const contradictions: Array<[string, string]> = [
+      ['이 단계는 필요하다.', '이 단계는 필요없다.'],
+      ['이 함수는 실패할 수 있다.', '이 함수는 실패할 수없다.'],
+      ['이 설정으로는 배포가 된다.', '이 설정으로는 배포가 안된다.'],
+      ['이 값을 직접 수정할 것.', '이 값을 직접 수정하지 말 것.'],
+      ['이 값을 직접 수정하도록 한다.', '이 값을 직접 수정하지 말도록 한다.'],
+      ['이 값을 직접 수정하여라.', '이 값을 직접 수정하지 말아라.'],
+      ['오래된 세션은 자동으로 없어진다.', '오래된 세션은 자동으로 없어지지 않는다.'],
+    ];
+    for (const [a, b] of contradictions) {
+      const map = buildAgreementMap(a, b);
+      expect(map.pairs, `${a} / ${b}`).toBe(1);
+      expect(map.verdict, `${a} / ${b}`).toBe('diverge');
+    }
+    const affirmative: Array<[string, string]> = [
+      ['오래된 세션은 자동으로 없어진다.', '오래된 세션은 자동으로 사라진다.'],
+      ['모든 요청을 예외없이 검사한다.', '모든 요청을 검사한다.'],
+    ];
+    for (const [a, b] of affirmative) {
+      const map = buildAgreementMap(a, b);
+      expect(map.pairs, `${a} / ${b}`).toBe(1);
+      expect(map.verdict, `${a} / ${b}`).toBe('agree');
+    }
+  });
+
+  // Review M2: a one-syllable particle comes off only when two characters stay, or when it is a case
+  // particle that agrees with the syllable before it (값을 -> 값), so a bare noun ending in a particle-like
+  // syllable (경로, 결과, 속도) keeps its stem and pairs with its particle-attached form.
+  it('pairs a bare noun ending in a particle-like syllable with its particle-attached form', () => {
+    const map = buildAgreementMap('경로 설정 파일 검사 단계가 빠져 있다.', '경로를 설정 파일 검사 단계에서 빠뜨렸다.');
+    expect(map.pairs).toBe(1);
+    expect(map.verdict).toBe('agree');
+  });
+
+  // Review M1: "~인지 아닌지" is "whether or not" and negates nothing.
+  it('does not read 아닌지 (whether or not) as negation', () => {
+    expect(buildAgreementMap('파일이 존재하는지 아닌지 확인한다.', '파일이 존재하는지 확인한다.').verdict).toBe('agree');
+  });
+
+  // Review M5: negator forms and gates the first tests left unpinned.
+  it('pins the remaining negator forms and the gates around the prohibitive rule', () => {
+    const contradictions: Array<[string, string]> = [
+      ['이 단계에서 잠금을 얻는다.', '이 단계에서 잠금을 못 얻는다.'],
+      ['서버가 연결을 했다.', '서버가 연결을 못했다.'],
+      ['이 값은 기본값입니다.', '이 값은 기본값이 아닙니다.'],
+      ['이 모드에서는 쓰기가 허용됨.', '이 모드에서는 쓰기가 허용 아님.'],
+    ];
+    for (const [a, b] of contradictions) {
+      const map = buildAgreementMap(a, b);
+      expect(map.pairs, `${a} / ${b}`).toBe(1);
+      expect(map.verdict, `${a} / ${b}`).toBe('diverge');
+    }
+    const affirmative: Array<[string, string]> = [
+      // 마스킹 after a -지 word is not a prohibitive form: the rule needs the whole word.
+      ['오류 메시지 마스킹을 적용한다.', '오류 로그 마스킹을 적용한다.'],
+      // 말고 with no -지 word before it means "instead of".
+      ['로그 말고 메트릭을 본다.', '메트릭을 본다.'],
+    ];
+    for (const [a, b] of affirmative) {
+      const map = buildAgreementMap(a, b);
+      expect(map.pairs, `${a} / ${b}`).toBe(1);
+      expect(map.verdict, `${a} / ${b}`).toBe('agree');
+    }
+  });
+
+  // The prohibitive rule needs the whole word: 단말 (terminal) ends in 말 and negates nothing, even after a
+  // -지 word.
+  it('does not read a word that only ends in a prohibitive form as one', () => {
+    const map = buildAgreementMap('알림 메시지 단말 표시를 지원한다.', '알림 메시지 표시를 지원한다.');
+    expect(map.pairs).toBe(1);
+    expect(map.verdict).toBe('agree');
+  });
+
+  // A case particle comes off a one-syllable stem only when it agrees with that syllable: 이 follows a final
+  // consonant, so 차이 (difference, 차 has none) stays whole and pairs with 차이를.
+  it('keeps a noun ending in a vowel syllable and 이 whole', () => {
+    expect(buildAgreementMap('차이를 확인한다.', '차이 확인.').pairs).toBe(1);
+  });
+
+  // Korean negation sets the English negators' bit, so a pair negated in English on one side and in
+  // Korean on the other agrees.
+  it('agrees when one side negates in English and the other in Korean', () => {
+    const map = buildAgreementMap('Scheduler.run lock is not thread-safe.', 'Scheduler.run lock은 thread-safe 하지 않다.');
+    expect(map.pairs).toBe(1);
+    expect(map.verdict).toBe('agree');
+  });
+});

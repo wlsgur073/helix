@@ -37,9 +37,76 @@ function sentences(answer: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-/** Content tokens of a sentence: lowercased runs of letters/digits (punctuation/spacing dropped). */
+/** Hangul text (issue #14). Korean attaches particles and verb endings to its words, so to a plain
+ *  letter-run split "실행을" and "실행", "못한다" and "못합니다" are different tokens, and two Korean
+ *  sentences stating the same finding shared too few identical tokens to clear SENTENCE_SIM. */
+const HANGUL_RE = /\p{Script=Hangul}/u;
+
+/** Closed lists, longest first, applied once each to a token that holds Hangul: one ending, then one
+ *  particle. No morphological analyser: a lexical aligner does not claim one, and none ships. The
+ *  stripping is SYMMETRIC (the same token always maps to the same stem on both sides), so it never
+ *  separates two identical words. What it can do is merge two different words, and a merge is not
+ *  harmless: two different claims that pair on a merged stem at the same polarity read 'agree'. That is
+ *  why a one-syllable particle is taken off only under the conditions in particleLeaves, which keep a
+ *  two-syllable noun that ends in a particle-like syllable (경로, 결과, 속도, 회의) whole. Merges that
+ *  remain: a word ending in 이 after a final consonant (길이 length and 길 road both become 길).
+ *  Measured on the issue #14 corpus (kept outside the repository): same-finding pairs agreeing went from
+ *  7 to 13 of 16, and none of 240 unrelated pairs became a candidate, before or after. */
+const KO_ENDINGS = [
+  '했습니다', '였습니다', '합니다', '습니다', '됩니다', '입니다', '이었다', '되었다', '하였다',
+  '한다', '된다', '는다', '했다', '하다', '이다', '니다', '였다', '됐다', '었다', '았다', '다',
+] as const;
+const KO_PARTICLES = [
+  '에서는', '에게서', '으로는', '으로도', '에서도', '까지는', '까지도', '부터는', '에게는', '에서', '에게', '한테', '께서', '으로',
+  '까지', '부터', '마저', '조차', '처럼', '보다', '이나', '이란', '이라', '이고', '이며', '과의', '와의', '에는', '에도',
+  '을', '를', '이', '가', '은', '는', '의', '에', '와', '과', '도', '로', '만',
+] as const;
+
+/** The parts of one Hangul syllable as jamo indexes (initial 0-18, medial 0-20, final 0-27, 0 = none),
+ *  or undefined for anything that is not a precomposed Hangul syllable. */
+function syllableParts(ch: string | undefined): { initial: number; medial: number; final: number } | undefined {
+  if (ch === undefined) return undefined;
+  const c = ch.codePointAt(0)! - 0xac00;
+  if (c < 0 || c >= 11172) return undefined;
+  return { initial: Math.floor(c / 588), medial: Math.floor((c % 588) / 28), final: c % 28 };
+}
+
+/** Whether taking the particle off leaves a stem worth comparing. A figure's unit (`whole`) may lose a
+ *  particle only when something is left: after a figure, 만 is the numeral ten thousand and 도 the unit
+ *  degrees, so "3만" and "30도" keep them, and 만 after 십, 백 or 천 belongs to the numeral (1천만). A token keeps at least two characters when the particle has
+ *  one syllable, except for a case particle that agrees with the syllable before it (값을, 키를): 을 은 이
+ *  follow a final consonant, 를 는 가 follow a vowel. */
+function particleLeaves(rest: string, particle: string, whole: boolean): boolean {
+  const n = [...rest].length;
+  if (whole) return n > 0 && !(particle === '만' && /[십백천]$/u.test(rest));
+  if ([...particle].length > 1 || n >= 2) return n >= 1;
+  const parts = n === 1 ? syllableParts(rest) : undefined;
+  if (parts === undefined) return false;
+  return (parts.final !== 0 && ['을', '은', '이'].includes(particle)) || (parts.final === 0 && ['를', '는', '가'].includes(particle));
+}
+
+/** The comparison stem of one token: the token itself unless it holds Hangul. `whole` lets an ending
+ *  take the token down to nothing, which a figure's unit needs ("0이다" carries the copula, not a unit,
+ *  so its unit part "이다" goes); an ordinary token always keeps at least one character. */
+function koStem(token: string, whole = false): string {
+  if (!HANGUL_RE.test(token)) return token;
+  let t = token;
+  for (const e of KO_ENDINGS) {
+    if (t.endsWith(e) && [...t].length - [...e].length >= (whole ? 0 : 1)) { t = t.slice(0, -e.length); break; }
+  }
+  for (const p of KO_PARTICLES) {
+    if (!t.endsWith(p)) continue;
+    const rest = t.slice(0, -p.length);
+    if (particleLeaves(rest, p, whole)) t = rest;
+    break;
+  }
+  return t;
+}
+
+/** Content tokens of a sentence: lowercased runs of letters/digits (punctuation/spacing dropped), each
+ *  Hangul token reduced to its stem (koStem). */
 function tokenSet(s: string): Set<string> {
-  return new Set(s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+  return new Set((s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map((t) => koStem(t)));
 }
 
 function jaccard(a: Set<string>, b: Set<string>): number {
@@ -211,8 +278,20 @@ const COLLAPSE_GAP = String.raw`[\s*_~\u0060]+`;
  *  become a difference. */
 const FIGURE_RE = /\d+(?:[.,:]\d+)*\s*[\p{L}%]{0,8}/gu;
 
-function figuresOf(s: string): string[] {
+/** The figures of a sentence as written (case and whitespace shape aside): what a note quotes. */
+function rawFiguresOf(s: string): string[] {
   return (s.match(FIGURE_RE) ?? []).map((f) => f.toLowerCase().replace(/\s+/g, ' ').trim());
+}
+
+/** The figures of a sentence as compared. Issue #14: a Korean unit arrives with its particle or ending
+ *  attached ("3개를", "0입니다"), and koStem in its figure mode takes them off, so "0이다" and "0입니다"
+ *  compare equal while "3만" and "3" do not (see particleLeaves). A note quotes rawFiguresOf instead, so
+ *  the reader sees each figure as it was written. Without Hangul the two are the same list. */
+function figuresOf(s: string): string[] {
+  return rawFiguresOf(s).map((f) => {
+    const unitAt = f.search(/[\p{L}%]/u);
+    return unitAt < 0 ? f : (f.slice(0, unitAt) + koStem(f.slice(unitAt), true)).trim();
+  });
 }
 
 /** Render a figure list for the divergence note; an empty list is stated, never left blank. */
@@ -277,9 +356,64 @@ const CANCELLING_PAIR_RE = new RegExp(
  *  all survive by construction. What is NOT equivalent, and is pinned: folding the un- bit back into
  *  bit 0 (that is the C1 defect), dropping either bit, and skipping the collapse — each of those
  *  MERGES or SPLITS classes, and each is killed by tests. */
+/** 없 at `chars[k]` is negation unless it begins 없애- (remove: its next syllable is of the 애 family,
+ *  initial ㅇ medial ㅐ, so 없애다 없앤다 없앴다 all qualify) or 없어지- (disappear: 어 and then a syllable
+ *  with initial ㅈ and medial ㅣ or ㅕ, so 없어진다 없어졌다 없어질). Told apart by the syllables' parts,
+ *  not by fixed strings, because each verb composes its syllables differently in every form. */
+function absenceAt(chars: string[], k: number): boolean {
+  const next = syllableParts(chars[k + 1]);
+  if (next !== undefined && next.initial === 11 && next.medial === 1) return false;
+  const third = syllableParts(chars[k + 2]);
+  if (chars[k + 1] === '어' && third !== undefined && third.initial === 12 && (third.medial === 20 || third.medial === 6)) return false;
+  return true;
+}
+
+/** Manner adverbs ending in 없이 that do not negate the claim they modify (regardless, constantly,
+ *  surely, without fail, without exception, ...). Written as one word; spaced ("상관 없이") they read as
+ *  negation, a known misread. */
+const KO_ADVERBS_WITH_EOPSI = ['상관없이', '관계없이', '끊임없이', '틀림없이', '어김없이', '변함없이', '빠짐없이', '예외없이', '거침없이', '하염없이'] as const;
+
+/** Prohibitive forms that negate the verb before them when that word ends in -지 (하지 마라, 수정하지
+ *  말 것, 하지 말아야). The whole word must be one of these, so 마스킹 or 마지막 after 메시지 is not read,
+ *  and without a -지 word before it 말고 is "instead of" (로그 말고 메트릭). */
+const KO_PROHIBITIVE_RE = /^(?:마|마라|마요|마세요|마시오|마십시오|말|말라|말고|말도록|말아|말아라|말아야|말아요|말자|말기를|맙시다)$/u;
+
+/** Korean negation (issue #14), read on the words of the RAW sentence, as NEGATOR_RE is, never on the
+ *  stemmed tokens, which have lost the endings that carry it. A bounded set like the English one, not a
+ *  parser: 않 anywhere in a word (않다, 않는, 않습니다); 못 as a word, or followed by 하- in any form
+ *  (못하다, 못한다, 못함, 못했다); 안 as a word on its own (안 된다), or unspaced before 되- or 하- in any
+ *  form (안된다, 안됨, 안돼, 안한다; 안전, 안에 and 안정 are other words); 없 anywhere in a word (없다, 필요없다, 수없다) except the 없애- and
+ *  없어지- families (absenceAt) and the manner adverbs in KO_ADVERBS_WITH_EOPSI; 아니- 아닌 아닙- 아님 아냐
+ *  except 아니면 (or else) and 아닌지 (whether or not); and a prohibitive form after a -지 word. It sets bit
+ *  0, the English negators' bit, and takes no part in the collapse.
+ *  Known misreads, the visible false 'diverge' direction unless stated (the idiom one is pinned): the
+ *  idiom 못지않다 (no less than); 아니라 in "A가 아니라 B" (not A but B); 안 as a noun (디렉터리 안 파일,
+ *  두 번째 안); 못 as a noun (못 박힌); 말고 after a -지 word meaning "instead of" (메시지 말고 로그를); a
+ *  spaced 없이 (어쩔 수 없이, 상관 없이); and a double negation (하지 않을 수 없다, must). Not read at all,
+ *  as in English: lexical negation (모르다, 실패하다, 불가능, 미지원) and contradictions carried by content
+ *  (성공 / 실패) rather than by negation; now that Korean claims pair, those read 'agree' as their English
+ *  twins do (header hole 2). */
+function koNegated(s: string): boolean {
+  const words = s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return words.some((w, k) => {
+    if (!HANGUL_RE.test(w)) return false;
+    if (w.includes('않') || w === '안' || w === '못') return true;
+    const chars = [...w];
+    // 못하- and 안되- / 안하- in every composed form: the second syllable's initial and medial decide
+    // (하 한 할 함 합 해 했: ㅎ with ㅏ or ㅐ; 되 된 될 됨 됩 돼 됐: ㄷ with ㅚ or ㅙ).
+    const second = syllableParts(chars[1]);
+    const ha = second !== undefined && second.initial === 18 && (second.medial === 0 || second.medial === 1);
+    const doe = second !== undefined && second.initial === 3 && (second.medial === 11 || second.medial === 10);
+    if ((chars[0] === '못' && ha) || (chars[0] === '안' && (ha || doe))) return true;
+    if (!KO_ADVERBS_WITH_EOPSI.some((a) => w.endsWith(a)) && chars.some((ch, i) => ch === '없' && absenceAt(chars, i))) return true;
+    if (/^(?:아니|아닌|아닙|아님|아냐)/u.test(w) && !w.startsWith('아니면') && !w.startsWith('아닌지')) return true;
+    return k > 0 && words[k - 1]!.endsWith('지') && KO_PROHIBITIVE_RE.test(w);
+  });
+}
+
 function negationPolarity(s: string): number {
   const collapsed = s.replace(CANCELLING_PAIR_RE, ' ');
-  return (NEGATOR_RE.test(collapsed) ? 1 : 0) | (UN_FORM_RE.test(collapsed) ? 2 : 0);
+  return (NEGATOR_RE.test(collapsed) || koNegated(collapsed) ? 1 : 0) | (UN_FORM_RE.test(collapsed) ? 2 : 0);
 }
 
 /**
@@ -330,7 +464,8 @@ function negationPolarity(s: string): number {
  *     rather than removing them, so re-measure the WHOLE pin set, never just the class in hand.
  *     Four open holes remain, deliberately not chased further here:
  *       (1) the negator list is a bounded list of English negators, not a parser — an unlisted
- *           negator ("hardly", "rarely", "seldom") still reads as unnegated. Its apostrophe
+ *           negator ("hardly", "rarely", "seldom") still reads as unnegated. Since issue #14 it is
+ *           joined by a bounded Korean set (koNegated) that carries the same caveat. Its apostrophe
  *           sub-case, where a LISTED negator failed on the codepoint ("doesn’t" with U+2019), was a
  *           different defect and is closed (I2); this hole is about words that are absent, not
  *           spellings that were missed. Adding a word closes that word and nothing else. Named here
@@ -548,7 +683,7 @@ export function buildAgreementMap(helixAnswer: string, codexAnswer: string): Agr
     // needs the sentences to judge whether the difference is a conflict. A side that quotes no
     // figure at all reads "cites no figure" rather than an empty gap.
     figureNotes.push(
-      `figures differ — "${helix[i]}" cites ${cites(helixFigures)}; "${codex[j]}" cites ${cites(codexFigures)}`,
+      `figures differ — "${helix[i]}" cites ${cites(rawFiguresOf(helix[i]!))}; "${codex[j]}" cites ${cites(rawFiguresOf(codex[j]!))}`,
     );
   }
 
