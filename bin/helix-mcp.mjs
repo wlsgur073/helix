@@ -26459,7 +26459,8 @@ function handleCommit(store2, args) {
   return ok(`committed ${JSON.stringify(result)}`);
 }
 function handleRecall(store2, args) {
-  const { items, appendix, integrityAvailable, projectDisposition, witnessNotes } = store2.recall(args.query, { maxItems: args.maxItems });
+  const { items, appendix: newest, integrityAvailable, projectDisposition, witnessNotes } = store2.recall(args.query, { maxItems: args.maxItems });
+  const appendix = args.recencyAppendix === false ? [] : newest;
   const served = [...items, ...appendix];
   const flags = served.filter((i) => i.needsReverify).map((i) => safeId(i.record.id));
   const reverifyNote = flags.length ? `
@@ -27460,7 +27461,7 @@ function buildServer(store2, dualDeps, metrics2) {
   }, async (args) => m.runOp("helix_memory_commit", () => handleCommit(store2, args)));
   server2.registerTool("helix_memory_recall", {
     title: "Recall memory",
-    description: "Recall relevant memory as a DATA-only block; flags items needing re-verification.",
+    description: `Recall relevant memory as a DATA-only block; flags items needing re-verification. After the ranked matches it adds up to ${RECALL_RECENCY_APPENDIX_COUNT} of the newest other records unless recencyAppendix is false, and names them in a trailing note.`,
     // The character bound is declared here as well as enforced in the store, so an oversized query
     // is refused by schema validation before it reaches a handler at all — the same bounded-input
     // discipline `maxItems` and `asOf` already get. The store keeps the authoritative check (it also
@@ -27471,10 +27472,15 @@ function buildServer(store2, dualDeps, metrics2) {
       // for far more items, or a far larger per-item cap, than the response will ever actually
       // deliver (the handler's own RESPONSE_MAX_CHARS total bound drops the excess anyway). Capping
       // the inputs here too is a client-facing rejection instead of a silently-shrunk result.
-      maxItems: external_exports.number().int().positive().max(RECALL_MAX_ITEMS_CAP).optional(),
+      // Issue #9: the default of 20 is the ranker's own (`opts.maxItems ?? 20` in retrieval.ts, a path the
+      // v2 freeze receipt pins, so it is not imported from there); test/server/recall-schema.test.ts holds the two equal.
+      maxItems: external_exports.number().int().positive().max(RECALL_MAX_ITEMS_CAP).optional().describe(`Maximum number of ranked matches (default 20). Unless recencyAppendix is false, up to ${RECALL_RECENCY_APPENDIX_COUNT} of the newest records the ranking did not return are added after them, so a response can hold up to maxItems + ${RECALL_RECENCY_APPENDIX_COUNT} records; a trailing recency appendix note names those records.`),
       // H5: count bounds are not size bounds — long prose items made a 30-item recall render
       // 74.6 KB. Per-item character cap; truncation is marked with an ellipsis.
-      maxChars: external_exports.number().int().positive().max(RECALL_MAX_CHARS_CAP).optional().describe("Per-item character cap for rendered content (truncated with \u2026). Use when the caller can only read a bounded result.")
+      maxChars: external_exports.number().int().positive().max(RECALL_MAX_CHARS_CAP).optional().describe("Per-item character cap for rendered content (truncated with \u2026). Use when the caller can only read a bounded result."),
+      // Issue #9: the H1 appendix rides beyond maxItems by default; false is how a caller bounds the response by
+      // maxItems alone, without taking the appendix away from callers that rely on it.
+      recencyAppendix: external_exports.boolean().optional().describe(`Set to false to get the ranked matches alone, so that maxItems bounds the whole response. By default (true), up to ${RECALL_RECENCY_APPENDIX_COUNT} of the newest records the ranking did not return follow the matches, so that a recent record worded differently from the query is still seen.`)
     }
   }, async (args) => m.runOp("helix_memory_recall", () => handleRecall(store2, args)));
   server2.registerTool("helix_memory_inspect", {

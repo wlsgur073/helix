@@ -203,7 +203,7 @@
     },
     {
       "name": "helix_memory_recall",
-      "description": "Recall relevant memory as a DATA-only block; flags items needing re-verification.",
+      "description": "Recall relevant memory as a DATA-only block; flags items needing re-verification. After the ranked matches it adds up to 3 of the newest other records unless recencyAppendix is false, and names them in a trailing note.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -214,13 +214,18 @@
           "maxItems": {
             "type": "integer",
             "exclusiveMinimum": 0,
-            "maximum": 200
+            "maximum": 200,
+            "description": "Maximum number of ranked matches (default 20). Unless recencyAppendix is false, up to 3 of the newest records the ranking did not return are added after them, so a response can hold up to maxItems + 3 records; a trailing recency appendix note names those records."
           },
           "maxChars": {
             "type": "integer",
             "exclusiveMinimum": 0,
             "maximum": 10000,
             "description": "Per-item character cap for rendered content (truncated with …). Use when the caller can only read a bounded result."
+          },
+          "recencyAppendix": {
+            "type": "boolean",
+            "description": "Set to false to get the ranked matches alone, so that maxItems bounds the whole response. By default (true), up to 3 of the newest records the ranking did not return follow the matches, so that a recent record worded differently from the query is still seen."
           }
         },
         "required": [
