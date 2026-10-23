@@ -79,4 +79,31 @@ describe('H1: recall appends the newest records regardless of rank', () => {
     expect(out).not.toContain('kettle whistles');
     expect(out).not.toContain('rain is forecast');
   });
+
+  // Issue #9: a caller can turn the appendix off for one call, so that maxItems bounds the response.
+  it('recencyAppendix false returns the ranked items alone, with no appendix note', () => {
+    const store = storeWith([RANKED_OLD, RANKED_MID, NEWEST_DISJOINT]);
+    const out = text(handleRecall(store, { query: 'postgres schema', recencyAppendix: false }));
+    expect(out).toContain(RANKED_OLD);
+    expect(out).toContain(RANKED_MID);
+    expect(out).not.toContain(NEWEST_DISJOINT);
+    expect(out).not.toContain('recency appendix');
+  });
+
+  it('recencyAppendix true keeps the appendix, as when it is omitted', () => {
+    const store = storeWith([RANKED_OLD, RANKED_MID, NEWEST_DISJOINT]);
+    const out = text(handleRecall(store, { query: 'postgres schema', recencyAppendix: true }));
+    expect(out).toContain(NEWEST_DISJOINT);
+    expect(out).toMatch(/recency appendix/);
+  });
+
+  it('with recencyAppendix false no trailing note names a record the appendix would have carried', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-h1-'));
+    const store = new MemoryStore(join(home, 'm.jsonl'), { home, sessionId: 's1' });
+    store.commit({ content: RANKED_OLD, source: 'user' });
+    // agent-inference is always flagged for re-verification, so by default its id is in two notes.
+    const newest = store.commit({ content: NEWEST_DISJOINT, source: 'agent-inference' });
+    expect(text(handleRecall(store, { query: 'postgres schema' }))).toMatch(new RegExp(`needs re-verify before acting: ${newest.id}`));
+    expect(text(handleRecall(store, { query: 'postgres schema', recencyAppendix: false }))).not.toContain(newest.id);
+  });
 });

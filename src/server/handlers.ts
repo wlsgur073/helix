@@ -149,13 +149,15 @@ export function handleCommit(store: MemoryStore, args: CommitInput): ToolResult 
   return ok(`committed ${JSON.stringify(result)}`);
 }
 
-export function handleRecall(store: MemoryStore, args: { query: string; maxItems?: number; maxChars?: number }): ToolResult {
-  const { items, appendix, integrityAvailable, projectDisposition, witnessNotes } = store.recall(args.query, { maxItems: args.maxItems });
+export function handleRecall(store: MemoryStore, args: { query: string; maxItems?: number; maxChars?: number; recencyAppendix?: boolean }): ToolResult {
+  const { items, appendix: newest, integrityAvailable, projectDisposition, witnessNotes } = store.recall(args.query, { maxItems: args.maxItems });
   // H1: `appendix` carries the newest served records the ranker could not reach (built inside
   // `store.recall` from the already-read projection — the A4 cache lock forbids a handler-side
   // re-read). Render them after the ranked items and disclose their ids out-of-frame below, so the
   // agent can tell rank-evidence from recency-evidence; every advisory note here treats them like
-  // any other served item.
+  // any other served item. Issue #9: `recencyAppendix: false` serves the ranked items alone, so the
+  // caller's maxItems bounds the response and no note below names a record that was not served.
+  const appendix = args.recencyAppendix === false ? [] : newest;
   const served = [...items, ...appendix];
   const flags = served.filter((i) => i.needsReverify).map((i) => safeId(i.record.id));
   const reverifyNote = flags.length ? `\n\n(needs re-verify before acting: ${flags.join(', ')})` : '';
