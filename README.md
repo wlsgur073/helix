@@ -92,7 +92,13 @@ saying it is being ignored.)
   In `compare`, `agree` is **lexical** agreement — the matched claims share content tokens and
   negation polarity — not a semantic check, and the response says so on every `agree`. A role swap
   with an identical token set ("A approved B" / "B approved A") still reads `agree`; that limit is
-  pinned in `src/verify/agreement-map.ts`. Read both answers before relying on an agreement.
+  pinned in `src/verify/agreement-map.ts`. Korean words are compared after one common ending and one
+  particle are removed from each, and Korean negation is read from a bounded set: 않; 못; 안 on its own
+  or before 되- and 하-; 없, except in 없애다, 없어지다 and adverbs such as 상관없이; 아니, except 아니면
+  and 아닌지; and a prohibitive such as 하지 마라. Now that Korean claims pair, a Korean contradiction
+  carried by content rather than negation (성공한다 / 실패한다) reads `agree`, as its English twin does;
+  the idiom 못지않다 reads as negation, and other languages that attach particles to words are compared
+  as written. Read both answers before relying on an agreement.
 - `stakesFloor` — skip the metered Codex call below this stakes level (`low` / `medium` / `high` / `xhigh`).
   A call that omits `stakes` is **read as the lowest tier**, so any floor above `low` refuses it:
   omission is not an exemption. Declare the level a call deserves, or set `stakesFloor` to `low` to

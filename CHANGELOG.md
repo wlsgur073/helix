@@ -178,6 +178,12 @@ First release.
   first two characters and kind, inside a datamarked DATA frame with a count of the rest; a
   blocking token found only after normalization has no position and is not listed, and the frame
   says that one exists. Like the echo runs, these lines never reach the audit row.
+- The compare-mode agreement map reads Korean (issue #14). Each Hangul word loses one common ending
+  and one particle before the comparison. A particle or ending attached to a figure no longer makes
+  the same number differ, while 만 after a number (3만, 1천만) and 도 (30도) stay part of the figure.
+  Negation is read from a bounded Korean set as well as the English one, so a Korean contradiction
+  carried by one of those negators reads `diverge`, not `agree`; a contradiction carried by content
+  (성공 / 실패) still reads `agree`, as it does in English.
 
 #### Automatic compaction — opt-in, default OFF
 
