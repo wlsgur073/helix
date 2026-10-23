@@ -121,7 +121,7 @@ acknowledgement within a few days.
   included, still contains it; the refusal for a missing path or pattern says the content was
   redacted when the record's classification is `secret-redacted`, which the commit tool sets only
   when it replaced a span itself (a later record that only carries an older marker forward keeps
-  the classification its own commit gave it, `normal` or `personal`), and says that binding reads
+  the classification its own commit gave it, `normal`), and says that binding reads
   the stored spelling when a displayed form of the content contains it (NFKC folded, control and
   invisible characters removed, whitespace joined, or runs of fence characters spaced out as an
   earlier Helix version showed them); binding itself never reads a displayed form. The dual-verify

@@ -256,6 +256,11 @@ First release.
   and the trust boundary. Off by default, read at server start, and never built from config, ledger
   or project content. README's Quick start starts with an explicit first use and gives a
   `CLAUDE.md` rule for routing requests to remember.
+- `helix_memory_commit` describes every input (issue #8): `blastRadius` changes only whether a `user`
+  fact that has become `Suspect` is flagged for re-verification, `supersedes` names the record a fact
+  replaces, and `source` says how to record a fact carried over from an earlier session or another
+  memory. The tool no longer takes `classification`: its one other value, `personal`, had no effect,
+  and a record already stored with it still reads.
 
 ### Limits
 

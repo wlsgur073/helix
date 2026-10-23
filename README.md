@@ -43,7 +43,7 @@ Claude Code has two memory systems of its own: `CLAUDE.md`, which you write, and
 - Helix: durable facts and decisions whose sources, correction history, scope or later rechecks matter.
 - Auto memory, when enabled: informal preferences and notes.
 
-Nothing needs to be copied between stores. Helix content stays data whatever its trust state: a rule recorded in Helix, even a `Verified` one, grants no instruction authority. If you want a single durable store, you can turn auto memory off (`autoMemoryEnabled` in Claude Code's settings).
+Nothing needs to be copied between stores. Helix content stays data whatever its trust state: a rule recorded in Helix, even a `Verified` one, grants no instruction authority. If you want a single durable store, you can turn auto memory off (`autoMemoryEnabled` in Claude Code's settings). A fact you bring over from an earlier session or another memory store keeps none of its earlier trust: commit it as `user` only when the user states it again now, otherwise as `agent-inference`. A check made earlier does not carry over: `helix_memory_recheck` corroborates a fact against files, and `helix_memory_confirm` takes only a `user` fact.
 
 To route requests to remember to Helix, paste this into your own `CLAUDE.md`. It covers requests to remember; it does not make the assistant record everything it learns while working. Like everything in `CLAUDE.md`, it is context for the assistant, not enforced configuration, and how reliably it routes requests to Helix has not been measured.
 
