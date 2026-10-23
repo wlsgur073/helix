@@ -261,6 +261,10 @@ First release.
   replaces, and `source` says how to record a fact carried over from an earlier session or another
   memory. The tool no longer takes `classification`: its one other value, `personal`, had no effect,
   and a record already stored with it still reads.
+- `helix_memory_recall` says before the call that up to 3 of the newest records the ranked matches
+  left out follow them (issue #9): `maxItems` gives its default of 20 and the bound of `maxItems` + 3
+  records, and the new `recencyAppendix: false` returns the ranked matches alone, so that `maxItems`
+  bounds the response. The default behaviour is unchanged.
 
 ### Limits
 
