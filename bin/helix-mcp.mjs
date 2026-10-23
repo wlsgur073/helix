@@ -25647,8 +25647,107 @@ function compactionConfigFromGlobal(home2) {
 function sentences(answer) {
   return answer.split(/\n+|;+\s*|(?<=\S)\.(?=\s|$)/).map((s) => s.trim()).filter((s) => s.length > 0);
 }
+var HANGUL_RE = new RegExp("\\p{Script=Hangul}", "u");
+var KO_ENDINGS = [
+  "\uD588\uC2B5\uB2C8\uB2E4",
+  "\uC600\uC2B5\uB2C8\uB2E4",
+  "\uD569\uB2C8\uB2E4",
+  "\uC2B5\uB2C8\uB2E4",
+  "\uB429\uB2C8\uB2E4",
+  "\uC785\uB2C8\uB2E4",
+  "\uC774\uC5C8\uB2E4",
+  "\uB418\uC5C8\uB2E4",
+  "\uD558\uC600\uB2E4",
+  "\uD55C\uB2E4",
+  "\uB41C\uB2E4",
+  "\uB294\uB2E4",
+  "\uD588\uB2E4",
+  "\uD558\uB2E4",
+  "\uC774\uB2E4",
+  "\uB2C8\uB2E4",
+  "\uC600\uB2E4",
+  "\uB410\uB2E4",
+  "\uC5C8\uB2E4",
+  "\uC558\uB2E4",
+  "\uB2E4"
+];
+var KO_PARTICLES = [
+  "\uC5D0\uC11C\uB294",
+  "\uC5D0\uAC8C\uC11C",
+  "\uC73C\uB85C\uB294",
+  "\uC73C\uB85C\uB3C4",
+  "\uC5D0\uC11C\uB3C4",
+  "\uAE4C\uC9C0\uB294",
+  "\uAE4C\uC9C0\uB3C4",
+  "\uBD80\uD130\uB294",
+  "\uC5D0\uAC8C\uB294",
+  "\uC5D0\uC11C",
+  "\uC5D0\uAC8C",
+  "\uD55C\uD14C",
+  "\uAED8\uC11C",
+  "\uC73C\uB85C",
+  "\uAE4C\uC9C0",
+  "\uBD80\uD130",
+  "\uB9C8\uC800",
+  "\uC870\uCC28",
+  "\uCC98\uB7FC",
+  "\uBCF4\uB2E4",
+  "\uC774\uB098",
+  "\uC774\uB780",
+  "\uC774\uB77C",
+  "\uC774\uACE0",
+  "\uC774\uBA70",
+  "\uACFC\uC758",
+  "\uC640\uC758",
+  "\uC5D0\uB294",
+  "\uC5D0\uB3C4",
+  "\uC744",
+  "\uB97C",
+  "\uC774",
+  "\uAC00",
+  "\uC740",
+  "\uB294",
+  "\uC758",
+  "\uC5D0",
+  "\uC640",
+  "\uACFC",
+  "\uB3C4",
+  "\uB85C",
+  "\uB9CC"
+];
+function syllableParts(ch) {
+  if (ch === void 0) return void 0;
+  const c = ch.codePointAt(0) - 44032;
+  if (c < 0 || c >= 11172) return void 0;
+  return { initial: Math.floor(c / 588), medial: Math.floor(c % 588 / 28), final: c % 28 };
+}
+function particleLeaves(rest, particle, whole) {
+  const n = [...rest].length;
+  if (whole) return n > 0 && !(particle === "\uB9CC" && /[십백천]$/u.test(rest));
+  if ([...particle].length > 1 || n >= 2) return n >= 1;
+  const parts = n === 1 ? syllableParts(rest) : void 0;
+  if (parts === void 0) return false;
+  return parts.final !== 0 && ["\uC744", "\uC740", "\uC774"].includes(particle) || parts.final === 0 && ["\uB97C", "\uB294", "\uAC00"].includes(particle);
+}
+function koStem(token, whole = false) {
+  if (!HANGUL_RE.test(token)) return token;
+  let t = token;
+  for (const e of KO_ENDINGS) {
+    if (t.endsWith(e) && [...t].length - [...e].length >= (whole ? 0 : 1)) {
+      t = t.slice(0, -e.length);
+      break;
+    }
+  }
+  for (const p of KO_PARTICLES) {
+    if (!t.endsWith(p)) continue;
+    const rest = t.slice(0, -p.length);
+    if (particleLeaves(rest, p, whole)) t = rest;
+    break;
+  }
+  return t;
+}
 function tokenSet(s) {
-  return new Set(s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+  return new Set((s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map((t) => koStem(t)));
 }
 function jaccard(a, b) {
   if (a.size === 0 && b.size === 0) return 1;
@@ -25666,8 +25765,14 @@ var NEGATOR_RE = new RegExp(NEGATOR_ALTERNATIVES, "i");
 var UN_FORM_RE = new RegExp(String.raw`\bun-|\b(?:${UNPREFIXED_NEGATIONS.join("|")})\b`, "i");
 var COLLAPSE_GAP = String.raw`[\s*_~\u0060]+`;
 var FIGURE_RE = /\d+(?:[.,:]\d+)*\s*[\p{L}%]{0,8}/gu;
-function figuresOf(s) {
+function rawFiguresOf(s) {
   return (s.match(FIGURE_RE) ?? []).map((f) => f.toLowerCase().replace(/\s+/g, " ").trim());
+}
+function figuresOf(s) {
+  return rawFiguresOf(s).map((f) => {
+    const unitAt = f.search(/[\p{L}%]/u);
+    return unitAt < 0 ? f : (f.slice(0, unitAt) + koStem(f.slice(unitAt), true)).trim();
+  });
 }
 function cites(figures) {
   return figures.length === 0 ? "no figure" : figures.join(", ");
@@ -25682,9 +25787,33 @@ var CANCELLING_PAIR_RE = new RegExp(
   String.raw`(?:${NEGATOR_ALTERNATIVES})${COLLAPSE_GAP}(?:un-|\b(?:${UNPREFIXED_NEGATIONS.join("|")})\b)`,
   "gi"
 );
+function absenceAt(chars, k) {
+  const next = syllableParts(chars[k + 1]);
+  if (next !== void 0 && next.initial === 11 && next.medial === 1) return false;
+  const third = syllableParts(chars[k + 2]);
+  if (chars[k + 1] === "\uC5B4" && third !== void 0 && third.initial === 12 && (third.medial === 20 || third.medial === 6)) return false;
+  return true;
+}
+var KO_ADVERBS_WITH_EOPSI = ["\uC0C1\uAD00\uC5C6\uC774", "\uAD00\uACC4\uC5C6\uC774", "\uB04A\uC784\uC5C6\uC774", "\uD2C0\uB9BC\uC5C6\uC774", "\uC5B4\uAE40\uC5C6\uC774", "\uBCC0\uD568\uC5C6\uC774", "\uBE60\uC9D0\uC5C6\uC774", "\uC608\uC678\uC5C6\uC774", "\uAC70\uCE68\uC5C6\uC774", "\uD558\uC5FC\uC5C6\uC774"];
+var KO_PROHIBITIVE_RE = /^(?:마|마라|마요|마세요|마시오|마십시오|말|말라|말고|말도록|말아|말아라|말아야|말아요|말자|말기를|맙시다)$/u;
+function koNegated(s) {
+  const words = s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return words.some((w, k) => {
+    if (!HANGUL_RE.test(w)) return false;
+    if (w.includes("\uC54A") || w === "\uC548" || w === "\uBABB") return true;
+    const chars = [...w];
+    const second = syllableParts(chars[1]);
+    const ha = second !== void 0 && second.initial === 18 && (second.medial === 0 || second.medial === 1);
+    const doe = second !== void 0 && second.initial === 3 && (second.medial === 11 || second.medial === 10);
+    if (chars[0] === "\uBABB" && ha || chars[0] === "\uC548" && (ha || doe)) return true;
+    if (!KO_ADVERBS_WITH_EOPSI.some((a) => w.endsWith(a)) && chars.some((ch, i) => ch === "\uC5C6" && absenceAt(chars, i))) return true;
+    if (/^(?:아니|아닌|아닙|아님|아냐)/u.test(w) && !w.startsWith("\uC544\uB2C8\uBA74") && !w.startsWith("\uC544\uB2CC\uC9C0")) return true;
+    return k > 0 && words[k - 1].endsWith("\uC9C0") && KO_PROHIBITIVE_RE.test(w);
+  });
+}
 function negationPolarity(s) {
   const collapsed = s.replace(CANCELLING_PAIR_RE, " ");
-  return (NEGATOR_RE.test(collapsed) ? 1 : 0) | (UN_FORM_RE.test(collapsed) ? 2 : 0);
+  return (NEGATOR_RE.test(collapsed) || koNegated(collapsed) ? 1 : 0) | (UN_FORM_RE.test(collapsed) ? 2 : 0);
 }
 function buildAgreementMap(helixAnswer, codexAnswer) {
   const helix = sentences(helixAnswer);
@@ -25733,7 +25862,7 @@ function buildAgreementMap(helixAnswer, codexAnswer) {
     helixStatus[i] = "figures-differ";
     codexStatus[j] = "figures-differ";
     figureNotes.push(
-      `figures differ \u2014 "${helix[i]}" cites ${cites(helixFigures)}; "${codex[j]}" cites ${cites(codexFigures)}`
+      `figures differ \u2014 "${helix[i]}" cites ${cites(rawFiguresOf(helix[i]))}; "${codex[j]}" cites ${cites(rawFiguresOf(codex[j]))}`
     );
   }
   const agreements = helix.filter((_, i) => helixStatus[i] === "agreed");
