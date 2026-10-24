@@ -155,16 +155,27 @@ describe('first fix batch — bundle e2e', () => {
     }, 30_000);
   });
 
-  it('IT-M1: a resumed session with empty memory gets the supersede note alone; a startup gets nothing', async () => {
+  // IT-M1, narrowed by issue #7: a continued session gets the supersede note alone when memory is empty but
+  // once held a fact (an earlier block may have shown it), and nothing when no scope has ever held memory.
+  it('IT-M1: a continued session whose memory was erased gets the supersede note alone; a pristine home and a startup get nothing', async () => {
     const base = tmp('helix-fb-resume-');
     const userHome = join(base, 'home');
     mkdirSync(userHome);
-    const hh = join(base, 'hh');
-    mkdirSync(hh, { mode: 0o700 });
-    const env = { ...cleanEnv(), HOME: userHome, HELIX_HOME: hh };
-    const resumed = await hook(env, { cwd: userHome, hook_event_name: 'SessionStart', source: 'resume' });
-    const started = await hook(env, { cwd: userHome, hook_event_name: 'SessionStart', source: 'startup' });
-    expect(resumed.stdout).toBe(`${SUPERSEDE_NOTE}\n`);
-    expect(started.stdout).toBe('');
+    const pristine = join(base, 'hh-pristine');
+    mkdirSync(pristine, { mode: 0o700 });
+    const erased = join(base, 'hh-erased');
+    mkdirSync(erased, { mode: 0o700 });
+    const erasedEnv = { ...cleanEnv(), HOME: userHome, HELIX_HOME: erased };
+    const committed = await rpc(erasedEnv, userHome, [{ name: 'helix_memory_commit', args: { content: 'staging runs postgres 16', source: 'user' } }]);
+    const { id } = JSON.parse(textOf(committed.responses.get(2)).replace(/^committed /, '')) as { id: string };
+    const removed = await rpc(erasedEnv, userHome, [{ name: 'helix_memory_erase', args: { id } }]);
+    expect(textOf(removed.responses.get(2))).toMatch(/^erased /);
+    for (const [hh, continued] of [[pristine, ''], [erased, `${SUPERSEDE_NOTE}\n`]] as const) {
+      const env = { ...cleanEnv(), HOME: userHome, HELIX_HOME: hh };
+      for (const source of ['resume', 'compact', 'fork']) {
+        expect((await hook(env, { cwd: userHome, hook_event_name: 'SessionStart', source })).stdout, `${hh} ${source}`).toBe(continued);
+      }
+      expect((await hook(env, { cwd: userHome, hook_event_name: 'SessionStart', source: 'startup' })).stdout, `${hh} startup`).toBe('');
+    }
   }, 30_000);
 });

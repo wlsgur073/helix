@@ -1661,7 +1661,14 @@ function gatherScopedRecords({ home, globalLedger, cwd, userHome }) {
       }
     }
   }
-  return { records, integrityAvailable, replays, projectDisposition, witnessNotes: collectWitnessNotes(verdicts) };
+  return {
+    records,
+    integrityAvailable,
+    replays,
+    projectDisposition,
+    witnessNotes: collectWitnessNotes(verdicts),
+    everyScopePristine: verdicts.every((v) => v.kind === "first-contact" && v.reason === "pristine")
+  };
 }
 function unionPhysicalRows(replays) {
   return replays.reduce((sum, r) => sum + r.rows, 0);
@@ -1700,15 +1707,16 @@ async function main() {
     } else {
       ({ cwd, supersedesEarlier } = hookInputOf(stdinText));
     }
-    const { records, integrityAvailable, replays, projectDisposition, witnessNotes } = gatherScopedRecords({ home, globalLedger, cwd });
+    const { records, integrityAvailable, replays, projectDisposition, witnessNotes, everyScopePristine } = gatherScopedRecords({ home, globalLedger, cwd });
     const text = formatSessionStartContext(records, newNonce(), {
       integrityAvailable,
       unadoptedPresent: projectDisposition === "unadopted-present",
       aliasedPresent: projectDisposition === "aliased",
       ancestorUnadopted: projectDisposition === "ancestor-unadopted",
       witnessNotes,
+      // Issue #7: when no scope read has ever held memory, no earlier block can need superseding.
       unionRows: unionPhysicalRows(replays),
-      supersedesEarlier
+      supersedesEarlier: supersedesEarlier && !everyScopePristine
     });
     if (text !== "") writeSync3(1, text + "\n");
     const sink = createMetricsSink(join9(home, "metrics.jsonl"), metricsEnabledFromGlobalConfig(home));
