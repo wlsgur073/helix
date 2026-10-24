@@ -2,6 +2,8 @@ import type { MemoryState, ScopedRecord } from '../types.js';
 import { markLines, normalizeRecordContent, frameOpen, frameClose, DATA_SEMANTICS, reverifyFlag, safeId, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, SUPERSEDE_NOTE } from '../memory/content-frame.js';
 import { classifyEmission } from '../risk/trifecta.js';
 import { isVerifyingSource } from '../memory/firewall.js';
+import { isIsoInstant } from '../memory/history.js';
+import { RECALL_APPENDIX_FUTURE_TOLERANCE_MS } from '../limits.js';
 
 // H8's source-named flag map moved to content-frame.ts (`reverifyFlag`) so this surface and the
 // recall tool frame render ONE vocabulary (H9) — the argument for the map lives there now.
@@ -10,6 +12,10 @@ export interface FormatOptions {
   maxItems?: number;
   maxChars?: number;
   maxItemChars?: number;
+  /** SESSIONSTART-FUTURE-TX: the time of this run (ISO). A record whose tx is a canonical instant no later
+   *  than this plus RECALL_APPENDIX_FUTURE_TOLERANCE_MS keeps its state-then-time place; every other record
+   *  goes after all of those. Default: the current clock. */
+  now?: string;
   /** False => at least one scope was read key-absent, so every grade was clamped to Fresh and none
    *  can be trusted. Appends a trusted out-of-band note after the frame (mirrors recall's signal).
    *  Default true (no note) keeps the signature backward-compatible. */
@@ -86,9 +92,20 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
   const trailer = [opts.supersedesEarlier ? SUPERSEDE_NOTE : null, projectLayerNote, ...(opts.witnessNotes ?? []), scaleNote]
     .filter((n): n is string => n !== null && n !== '');
 
+  // SESSIONSTART-FUTURE-TX: a record the block cannot place in time (a tx that is not a canonical instant, or
+  // one more than the tolerance after this run) goes after every record it can, whatever its state. Ordered
+  // by tx alone, a row dated far in the future (a skewed clock, or a row written by hand into an adopted
+  // ledger) took the first slot of its state, and a RESERVE slot when it claimed a verifying source. Its
+  // content is still shown when slots remain. The tolerance is recall's (a backward clock step is not a skew).
+  const runMs = Date.parse(opts.now ?? new Date().toISOString());
+  const latestTx = Number.isFinite(runMs) ? new Date(runMs + RECALL_APPENDIX_FUTURE_TOLERANCE_MS).toISOString() : '';
   const usable = records
     .filter(({ record }) => record.content.trim() !== '')
-    .sort((a, b) => STATE_ORDER[a.record.state] - STATE_ORDER[b.record.state] || b.record.tx.localeCompare(a.record.tx));
+    .map((s) => ({ s, dated: isIsoInstant(s.record.tx) && s.record.tx <= latestTx }))
+    .sort((a, b) => Number(b.dated) - Number(a.dated)
+      || STATE_ORDER[a.s.record.state] - STATE_ORDER[b.s.record.state]
+      || (a.dated ? b.s.record.tx.localeCompare(a.s.record.tx) : 0))
+    .map(({ s }) => s);
   if (usable.length === 0) return trailer.length > 0 ? trailer.join('\n') : '';
 
   // Crowd-out protection: guarantee up to RESERVE current-authoritative (verifying source, not

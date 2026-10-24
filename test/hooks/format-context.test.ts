@@ -343,3 +343,72 @@ describe('supersede note for a resumed, compacted or forked session (IT-M1)', ()
     expect(SUPERSEDE_NOTE.startsWith('(this Helix memory block supersedes every earlier Helix memory block')).toBe(true);
   });
 });
+
+// SESSIONSTART-FUTURE-TX: the block is ordered by trust state, then by time, newest first. A record whose time is not
+// a canonical instant, or lies more than five minutes after the hook run, cannot be placed in that order: it goes
+// after every record that can, so a row dated far in the future no longer takes the first slot of its state.
+describe('records the block cannot place in time go after every other record', () => {
+  const NOW = '2026-10-24T03:00:00.000Z';
+  /** The given contents in the order the block shows them (a flag prefix on a line does not matter). */
+  const order = (out: string, contents: string[]): string[] =>
+    contents.filter((c) => out.includes(c)).sort((x, y) => out.indexOf(x) - out.indexOf(y));
+
+  it('a far-future record goes after every dated one, newest dated first', () => {
+    const out = formatSessionStartContext(g([
+      rec({ id: 'm_old', content: 'old fact', tx: '2026-10-20T00:00:00.000Z' }),
+      rec({ id: 'm_future', content: 'future fact', tx: '2999-01-01T00:00:00.000Z' }),
+      rec({ id: 'm_new', content: 'new fact', tx: '2026-10-23T00:00:00.000Z' }),
+    ]), N, { now: NOW });
+    expect(order(out, ['old fact', 'future fact', 'new fact'])).toEqual(['new fact', 'old fact', 'future fact']);
+  });
+
+  it('without an explicit now the run\'s own clock decides', () => {
+    const out = formatSessionStartContext(g([
+      rec({ id: 'm_future', content: 'future fact', tx: '2999-01-01T00:00:00.000Z' }),
+      rec({ id: 'm_new', content: 'new fact', tx: '2026-10-23T00:00:00.000Z' }),
+    ]), N);
+    expect(order(out, ['future fact', 'new fact'])).toEqual(['new fact', 'future fact']);
+  });
+
+  it('a record whose time is not a canonical instant goes after the dated ones too', () => {
+    const out = formatSessionStartContext(g([
+      rec({ id: 'm_bad', content: 'bad time fact', tx: 'zzzz' }),
+      rec({ id: 'm_new', content: 'new fact', tx: '2026-10-23T00:00:00.000Z' }),
+    ]), N, { now: NOW });
+    expect(order(out, ['bad time fact', 'new fact'])).toEqual(['new fact', 'bad time fact']);
+  });
+
+  it('a non-canonical time that would sort as a recent date goes after the dated ones as well', () => {
+    const out = formatSessionStartContext(g([
+      rec({ id: 'm_new', content: 'new fact', tx: '2026-10-22T00:00:00.000Z' }),
+      rec({ id: 'm_space', content: 'spaced time fact', tx: '2026-10-23 00:00' }),
+    ]), N, { now: NOW });
+    expect(order(out, ['new fact', 'spaced time fact'])).toEqual(['new fact', 'spaced time fact']);
+  });
+
+  it('a record up to five minutes after the run keeps its place; one a millisecond later goes last', () => {
+    const out = formatSessionStartContext(g([
+      rec({ id: 'm_new', content: 'new fact', tx: '2026-10-23T00:00:00.000Z' }),
+      rec({ id: 'm_edge', content: 'edge fact', tx: '2026-10-24T03:05:00.000Z' }),
+      rec({ id: 'm_past', content: 'past the edge fact', tx: '2026-10-24T03:05:00.001Z' }),
+    ]), N, { now: NOW });
+    expect(order(out, ['new fact', 'edge fact', 'past the edge fact'])).toEqual(['edge fact', 'new fact', 'past the edge fact']);
+  });
+
+  it('a record it cannot place goes after every dated one, whatever its trust state', () => {
+    const out = formatSessionStartContext(g([
+      rec({ id: 'm_v', content: 'verified future fact', state: 'Verified', tx: '2999-01-01T00:00:00.000Z' }),
+      rec({ id: 'm_s', content: 'suspect dated fact', state: 'Suspect', tx: '2026-10-23T00:00:00.000Z' }),
+    ]), N, { now: NOW });
+    expect(order(out, ['verified future fact', 'suspect dated fact'])).toEqual(['suspect dated fact', 'verified future fact']);
+  });
+
+  it('a far-future user record takes no reserved slot ahead of dated ones', () => {
+    const out = formatSessionStartContext(g([
+      rec({ id: 'm_future', content: 'planted user fact', tx: '2999-01-01T00:00:00.000Z' }),
+      rec({ id: 'm_a', content: 'dated user fact a', tx: '2026-10-23T00:00:00.000Z' }),
+      rec({ id: 'm_b', content: 'dated user fact b', tx: '2026-10-22T00:00:00.000Z' }),
+    ]), N, { now: NOW, maxItems: 2 });
+    expect(order(out, ['planted user fact', 'dated user fact a', 'dated user fact b'])).toEqual(['dated user fact a', 'dated user fact b']);
+  });
+});
