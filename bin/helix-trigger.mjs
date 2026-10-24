@@ -243,8 +243,9 @@ function readJson(path, onUnusable) {
     if (e.code !== "ENOENT") onUnusable(e.message);
     return null;
   }
+  const body = text.charCodeAt(0) === 65279 ? text.slice(1) : text;
   try {
-    return JSON.parse(text);
+    return JSON.parse(body);
   } catch (e) {
     onUnusable(e.message);
     return null;

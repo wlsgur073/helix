@@ -82,3 +82,14 @@ describe('opt-in server instructions over the shipped bundle (issue #4)', () => 
     expect(r.stdout).toBe('');
   }, 30_000);
 });
+
+// CONFIG-BOM: a config.json saved with a UTF-8 byte order mark (Windows PowerShell 5.1's default) is read by the
+// shipped bundle like any other; serverInstructions is the setting whose effect a client can observe.
+describe('a config.json that starts with a byte order mark, over the shipped bundle (CONFIG-BOM)', () => {
+  it('the shipped bundle reads it: serverInstructions true sends the pinned text', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-acc-bom-'));
+    writeFileSync(join(home, 'config.json'), String.fromCharCode(0xfeff) + '{"serverInstructions": true}', 'utf8');
+    const client = await connect(home);
+    expect(client.getInstructions()).toBe(PINNED);
+  }, 30_000);
+});
