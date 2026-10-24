@@ -16398,7 +16398,7 @@ var MemoryStore = class {
     const p = this.opts.project;
     if (scope === "project" && !p) {
       throw new Error(
-        "commit: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started in or below a directory holding a .helix folder). Omit `scope` to use the contextual default, or start Helix inside the project and adopt it (helix_memory_adopt) \u2014 the write is refused rather than silently widened to the global ledger."
+        "commit: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started in or below a directory holding a .helix folder). Omit `scope` to use the contextual default, or create a .helix folder at the project root and start a new session there to turn project memory on \u2014 the write is refused rather than silently widened to the global ledger."
       );
     }
     if (scope === "global" || !p) return this.global;
@@ -16998,7 +16998,7 @@ var MemoryStore = class {
     if (scope) {
       if (scope === "project" && !p) {
         throw new EraseRefusedError(
-          "erase: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started in or below a directory holding a .helix folder). Omit `scope`, or start Helix inside the project and adopt it (helix_memory_adopt) \u2014 the erase is refused rather than silently widened to the global ledger."
+          "erase: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started in or below a directory holding a .helix folder). Omit `scope`, or start a new session inside the project whose memory holds the record \u2014 the erase is refused rather than silently widened to the global ledger."
         );
       }
       if (scope === "project" && aliased) {

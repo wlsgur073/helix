@@ -220,4 +220,33 @@ describe('project-ledger e2e (over bin/)', () => {
     expect(out).toMatch(/\[Fresh:global\].*user timezone: UTC\+9/);
   }, 30_000);
 
+  // NOLAYER-ADOPT-HINT (2026-10-24): with no .helix folder there is no project layer and adopt refuses,
+  // so the project-scope refusal names the step that works instead of helix_memory_adopt. Over bin/,
+  // because the text an assistant reads is the shipped one.
+  it('with no .helix folder, a project-scope commit refusal says how to turn project memory on, not to adopt', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'helix-proj-home-'));
+    const projDir = mkdtempSync(join(tmpdir(), 'helix-proj-cwd-'));          // no .helix: no project layer
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [BUNDLE],
+      cwd: projDir,
+      env: { ...cleanEnv(), HELIX_HOME: homeDir },
+    });
+    const client = new Client({ name: 'helix-project-e2e', version: '0.0.0' });
+    await client.connect(transport);
+    open.push(client);
+
+    const refused = await client.callTool({
+      name: 'helix_memory_commit',
+      arguments: { content: 'a project fact', scope: 'project', source: 'user' },
+    });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toContain('create a .helix folder at the project root and start a new session there');
+    expect(text(refused)).not.toContain('helix_memory_adopt');
+
+    const adopt = await client.callTool({ name: 'helix_memory_adopt', arguments: { projectRoot: projDir } });
+    expect(adopt.isError).toBe(true);
+    expect(text(adopt)).toContain('no project scope is active');
+  }, 30_000);
+
 });
