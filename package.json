@@ -26,16 +26,14 @@
     "certify-gate": "tsx scripts/inventory/certify-gate.ts",
     "cut-candidate": "tsx scripts/inventory/cut-candidate.ts"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "zod": "^3.25.0"
-  },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/node": "^24.0.0",
     "esbuild": "^0.28.2",
     "tsx": "4.23.5",
     "typescript": "6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "zod": "^3.25.0"
   },
   "overrides": {
     "fast-uri": "3.1.7"

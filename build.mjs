@@ -1,6 +1,7 @@
 // Bundle the MCP server + hook entries into committed, dependency-free bin/*.mjs.
-// Claude Code does NOT npm-install a plugin's dependencies, so everything the runtime
-// needs (@modelcontextprotocol/sdk, zod) must be inlined here.
+// Everything the runtime needs (@modelcontextprotocol/sdk, zod) is inlined here, so package.json
+// lists both as devDependencies: Claude Code installs the runtime dependencies a cache-installed
+// plugin declares, and refuses a package.json with overrides (issue #10).
 // HELIX_BUILD_OUT overrides the output root (the freshness test builds to a temp dir and
 // byte-compares against the committed bin/).
 import { build } from 'esbuild';
