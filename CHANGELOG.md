@@ -317,5 +317,9 @@ First release.
   overridden to `3.1.7`. The advisories that remain are transitive dependencies of the MCP SDK's
   HTTP transports, which the shipped bundle does not contain — the record measures that rather than
   assuming it.
+- `@modelcontextprotocol/sdk` and `zod` are `devDependencies`: both are inlined into `bin/`, so the
+  plugin declares no runtime dependency for Claude Code to install. Claude Code 2.1.287 and later
+  otherwise noted on the installed plugin that its packages were not installed, because of the
+  `fast-uri` override (issue #10).
 
 [0.1.0]: https://github.com/wlsgur073/helix/releases/tag/v0.1.0

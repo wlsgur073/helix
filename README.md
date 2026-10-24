@@ -428,7 +428,7 @@ Report vulnerabilities privately — see [SECURITY.md](./SECURITY.md).
 git clone https://github.com/wlsgur073/helix
 cd helix
 npm install
-npm run build      # esbuild → bin/ (committed: a cloned plugin gets no npm install)
+npm run build      # esbuild → bin/ (committed: the plugin declares no runtime dependencies, so nothing is installed with it)
 npm test           # vitest — rebuild bin/ first after editing bundled src
 npm run typecheck
 ```
