@@ -138,7 +138,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   server.registerTool('helix_memory_recall', {
     title: 'Recall memory',
     description: 'Recall relevant memory as a DATA-only block; flags items needing re-verification. ' +
-      `After the ranked matches it adds up to ${RECALL_RECENCY_APPENDIX_COUNT} of the newest other records unless recencyAppendix is false, and names them in a trailing note.`,
+      `After the ranked matches it adds up to ${RECALL_RECENCY_APPENDIX_COUNT} of the newest other records unless recencyAppendix is false, and names them in a trailing note with the time each record carries.`,
     // The character bound is declared here as well as enforced in the store, so an oversized query
     // is refused by schema validation before it reaches a handler at all — the same bounded-input
     // discipline `maxItems` and `asOf` already get. The store keeps the authoritative check (it also
@@ -152,7 +152,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
       // Issue #9: the default of 20 is the ranker's own (`opts.maxItems ?? 20` in retrieval.ts, a path the
       // v2 freeze receipt pins, so it is not imported from there); test/server/recall-schema.test.ts holds the two equal.
       maxItems: z.number().int().positive().max(RECALL_MAX_ITEMS_CAP).optional()
-        .describe(`Maximum number of ranked matches (default 20). Unless recencyAppendix is false, up to ${RECALL_RECENCY_APPENDIX_COUNT} of the newest records the ranking did not return are added after them, so a response can hold up to maxItems + ${RECALL_RECENCY_APPENDIX_COUNT} records; a trailing recency appendix note names those records.`),
+        .describe(`Maximum number of ranked matches (default 20). Unless recencyAppendix is false, up to ${RECALL_RECENCY_APPENDIX_COUNT} of the newest records the ranking did not return are added after them, so a response can hold up to maxItems + ${RECALL_RECENCY_APPENDIX_COUNT} records; a trailing recency appendix note names those records and the time each one carries.`),
       // H5: count bounds are not size bounds — long prose items made a 30-item recall render
       // 74.6 KB. Per-item character cap; truncation is marked with an ellipsis.
       maxChars: z.number().int().positive().max(RECALL_MAX_CHARS_CAP).optional()
@@ -166,7 +166,7 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
 
   server.registerTool('helix_memory_inspect', {
     title: 'Inspect memory',
-    description: "List current memory items: each item's content on DATA lines marked with its trust state, then one PROOF line carrying its id and contentDigest. Pass history=true to also list closed items with their [tx, txTo) declared interval (a closed item's PROOF line carries its id only), OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive. Pass ids=[...] to render only those records instead of the whole store; ids, history and asOf are mutually exclusive.",
+    description: "List current memory items: each item's content on DATA lines marked with its trust state, then one PROOF line carrying its id and contentDigest. Pass history=true to also list closed items with their [tx, txTo) declared interval (a closed item's PROOF line carries its id only), OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive. Pass ids=[...] to render only those records instead of the whole store; ids, history and asOf are mutually exclusive. With ids, each record's mark also shows the time the record carries, in the interval form history uses (<state>:<scope>:<tx>..).",
     inputSchema: { history: z.boolean().optional(), asOf: z.string().optional(), ids: z.array(ID_SCHEMA).min(1).max(MAX_INSPECT_IDS).optional() },
   }, async (args) => m.runOp('helix_memory_inspect', () => handleInspect(store, args)));
 

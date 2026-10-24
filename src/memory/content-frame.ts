@@ -388,14 +388,15 @@ export function isValidId(id: string): boolean {
  *  row — `proofRow` above (IT-M16: the PROOF line of recall's `frameAsData` and of `handleInspect`'s
  *  current, ids, history and asOf views, every one built through `recordRows`) and `handleInspect`'s
  *  asOf evidence row (`DATA[verify:<scope>]| <id> gen=…`, handlers.ts) — and in `echoMemoryIds`, a
- *  structured JSON audit field an agent never reads as prose, not a rendered sentence. All FIVE
+ *  structured JSON audit field an agent never reads as prose, not a rendered sentence. All SIX
  *  OUT-OF-FRAME advisory notes call `safeId` directly instead, unconditionally: `handleRecall`'s
- *  reverify, egress and conflict notes; `handleInspect` asOf's integrity-conflict note; and
- *  `handleInspect` history's ANOMALIES note. That fifth one was missing from this list while the code
- *  itself was correct — which matters more than a normal doc slip, because this prose IS the
+ *  reverify, egress, conflict and recency-appendix notes; `handleInspect` asOf's integrity-conflict
+ *  note; and `handleInspect` history's ANOMALIES note. The anomalies note and then the recency note
+ *  (issue #9) were each missing from this list while the code itself was correct — which matters more
+ *  than a normal doc slip, because this prose IS the
  *  enforcement: nothing type-checks the split, so a site the inventory omits is a site the next
  *  reader has no reason to treat as out-of-frame. `grep -nE 'safeId|presentId' src/server/handlers.ts
- *  src/memory/content-frame.ts` re-derives the list. Each of the five is now pinned by a test that
+ *  src/memory/content-frame.ts` re-derives the list. Each of the six is now pinned by a test that
  *  reddens when that site ALONE is
  *  flipped to `presentId` (measured, one flip at a time). CALL SITE, NOT
  *  THIS FUNCTION, decides which; do not reach for `presentId` at a new out-of-frame site without

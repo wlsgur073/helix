@@ -7,7 +7,7 @@ import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
 import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, discardTransition, WitnessBlockedError } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
-import { buildHistory, ledgerTruncated } from './history.js';
+import { buildHistory, ledgerTruncated, isIsoInstant } from './history.js';
 import { buildAsOfEvidence } from './asof.js';
 import { findSecrets, redactSecrets, selectWriteRedactions } from './secret-scan.js';
 import { canCommit, isVerifyingSource, resolveTransition, type TransitionResult, type VerifyOutcome } from './firewall.js';
@@ -27,7 +27,7 @@ import { ledgerDigest, subkeyFingerprint, keyVectorEqual, type ScopeKeyComponent
 import type { MetricsSink } from '../metrics.js';
 import { withFileLock } from './lock.js';
 import { aliasesGlobalLedger } from './scope-target.js';
-import { MAX_COMMIT_CONTENT_CHARS, RECALL_RECENCY_APPENDIX_COUNT } from '../limits.js';
+import { MAX_COMMIT_CONTENT_CHARS, RECALL_RECENCY_APPENDIX_COUNT, RECALL_APPENDIX_FUTURE_TOLERANCE_MS } from '../limits.js';
 
 export interface MemoryStoreOptions {
   sessionId?: string;
@@ -117,7 +117,8 @@ export interface RecallResult {
    *  SEPARATE from `items` so rank consumers (the pilot Hit@K scripts) keep measuring the ranker
    *  alone; the tool surface renders both and discloses these ids in a trusted out-of-frame note.
    *  At most RECALL_RECENCY_APPENDIX_COUNT entries, newest first (tx desc, append order breaking
-   *  same-millisecond ties), additive beyond `maxItems`. */
+   *  same-millisecond ties), additive beyond `maxItems`; only records whose tx is a canonical instant
+   *  no later than RECALL_APPENDIX_FUTURE_TOLERANCE_MS after the call (issue #9). */
   appendix: RecalledItem[];
   framed: string; // DATA-quarantined block for prompt injection
   /** False when no master key is available — every state is conservatively clamped to Fresh and
@@ -843,12 +844,26 @@ export class MemoryStore {
     // entries. The repair is this APPENDIX, not a score term: a wall-clock decay component would
     // make the same bytes rank differently across calls — the exact determinism class the
     // inspect-asof cursor fix retired — and would poison the A4 cache's HIT path. The appendix is
-    // a pure function of the already-read served set (no extra ledger read), so a cache HIT
-    // computes the same appendix as the MISS that built the slot.
+    // a pure function of the already-read served set (no extra ledger read) and, since issue #9, of
+    // the call's clock, which only refuses a slot to a record dated after the call and ranks nothing
+    // differently; a cache HIT computes the same appendix as a MISS at the same instant.
+    //
+    // Issue #9: only a record dated no later than this call, plus RECALL_APPENDIX_FUTURE_TOLERANCE_MS,
+    // can take a slot. The order is by tx, so a row carrying a far-future tx (a skewed clock, or a row
+    // written by hand into an adopted ledger) otherwise held the first slot on every recall, and a tx
+    // that is not a canonical instant cannot be placed in time at all. Such rows are still ranked like
+    // any other; only the regardless-of-rank slot is refused. The tolerance keeps a record committed
+    // just before a backward clock step (measured: about 0.78 s every ~32 s on WSL2); a step larger than
+    // it withholds such a record until the clock comes back within the tolerance of its tx. The call's
+    // clock is the one input added here, read after the rank cache, so a HIT and a MISS at the same
+    // instant still compute the same appendix. `this.now()` is canonical in production (toISOString);
+    // an injected clock must be too, or `<=` stops reading as time order (an unreadable one admits nothing).
     const ranked = new Set(hits);
+    const callMs = Date.parse(this.now());
+    const latestTx = Number.isFinite(callMs) ? new Date(callMs + RECALL_APPENDIX_FUTURE_TOLERANCE_MS).toISOString() : '';
     const appendixRecords = enforcedScoped
       .map((s, seq) => ({ rec: s.record, seq }))
-      .filter(({ rec }) => !ranked.has(rec))
+      .filter(({ rec }) => !ranked.has(rec) && isIsoInstant(rec.tx) && rec.tx <= latestTx)
       .sort((a, b) => (a.rec.tx === b.rec.tx ? b.seq - a.seq : a.rec.tx < b.rec.tx ? 1 : -1))
       .slice(0, RECALL_RECENCY_APPENDIX_COUNT)
       .map(({ rec }) => rec);

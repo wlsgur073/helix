@@ -149,6 +149,11 @@ export function handleCommit(store: MemoryStore, args: CommitInput): ToolResult 
   return ok(`committed ${JSON.stringify(result)}`);
 }
 
+/** A record's tx as printed on a read surface: the value itself only when it is a canonical ISO-8601
+ *  instant (digits and `-:.TZ`, round-tripping through Date), otherwise `??`. A tx is record bytes, so
+ *  nothing else of it ever reaches a mark or an out-of-frame note. */
+const iso = (s: string): string => (isIsoInstant(s) ? s : '??');
+
 export function handleRecall(store: MemoryStore, args: { query: string; maxItems?: number; maxChars?: number; recencyAppendix?: boolean }): ToolResult {
   const { items, appendix: newest, integrityAvailable, projectDisposition, witnessNotes } = store.recall(args.query, { maxItems: args.maxItems });
   // H1: `appendix` carries the newest served records the ranker could not reach (built inside
@@ -195,7 +200,11 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
     : '';
   // H1 disclosure: the channel ask was BOTH halves — return the newest records alongside the
   // lexical matches AND say so when the ranked set excluded them. This note is that second half.
-  const recencyIds = appendix.map((i) => safeId(i.record.id));
+  // Issue #9: each id carries the time its record holds, because "newest" can mean days old on a quiet
+  // ledger. The word is "dated", not "committed": a fact row's tx carries no MAC, so a row written into
+  // an adopted ledger can claim any time, and Helix cannot vouch for when it was committed (review F4,
+  // owner 2026-10-23). Only safeId'd ids and iso()-checked instants enter this out-of-frame note.
+  const recencyIds = appendix.map((i) => `${safeId(i.record.id)} (dated ${iso(i.record.tx)})`);
   const recencyNote = recencyIds.length
     ? `\n\n(recency appendix — newest records included regardless of rank: ${recencyIds.join(', ')})`
     : '';
@@ -216,8 +225,8 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
 }
 
 /** Shared by handleInspect's two "live/current records" branches — the unfiltered listing at the
- *  bottom of this function and the ids-filtered lookup below — so the two cannot drift into
- *  rendering the same row shape two different ways. Frames `rows` through the SAME DATA quarantine
+ *  bottom of this function and the ids-filtered lookup below — so the two render one row shape, apart
+ *  from the record's time the ids branch adds on purpose (`withCommitTime` below). Frames `rows` through the SAME DATA quarantine
  *  recall/SessionStart use (nonce frame + per-line datamark, normalizeRecordContent on the content)
  *  and applies the M1 response-cap (`capRendered`) exactly once.
  *
@@ -227,8 +236,12 @@ export function handleRecall(store: MemoryStore, args: { query: string; maxItems
  *
  *  `trailingNotes` must be the CALLER's own fully-composed advisory text (the ids branch folds its
  *  missing-ids count into it) — its length is what sizes the remaining budget passed to
- *  `capRendered`, and the caller appends it AFTER this return, never reordered ahead of it. */
-function renderCurrentRows(rows: ScopedRecord[], label: string, trailingNotes: string): string {
+ *  `capRendered`, and the caller appends it AFTER this return, never reordered ahead of it.
+ *
+ *  `withCommitTime` (issue #9, the ids branch only) extends the bracket to history's live form
+ *  `<state>:<scope>:<tx>..`, so a record named in a recency note can be dated without rendering the
+ *  whole history; the row shape stays defined here, once. */
+function renderCurrentRows(rows: ScopedRecord[], label: string, trailingNotes: string, withCommitTime = false): string {
   const { text: frame } = capRendered(
     rows.length,
     (n) => makeDataFrame({
@@ -236,7 +249,8 @@ function renderCurrentRows(rows: ScopedRecord[], label: string, trailingNotes: s
       nonce: newNonce(),
       lines: rows.slice(0, n).flatMap(({ record, scope, contentDigest }) => {
         // The mark is the SAME known-enum `DATA[state:scope]| ` label recall/SessionStart use (mirrored
-        // byte-for-byte, not reinvented). IT-M16: the content is its own DATA entry, and the id moved
+        // byte-for-byte, not reinvented; the ids view appends `:<tx>..`, see withCommitTime above).
+        // IT-M16: the content is its own DATA entry, and the id moved
         // OFF the head line onto the record's PROOF line (proofRow), under the same bracket content —
         // content could forge a line shaped like the old `<id> <content>` head or `contentDigest:`
         // row, but never a PROOF line. Both entries come from ONE element of `rows`, so `capRendered`,
@@ -260,7 +274,8 @@ function renderCurrentRows(rows: ScopedRecord[], label: string, trailingNotes: s
         // The content is normalized here, once (no `maxChars` reaches inspect), as record content
         // is on every read surface (normalizeRecordContent, issue #6), and recordRows drops the
         // DATA entry of a record whose body renders empty (ruling R3).
-        return recordRows(`${record.state}:${scope}`, normalizeRecordContent(record.content), record.id, contentDigest);
+        const bracket = withCommitTime ? `${record.state}:${scope}:${iso(record.tx)}..` : `${record.state}:${scope}`;
+        return recordRows(bracket, normalizeRecordContent(record.content), record.id, contentDigest);
       }),
     }),
     RESPONSE_MAX_CHARS - trailingNotes.length,
@@ -277,7 +292,6 @@ function renderCurrentRows(rows: ScopedRecord[], label: string, trailingNotes: s
  *  (renderCurrentRows above), narrowed to the caller's own requested set instead of the whole
  *  store. */
 export function handleInspect(store: MemoryStore, args: { history?: boolean; asOf?: string; ids?: string[] }): ToolResult {
-  const iso = (s: string): string => (isIsoInstant(s) ? s : '??');
   if (args.ids !== undefined) {
     if (args.history || args.asOf !== undefined) return ok('inspect: ids, history and asOf are mutually exclusive — pass one.');
     for (const id of args.ids) assertValidId(id);
@@ -293,7 +307,7 @@ export function handleInspect(store: MemoryStore, args: { history?: boolean; asO
     // Never '(memory is empty)' here: that sentence is a true/false claim about the LEDGER, and it
     // would be FALSE whenever the ledger holds records but none of them are the ones requested.
     if (rows.length === 0) return ok('(no live memory for the requested ids)' + trailingNotes);
-    return ok(renderCurrentRows(rows, 'CURRENT MEMORY', trailingNotes) + trailingNotes);
+    return ok(renderCurrentRows(rows, 'CURRENT MEMORY', trailingNotes, true) + trailingNotes);
   }
   if (args.asOf !== undefined) {
     if (args.history) return ok('inspect: history and asOf are mutually exclusive — pass one.');

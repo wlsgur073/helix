@@ -131,5 +131,13 @@ export const RECALL_MAX_CHARS_CAP = 10_000;
  *  decisions absent from recall (channel entries 2026-07-11..08-12). */
 export const RECALL_RECENCY_APPENDIX_COUNT = 3;
 
+/** How far after the call a record's tx may lie and still take a recency-appendix slot (issue #9). A
+ *  far-future row is refused, but an honest record must survive the clock stepping back: on the WSL2
+ *  machine this was built on, Date.now() stepped back about 0.78 s every ~32 s (measured 2026-10-24),
+ *  which withheld a record committed just before a step and failed a test once. Five minutes absorbs
+ *  such steps; a row written by hand gains at most five more minutes at the head of the appendix than
+ *  one dated "now" already has (owner 2026-10-24). */
+export const RECALL_APPENDIX_FUTURE_TOLERANCE_MS = 300_000;
+
 /** Ceiling on any single MCP tool response's rendered character length. */
 export const RESPONSE_MAX_CHARS = 262_144;

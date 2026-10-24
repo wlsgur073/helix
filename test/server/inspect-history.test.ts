@@ -206,9 +206,10 @@ describe('handleInspect history mode', () => {
       const lines = out.split('\n');
       expect(lines.filter(bareMark)).toEqual([]);
       for (const id of ['m_blank', 'm_breaks']) {
-        const i = lines.findIndex((l) => l.startsWith('PROOF[Fresh:global]| ') && l.startsWith(`PROOF[Fresh:global]| ${id} contentDigest: `));
+        // The ids view's bracket also carries the commit time (issue #9): `Fresh:global:<tx>..`.
+        const i = lines.findIndex((l) => new RegExp(`^PROOF\\[Fresh:global(?::[^\\]]*\\.\\.)?\\]\\| ${id} contentDigest: `).test(l));
         expect(i, `no PROOF line for ${id}`).toBeGreaterThan(0);
-        expect(lines[i - 1]!.startsWith('DATA[Fresh:global]| ')).toBe(false);
+        expect(/^DATA\[Fresh:global(?::[^\]]*\.\.)?\]\| /.test(lines[i - 1]!)).toBe(false);
       }
     }
   });

@@ -622,7 +622,7 @@ describe('id bound (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
     expect(out.slice(0, out.length - afterFrame.length)).toContain(HOSTILE_PROSE);
   });
 
-  // Site 5 of 5 — the one the inventory in `presentId`'s docstring used to omit entirely (it named
+  // Site 5 of 6 — the one the inventory in `presentId`'s docstring used to omit entirely (it named
   // four out-of-frame notes; `handleInspect` history's ANOMALIES note is a fifth). The code was
   // always right here; nothing enforced that but the prose, so it gets the same tripwire as the rest.
   // A duplicate fact id is itself what history flags as an anomaly, so the fixture is the same one.
@@ -641,6 +641,24 @@ describe('id bound (LEAD-AUDIT-ID-UNCONSTRAINED)', () => {
     expect(afterFrame).toContain('history anomalies');                   // the target note DID fire
     expect(afterFrame).not.toContain(HOSTILE_PROSE);
     expect(out.slice(0, out.length - afterFrame.length)).toContain(HOSTILE_PROSE); // verbatim IN-frame
+  });
+
+  // Site 6 of 6: handleRecall's RECENCY note (H1), `(recency appendix — ...: <id> (dated <tx>))`, which
+  // the inventory omitted until issue #9's follow-up rewrote the line (a raw-id or presentId flip there
+  // left the suite green, measured by that review). The hostile id is the newest record the ranker
+  // cannot reach; source 'user' keeps the reverify note silent and the content has no egress shape.
+  it('does not let a prose-shaped valid id inject attacker text into the RECENCY appendix note', () => {
+    const { s, id } = hostileIdStore();
+    s.commit({ content: 'the codex retry budget is three attempts', source: 'user' });  // the hostile id, unranked
+    s.commit({ content: 'postgres schema owns the users table', source: 'user' });      // ranked
+    const out = text(handleRecall(s, { query: 'postgres schema' }));
+    const afterFrame = afterFrameOf(out);
+    expect(afterFrame).toContain('recency appendix');                    // the target note DID fire
+    expect(afterFrame).not.toContain('needs re-verify before acting');   // ...and is the only one
+    expect(afterFrame).not.toContain('egress-shaped content flagged');
+    expect(afterFrame).not.toContain(HOSTILE_PROSE);
+    expect(out.slice(0, out.length - afterFrame.length)).toContain(HOSTILE_PROSE); // verbatim IN-frame
+    expect(isValidId(id)).toBe(true);
   });
 
   // FIX ROUND 4 (hardening, review self-critique): presentId validates the RAW id and returns it

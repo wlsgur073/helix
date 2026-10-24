@@ -5,9 +5,10 @@
 // alongside the lexical matches, regardless of rank, and discloses them in a trusted out-of-frame
 // note (safeId — handlers.ts round-3 taxonomy). Score blending was rejected because a wall-clock
 // decay term would break the A4 rank cache's determinism (the inspect-asof backward-clock lesson);
-// the appendix is a pure function of the already-read served set, so a cache HIT serves it too.
-import { describe, it, expect } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+// the appendix is a pure function of the already-read served set and (since issue #9) the call's clock,
+// so a cache HIT serves it too.
+import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, readFileSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -105,5 +106,95 @@ describe('H1: recall appends the newest records regardless of rank', () => {
     const newest = store.commit({ content: NEWEST_DISJOINT, source: 'agent-inference' });
     expect(text(handleRecall(store, { query: 'postgres schema' }))).toMatch(new RegExp(`needs re-verify before acting: ${newest.id}`));
     expect(text(handleRecall(store, { query: 'postgres schema', recencyAppendix: false }))).not.toContain(newest.id);
+  });
+});
+
+/** A store whose clock the test sets: commits stamp `clock.t`, and a recall reads it as the call's time. */
+function clockedStore(): { store: MemoryStore; path: string; clock: { t: string } } {
+  const home = mkdtempSync(join(tmpdir(), 'helix-h1-'));
+  const path = join(home, 'm.jsonl');
+  const clock = { t: '2026-10-08T05:42:04.416Z' };
+  return { store: new MemoryStore(path, { home, sessionId: 's1', now: () => clock.t }), path, clock };
+}
+
+/** Appends a copy of the ledger's last fact row under a new id, content and tx, written raw, as a row written
+ *  by hand into an adopted ledger would be. */
+function plantRow(path: string, id: string, content: string, tx: string): void {
+  const lines = readFileSync(path, 'utf8').trim().split('\n');
+  appendFileSync(path, JSON.stringify({ ...JSON.parse(lines[lines.length - 1]!), id, content, tx }) + '\n');
+}
+
+// Issue #9, its 2026-10-12 comment: the appendix's "newest" records can be days old on a quiet ledger, and
+// nothing showed how old they were. The note now names each one with the time it carries ("dated": a fact
+// row's tx carries no MAC, so the note does not call it a commit time). Found while answering it: a
+// record dated later than the call held the first appendix slot on every recall, since the order is by tx.
+describe('issue #9 follow-up: the time each appendix record carries, and records dated after the call', () => {
+  it('the recency note names each appendix record with the time it carries', () => {
+    const { store, clock } = clockedStore();
+    store.commit({ content: RANKED_OLD, source: 'user' });
+    clock.t = '2026-10-08T06:48:09.000Z';
+    const newest = store.commit({ content: NEWEST_DISJOINT, source: 'user' });
+    clock.t = '2026-10-12T04:52:00.000Z';
+    expect(text(handleRecall(store, { query: 'postgres schema' })))
+      .toContain(`(recency appendix — newest records included regardless of rank: ${newest.id} (dated 2026-10-08T06:48:09.000Z))`);
+  });
+
+  it('a record dated more than five minutes after the call takes no appendix slot, and takes one from five minutes before its time', () => {
+    const { store, clock } = clockedStore();
+    store.commit({ content: RANKED_OLD, source: 'user' });
+    clock.t = '2026-10-09T00:00:00.000Z';
+    const later = store.commit({ content: NEWEST_DISJOINT, source: 'user' });
+    clock.t = '2026-10-08T23:54:59.999Z';   // five minutes and one millisecond before the record's time
+    expect(text(handleRecall(store, { query: 'postgres schema' }))).not.toContain(later.id);
+    clock.t = '2026-10-08T23:55:00.000Z';   // exactly five minutes before: inside the tolerance
+    expect(text(handleRecall(store, { query: 'postgres schema' }))).toContain(`${later.id} (dated 2026-10-09T00:00:00.000Z)`);
+  });
+
+  // The step measured on the WSL2 machine (2026-10-24): Date.now() fell back about 0.78 s every ~32 s, and a
+  // record committed just before such a step lost its slot until the tolerance existed (one full-suite failure).
+  it('a backward clock step like the one measured (780 ms) does not withhold a record just committed', () => {
+    const { store, clock } = clockedStore();
+    store.commit({ content: RANKED_OLD, source: 'user' });
+    clock.t = '2026-10-24T02:43:01.453Z';
+    const just = store.commit({ content: NEWEST_DISJOINT, source: 'user' });
+    clock.t = '2026-10-24T02:43:00.673Z';
+    expect(text(handleRecall(store, { query: 'postgres schema' }))).toContain(`${just.id} (dated 2026-10-24T02:43:01.453Z)`);
+  });
+
+  it('a far-future row written into the ledger by hand takes no appendix slot, however many records follow it', () => {
+    const { store, path } = clockedStore();
+    store.commit({ content: RANKED_OLD, source: 'user' });
+    plantRow(path, 'm_planted_future', 'the kettle whistles when tea is ready', '2999-01-01T00:00:00.000Z');
+    for (const c of ['the lantern battery lasts four hours', 'rain is forecast for tuesday afternoon', NEWEST_DISJOINT]) store.commit({ content: c, source: 'user' });
+    const out = text(handleRecall(store, { query: 'postgres schema' }));
+    expect(out).not.toContain('m_planted_future');
+    expect(out).not.toContain('kettle whistles');
+    expect(out).toContain(NEWEST_DISJOINT);
+  });
+
+  it('a far-future row that matches the query is still ranked: only the regardless-of-rank slot is refused', () => {
+    const { store, path } = clockedStore();
+    store.commit({ content: RANKED_OLD, source: 'user' });
+    plantRow(path, 'm_planted_future', 'the postgres schema backup runs nightly', '2999-01-01T00:00:00.000Z');
+    const out = text(handleRecall(store, { query: 'postgres schema' }));
+    expect(out).toContain('the postgres schema backup runs nightly');
+    expect(out).not.toContain('recency appendix');   // both records rank, so no appendix is rendered at all
+  });
+
+  it('a row whose tx is not a canonical instant takes no appendix slot', () => {
+    const { store, path } = clockedStore();
+    store.commit({ content: RANKED_OLD, source: 'user' });
+    plantRow(path, 'm_planted_badtx', 'the kettle whistles when tea is ready', '2026-10-08 05:42');
+    const out = text(handleRecall(store, { query: 'postgres schema' }));
+    expect(out).not.toContain('m_planted_badtx');
+  });
+
+  it('the note prints ?? for a time that is not a canonical instant', () => {
+    const { store } = clockedStore();
+    store.commit({ content: RANKED_OLD, source: 'user' });
+    const real = store.recall('postgres schema');
+    const bogus = { ...real.items[0]!, record: { ...real.items[0]!.record, id: 'm_bogus', tx: 'not-a-time' } };
+    vi.spyOn(store, 'recall').mockReturnValue({ ...real, appendix: [bogus] });
+    expect(text(handleRecall(store, { query: 'postgres schema' }))).toContain('m_bogus (dated ??)');
   });
 });

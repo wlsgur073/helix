@@ -70,6 +70,7 @@ describe('helix_memory_recall inputs (issue #9)', () => {
 
   it('the tool description mentions the appendix before the call', async () => {
     expect((await recallTool()).description).toMatch(/up to 3 of the newest other records unless recencyAppendix is false/);
+    expect((await recallTool()).description).toMatch(/names them in a trailing note with the time each record carries/);
   });
 
   it('recencyAppendix false returns the ranked matches alone, so maxItems bounds the response', async () => {
