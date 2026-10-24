@@ -301,7 +301,8 @@ First release.
   there after the record is erased. Deleting the file is the remedy.
 - **Erasure from a host transcript.** An erase does not reach what a session was already shown: the
   host keeps its own transcript. The SessionStart block of a resumed, compacted or forked session
-  says that it supersedes every earlier Helix block.
+  says that it supersedes every earlier Helix block; where no scope it reads has ever held memory, it
+  stays silent instead (issue #7).
 - **Team sharing of a project ledger.** v0.1 does not support sharing `.helix/` through git:
   `helix_memory_adopt` replaces the tracked `.helix/.owner` stamp with the adopter's own, so a
   teammate's adoption locks the previous owner out, and a `verify` row is signed with a key that
