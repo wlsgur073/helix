@@ -208,7 +208,11 @@ function readJson(path: string, onUnusable: (reason: string) => void): Record<st
     if ((e as NodeJS.ErrnoException).code !== 'ENOENT') onUnusable((e as Error).message);
     return null;
   }
-  try { return JSON.parse(text) as Record<string, unknown>; }
+  // CONFIG-BOM: drop exactly one leading U+FEFF. Windows PowerShell 5.1 writes UTF-8 with a byte order
+  // mark by default and JSON.parse rejects it, so such a file was ignored whole. Only one is dropped:
+  // anything stranger still reads as the malformed file it is.
+  const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  try { return JSON.parse(body) as Record<string, unknown>; }
   // CONTRACT: `reason` is UNTRUSTED. A JSON.parse message quotes a span of the file, so a hostile or
   // merely multi-line config could forge log lines through it — every caller must put it through q()
   // (or an equivalent escape) before it reaches a diagnostic, exactly like any other config value.

@@ -709,3 +709,47 @@ describe('serverInstructions (issue #4)', () => {
     }
   });
 });
+
+// CONFIG-BOM: Windows PowerShell 5.1 writes UTF-8 with a byte order mark by default, and JSON.parse rejects a
+// leading U+FEFF, so a config.json saved that way was ignored whole with only a warning. Every reader goes
+// through one parser, which now drops exactly one leading U+FEFF; a second one still makes the file malformed.
+describe('a config.json that starts with a UTF-8 byte order mark (CONFIG-BOM)', () => {
+  const BOM = String.fromCharCode(0xfeff);
+  const writeWithBom = (path: string, body: unknown, marks = 1): void => writeFileSync(path, BOM.repeat(marks) + JSON.stringify(body), 'utf8');
+
+  it('loadConfig applies it with no warning', () => {
+    const g = join(tmpDir(), 'config.json');
+    writeWithBom(g, { dualVerify: { enabled: true, mode: 'critique' }, serverInstructions: true });
+    const warn = vi.fn();
+    const cfg = loadConfig({ globalPath: g, warn });
+    expect(cfg.dualVerify.enabled).toBe(true);
+    expect(cfg.dualVerify.mode).toBe('critique');
+    expect(cfg.serverInstructions).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('metricsEnabledFromGlobalConfig reads it', () => {
+    const home = tmpDir();
+    writeWithBom(join(home, 'config.json'), { metrics: { enabled: false } });
+    expect(metricsEnabledFromGlobalConfig(home)).toBe(false);
+  });
+
+  it('compactionConfigFromGlobal reads it', () => {
+    const home = tmpDir();
+    writeWithBom(join(home, 'config.json'), { compaction: { auto: true, minRows: 10 } });
+    const c = compactionConfigFromGlobal(home);
+    expect(c.auto).toBe(true);
+    expect(c.minRows).toBe(10);
+  });
+
+  it('drops one mark only: two leading marks are still a malformed file, reported once and ignored', () => {
+    const g = join(tmpDir(), 'config.json');
+    writeWithBom(g, { dualVerify: { enabled: true } }, 2);
+    const warn = vi.fn();
+    const cfg = loadConfig({ globalPath: g, warn });
+    expect(cfg.dualVerify.enabled).toBe(false);
+    expect(cfg.unreadable).toEqual([g]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toContain('exists but could not be read');
+  });
+});

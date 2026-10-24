@@ -121,10 +121,10 @@ describe('server instructions are absent unless the user config says exactly tru
     }
   });
 
-  // Pre-existing reader behaviour, recorded rather than endorsed: JSON.parse rejects a leading U+FEFF, so
-  // the whole file is ignored (defect row CONFIG-BOM, to be fixed after issue #4).
-  it('a config file that starts with a byte order mark is unreadable today', async () => {
-    expect(await fromFile(text('\uFEFF{"serverInstructions": true}'))).toBeUndefined();
+  // CONFIG-BOM, fixed: the reader skips one leading U+FEFF, so a file saved with a byte order mark is read.
+  // While the defect was open this test recorded the file as unreadable.
+  it('a config file that starts with a byte order mark is read', async () => {
+    expect(await fromFile(text('\uFEFF{"serverInstructions": true}'))).toBe(PINNED);
   });
 });
 
