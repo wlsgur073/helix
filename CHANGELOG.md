@@ -264,7 +264,10 @@ First release.
 - `helix_memory_recall` says before the call that up to 3 of the newest records the ranked matches
   left out follow them (issue #9): `maxItems` gives its default of 20 and the bound of `maxItems` + 3
   records, and the new `recencyAppendix: false` returns the ranked matches alone, so that `maxItems`
-  bounds the response. The default behaviour is unchanged.
+  bounds the response; without the new input the appendix is still returned. The recency note names
+  each appendix record with the time it carries (`dated <tx>`), a record dated more than five minutes
+  after the call (or carrying no valid time) takes no appendix slot, and `helix_memory_inspect` with `ids`
+  shows the time each record carries in the interval form `history` uses.
 
 ### Limits
 
