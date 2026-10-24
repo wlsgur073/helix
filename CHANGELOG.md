@@ -128,7 +128,9 @@ First release.
   `compare`, a deleted or unreadable file. A widening change, and any change of `model`, `effort` or
   `timeoutMs`, waits for the server to restart, and `helix_codex_status` names those keys until then.
   The file is read non-blocking and only when it is a regular file of at most 1 MiB, so a FIFO or a
-  device at that path counts as unreadable instead of stalling the server.
+  device at that path counts as unreadable instead of stalling the server. One leading UTF-8 byte
+  order mark, which Windows PowerShell 5.1 writes by default, is skipped, here and by every other
+  reader of the file.
 - An invalid value on `mode`, `stakesFloor`, `model` or `effort` is refused with a bounded
   single-line stderr warning and the default is kept, so a crafted newline cannot forge a second
   diagnostic line. `enabled`, `timeoutMs` and `logContent` fall back to their defaults silently. An
