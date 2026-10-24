@@ -311,9 +311,10 @@ First release.
   teammate's adoption locks the previous owner out, and a `verify` row is signed with a key that
   lives in one user's `~/.helix`.
 - **That an assistant chooses Helix.** On a host with its own memory, Helix makes no claim that an
-  assistant routes requests to remember to it, with or without the opt-in server instructions:
-  their effect on routing has not been measured. README's routing rule is the user's own
-  configuration.
+  assistant routes requests to remember to it, with or without the opt-in server instructions. In a
+  smoke test on 2026-10-24 (two runs per setup) the instructions reached the assistant's context
+  without changing where a request to remember was stored; with README's routing rule, which is the
+  user's own configuration, the assistant called `helix_memory_commit`.
 
 ### Dependencies
 
