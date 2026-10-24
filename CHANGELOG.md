@@ -22,7 +22,10 @@ First release.
   omits `scope` is refused rather than written globally, with a refusal that leaves the choice
   between adopting the project and global memory to the user. Commit results name the scope
   written, and an explicit `global` commit made while the session's project memory is off says so
-  in a `notice` field.
+  in a `notice` field. With no project layer at all, a commit or an erase that names `scope:
+  "project"` is refused rather than widened to the global ledger; the commit refusal says to create
+  a `.helix/` folder at the project root and start a new session there, and the erase refusal to
+  start one inside the project that holds the record.
 - Two-tier trust labels: machine-corroborated **Corroborated** (`helix_memory_recheck`, a
   content-bound mechanical file check) and human-attested **Verified** (`helix_memory_confirm`).
 - Lexical recall ranker (coverage / phrase-first, BM25-assisted), with an in-process recall cache
