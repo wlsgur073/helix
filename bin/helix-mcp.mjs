@@ -16161,6 +16161,7 @@ var MAX_RECHECK_PATTERN_CHARS = 2048;
 var RECALL_MAX_ITEMS_CAP = 200;
 var RECALL_MAX_CHARS_CAP = 1e4;
 var RECALL_RECENCY_APPENDIX_COUNT = 3;
+var RECALL_APPENDIX_FUTURE_TOLERANCE_MS = 3e5;
 var RESPONSE_MAX_CHARS = 262144;
 
 // src/memory/store.ts
@@ -16643,7 +16644,9 @@ var MemoryStore = class {
       { ...opts, expansion, semDiscount: SEM_DISCOUNT, semGate: SEM_GATE }
     );
     const ranked = new Set(hits);
-    const appendixRecords = enforcedScoped.map((s, seq) => ({ rec: s.record, seq })).filter(({ rec }) => !ranked.has(rec)).sort((a, b) => a.rec.tx === b.rec.tx ? b.seq - a.seq : a.rec.tx < b.rec.tx ? 1 : -1).slice(0, RECALL_RECENCY_APPENDIX_COUNT).map(({ rec }) => rec);
+    const callMs = Date.parse(this.now());
+    const latestTx = Number.isFinite(callMs) ? new Date(callMs + RECALL_APPENDIX_FUTURE_TOLERANCE_MS).toISOString() : "";
+    const appendixRecords = enforcedScoped.map((s, seq) => ({ rec: s.record, seq })).filter(({ rec }) => !ranked.has(rec) && isIsoInstant(rec.tx) && rec.tx <= latestTx).sort((a, b) => a.rec.tx === b.rec.tx ? b.seq - a.seq : a.rec.tx < b.rec.tx ? 1 : -1).slice(0, RECALL_RECENCY_APPENDIX_COUNT).map(({ rec }) => rec);
     const toItem = (record2) => ({
       record: record2,
       scope: byRecord.get(record2)?.scope ?? "global",
@@ -26458,6 +26461,7 @@ function handleCommit(store2, args) {
   if (notices.length > 0) result.notice = notices.join("; ");
   return ok(`committed ${JSON.stringify(result)}`);
 }
+var iso = (s) => isIsoInstant(s) ? s : "??";
 function handleRecall(store2, args) {
   const { items, appendix: newest, integrityAvailable, projectDisposition, witnessNotes } = store2.recall(args.query, { maxItems: args.maxItems });
   const appendix = args.recencyAppendix === false ? [] : newest;
@@ -26475,7 +26479,7 @@ function handleRecall(store2, args) {
   const conflictNote = conflictIds.length ? `
 
 (integrity conflict \u2014 equal-generation verify mismatch or duplicate fact id: ${conflictIds.join(", ")})` : "";
-  const recencyIds = appendix.map((i) => safeId(i.record.id));
+  const recencyIds = appendix.map((i) => `${safeId(i.record.id)} (dated ${iso(i.record.tx)})`);
   const recencyNote = recencyIds.length ? `
 
 (recency appendix \u2014 newest records included regardless of rank: ${recencyIds.join(", ")})` : "";
@@ -26488,14 +26492,15 @@ function handleRecall(store2, args) {
   );
   return ok(framedOut + trailingNotes);
 }
-function renderCurrentRows(rows, label, trailingNotes) {
+function renderCurrentRows(rows, label, trailingNotes, withCommitTime = false) {
   const { text: frame } = capRendered(
     rows.length,
     (n) => makeDataFrame({
       label,
       nonce: newNonce(),
       lines: rows.slice(0, n).flatMap(({ record: record2, scope, contentDigest }) => {
-        return recordRows(`${record2.state}:${scope}`, normalizeRecordContent(record2.content), record2.id, contentDigest);
+        const bracket = withCommitTime ? `${record2.state}:${scope}:${iso(record2.tx)}..` : `${record2.state}:${scope}`;
+        return recordRows(bracket, normalizeRecordContent(record2.content), record2.id, contentDigest);
       })
     }),
     RESPONSE_MAX_CHARS - trailingNotes.length
@@ -26503,7 +26508,6 @@ function renderCurrentRows(rows, label, trailingNotes) {
   return frame;
 }
 function handleInspect(store2, args) {
-  const iso = (s) => isIsoInstant(s) ? s : "??";
   if (args.ids !== void 0) {
     if (args.history || args.asOf !== void 0) return ok("inspect: ids, history and asOf are mutually exclusive \u2014 pass one.");
     for (const id of args.ids) assertValidId(id);
@@ -26516,7 +26520,7 @@ function handleInspect(store2, args) {
 (${missing} of the requested ids have no live memory)` : "";
     const trailingNotes2 = missingNote + projectLayerNote(projectDisposition2) + witnessNotesText(witnessNotes2);
     if (rows2.length === 0) return ok("(no live memory for the requested ids)" + trailingNotes2);
-    return ok(renderCurrentRows(rows2, "CURRENT MEMORY", trailingNotes2) + trailingNotes2);
+    return ok(renderCurrentRows(rows2, "CURRENT MEMORY", trailingNotes2, true) + trailingNotes2);
   }
   if (args.asOf !== void 0) {
     if (args.history) return ok("inspect: history and asOf are mutually exclusive \u2014 pass one.");
@@ -27461,7 +27465,7 @@ function buildServer(store2, dualDeps, metrics2) {
   }, async (args) => m.runOp("helix_memory_commit", () => handleCommit(store2, args)));
   server2.registerTool("helix_memory_recall", {
     title: "Recall memory",
-    description: `Recall relevant memory as a DATA-only block; flags items needing re-verification. After the ranked matches it adds up to ${RECALL_RECENCY_APPENDIX_COUNT} of the newest other records unless recencyAppendix is false, and names them in a trailing note.`,
+    description: `Recall relevant memory as a DATA-only block; flags items needing re-verification. After the ranked matches it adds up to ${RECALL_RECENCY_APPENDIX_COUNT} of the newest other records unless recencyAppendix is false, and names them in a trailing note with the time each record carries.`,
     // The character bound is declared here as well as enforced in the store, so an oversized query
     // is refused by schema validation before it reaches a handler at all — the same bounded-input
     // discipline `maxItems` and `asOf` already get. The store keeps the authoritative check (it also
@@ -27474,7 +27478,7 @@ function buildServer(store2, dualDeps, metrics2) {
       // the inputs here too is a client-facing rejection instead of a silently-shrunk result.
       // Issue #9: the default of 20 is the ranker's own (`opts.maxItems ?? 20` in retrieval.ts, a path the
       // v2 freeze receipt pins, so it is not imported from there); test/server/recall-schema.test.ts holds the two equal.
-      maxItems: external_exports.number().int().positive().max(RECALL_MAX_ITEMS_CAP).optional().describe(`Maximum number of ranked matches (default 20). Unless recencyAppendix is false, up to ${RECALL_RECENCY_APPENDIX_COUNT} of the newest records the ranking did not return are added after them, so a response can hold up to maxItems + ${RECALL_RECENCY_APPENDIX_COUNT} records; a trailing recency appendix note names those records.`),
+      maxItems: external_exports.number().int().positive().max(RECALL_MAX_ITEMS_CAP).optional().describe(`Maximum number of ranked matches (default 20). Unless recencyAppendix is false, up to ${RECALL_RECENCY_APPENDIX_COUNT} of the newest records the ranking did not return are added after them, so a response can hold up to maxItems + ${RECALL_RECENCY_APPENDIX_COUNT} records; a trailing recency appendix note names those records and the time each one carries.`),
       // H5: count bounds are not size bounds — long prose items made a 30-item recall render
       // 74.6 KB. Per-item character cap; truncation is marked with an ellipsis.
       maxChars: external_exports.number().int().positive().max(RECALL_MAX_CHARS_CAP).optional().describe("Per-item character cap for rendered content (truncated with \u2026). Use when the caller can only read a bounded result."),
@@ -27485,7 +27489,7 @@ function buildServer(store2, dualDeps, metrics2) {
   }, async (args) => m.runOp("helix_memory_recall", () => handleRecall(store2, args)));
   server2.registerTool("helix_memory_inspect", {
     title: "Inspect memory",
-    description: "List current memory items: each item's content on DATA lines marked with its trust state, then one PROOF line carrying its id and contentDigest. Pass history=true to also list closed items with their [tx, txTo) declared interval (a closed item's PROOF line carries its id only), OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive. Pass ids=[...] to render only those records instead of the whole store; ids, history and asOf are mutually exclusive.",
+    description: "List current memory items: each item's content on DATA lines marked with its trust state, then one PROOF line carrying its id and contentDigest. Pass history=true to also list closed items with their [tx, txTo) declared interval (a closed item's PROOF line carries its id only), OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive. Pass ids=[...] to render only those records instead of the whole store; ids, history and asOf are mutually exclusive. With ids, each record's mark also shows the time the record carries, in the interval form history uses (<state>:<scope>:<tx>..).",
     inputSchema: { history: external_exports.boolean().optional(), asOf: external_exports.string().optional(), ids: external_exports.array(ID_SCHEMA).min(1).max(MAX_INSPECT_IDS).optional() }
   }, async (args) => m.runOp("helix_memory_inspect", () => handleInspect(store2, args)));
   server2.registerTool("helix_memory_erase", {

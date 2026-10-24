@@ -1,7 +1,7 @@
 // Acceptance for issue #9 over the COMMITTED bundle, which is what a cloned plugin runs: by default up to
-// three of the newest records follow the ranked matches, and `recencyAppendix: false` returns the ranked
-// matches alone, so that maxItems bounds the response. The facts and calls are the issue's own
-// reproduction. Hermetic: temp HELIX_HOME and a temp cwd.
+// three of the newest records follow the ranked matches, each named with the time it carries, and
+// `recencyAppendix: false` returns the ranked matches alone, so that maxItems bounds the response. The
+// facts and calls are the issue's own reproduction. Hermetic: temp HELIX_HOME and a temp cwd.
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -63,7 +63,10 @@ describe('recall recency appendix over the shipped bundle (issue #9)', () => {
     const byDefault = text(await client.callTool({ name: 'helix_memory_recall', arguments: { query: 'alpha build tool', maxItems: 1 } }));
     const alone = text(await client.callTool({ name: 'helix_memory_recall', arguments: { query: 'alpha build tool', maxItems: 1, recencyAppendix: false } }));
     expect(records(byDefault)).toBe(4);
-    expect(byDefault).toMatch(/\(recency appendix — newest records included regardless of rank: m_[^)]+\)/);
+    // Every entry of the note, not only the first, carries a canonical time (review F6).
+    const entries = (byDefault.match(/^\(recency appendix — newest records included regardless of rank: (.*)\)$/m)?.[1] ?? '').split(', ');
+    expect(entries).toHaveLength(3);
+    for (const e of entries) expect(e).toMatch(/^m_[0-9a-f-]+ \(dated \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\)$/);
     expect(records(alone)).toBe(1);
     expect(alone).toContain('The alpha build tool on this machine needs the flag --offline.');
     expect(alone).not.toContain('recency appendix');

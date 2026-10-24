@@ -178,7 +178,7 @@
     },
     {
       "name": "helix_memory_inspect",
-      "description": "List current memory items: each item's content on DATA lines marked with its trust state, then one PROOF line carrying its id and contentDigest. Pass history=true to also list closed items with their [tx, txTo) declared interval (a closed item's PROOF line carries its id only), OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive. Pass ids=[...] to render only those records instead of the whole store; ids, history and asOf are mutually exclusive.",
+      "description": "List current memory items: each item's content on DATA lines marked with its trust state, then one PROOF line carrying its id and contentDigest. Pass history=true to also list closed items with their [tx, txTo) declared interval (a closed item's PROOF line carries its id only), OR asOf=<ISO instant> to reconstruct the point-in-time snapshot at that system-time (which facts were live, their grade, and the verify evidence). history and asOf are mutually exclusive. Pass ids=[...] to render only those records instead of the whole store; ids, history and asOf are mutually exclusive. With ids, each record's mark also shows the time the record carries, in the interval form history uses (<state>:<scope>:<tx>..).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -203,7 +203,7 @@
     },
     {
       "name": "helix_memory_recall",
-      "description": "Recall relevant memory as a DATA-only block; flags items needing re-verification. After the ranked matches it adds up to 3 of the newest other records unless recencyAppendix is false, and names them in a trailing note.",
+      "description": "Recall relevant memory as a DATA-only block; flags items needing re-verification. After the ranked matches it adds up to 3 of the newest other records unless recencyAppendix is false, and names them in a trailing note with the time each record carries.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -215,7 +215,7 @@
             "type": "integer",
             "exclusiveMinimum": 0,
             "maximum": 200,
-            "description": "Maximum number of ranked matches (default 20). Unless recencyAppendix is false, up to 3 of the newest records the ranking did not return are added after them, so a response can hold up to maxItems + 3 records; a trailing recency appendix note names those records."
+            "description": "Maximum number of ranked matches (default 20). Unless recencyAppendix is false, up to 3 of the newest records the ranking did not return are added after them, so a response can hold up to maxItems + 3 records; a trailing recency appendix note names those records and the time each one carries."
           },
           "maxChars": {
             "type": "integer",

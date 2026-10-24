@@ -2767,6 +2767,7 @@ function aliasesGlobalLedger(projectLedger, globalLedger) {
 // src/limits.ts
 var MAX_COMMIT_CONTENT_CHARS = 16384;
 var RECALL_RECENCY_APPENDIX_COUNT = 3;
+var RECALL_APPENDIX_FUTURE_TOLERANCE_MS = 3e5;
 
 // src/memory/store.ts
 var ALIASED_PROJECT_WRITE_REFUSAL = "commit: this project's memory file resolves to another adopted project's memory file, to the global memory file, or through a path Helix cannot resolve, so the project layer is disabled here \u2014 the write is refused rather than written into the other project's memory. Ask the user whether to store this fact in global memory, which every project sees, or to replace the link with the project's own file; do not choose for them.";
@@ -3247,7 +3248,9 @@ var MemoryStore = class {
       { ...opts, expansion, semDiscount: SEM_DISCOUNT, semGate: SEM_GATE }
     );
     const ranked = new Set(hits);
-    const appendixRecords = enforcedScoped.map((s, seq) => ({ rec: s.record, seq })).filter(({ rec }) => !ranked.has(rec)).sort((a, b) => a.rec.tx === b.rec.tx ? b.seq - a.seq : a.rec.tx < b.rec.tx ? 1 : -1).slice(0, RECALL_RECENCY_APPENDIX_COUNT).map(({ rec }) => rec);
+    const callMs = Date.parse(this.now());
+    const latestTx = Number.isFinite(callMs) ? new Date(callMs + RECALL_APPENDIX_FUTURE_TOLERANCE_MS).toISOString() : "";
+    const appendixRecords = enforcedScoped.map((s, seq) => ({ rec: s.record, seq })).filter(({ rec }) => !ranked.has(rec) && isIsoInstant(rec.tx) && rec.tx <= latestTx).sort((a, b) => a.rec.tx === b.rec.tx ? b.seq - a.seq : a.rec.tx < b.rec.tx ? 1 : -1).slice(0, RECALL_RECENCY_APPENDIX_COUNT).map(({ rec }) => rec);
     const toItem = (record) => ({
       record,
       scope: byRecord.get(record)?.scope ?? "global",
