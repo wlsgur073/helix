@@ -51,6 +51,12 @@ export interface GatherResult {
    *  interrupted/first-contact). Threaded into formatSessionStartContext, rendered OUTSIDE the frame
    *  like the unadopted note — including when the enforced record set is empty. */
   witnessNotes: string[];
+  /** Issue #7: true when every scope this call read had a first-contact witness verdict with reason
+   *  `pristine` (no witness entry and an absent or empty ledger, the notion the #2 fix introduced). No
+   *  earlier Helix block can have carried a fact from such a scope, so main() leaves out the supersede
+   *  note. A rollback that deletes both a ledger and its witness entry reads the same way, the
+   *  trade-off #2 accepted. */
+  everyScopePristine: boolean;
 }
 
 /**
@@ -104,7 +110,10 @@ export function gatherScopedRecords({ home, globalLedger, cwd, userHome }: Gathe
       } catch { /* unreadable/foreign project ledger → global only */ }
     }
   }
-  return { records, integrityAvailable, replays, projectDisposition, witnessNotes: collectWitnessNotes(verdicts) };
+  return {
+    records, integrityAvailable, replays, projectDisposition, witnessNotes: collectWitnessNotes(verdicts),
+    everyScopePristine: verdicts.every((v) => v.kind === 'first-contact' && v.reason === 'pristine'),
+  };
 }
 
 /** C4.10: union PHYSICAL rows across the scopes a gather read — the sum of the same per-scope
@@ -164,12 +173,13 @@ async function main(): Promise<void> {
       ({ cwd, supersedesEarlier } = hookInputOf(stdinText));
     }
 
-    const { records, integrityAvailable, replays, projectDisposition, witnessNotes } = gatherScopedRecords({ home, globalLedger, cwd });
+    const { records, integrityAvailable, replays, projectDisposition, witnessNotes, everyScopePristine } = gatherScopedRecords({ home, globalLedger, cwd });
     const text = formatSessionStartContext(records, newNonce(), {
       integrityAvailable, unadoptedPresent: projectDisposition === 'unadopted-present',
       aliasedPresent: projectDisposition === 'aliased',
       ancestorUnadopted: projectDisposition === 'ancestor-unadopted', witnessNotes,
-      unionRows: unionPhysicalRows(replays), supersedesEarlier,
+      // Issue #7: when no scope read has ever held memory, no earlier block can need superseding.
+      unionRows: unionPhysicalRows(replays), supersedesEarlier: supersedesEarlier && !everyScopePristine,
     });
     // Synchronous write to fd 1: process exit must not drop a buffered async pipe write on
     // Windows (which would inject an unterminated DATA block). No explicit exit() needed —

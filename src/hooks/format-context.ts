@@ -41,7 +41,9 @@ export interface FormatOptions {
   /** IT-M1: the session continues an earlier conversation (resume / compact / fork), whose earlier
    *  Helix block may still be in context. SUPERSEDE_NOTE then LEADS the trailer: outside the frame,
    *  outside the maxChars budget, and rendered on the empty-records early return too, since empty
-   *  memory is exactly when the earlier block would otherwise stand unchallenged. Default false. */
+   *  memory is exactly when the earlier block would otherwise stand unchallenged. Default false. The
+   *  hook leaves it unset when every scope it read is pristine, which no earlier block can have drawn
+   *  a fact from (issue #7); erased memory is not pristine, so it keeps the note. */
   supersedesEarlier?: boolean;
 }
 

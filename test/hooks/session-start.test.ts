@@ -184,3 +184,62 @@ describe('hookInputOf (IT-M1)', () => {
     }
   });
 });
+
+// Issue #7: a resumed, compacted or forked session gets the supersede note only when an earlier Helix block
+// could have carried a fact. gatherScopedRecords says when no scope it read has ever held memory (#2's notion
+// of pristine: no witness entry and an absent or empty ledger), and main() then leaves the note out.
+describe('gatherScopedRecords everyScopePristine (issue #7)', () => {
+  it('is true for an existing home with no ledger and for a missing home', () => {
+    const base = mkdtempSync(join(tmpdir(), 'helix-i7-'));
+    const present = join(base, 'hh');
+    mkdirSync(present, { mode: 0o700 });
+    const missing = join(base, 'missing');
+    expect(gatherScopedRecords({ home: present, globalLedger: join(present, 'memory.jsonl') }).everyScopePristine).toBe(true);
+    expect(gatherScopedRecords({ home: missing, globalLedger: join(missing, 'memory.jsonl') }).everyScopePristine).toBe(true);
+  });
+
+  it('is false once a fact was committed, and stays false after that fact is erased', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-i7-'));
+    const globalLedger = join(home, 'memory.jsonl');
+    const store = new MemoryStore(globalLedger, { home, sessionId: 's' });
+    const rec = store.commit({ content: 'staging runs postgres 16', source: 'user' });
+    expect(gatherScopedRecords({ home, globalLedger }).everyScopePristine).toBe(false);
+    store.erase(rec.id);
+    const after = gatherScopedRecords({ home, globalLedger });
+    expect(after.records).toEqual([]);
+    expect(after.everyScopePristine).toBe(false);
+  });
+
+  it('is false for a ledger that holds rows but has no witness entry (a first contact that is not pristine)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-i7-'));
+    const globalLedger = join(home, 'memory.jsonl');
+    writeFileSync(globalLedger, JSON.stringify({
+      id: 'm_1', tx: '2026-07-05T00:00:00.000Z', validFrom: '2026-07-05T00:00:00.000Z', validTo: null,
+      type: 'assert', state: 'Fresh', content: 'hook fixture fact',
+      provenance: { source: 'user', sessionId: 's' },
+      supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+    }) + '\n');
+    expect(gatherScopedRecords({ home, globalLedger }).everyScopePristine).toBe(false);
+  });
+
+  it('is false when the global scope is pristine but an owned project holds a fact', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-i7-home-'));
+    const proj = mkdtempSync(join(tmpdir(), 'helix-i7-proj-'));
+    const globalLedger = join(home, 'memory.jsonl');
+    const store = new MemoryStore(globalLedger, { home, sessionId: 's', project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj } });
+    store.commit({ content: 'this repo deploys on fly.io', scope: 'project', source: 'user' });
+    expect(existsSync(globalLedger)).toBe(false);
+    const g = gatherScopedRecords({ home, globalLedger, cwd: proj });
+    expect(g.projectDisposition).toBe('owned');
+    expect(g.everyScopePristine).toBe(false);
+  });
+
+  it('is true when the global scope and an owned project are both pristine', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-i7-home-'));
+    const proj = mkdtempSync(join(tmpdir(), 'helix-i7-proj-'));
+    stampOwnership(proj, home, { genStamp: () => 'OWN' });
+    const g = gatherScopedRecords({ home, globalLedger: join(home, 'memory.jsonl'), cwd: proj });
+    expect(g.projectDisposition).toBe('owned');
+    expect(g.everyScopePristine).toBe(true);
+  });
+});
