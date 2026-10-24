@@ -442,6 +442,30 @@ describe('MemoryStore scope enforcement — no project layer', () => {
       .toThrow(/no project memory layer is active/);
   });
 
+  // NOLAYER-ADOPT-HINT (2026-10-24): adopt refuses while no project layer is active, so a refusal that
+  // named helix_memory_adopt sent the assistant to a dead end (three of four assistants in the issue #4
+  // smoke test offered it). The refusals name the step that works here instead.
+  function refusal(fn: () => unknown): string {
+    try { fn(); } catch (e) { return (e as Error).message; }
+    throw new Error('expected a refusal');
+  }
+
+  it('tells a no-layer project commit to create a .helix folder, not to adopt', () => {
+    const s = store();                                  // no project layer
+    expect(() => s.adopt(join(tmpdir(), 'helix-any-root'))).toThrow('adopt: no project scope is active');
+    const msg = refusal(() => s.commit({ content: 'x', scope: 'project', source: 'user' }));
+    expect(msg).toContain('create a .helix folder at the project root and start a new session there');
+    expect(msg).not.toContain('helix_memory_adopt');
+  });
+
+  it('tells a no-layer project erase to start a session inside the project, not to adopt', () => {
+    const s = store();                                  // no project layer
+    const r = s.commit({ content: 'a global fact', source: 'user' });
+    const msg = refusal(() => s.erase(r.id, { scope: 'project' }));
+    expect(msg).toContain('start a new session inside the project whose memory holds the record');
+    expect(msg).not.toContain('helix_memory_adopt');
+  });
+
   it('leaves the other three scope cases alone', () => {
     const s = store();                                  // no project layer
     expect(s.commit({ content: 'omitted goes global', source: 'user' }).id).toMatch(/^m_/);

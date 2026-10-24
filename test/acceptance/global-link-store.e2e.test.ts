@@ -71,5 +71,7 @@ describe('a project memory file linked to the global ledger makes that .helix th
     const refused = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'a project fact', source: 'user', scope: 'project' } });
     expect((refused as { isError?: boolean }).isError).toBe(true);
     expect(text(refused)).toContain("scope 'project' was requested but no project memory layer is active here");
+    expect(text(refused)).toContain('create a .helix folder at the project root and start a new session there');
+    expect(text(refused)).not.toContain('helix_memory_adopt');            // NOLAYER-ADOPT-HINT
   }, 60_000);
 });
