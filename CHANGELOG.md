@@ -269,7 +269,8 @@ First release.
   bounds the response; without the new input the appendix is still returned. The recency note names
   each appendix record with the time it carries (`dated <tx>`), a record dated more than five minutes
   after the call (or carrying no valid time) takes no appendix slot, and `helix_memory_inspect` with `ids`
-  shows the time each record carries in the interval form `history` uses.
+  shows the time each record carries in the interval form `history` uses. The SessionStart block puts
+  such a record after every other one.
 
 ### Limits
 
