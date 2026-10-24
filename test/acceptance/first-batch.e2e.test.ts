@@ -5,7 +5,7 @@
 // must fail its test, never the run.
 import { describe, it, expect } from 'vitest';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, readFileSync, existsSync, statSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -177,5 +177,26 @@ describe('first fix batch — bundle e2e', () => {
       }
       expect((await hook(env, { cwd: userHome, hook_event_name: 'SessionStart', source: 'startup' })).stdout, `${hh} startup`).toBe('');
     }
+  }, 30_000);
+
+  // SESSIONSTART-FUTURE-TX: the shipped hook puts a row dated far in the future after every dated record, where
+  // ordering by time alone gave it the first slot of its state.
+  it('a row dated far in the future goes after every dated record in the SessionStart block', async () => {
+    const base = tmp('helix-fb-order-');
+    const userHome = join(base, 'home');
+    mkdirSync(userHome);
+    const hh = join(base, 'hh');
+    mkdirSync(hh, { mode: 0o700 });
+    const env = { ...cleanEnv(), HOME: userHome, HELIX_HOME: hh };
+    const committed = await rpc(env, userHome, ['first dated fact', 'second dated fact', 'third dated fact']
+      .map((content) => ({ name: 'helix_memory_commit', args: { content, source: 'user' } })));
+    expect(committed.timedOut).toBe(false);
+    const ledger = join(hh, 'memory.jsonl');
+    const rows = readFileSync(ledger, 'utf8').trim().split('\n');
+    appendFileSync(ledger, JSON.stringify({ ...JSON.parse(rows[rows.length - 1]!), id: 'm_planted_future', content: 'planted future fact', tx: '2999-01-01T00:00:00.000Z' }) + '\n');
+    const data = (await hook(env, { cwd: userHome, hook_event_name: 'SessionStart', source: 'startup' })).stdout
+      .split('\n').filter((l) => l.startsWith('DATA['));
+    expect(data).toHaveLength(4);
+    expect(data.findIndex((l) => l.includes('planted future fact'))).toBe(3);
   }, 30_000);
 });

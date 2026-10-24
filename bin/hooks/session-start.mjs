@@ -1325,6 +1325,7 @@ function reverifyFlag(r) {
 
 // src/limits.ts
 var HOOK_STDIN_MAX_BYTES = 1048576;
+var RECALL_APPENDIX_FUTURE_TOLERANCE_MS = 3e5;
 
 // src/risk/trifecta.ts
 var EGRESS_VERB = /\b(send|post|upload|email|exfiltrate|transmit|leak|forward|fetch)\b/;
@@ -1350,7 +1351,9 @@ function formatSessionStartContext(records, nonce, opts = {}) {
   const projectLayerNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE : opts.aliasedPresent ? ALIASED_LEDGER_NOTE : opts.ancestorUnadopted ? ANCESTOR_UNADOPTED_NOTE : null;
   const scaleNote = opts.unionRows !== void 0 && opts.unionRows >= SCALE_ADVISORY_ROWS ? scaleAdvisoryNote(opts.unionRows) : null;
   const trailer = [opts.supersedesEarlier ? SUPERSEDE_NOTE : null, projectLayerNote, ...opts.witnessNotes ?? [], scaleNote].filter((n) => n !== null && n !== "");
-  const usable = records.filter(({ record }) => record.content.trim() !== "").sort((a, b) => STATE_ORDER[a.record.state] - STATE_ORDER[b.record.state] || b.record.tx.localeCompare(a.record.tx));
+  const runMs = Date.parse(opts.now ?? (/* @__PURE__ */ new Date()).toISOString());
+  const latestTx = Number.isFinite(runMs) ? new Date(runMs + RECALL_APPENDIX_FUTURE_TOLERANCE_MS).toISOString() : "";
+  const usable = records.filter(({ record }) => record.content.trim() !== "").map((s) => ({ s, dated: isIsoInstant(s.record.tx) && s.record.tx <= latestTx })).sort((a, b) => Number(b.dated) - Number(a.dated) || STATE_ORDER[a.s.record.state] - STATE_ORDER[b.s.record.state] || (a.dated ? b.s.record.tx.localeCompare(a.s.record.tx) : 0)).map(({ s }) => s);
   if (usable.length === 0) return trailer.length > 0 ? trailer.join("\n") : "";
   const top = usable.slice(0, maxItems);
   const reserved = usable.filter((s) => isVerifyingSource(s.record.provenance.source) && s.record.state !== "Suspect").slice(0, RESERVE);
