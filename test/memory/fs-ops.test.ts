@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readFileSync, constants, symlinkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, statSync, constants, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { realFsOps, fsyncDir, writeAll, type DirFsyncSyscalls } from '../../src/memory/fs-ops.js';
@@ -34,6 +34,18 @@ describe('fs-ops seam', () => {
     expect(codeOf(() => realFsOps.openSync(f, create, 0o600))).toBe('EEXIST');      // present: exclusive create refuses
     symlinkSync(f, join(d, 'l.txt'));
     expect(codeOf(() => realFsOps.openSync(join(d, 'l.txt'), constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW))).toBe('ELOOP');
+  });
+  it('fstatSync reports the device and inode of the descriptor\'s file, beside size, link count and mode', () => {
+    const d = mkdtempSync(join(tmpdir(), 'fsops-'));
+    const f = join(d, 'x.txt'); writeFileSync(f, 'abc');
+    const fd = realFsOps.openSync(f, 'r');
+    try {
+      const st = realFsOps.fstatSync(fd);
+      const ref = statSync(f);
+      expect(st.dev).toBe(ref.dev); expect(st.ino).toBe(ref.ino);
+      expect(st.size).toBe(3); expect(st.nlink).toBe(1);
+      expect(st.mode).toBe(ref.mode);
+    } finally { realFsOps.closeSync(fd); }
   });
   // 2026-08-11 supersession: the open() leg used to swallow EVERY errno on the theory that a failed
   // open means fsync was never attempted. That reported success for an EMFILE/EIO/ENOENT directory

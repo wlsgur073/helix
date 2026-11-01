@@ -1,4 +1,4 @@
-import { mkdirSync, statSync, openSync, fstatSync, readSync, closeSync, constants, type Stats } from 'node:fs';
+import { mkdirSync, statSync, lstatSync, openSync, fstatSync, readSync, closeSync, constants, type Stats } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
@@ -125,23 +125,127 @@ export function aliasedLedgerRefusal(rawPath: LedgerPath): string | null {
   return st.nlink === 1 ? null : aliasedLedgerMessage(st.nlink);
 }
 
+/** design 4.9, the row for a destination that changed while the write waited. A constant: no path, no
+ *  interpolation. */
+export const DESTINATION_CHANGED_REFUSAL =
+  "commit: this project's memory file was replaced while the write waited for its lock — nothing was written. " +
+  'Try the commit again; if it happens again, tell the user.';
+
+/** The destination an append was about to write is not the one that was judged (design 4.1 item 3): the open
+ *  failed on what now stands at the path, or a check after the open refused. Nothing was written. */
+export class LedgerDestinationChangedError extends Error {
+  /** The marker isLedgerDestinationChangedError reads (a property, never class identity). */
+  readonly ledgerDestinationChanged = true;
+  constructor(message: string = DESTINATION_CHANGED_REFUSAL) {
+    super(message);
+    this.name = 'LedgerDestinationChangedError';
+  }
+}
+
+export const isLedgerDestinationChangedError = (e: unknown): boolean =>
+  e instanceof Error && (e as { ledgerDestinationChanged?: unknown }).ledgerDestinationChanged === true;
+
+interface FileIdentity { dev: number; ino: number }
+
+/** The destination as a caller judged it, sampled under the ledger lock: the resolved path and the device and
+ *  inode that stood there, `identity` null when nothing did. */
+export interface JudgedDestination { path: string; identity: { dev: bigint; ino: bigint } | null }
+
+/** What stands at `path` itself (a link is not followed), or null when nothing does. */
+function identityAt(path: string): FileIdentity | null {
+  try { const st = lstatSync(path); return { dev: st.dev, ino: st.ino }; }
+  catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null; throw e; }
+}
+
+/** O_NOFOLLOW (design 4.1 item 3): the last component of the resolved path is never followed, so a link that
+ *  appears there after the resolution ends in ELOOP with nothing written. Where the platform does not define the
+ *  constant the OR drops it silently and the open follows a link at the final name (measured on native Windows,
+ *  2026-10-30). */
+const APPEND_OPEN = constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW;
+
+/** What the open of a resolved path answers when something else now stands there (design 4.1 item 3). */
+const DESTINATION_CHANGED_OPEN_ERRORS = new Set(['ELOOP', 'EISDIR', 'ENOENT']);
+
+/** Open the resolved destination for append. `created` is true only when THIS call made the file. A destination
+ *  absent when it was judged is created exclusively; a file that appeared since (EEXIST) is opened as it stands and
+ *  is appended to. A destination present when it was judged is opened without O_CREAT: gone now, it is a changed
+ *  destination, never a file to create afresh. */
+function openForAppend(path: string, absentWhenJudged: boolean, fsOps: DurableFsOps): { fd: number; created: boolean } {
+  try {
+    if (absentWhenJudged) {
+      try {
+        return { fd: fsOps.openSync(path, APPEND_OPEN | constants.O_CREAT | constants.O_EXCL, 0o600), created: true };   // owner-only ON CREATE; umask can only clear bits, never set them
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      }
+    }
+    return { fd: fsOps.openSync(path, APPEND_OPEN), created: false };
+  } catch (e) {
+    if (DESTINATION_CHANGED_OPEN_ERRORS.has((e as NodeJS.ErrnoException).code ?? '')) throw new LedgerDestinationChangedError();
+    throw e;
+  }
+}
+
+/** The check after the open, before the first byte (design 4.1 item 3). O_NOFOLLOW sees the last component only: a
+ *  DIRECTORY component replaced by a link after the resolution is followed by the open. So the descriptor must be
+ *  the destination as judged and the path, resolved again, must still be that destination. A file that was absent
+ *  when it was judged has no identity to compare: there the file at the path as resolved again must be the
+ *  descriptor's. A check that cannot be made answers false. */
+function destinationUnchanged(rawPath: LedgerPath, path: string, judged: FileIdentity | null, opened: FileIdentity): boolean {
+  if (judged !== null && (opened.dev !== judged.dev || opened.ino !== judged.ino)) return false;
+  const again = resolvePath(rawPath);
+  if (again.kind !== 'resolved' || again.dirMissing || again.path !== path) return false;
+  if (judged !== null) return true;
+  let now: FileIdentity | null;
+  try { now = identityAt(again.path); } catch { return false; }
+  return now !== null && now.dev === opened.dev && now.ino === opened.ino;
+}
+
+/** Remove the file this call created, when the check after the open refused (design 4.3 step 5): only while the
+ *  file at the path is still the descriptor's. Every failure is swallowed: the refusal in flight is what the caller
+ *  reports. */
+function removeOwnCreation(path: string, opened: FileIdentity, fsOps: DurableFsOps): void {
+  try {
+    const now = identityAt(path);
+    if (now === null || now.dev !== opened.dev || now.ino !== opened.ino) return;
+    fsOps.unlinkSync(path);
+    fsOps.fsyncDir(dirname(path));
+  } catch { /* the file cannot be shown to be gone or durable; the refusal stands */ }
+}
+
 /** Append one record as a single JSONL line WITHOUT taking the ledger lock — for callers that
  *  ALREADY hold it (withFileLock is not re-entrant), e.g. the store's signing writeVerify.
- *  Durable + self-repairing (spec Layer 5): sweeps orphan tmps (the fence — a sweep failure ABORTS
- *  the append: an unfenceable predecessor must block us), refuses hard-linked ledgers (two alias
- *  names would carry two locks — no mutual exclusion), repairs a newline-less torn tail by
+ *  Durable + self-repairing (spec Layer 5): refuses hard-linked ledgers (two alias names would
+ *  carry two locks — no mutual exclusion), sweeps orphan tmps (the fence — a sweep failure ABORTS
+ *  the append: an unfenceable predecessor must block us) and checks the descriptor again right
+ *  behind the sweep (a lock-losing compactor's rename that landed before the sweep leaves it on an
+ *  unlinked inode, refused as a changed destination), repairs a newline-less torn tail by
  *  prefixing its own separator (at-least-once: a complete-but-unacked prior record commits; a torn
  *  fragment is isolated into its own malformed line that parse-health counts), then writes the
  *  whole line, fsyncs the fd, and fsyncs the parent dir so an acknowledged append survives power
- *  loss. */
-export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, fsOps: DurableFsOps = realFsOps): void {
+ *  loss. The resolved path is opened with O_NOFOLLOW and, before the first byte and before the sweep, the descriptor
+ *  and the path resolved again are checked (destinationUnchanged): a changed destination throws
+ *  LedgerDestinationChangedError with nothing written. `judged` is the destination as a caller judged it under the
+ *  lock; without it the destination is sampled here, right before the open. */
+export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, fsOps: DurableFsOps = realFsOps, judged?: JudgedDestination): void {
   mkdirSync(dirname(rawPath), { recursive: true });
   const path = resolvedPathOrThrow(rawPath);   // resolve the FINAL-component symlink to the real inode's path (write-layer identity, the SAME rule the lock uses) so append and compaction never diverge onto different inodes
-  sweepOrphanTmps(path, { fsOps });
-  const fd = fsOps.openSync(path, 'a+', 0o600);   // owner-only ON CREATE; umask can only clear bits, never set them
+  if (judged !== undefined && judged.path !== path) throw new LedgerDestinationChangedError();
+  const before: FileIdentity | null = judged === undefined
+    ? identityAt(path)
+    : judged.identity && { dev: Number(judged.identity.dev), ino: Number(judged.identity.ino) };
+  const { fd, created } = openForAppend(path, before === null, fsOps);
   try {
     const st = fsOps.fstatSync(fd);
+    const opened = { dev: st.dev, ino: st.ino };
+    if (!destinationUnchanged(rawPath, path, before, opened)) {
+      if (created) removeOwnCreation(path, opened, fsOps);   // the descriptor is still open, so its inode cannot have gone to another file
+      throw new LedgerDestinationChangedError();
+    }
+    if (st.nlink === 0) throw new LedgerDestinationChangedError();   // replaced at the name since the open: a race, not an alias
     if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
+    sweepOrphanTmps(path, { fsOps });   // behind the check: a refused append never touches the directory the path came to lead to
+    if (fsOps.fstatSync(fd).nlink === 0) throw new LedgerDestinationChangedError();   // a compactor's rename that landed before the sweep left this descriptor on an unlinked inode; behind the sweep it fails ENOENT, so a descriptor that passes here is the file at the name
     let line = JSON.stringify(record) + '\n';
     if (st.size > 0) {
       const tail = Buffer.alloc(1);
