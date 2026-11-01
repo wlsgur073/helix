@@ -135,10 +135,14 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
             `  global ledger  : ${globalLedger}\n` +
             `Re-baselining it under a project scope key would record one file under two witness identities.\n` +
             `Use: --scope global\n`
-          : `helix-rebaseline: REFUSING - ${scope}'s ledger resolves to another adopted project's ledger file.\n` +
-            `  resolved ledger: ${target.ledger}\n` +
-            `Re-baselining it would record one file under two project witness identities.\n` +
-            `Replace the link with the project's own file, then re-run.\n`,
+          : target.reason === 'unusable'
+            ? `helix-rebaseline: REFUSING - ${scope}'s project ledger path cannot be inspected (a folder on the path cannot be read, or a path component is not a directory).\n` +
+              `  resolved ledger: ${target.ledger}\n` +
+              `Repair the project memory path, then re-run.\n`
+            : `helix-rebaseline: REFUSING - ${scope}'s ledger resolves to another adopted project's ledger file.\n` +
+              `  resolved ledger: ${target.ledger}\n` +
+              `Re-baselining it would record one file under two project witness identities.\n` +
+              `Replace the link with the project's own file, then re-run.\n`,
       );
       exit(2);
       return 2;

@@ -4,7 +4,8 @@ import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
 import { forgedFactIds, isFactRow } from './verified-projection.js';
-import { withFileLock, canonical } from './lock.js';
+import { withFileLock } from './lock.js';
+import { resolvePath, resolvedPathOrThrow } from './path-identity.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import { fenceId, sha256Hex } from './witness-core.js';
@@ -113,8 +114,10 @@ function aliasedLedgerMessage(nlink: number): string {
  */
 export function aliasedLedgerRefusal(rawPath: LedgerPath): string | null {
   let st: Stats;
+  const r = resolvePath(rawPath);
+  if (r.kind !== 'resolved' || r.dirMissing) return null;
   try {
-    st = statSync(canonical(rawPath));  // canonical: the SAME inode identity the append resolves to
+    st = statSync(r.path);              // the resolver's answer: the SAME inode identity the append resolves to
   } catch {
     return null;                        // absent (or unstatable) — the append will speak for itself
   }
@@ -133,7 +136,7 @@ export function aliasedLedgerRefusal(rawPath: LedgerPath): string | null {
  *  loss. */
 export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, fsOps: DurableFsOps = realFsOps): void {
   mkdirSync(dirname(rawPath), { recursive: true });
-  const path = canonical(rawPath);   // resolve the FINAL-component symlink to the real inode's path (write-layer identity, the SAME rule the lock uses) so append and compaction never diverge onto different inodes
+  const path = resolvedPathOrThrow(rawPath);   // resolve the FINAL-component symlink to the real inode's path (write-layer identity, the SAME rule the lock uses) so append and compaction never diverge onto different inodes
   sweepOrphanTmps(path, { fsOps });
   const fd = fsOps.openSync(path, 'a+', 0o600);   // owner-only ON CREATE; umask can only clear bits, never set them
   try {
@@ -685,8 +688,8 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
   // lost and a stale snapshot can't resurrect erased content. The tmp is created BEFORE the read
   // (fence sentinel): any successor's sweep unlinks it, so if OUR lock is ever lost, the final
   // rename-by-pathname fails ENOENT instead of overwriting the successor's state.
-  return withFileLock(rawPath, (ctx) => {                   // lock target stays raw — withFileLock canonicalizes internally to the same lock file
-    const path = canonical(rawPath);                        // resolve ONCE, under the lock: EVERYTHING below (nlink, tmp, sweep, mode, read, rename, dir fsync) targets the real inode, so a compaction can never replace a symlink alias and strand the erased plaintext on the link's target
+  return withFileLock(rawPath, (ctx) => {                   // lock target stays raw — withFileLock resolves it internally to the same lock file
+    const path = resolvedPathOrThrow(rawPath);              // resolve ONCE, under the lock: EVERYTHING below (nlink, tmp, sweep, mode, read, rename, dir fsync) targets the real inode, so a compaction can never replace a symlink alias and strand the erased plaintext on the link's target
     assertSingleLink(path);
     const tmp = `${path}.c-${randomBytes(16).toString('hex')}.tmp`;
     sweepOrphanTmps(path, { fsOps, keep: tmp });

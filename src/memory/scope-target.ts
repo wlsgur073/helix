@@ -11,7 +11,8 @@
  *  because it stops the ceremony deriving a ledger and a witness key from the same argument by two
  *  independent routes. Since issue #1 the server and the SessionStart hook no longer apply it
  *  separately: `src/memory/project-root.ts` applies it once for both. */
-import { aliasesAdoptedLedger, ledgerDestination, projectLedgerPath } from './ownership.js';
+import { aliasesAdoptedLedger, ledgerPathState, projectLedgerPath } from './ownership.js';
+import { resolvePath } from './path-identity.js';
 import { scopeKeyOf } from './witness-store.js';
 
 /**
@@ -27,17 +28,18 @@ import { scopeKeyOf } from './witness-store.js';
  * `projectLedgerPath($HOME)` returns.
  *
  * ALIAS-DOTDOT (second fix batch, D4): both sides are where an append through them lands, computed
- * the kernel's way (ownership.ts ledgerDestination), not canonicalRoot. canonicalRoot collapses a
+ * the kernel's way (path-identity.ts resolvePath), not canonicalRoot. canonicalRoot collapses a
  * `..` after a symlinked directory as text and returns a DANGLING link's own location, so a project
  * ledger linked as `dl/../<path to the global ledger>`, or linked to a global ledger that does not
- * exist yet, read as a separate file while its appends landed in (or created) the global ledger. An
- * UNRESOLVABLE side (ledgerDestination null) is not called the same file here: the project layer then
- * stays configured and the aliased disposition excludes it (aliasesAdoptedLedger), so its writes are
- * refused rather than silently routed to the global ledger.
+ * exist yet, read as a separate file while its appends landed in (or created) the global ledger. A
+ * side that is not `resolved` is not called the same file here: the project layer then stays
+ * configured and the disposition excludes it (ledgerPathState), so its writes are refused rather
+ * than silently routed to the global ledger.
  */
 export function aliasesGlobalLedger(projectLedger: string, globalLedger: string): boolean {
-  const project = ledgerDestination(projectLedger);
-  return project !== null && project === ledgerDestination(globalLedger);
+  const p = resolvePath(projectLedger);
+  const g = resolvePath(globalLedger);
+  return p.kind === 'resolved' && g.kind === 'resolved' && p.path === g.path;
 }
 
 /** `'global'`, or an absolute project root. */
@@ -45,7 +47,7 @@ export type Scope = 'global' | (string & {});
 
 export type ScopeResolution =
   | { ok: true; ledger: string; scopeKey: string }
-  | { ok: false; reason: 'aliases-global' | 'aliases-project'; ledger: string };
+  | { ok: false; reason: 'aliases-global' | 'aliases-project' | 'unusable'; ledger: string };
 
 /**
  * The ledger a scope names AND the witness key it is recorded under — derived together, from one
@@ -67,6 +69,7 @@ export function resolveScopeTarget(home: string, globalLedger: string, scope: Sc
   if (scope === 'global') return { ok: true, ledger: globalLedger, scopeKey: scopeKeyOf(home) };
   const ledger = projectLedgerPath(scope);
   if (aliasesGlobalLedger(ledger, globalLedger)) return { ok: false, reason: 'aliases-global', ledger };
+  if (ledgerPathState(ledger) === 'unusable') return { ok: false, reason: 'unusable', ledger };
   if (aliasesAdoptedLedger({ root: scope, home, ledger })) return { ok: false, reason: 'aliases-project', ledger };
   return { ok: true, ledger, scopeKey: scopeKeyOf(home, scope) };
 }

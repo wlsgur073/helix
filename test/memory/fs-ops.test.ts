@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, constants, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { realFsOps, fsyncDir, writeAll, type DirFsyncSyscalls } from '../../src/memory/fs-ops.js';
@@ -24,6 +24,16 @@ describe('fs-ops seam', () => {
     try { writeAll(shortWriting, fd, 'abcdefghij'); } finally { realFsOps.closeSync(fd); }
     expect(readFileSync(f, 'utf8')).toBe('abcdefghij');   // no fragment loss under short writes
     expect(calls).toBeGreaterThan(1);                      // the loop actually looped
+  });
+  it('openSync takes numeric fs.constants flags as well as flag strings (design 4.1 item 3: O_NOFOLLOW has no string spelling)', () => {
+    const d = mkdtempSync(join(tmpdir(), 'fsops-'));
+    const f = join(d, 'x.txt');
+    const codeOf = (fn: () => unknown): string | undefined => { try { fn(); } catch (e) { return (e as NodeJS.ErrnoException).code; } return undefined; };
+    const create = constants.O_RDWR | constants.O_APPEND | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+    realFsOps.closeSync(realFsOps.openSync(f, create, 0o600));                      // free name: created
+    expect(codeOf(() => realFsOps.openSync(f, create, 0o600))).toBe('EEXIST');      // present: exclusive create refuses
+    symlinkSync(f, join(d, 'l.txt'));
+    expect(codeOf(() => realFsOps.openSync(join(d, 'l.txt'), constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW))).toBe('ELOOP');
   });
   // 2026-08-11 supersession: the open() leg used to swallow EVERY errno on the theory that a failed
   // open means fsync was never attempted. That reported success for an EMFILE/EIO/ENOENT directory

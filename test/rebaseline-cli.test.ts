@@ -5,7 +5,7 @@
 // (test/rebaseline-smoke.test.ts) and only exercises the argv-parsing / TTY-gate surface (it can
 // never reach the confirmation prompt from a non-interactive spawn).
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, linkSync, chmodSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, linkSync, chmodSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../scripts/rebaseline-cli.js';
@@ -370,6 +370,24 @@ describe('rebaseline-cli main() — refusal paths', () => {
       expect(readLedgerBytes(ledger).equals(before)).toBe(true);
       expect(readScopeWitness(home, projectKey).entry).toBeNull(); // no second witness identity
       expect(classifyState(readScopeWitness(home, globalKey), readLedgerBytes(ledger)).kind).toBe('in-sync');
+    } finally { cap.restore(); }
+  });
+
+  it('refuses a project scope whose ledger path cannot be inspected, with its own text, before the operator is asked', async () => {
+    const home = tmpHome(); homes.push(home);
+    const root = tmpHome(); homes.push(root);
+    mkdirSync(join(root, '.helix'));
+    writeFileSync(join(root, '.helix', 'real.jsonl'), '');
+    symlinkSync('real.jsonl/', projectLedgerPath(root));      // a body ending in a slash: the kernel answers ENOTDIR
+    const cap = captureStd();
+    try {
+      let prompted = false;
+      const code = await main(['--scope', root], { env: envFor(home), isTTY: true, promptLine: async () => { prompted = true; return 'bless'; } });
+      expect(code).toBe(2);
+      expect(prompted).toBe(false);
+      expect(cap.stderr()).toContain('REFUSING');
+      expect(cap.stderr()).toContain('cannot be inspected');
+      expect(cap.stderr()).not.toContain("another adopted project's ledger");
     } finally { cap.restore(); }
   });
 

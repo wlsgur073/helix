@@ -17,7 +17,7 @@ import { rankWithArtifacts, buildRankArtifacts, assertQueryWithinBounds, type Ex
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce, collectWitnessNotes, asOfWitnessNotes } from './content-frame.js';
-import { isOwned, stampOwnership, projectDispositionOf, canonicalRoot, isReviewableRoot, trustStateOf, aliasesAdoptedLedger, type ProjectDisposition, type ProjectOrigin, type TrustState } from './ownership.js';
+import { isOwned, stampOwnership, projectDispositionOf, canonicalRoot, isReviewableRoot, trustStateOf, aliasesAdoptedLedger, ledgerPathState, type ProjectDisposition, type ProjectOrigin, type TrustState } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, isFutureMacVersion } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedLiveWitnessed, verifiedProjectionWithSubkey } from './verified-read.js';
@@ -158,13 +158,27 @@ const ALIASED_PROJECT_WRITE_REFUSAL =
   "fact in global memory, which every project sees, or to replace the link with the project's own file; " +
   'do not choose for them.';
 
+/** Row 5 of design 4.2 (third fix batch B1): the refusal of a project-routed write on a layer whose memory path
+ *  cannot be inspected, adopted or not (design 4.9). */
+const UNUSABLE_PROJECT_WRITE_REFUSAL =
+  "commit: this project's memory file cannot be used as it is (it is not a regular file, it or its folder cannot " +
+  'be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory ' +
+  "records), so the project layer is disabled here — nothing was written. Ask the user whether to store this fact " +
+  "in global memory, which every project sees, or to repair the project's memory file; do not choose for them.";
+
+/** The same state on an erase with scope 'project' (design 4.9). */
+const ERASE_UNUSABLE_REFUSAL =
+  "erase: this project's memory file cannot be used as it is (it is not a regular file, it or its folder cannot " +
+  'be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory ' +
+  'records) — nothing was erased.';
+
 /** The states in which an explicit 'global' commit bypassed a project layer that is off here (IT-M4). */
-export type BypassedProjectDisposition = 'ancestor-unadopted' | 'aliased' | 'unadopted-present';
+export type BypassedProjectDisposition = 'ancestor-unadopted' | 'aliased' | 'unusable' | 'unadopted-present';
 /** What `commitScoped` reports: the record, the scope it was written to, and two disclosures.
  *  `redactions` (IT-M3) counts, per marker kind, the spans the secret scan actually replaced (the
  *  write-policy selection, one `[redacted:<kind>]` marker each); absent when nothing was replaced.
  *  `bypassedProject` (IT-M4) is set only for an EXPLICIT 'global' commit made while a project layer
- *  is configured but off here — 'ancestor-unadopted', 'aliased', or (ruling R11) 'unadopted-present',
+ *  is configured but off here — 'ancestor-unadopted', 'aliased', 'unusable', or (ruling R11) 'unadopted-present',
  *  a cwd project whose memory file Helix did not create and nobody adopted, excluded from every read
  *  the same way; absent otherwise. A cwd project nobody adopted whose memory file the pre-adopt check
  *  refuses (Δ4-37) reports 'aliased' too: it reads 'inactive' while its link leads to no file, but
@@ -442,7 +456,7 @@ export class MemoryStore {
     // after the append, so a refused or failed write never pays for it. Side-effect free.
     if (input.scope === 'global' && this.opts.project) {
       const d = this.projectDisposition();
-      if (d === 'ancestor-unadopted' || d === 'aliased' || d === 'unadopted-present') out.bypassedProject = d;
+      if (d === 'ancestor-unadopted' || d === 'aliased' || d === 'unusable' || d === 'unadopted-present') out.bypassedProject = d;
       // A cwd project nobody adopted whose memory file the pre-adopt check refuses (Δ4-37) reads
       // 'inactive' while its link leads to no existing file, yet every project write there is refused
       // with the alias refusal, which calls the layer disabled and offers global memory. Its layer is
@@ -462,7 +476,7 @@ export class MemoryStore {
    *  claim or create a ledger. Throws iff aliased; otherwise returns without side effect. */
   private refuseAliasedProjectWrite(p: { root: string; ledger: string }): void {
     if (isOwned(p.root, this.homeDir()) && aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger })) {
-      throw new Error(ALIASED_PROJECT_WRITE_REFUSAL);
+      throw new Error(ledgerPathState(p.ledger) === 'unusable' ? UNUSABLE_PROJECT_WRITE_REFUSAL : ALIASED_PROJECT_WRITE_REFUSAL);
     }
   }
 
@@ -518,6 +532,9 @@ export class MemoryStore {
     this.refuseAliasedProjectWrite(p);
     this.refuseUnadoptedParentWrite(p);
     if (!isOwned(p.root, this.homeDir())) {
+      // Rows 4 and 5 of design 4.2, adopted or not: they beat the foreign-file text below, and nothing is stamped.
+      const rowState = ledgerPathState(p.ledger);
+      if (rowState !== null) throw new Error(rowState === 'unusable' ? UNUSABLE_PROJECT_WRITE_REFUSAL : ALIASED_PROJECT_WRITE_REFUSAL);
       if (existsSync(p.ledger)) {
         throw new Error(
           'commit: a project memory file exists here that Helix did not create — ' +
@@ -529,7 +546,7 @@ export class MemoryStore {
       // had its first commit stamp ownership and then create that other file holding the record. Linked
       // to another project's ledger it was excluded only from then on; linked to the global ledger it
       // stayed in use until the next server start. Both rules (global, then project-to-project, each
-      // computed the kernel's way — ledgerDestination) now run BEFORE the stamp, and an alias or an
+      // computed the kernel's way — resolvePath) now run BEFORE the stamp, and an alias or an
       // unresolvable ledger is refused with the alias refusal: no ownership recorded, no file created.
       // The store applies the global rule to a project NOT yet adopted only (here, and in the notice
       // commitScoped adds to a global commit made in that state): once a project is adopted (by this
@@ -558,6 +575,8 @@ export class MemoryStore {
    *    (ownership.ts's aliasesAdoptedLedger). Excluded from every read like 'unadopted-present', with
    *    its own constant note; targetLedger() (commit) and resolveEraseTarget() (erase) both refuse to
    *    write through it.
+   *  - 'unusable' (row 5 of design 4.2): adopted or not, a memory path the resolver cannot inspect. Excluded
+   *    and refused the same way, with its own constant note.
    *  - 'unadopted-present': project configured, NOT owned, and a ledger file exists at p.ledger — the
    *    exact condition targetLedger() (above) already throws on for commit. The write side keeps its
    *    OWN independent, fresh isOwned/existsSync check — targetLedger's auto-stamp claim-on-first-use
@@ -1272,7 +1291,7 @@ export class MemoryStore {
         );
       }
       if (scope === 'project' && aliased) {
-        throw new EraseRefusedError(
+        throw new EraseRefusedError(ledgerPathState(p!.ledger) === 'unusable' ? ERASE_UNUSABLE_REFUSAL :
           "erase: this project's memory file resolves to another adopted project's memory file, to the " +
           'global memory file, or through a path Helix cannot resolve — the erase is refused rather than ' +
           "applied to the other project's memory.",

@@ -5,7 +5,9 @@ import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, renameS
  *  removing every fsync stays green behaviorally) — only the syscall sequence can be pinned.
  *  Production code always receives `realFsOps`. Keep this seam exactly as thin as the write path. */
 export interface DurableFsOps {
-  openSync(path: string, flags: string, mode?: number): number;
+  /** `flags` is a Node flag string or the numeric `fs.constants` form (the append opens with `O_NOFOLLOW`, which no
+   *  flag string spells). */
+  openSync(path: string, flags: string | number, mode?: number): number;
   readSync(fd: number, buf: Buffer, offset: number, length: number, position: number): number;
   writeSync(fd: number, buf: Buffer, offset: number, length: number): number;
   fsyncSync(fd: number): void;

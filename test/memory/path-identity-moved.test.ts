@@ -31,11 +31,11 @@ describe('path-identity.ts (A1: the moved helpers)', () => {
     expect(specs.filter((s) => !s.startsWith('node:'))).toEqual([]);
   });
 
-  it('exports canonicalRoot and ledgerDestination, and ownership.ts exports the same bindings', () => {
+  it('exports canonicalRoot, ownership.ts exports the same binding, and ledgerDestination is gone from both', () => {
     expect(typeof pathIdentity.canonicalRoot).toBe('function');
-    expect(typeof pathIdentity.ledgerDestination).toBe('function');
     expect(ownership.canonicalRoot).toBe(pathIdentity.canonicalRoot);
-    expect(ownership.ledgerDestination).toBe(pathIdentity.ledgerDestination);
+    expect('ledgerDestination' in pathIdentity).toBe(false);
+    expect('ledgerDestination' in ownership).toBe(false);
   });
 
   it('the helpers that stay private are not exported from either module (A2 reuses them inside the module)', () => {

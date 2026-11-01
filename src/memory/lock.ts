@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, linkSync, lstatSync, rmSync, readdirSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { dirname, basename, join } from 'node:path';
 import { classifyHolder, selfIdentity, tryParsePayload, realProbe, type HolderClass, type LivenessProbe, type LockPayload } from './lock-liveness.js';
+import { resolvedPathOrThrow } from './path-identity.js';
 
 // Cross-process advisory lock around the JSONL ledger. Concurrent helix-mcp processes (one per
 // agent session, same host, same user, ONE kernel/boot domain — declared precondition) write the
@@ -44,46 +45,12 @@ function sleepSync(ms: number): void {
 export interface LockContext { stillOwned(): boolean; }
 export interface LockOptions { maxWaitMs?: number; probe?: LivenessProbe; }
 
-/** THE shared path-identity rule for BOTH the lock layer AND the ledger write layer (append +
- *  compaction) — export it so ledger.ts resolves the SAME identity the lock does. Every spelling of
- *  one ledger (a symlinked cwd, or a symlink standing in for the ledger FILE itself) must map to one
- *  path, or the lock would guard a different inode than the writes touch: a compaction renaming over
- *  a symlink alias turns the alias into a regular file while appends follow the link to the real
- *  inode, and the pre-compaction plaintext (incl. permanently-erased content) survives on that inode
- *  — the erase claim broken. realpath resolves symlinks, not hard links — hard-link aliases are
- *  refused at the write layer (nlink guard), not here. The parent dir must exist (callers mkdir it
- *  first).
- *
- *  ALIAS-DOTDOT (second fix batch, D4): `realpathSync.native`, the kernel's resolution, for BOTH the
- *  path and the parent fallback. Node's JS `realpathSync` collapses a `..` that follows a symlinked
- *  directory as text (`dl/..` read as the directory holding `dl`), while the kernel follows `dl`
- *  first: for a ledger linked as `dl/../x.jsonl` the JS answer named a different file than the one the
- *  kernel opens, so the lock guarded one inode (and the append wrote one file) while reads opened
- *  another, and one inode could carry two lock files. Registry and witness scope KEYS do not use this
- *  function: ownership.ts canonicalRoot keeps the JS computation, so no key an older build wrote
- *  changes. On an ordinary path (no `..` after a directory link) the two computations agree, so
- *  existing lock paths do not move.
- *
- *  A destination whose bytes are not valid UTF-8 is never returned (second fix batch, after its final
- *  review): Node decodes realpath's answer with replacement, so a target name holding 0xff came back
- *  as U+FFFD, a name the kernel does not open, and nothing failed. The append then created a NEW
- *  file under that name beside the target while every read followed the link (measured 2026-10-04 on
- *  a global ledger: two commits answered normally and inspect showed none). The answer is read as a
- *  Buffer and must survive a UTF-8 round trip (the test ownership.ts utf8OrNull applies); otherwise
- *  the fallback applies, the link's own location, where every open follows the link. That is what
- *  this function answered before D4, when the JS realpathSync threw on the decoded path. A rewrite
- *  there still replaces the link with a regular file and leaves the earlier bytes in the old
- *  target: the alias defect described above stays open for this one shape. */
-export function canonical(target: string): string {
-  try {
-    const real = realpathSync.native(target, { encoding: 'buffer' });
-    const text = real.toString('utf8');
-    if (Buffer.from(text, 'utf8').equals(real)) return text;
-  } catch { /* absent, or not resolvable: the physical parent plus the name, below */ }
-  return join(realpathSync.native(dirname(target)), basename(target));
-}
-
-export function lockPathOf(target: string): string { return canonical(target) + '.lock'; }
+/** The lock path of a target: the path resolver's answer (path-identity.ts resolvePath) plus `.lock`, so the lock
+ *  guards the file the kernel reaches through every spelling, a dangling link included (it locks beside the link's
+ *  TARGET: M67). An unresolvable path throws UnresolvablePathError, one that cannot be inspected throws its own fs
+ *  error, a missing folder throws the kernel's ENOENT: nothing is ever published into a folder that is not there.
+ *  Registry and witness scope KEYS do not use this: path-identity.ts canonicalRoot keeps Node's JS realpath. */
+export function lockPathOf(target: string): string { return resolvedPathOrThrow(target) + '.lock'; }
 
 /** Test-only helper: publish an arbitrary lock payload the same atomic way production does. */
 export function writeLockFileForTest(lockPath: string, payload: object): void {
@@ -124,7 +91,7 @@ interface AcquiredLock { ctx: LockContext; release: () => void }
  *  section runs (sync return vs awaited) is the caller's job. */
 function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
   const probe = opts.probe ?? realProbe;
-  const canon = canonical(target);
+  const canon = resolvedPathOrThrow(target);
   const lockPath = canon + '.lock';
   const token = randomBytes(16).toString('hex');
   const self = selfIdentity(token, probe);

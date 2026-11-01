@@ -8,10 +8,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readFil
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
-import { stampOwnership, projectLedgerPath, projectDispositionOf, ledgerDestination, canonicalRoot, isOwned } from '../../src/memory/ownership.js';
+import { stampOwnership, projectLedgerPath, projectDispositionOf, canonicalRoot, isOwned } from '../../src/memory/ownership.js';
 import { aliasesGlobalLedger, resolveScopeTarget } from '../../src/memory/scope-target.js';
 import { resolveProjectLayer } from '../../src/memory/project-root.js';
-import { canonical, lockPathOf, withFileLock } from '../../src/memory/lock.js';
+import { lockPathOf, withFileLock } from '../../src/memory/lock.js';
+import { resolvePath, resolvedPathOrThrow } from '../../src/memory/path-identity.js';
 import { appendRecord, parseLedger } from '../../src/memory/ledger.js';
 import { scopeKeyOf } from '../../src/memory/witness-store.js';
 import { ALIASED_LEDGER_NOTE } from '../../src/memory/content-frame.js';
@@ -43,7 +44,7 @@ describe('lock identity and the append target follow the kernel through `dl/..` 
     const link = join(d, 'ledger.jsonl');
     symlinkSync('dl/../real.jsonl', link);
     expect(realpathSync.native(link)).toBe(join(realpathSync(d), 'p', 'real.jsonl'));
-    expect(canonical(link)).toBe(canonical(join(d, 'p', 'real.jsonl')));
+    expect(resolvedPathOrThrow(link)).toBe(resolvedPathOrThrow(join(d, 'p', 'real.jsonl')));
     expect(lockPathOf(link)).toBe(lockPathOf(join(d, 'p', 'real.jsonl')));
     withFileLock(link, () => {
       expect(existsSync(lockPathOf(join(d, 'p', 'real.jsonl')))).toBe(true);   // the lock landed at the KERNEL's path
@@ -140,7 +141,7 @@ describe('a path Helix cannot resolve the kernel\'s way is excluded like an alia
       if (existing) writeFileSync(projectLedgerPath(b), '');
       symlinkSync(Buffer.from(`../../${basename(b)}/.helix/memory.jsonl`), inHelix(a, ff));
       symlinkSync(ff, projectLedgerPath(a));
-      expect(ledgerDestination(projectLedgerPath(a))).toBeNull();
+      expect(resolvePath(projectLedgerPath(a)).kind).toBe('unresolvable');
       expect(projectDispositionOf(desc(a, h))).toBe('aliased');
       expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/resolves to another adopted project/);
       expect(existsSync(projectLedgerPath(b))).toBe(existing);
@@ -166,7 +167,7 @@ describe('a path Helix cannot resolve the kernel\'s way is excluded like an alia
     mkdirSync(inHelix(a, Buffer.concat([ff, Buffer.from('dir')])));
     symlinkSync(Buffer.concat([ff, Buffer.from('dir')]), join(a, '.helix', 'dl'));
     symlinkSync('dl/mem.jsonl', projectLedgerPath(a));
-    expect(ledgerDestination(projectLedgerPath(a))).toBeNull();
+    expect(resolvePath(projectLedgerPath(a)).kind).toBe('unresolvable');
     expect(projectDispositionOf(desc(a, h))).toBe('aliased');
   });
 
@@ -191,7 +192,7 @@ describe('a path Helix cannot resolve the kernel\'s way is excluded like an alia
       if (existing) writeFileSync(projectLedgerPath(b), '');
       symlinkSync(plantDeepClimb(a, b), projectLedgerPath(a));
       expect(() => realpathSync.native(join(a, '.helix', 'dk', 'dk2'))).toThrow(/ENAMETOOLONG/);
-      expect(ledgerDestination(projectLedgerPath(a))).toBeNull();
+      expect(resolvePath(projectLedgerPath(a)).kind).toBe('unresolvable');
       expect(projectDispositionOf(desc(a, h))).toBe('aliased');
       expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/resolves to another adopted project/);
       expect(existsSync(projectLedgerPath(b))).toBe(existing);
@@ -223,7 +224,7 @@ describe('a path Helix cannot resolve the kernel\'s way is excluded like an alia
       symlinkSync(`dk/${hop}`, projectLedgerPath(a));
       expect(realpathSync.native(join(a, '.helix', 'dk'))).toBe(deep);    // the hop's directory resolves
       expect(() => lstatSync(join(deep, hop))).toThrow(/ENAMETOOLONG/);   // the hop's own path does not
-      expect(ledgerDestination(projectLedgerPath(a))).toBeNull();
+      expect(resolvePath(projectLedgerPath(a)).kind).toBe('unresolvable');
       expect(projectDispositionOf(desc(a, h))).toBe('aliased');
       expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/through a path Helix cannot resolve/);
       expect(existsSync(projectLedgerPath(b))).toBe(existing);
@@ -244,9 +245,9 @@ describe('a path Helix cannot resolve the kernel\'s way is excluded like an alia
     mkdirSync(a);
     stampOwnership(a, h, {});
     expect(isOwned(a, h)).toBe(true);                                                    // A/.helix is a real directory
-    expect(ledgerDestination(projectLedgerPath(a))).toBeNull();                          // no ledger yet: its parent is not valid UTF-8
+    expect(resolvePath(projectLedgerPath(a)).kind).toBe('unresolvable');                          // no ledger yet: its parent is not valid UTF-8
     symlinkSync(`../../../../${basename(b)}/.helix/memory.jsonl`, projectLedgerPath(a)); // resolved from A's PHYSICAL .helix
-    expect(ledgerDestination(projectLedgerPath(a))).toBeNull();
+    expect(resolvePath(projectLedgerPath(a)).kind).toBe('unresolvable');
     expect(projectDispositionOf(desc(a, h))).toBe('aliased');
     expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/through a path Helix cannot resolve/);
     expect(readFileSync(projectLedgerPath(b), 'utf8')).toBe('');
@@ -273,7 +274,7 @@ describe('a path Helix cannot resolve the kernel\'s way is excluded like an alia
     const h = home(); const a = project(h);
     const globalLedger = join(h, 'memory.jsonl');
     symlinkSync(ff, projectLedgerPath(a));                         // a link whose body is not valid UTF-8
-    expect(ledgerDestination(projectLedgerPath(a))).toBeNull();
+    expect(resolvePath(projectLedgerPath(a)).kind).toBe('unresolvable');
     expect(aliasesGlobalLedger(projectLedgerPath(a), globalLedger)).toBe(false);
     expect(resolveProjectLayer({ cwd: a, userHome: '/nonexistent-home', globalLedger })).toMatchObject({ root: a, ledger: projectLedgerPath(a) });
     expect(projectDispositionOf(desc(a, h))).toBe('aliased');
@@ -291,7 +292,7 @@ describe('registry and witness scope keys keep the pre-D4 computation', () => {
     const spelled = `${d}/dl/../proj`;                                   // kernel: d/p/proj; JS: d/proj
     expect(canonicalRoot(spelled)).toBe(realpathSync(spelled));
     expect(canonicalRoot(spelled)).toBe(join(realpathSync(d), 'proj'));
-    expect(canonical(spelled)).toBe(join(realpathSync(d), 'p', 'proj'));
+    expect(resolvedPathOrThrow(spelled)).toBe(join(realpathSync(d), 'p', 'proj'));
     expect(scopeKeyOf('/unused-home', spelled)).toBe(canonicalRoot(spelled));
   });
 

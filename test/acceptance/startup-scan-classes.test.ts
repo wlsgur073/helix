@@ -125,7 +125,7 @@ describe('the startup scan names each class of verify offender (IT-M15)', () => 
     const u = mkdtempSync(join(tmpdir(), 'helix-m15e-proj-'));
     mkdirSync(join(u, '.helix'));
     // The link leads to a REAL file the kernel opens (`<U>/.helix/<0xff>`, holding B's signed verify), so
-    // the scan would print a line for it; only ledgerDestination's UTF-8 round trip makes it unresolvable.
+    // the scan would print a line for it; only the resolver's UTF-8 round trip makes it unresolvable.
     // (A dangling <0xff> link reads as an empty ledger and would pass on the old rule too: measured.)
     writeFileSync(Buffer.concat([Buffer.from(`${join(u, '.helix')}/`), Buffer.from([0xff])]), readFileSync(bLedger));
     symlinkSync(Buffer.from([0xff]), projectLedgerPath(u));

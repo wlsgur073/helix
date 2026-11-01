@@ -177,6 +177,7 @@ async function main(): Promise<void> {
     const text = formatSessionStartContext(records, newNonce(), {
       integrityAvailable, unadoptedPresent: projectDisposition === 'unadopted-present',
       aliasedPresent: projectDisposition === 'aliased',
+      unusablePresent: projectDisposition === 'unusable',
       ancestorUnadopted: projectDisposition === 'ancestor-unadopted', witnessNotes,
       // Issue #7: when no scope read has ever held memory, no earlier block can need superseding.
       unionRows: unionPhysicalRows(replays), supersedesEarlier: supersedesEarlier && !everyScopePristine,

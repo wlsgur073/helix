@@ -7,7 +7,8 @@ import { randomBytes, createHmac, hkdfSync, timingSafeEqual } from 'node:crypto'
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { canonicalRoot } from './ownership.js';
-import { withFileLock, canonical } from './lock.js';
+import { withFileLock } from './lock.js';
+import { resolvePath, resolvedPathOrThrow, UnresolvablePathError } from './path-identity.js';
 import { ensureMaster, tryReadMaster } from './ledger-mac.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
@@ -101,7 +102,7 @@ function signedJournal(scopeKey: string, master: Buffer, unsigned: Omit<JournalE
 }
 
 // ---- witness.json read/write (pure helpers — no locking of their own; callers that mutate hold
-// the witness lock and resolve `path = canonical(witnessPath(home))` ONCE, matching the
+// the witness lock and resolve the witness path through path-identity.ts ONCE, matching the
 // resolve-once-under-the-lock discipline ledger.ts's compactLedger uses). ----
 
 function readStoreFileAt(path: string): WitnessStoreFile {
@@ -148,20 +149,17 @@ function deriveState(scopeKey: string, master: Buffer | null, raw: ScopeFile | u
   return { entry, journal, macInvalid };
 }
 
-/** Lock-free read; MAC-invalid entry/journal reported via `macInvalid`, returned as null. A home that
- *  does not exist yet (a fresh install) has no witness state: canonical() realpaths the missing
- *  directory and throws ENOENT, which is read here as absence (IT-H1) — witness-read.ts promises a
- *  valid verdict on a virgin home. Anything else (ENOTDIR from a file standing in the path, EACCES)
- *  still propagates. */
+/** Lock-free read; MAC-invalid entry/journal reported via `macInvalid`, returned as null. The path is
+ *  resolved through path-identity.ts. A home that does not exist yet (a fresh install) has no witness
+ *  state: the resolver marks the missing directory `dirMissing`, which is read here as absence (IT-H1)
+ *  — witness-read.ts promises a valid verdict on a virgin home. Anything else (ENOTDIR from a file
+ *  standing in the path, EACCES) still propagates. */
 export function readScopeWitness(home: string, scopeKey: string): ScopeWitnessState {
-  let path: string;
-  try {
-    path = canonical(witnessPath(home));
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { entry: null, journal: null, macInvalid: false };
-    throw e;
-  }
-  const store = readStoreFileAt(path);
+  const r = resolvePath(witnessPath(home));
+  if (r.kind === 'unresolvable') throw new UnresolvablePathError(r.cause);   // A15 opens such a path as written; until then the read refuses
+  if (r.kind === 'uninspectable') throw r.error;
+  if (r.dirMissing) return { entry: null, journal: null, macInvalid: false };   // a virgin home has no witness state (IT-H1)
+  const store = readStoreFileAt(r.path);
   return deriveState(scopeKey, tryReadMaster(home), store.scopes[scopeKey]);
 }
 
@@ -207,7 +205,7 @@ export function advanceWitness(home: string, scopeKey: string, bytes: Buffer, he
   const master = ensureMaster(home);
   const rawPath = witnessPath(home);
   withFileLock(rawPath, () => {
-    const path = canonical(rawPath);
+    const path = resolvedPathOrThrow(rawPath);
     const store = readStoreFileAt(path);
     const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
     const verdict = classifyState(state, bytes);
@@ -278,7 +276,7 @@ export function openTransition(
   const master = ensureMaster(home);
   const rawPath = witnessPath(home);
   return withFileLock(rawPath, () => {
-    const path = canonical(rawPath);
+    const path = resolvedPathOrThrow(rawPath);
     const store = readStoreFileAt(path);
     const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
     const entry = state.macInvalid ? null : state.entry;
@@ -317,7 +315,7 @@ export function completeTransition(home: string, scopeKey: string, bytes: Buffer
   const master = ensureMaster(home);
   const rawPath = witnessPath(home);
   withFileLock(rawPath, () => {
-    const path = canonical(rawPath);
+    const path = resolvedPathOrThrow(rawPath);
     const store = readStoreFileAt(path);
     const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
     const journal = state.macInvalid ? null : state.journal;
@@ -379,7 +377,7 @@ export function discardTransition(home: string, scopeKey: string, nonce: string,
   const master = ensureMaster(home);
   const rawPath = witnessPath(home);
   withFileLock(rawPath, () => {
-    const path = canonical(rawPath);
+    const path = resolvedPathOrThrow(rawPath);
     const store = readStoreFileAt(path);
     const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
     const journal = state.macInvalid ? null : state.journal;
@@ -416,7 +414,7 @@ export function maybeCleanupClear(home: string, scopeKey: string, bytes: Buffer,
   ensureHelixDir(home);
   const rawPath = witnessPath(home);
   return withFileLock(rawPath, () => {
-    const path = canonical(rawPath);
+    const path = resolvedPathOrThrow(rawPath);
     const store = readStoreFileAt(path);
     const master = tryReadMaster(home); // never mints: clearing produces no new signed content
     const state = deriveState(scopeKey, master, store.scopes[scopeKey]);

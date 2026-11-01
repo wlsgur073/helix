@@ -4,7 +4,7 @@ import type { HelixConfig, NarrowedConfig } from '../config.js';
 import { SLOW_EFFORTS, SLOW_EFFORT_TIMEOUT_HINT_MS, DEFAULT_CONFIG, narrowDualVerify } from '../config.js';
 import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js';
 import { dualVerify, persistedReason, type DualVerifyResult, type EchoSource, type GateTrace } from '../verify/dual-verify.js';
-import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, normalizeRecordContent, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, recordRows, type FrameLine } from '../memory/content-frame.js';
+import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, normalizeRecordContent, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, UNUSABLE_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, recordRows, type FrameLine } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
 import { isWitnessAdvanceError, isWitnessBlockedError } from '../memory/witness-store.js';
 import { appendAudit, type VerifyAudit, type EraseAudit } from '../audit.js';
@@ -60,7 +60,7 @@ export function assertValidId(id: string): void {
 
 /** B2 (Codex R2 #8) + ALIAS-P2P (item 7): the trusted, informational, CONSTANT-string project-layer
  *  disclosure note — never interpolated, never naming the project path (see content-frame.ts). Iff
- *  `disposition` is 'unadopted-present', 'aliased' or 'ancestor-unadopted', rendered in the SAME trusted
+ *  `disposition` is 'unadopted-present', 'aliased', 'unusable' or 'ancestor-unadopted', rendered in the SAME trusted
  *  advisory layer as the integrity/egress/conflict notes below, on empty AND non-empty results alike,
  *  on every read surface (recall; inspect current/history/asOf). `disposition` is always the caller's
  *  OWN single per-call snapshot (store.ts threads it — recall()/currentView()/historyView()/asOfView()
@@ -68,6 +68,7 @@ export function assertValidId(id: string): void {
 function projectLayerNote(disposition: ProjectDisposition): string {
   return disposition === 'unadopted-present' ? `\n\n${UNADOPTED_LEDGER_NOTE}`
     : disposition === 'aliased' ? `\n\n${ALIASED_LEDGER_NOTE}`
+    : disposition === 'unusable' ? `\n\n${UNUSABLE_LEDGER_NOTE}`
     : disposition === 'ancestor-unadopted' ? `\n\n${ANCESTOR_UNADOPTED_NOTE}` : '';
 }
 
@@ -130,7 +131,7 @@ export const REDACTION_NOTICE =
   'part of this fact was replaced with [redacted:<kind>] markers before storage; a recheck cannot bind a path or pattern that fell inside a redacted span';
 
 /** IT-M4: the commit result's `notice` for an explicit 'global' commit made while this session's
- *  project layer is off ('ancestor-unadopted', 'aliased' or, ruling R11, 'unadopted-present' — see
+ *  project layer is off ('ancestor-unadopted', 'aliased', 'unusable' or, ruling R11, 'unadopted-present' — see
  *  store.ts CommitResult). Constant, no path. */
 export const GLOBAL_WHILE_PROJECT_OFF_NOTICE =
   "written to global memory, which every project sees, while this session's project memory is off";

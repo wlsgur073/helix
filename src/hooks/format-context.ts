@@ -1,5 +1,5 @@
 import type { MemoryState, ScopedRecord } from '../types.js';
-import { markLines, normalizeRecordContent, frameOpen, frameClose, DATA_SEMANTICS, reverifyFlag, safeId, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, SUPERSEDE_NOTE } from '../memory/content-frame.js';
+import { markLines, normalizeRecordContent, frameOpen, frameClose, DATA_SEMANTICS, reverifyFlag, safeId, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, UNUSABLE_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, SUPERSEDE_NOTE } from '../memory/content-frame.js';
 import { classifyEmission } from '../risk/trifecta.js';
 import { isVerifyingSource } from '../memory/firewall.js';
 import { isIsoInstant } from '../memory/history.js';
@@ -30,6 +30,8 @@ export interface FormatOptions {
   /** Item 7: true iff this call's disposition snapshot is 'aliased'. Same treatment as unadoptedPresent:
    *  the constant note always renders and is reserved outside the maxChars accounting. */
   aliasedPresent?: boolean;
+  /** Third fix batch B1: true iff this call's disposition snapshot is 'unusable'. Same treatment as unadoptedPresent. */
+  unusablePresent?: boolean;
   /** Issue #1: true iff this call's disposition snapshot is 'ancestor-unadopted' — the session started
    *  below a parent-directory project that is not adopted. Same treatment as unadoptedPresent. */
   ancestorUnadopted?: boolean;
@@ -72,7 +74,7 @@ const RESERVE = 6; // floor of item slots guaranteed to current-authoritative re
  * Render the live projection as a SessionStart context block: nonce-delimited, semantics-headed,
  * per-line DATA[state:scope]| datamarked, most-trusted first, re-verify flags surfaced, bounded in
  * items and characters. Empty memory renders '' (inject nothing) UNLESS `unadoptedPresent`,
- * `aliasedPresent` or `ancestorUnadopted` is set, in which case the matching constant disclosure note renders alone (B2/item 7
+ * `aliasedPresent`, `unusablePresent` or `ancestorUnadopted` is set, in which case the matching constant disclosure note renders alone (B2/item 7
  * — the empty auto-load IS the misdiagnosis surface an attacker-planted-but-unadopted or aliased ledger
  * would otherwise hide behind). `nonce` is supplied by the caller.
  */
@@ -83,6 +85,7 @@ export function formatSessionStartContext(records: ScopedRecord[], nonce: string
   const integrityAvailable = opts.integrityAvailable ?? true;
   const projectLayerNote = opts.unadoptedPresent ? UNADOPTED_LEDGER_NOTE
     : opts.aliasedPresent ? ALIASED_LEDGER_NOTE
+    : opts.unusablePresent ? UNUSABLE_LEDGER_NOTE
     : opts.ancestorUnadopted ? ANCESTOR_UNADOPTED_NOTE : null;
   const scaleNote = opts.unionRows !== undefined && opts.unionRows >= SCALE_ADVISORY_ROWS
     ? scaleAdvisoryNote(opts.unionRows) : null;

@@ -156,24 +156,26 @@ describe('IT-M4: an explicit global commit while project memory is off carries t
     expect(globalCommit(store().store)).not.toHaveProperty('bypassedProject');
   });
 
-  // A cwd project nobody adopted whose memory file the pre-adopt check refuses reads 'inactive' (its
-  // link leads to no file), yet every project write there gets the alias refusal, which calls the
-  // layer disabled and offers global memory. The global commit that follows says so too.
-  const refusedLinks: Array<[string, (u: string, home: string) => void]> = [
+  // A cwd project nobody adopted whose memory file the pre-adopt check refuses reads 'inactive' while its
+  // link is a dangling link to another adopted project's ledger, and 'aliased' (row 4 of design 4.2, adopted
+  // or not) while the link cannot be resolved; A13 makes the first one 'aliased' too. Either way every project
+  // write there gets the alias refusal, which calls the layer disabled and offers global memory. The global
+  // commit that follows says so too.
+  const refusedLinks: Array<[string, (u: string, home: string) => void, 'inactive' | 'aliased']> = [
     ["a dangling link to another adopted project's ledger", (u, home) => {
       const b = tmp('helix-disc-proj-');
       stampOwnership(b, home, {});
       symlinkSync(projectLedgerPath(b), projectLedgerPath(u));
-    }],
-    ['a link body that is not valid UTF-8', (u) => symlinkSync(Buffer.from([0xff]), projectLedgerPath(u))],
-    ['a link that leads back to itself', (u) => symlinkSync('memory.jsonl', projectLedgerPath(u))],
+    }, 'inactive'],
+    ['a link body that is not valid UTF-8', (u) => symlinkSync(Buffer.from([0xff]), projectLedgerPath(u)), 'aliased'],
+    ['a link that leads back to itself', (u) => symlinkSync('memory.jsonl', projectLedgerPath(u)), 'aliased'],
   ];
-  it.each(refusedLinks)('not adopted, and the pre-adopt check refuses its memory file (%s): the notice, and aliased', (_label, plant) => {
+  it.each(refusedLinks)('not adopted, and the pre-adopt check refuses its memory file (%s): the notice, and aliased', (_label, plant, disposition) => {
     const u = tmp('helix-disc-proj-');
     mkdirSync(join(u, '.helix'));
     const { store: s, home } = store({ root: u });
     plant(u, home);
-    expect(projectDispositionOf({ root: u, ledger: projectLedgerPath(u), home, origin: 'cwd' })).toBe('inactive');
+    expect(projectDispositionOf({ root: u, ledger: projectLedgerPath(u), home, origin: 'cwd' })).toBe(disposition);
     expect(() => handleCommit(s, { content: 'a project fact', source: 'user' })).toThrow(/the project layer is disabled here/);
     expect(explicitGlobal(s).notice).toBe(GLOBAL_NOTICE);
     expect(s.commitScoped({ content: 'another fact for every project', source: 'user', scope: 'global' }).bypassedProject).toBe('aliased');

@@ -90,6 +90,12 @@ export const UNADOPTED_LEDGER_NOTE =
 export const ALIASED_LEDGER_NOTE =
   "(this project's memory file resolves to another adopted project's memory file, or through a path Helix cannot resolve, and is excluded from results)";
 
+/** Third fix batch B1 (design 4.2, 4.9): the same constraints as UNADOPTED_LEDGER_NOTE: informational only, no
+ *  imperative, no interpolation, no path. Rendered wherever the unadopted note is, iff the per-call
+ *  project-disposition snapshot is 'unusable'. */
+export const UNUSABLE_LEDGER_NOTE =
+  "(this project's memory file cannot be used as it is: it is not a regular file, it or its folder cannot be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory records; project memory is off for this session)";
+
 /** Issue #1: the same constraints as UNADOPTED_LEDGER_NOTE — whoever can create a `.helix/` in a
  *  directory above the session controls WHETHER this appears, so it is a constant: informational only,
  *  no imperative, no interpolation, no path. Rendered wherever the unadopted note is, iff the per-call
