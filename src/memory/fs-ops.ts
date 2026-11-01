@@ -13,7 +13,7 @@ export interface DurableFsOps {
   fsyncSync(fd: number): void;
   closeSync(fd: number): void;
   /** `dev` and `ino` identify the object the descriptor holds, whatever its path leads to by now. */
-  fstatSync(fd: number): { size: number; nlink: number; mode: number; dev: number; ino: number };
+  fstatSync(fd: number): { size: number; nlink: number; mode: number; dev: bigint; ino: bigint };
   renameSync(from: string, to: string): void;
   unlinkSync(path: string): void;
   linkSync(from: string, to: string): void;
@@ -88,7 +88,7 @@ export function fsyncDir(
 
 export const realFsOps: DurableFsOps = {
   openSync, readSync, writeSync, fsyncSync, closeSync,
-  fstatSync: (fd) => { const s = fstatSync(fd); return { size: s.size, nlink: s.nlink, mode: s.mode, dev: s.dev, ino: s.ino }; },
+  fstatSync: (fd) => { const s = fstatSync(fd, { bigint: true }); return { size: Number(s.size), nlink: Number(s.nlink), mode: Number(s.mode), dev: s.dev, ino: s.ino }; },
   renameSync, unlinkSync, linkSync, fchmodSync,
   readdirSync: (d) => readdirSync(d),
   fsyncDir,

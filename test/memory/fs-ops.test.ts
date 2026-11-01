@@ -41,10 +41,10 @@ describe('fs-ops seam', () => {
     const fd = realFsOps.openSync(f, 'r');
     try {
       const st = realFsOps.fstatSync(fd);
-      const ref = statSync(f);
+      const ref = statSync(f, { bigint: true });
       expect(st.dev).toBe(ref.dev); expect(st.ino).toBe(ref.ino);
       expect(st.size).toBe(3); expect(st.nlink).toBe(1);
-      expect(st.mode).toBe(ref.mode);
+      expect(st.mode).toBe(Number(ref.mode));
     } finally { realFsOps.closeSync(fd); }
   });
   // 2026-08-11 supersession: the open() leg used to swallow EVERY errno on the theory that a failed

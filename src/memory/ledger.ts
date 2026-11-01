@@ -1,11 +1,11 @@
-import { mkdirSync, statSync, lstatSync, openSync, fstatSync, readSync, closeSync, constants, type Stats } from 'node:fs';
+import { mkdirSync, statSync, openSync, fstatSync, readSync, closeSync, constants, type Stats } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
 import { forgedFactIds, isFactRow } from './verified-projection.js';
 import { withFileLock } from './lock.js';
-import { resolvePath, resolvedPathOrThrow } from './path-identity.js';
+import { resolvePath, resolvedPathOrThrow, fileIdentityAt, hasComparableInode, sameFile, type FileIdentity } from './path-identity.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import { fenceId, sha256Hex } from './witness-core.js';
@@ -145,17 +145,9 @@ export class LedgerDestinationChangedError extends Error {
 export const isLedgerDestinationChangedError = (e: unknown): boolean =>
   e instanceof Error && (e as { ledgerDestinationChanged?: unknown }).ledgerDestinationChanged === true;
 
-interface FileIdentity { dev: number; ino: number }
-
 /** The destination as a caller judged it, sampled under the ledger lock: the resolved path and the device and
  *  inode that stood there, `identity` null when nothing did. */
-export interface JudgedDestination { path: string; identity: { dev: bigint; ino: bigint } | null }
-
-/** What stands at `path` itself (a link is not followed), or null when nothing does. */
-function identityAt(path: string): FileIdentity | null {
-  try { const st = lstatSync(path); return { dev: st.dev, ino: st.ino }; }
-  catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null; throw e; }
-}
+export interface JudgedDestination { path: string; identity: FileIdentity | null }
 
 /** O_NOFOLLOW (design 4.1 item 3): the last component of the resolved path is never followed, so a link that
  *  appears there after the resolution ends in ELOOP with nothing written. Where the platform does not define the
@@ -190,24 +182,26 @@ function openForAppend(path: string, absentWhenJudged: boolean, fsOps: DurableFs
  *  DIRECTORY component replaced by a link after the resolution is followed by the open. So the descriptor must be
  *  the destination as judged and the path, resolved again, must still be that destination. A file that was absent
  *  when it was judged has no identity to compare: there the file at the path as resolved again must be the
- *  descriptor's. A check that cannot be made answers false. */
+ *  descriptor's. An inode of 0 on either side skips the identity half, keeps the re-resolution and never refuses by
+ *  itself (design 14, decision 9). A check that cannot be made answers false. */
 function destinationUnchanged(rawPath: LedgerPath, path: string, judged: FileIdentity | null, opened: FileIdentity): boolean {
-  if (judged !== null && (opened.dev !== judged.dev || opened.ino !== judged.ino)) return false;
+  if (hasComparableInode(judged) && hasComparableInode(opened) && !sameFile(judged, opened)) return false;
   const again = resolvePath(rawPath);
   if (again.kind !== 'resolved' || again.dirMissing || again.path !== path) return false;
   if (judged !== null) return true;
   let now: FileIdentity | null;
-  try { now = identityAt(again.path); } catch { return false; }
-  return now !== null && now.dev === opened.dev && now.ino === opened.ino;
+  try { now = fileIdentityAt(again.path); } catch { return false; }
+  if (now === null) return false;
+  if (!hasComparableInode(now) || !hasComparableInode(opened)) return true;
+  return sameFile(now, opened);
 }
 
 /** Remove the file this call created, when the check after the open refused (design 4.3 step 5): only while the
- *  file at the path is still the descriptor's. Every failure is swallowed: the refusal in flight is what the caller
- *  reports. */
+ *  file at the path is shown to be the descriptor's, so at inode 0 it stays. Every failure is swallowed: the refusal
+ *  in flight is what the caller reports. */
 function removeOwnCreation(path: string, opened: FileIdentity, fsOps: DurableFsOps): void {
   try {
-    const now = identityAt(path);
-    if (now === null || now.dev !== opened.dev || now.ino !== opened.ino) return;
+    if (!sameFile(fileIdentityAt(path), opened)) return;
     fsOps.unlinkSync(path);
     fsOps.fsyncDir(dirname(path));
   } catch { /* the file cannot be shown to be gone or durable; the refusal stands */ }
@@ -231,9 +225,7 @@ export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, 
   mkdirSync(dirname(rawPath), { recursive: true });
   const path = resolvedPathOrThrow(rawPath);   // resolve the FINAL-component symlink to the real inode's path (write-layer identity, the SAME rule the lock uses) so append and compaction never diverge onto different inodes
   if (judged !== undefined && judged.path !== path) throw new LedgerDestinationChangedError();
-  const before: FileIdentity | null = judged === undefined
-    ? identityAt(path)
-    : judged.identity && { dev: Number(judged.identity.dev), ino: Number(judged.identity.ino) };
+  const before = judged !== undefined ? judged.identity : fileIdentityAt(path);
   const { fd, created } = openForAppend(path, before === null, fsOps);
   try {
     const st = fsOps.fstatSync(fd);
@@ -245,7 +237,7 @@ export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, 
     if (st.nlink === 0) throw new LedgerDestinationChangedError();   // replaced at the name since the open: a race, not an alias
     if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
     sweepOrphanTmps(path, { fsOps });   // behind the check: a refused append never touches the directory the path came to lead to
-    if (fsOps.fstatSync(fd).nlink === 0) throw new LedgerDestinationChangedError();   // a compactor's rename that landed before the sweep left this descriptor on an unlinked inode; behind the sweep it fails ENOENT, so a descriptor that passes here is the file at the name
+    if (fsOps.fstatSync(fd).nlink === 0) throw new LedgerDestinationChangedError();   // a compactor's rename that landed before the sweep left this descriptor on an unlinked inode; behind the sweep it fails ENOENT, so a descriptor that passes here is a live file
     let line = JSON.stringify(record) + '\n';
     if (st.size > 0) {
       const tail = Buffer.alloc(1);

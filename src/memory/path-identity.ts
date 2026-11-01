@@ -1,5 +1,6 @@
 /** One path identity for the lock, the append, the rewrite, the read and the alias rules (third fix batch B1,
- *  design 4.1). This file holds the resolver and the helpers moved out of ownership.ts.
+ *  design 4.1). This file holds the resolver, the helpers moved out of ownership.ts and the device and inode
+ *  comparison (FileIdentity, fileIdentityAt, hasComparableInode, sameFile).
  *
  *  This module imports node builtins only (design section 3). */
 import { lstatSync, readlinkSync, realpathSync, statSync } from 'node:fs';
@@ -209,4 +210,35 @@ export function resolvedPathOrThrow(path: string): string {
   if (r.kind === 'uninspectable') throw r.error;
   if (r.dirMissing) throw r.dirError ?? Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
   return r.path;
+}
+
+/** Device and inode of one file system object, as bigints: an inode past 2^53 (a Windows file index, drvfs: 159 of
+ *  3,177 names measured) does not survive the default number-typed stat, and two files that round to one number
+ *  would read as one (design 4.2 row 7, 13.4 seventh bullet). */
+export interface FileIdentity { readonly dev: bigint; readonly ino: bigint }
+
+/** The stat the identity is read through; the seam a test replaces to answer inode 0 or a huge inode. */
+export type IdentityProbe = (path: string, follow: boolean) => FileIdentity | null;
+
+const realIdentityProbe: IdentityProbe = (path, follow) => {
+  try {
+    const st = follow ? statSync(path, { bigint: true }) : lstatSync(path, { bigint: true });
+    return { dev: st.dev, ino: st.ino };
+  } catch (e) { if (codeOf(e) === 'ENOENT') return null; throw e; }
+};
+
+/** What stands at `path` (a link is not followed unless `follow`), or null when nothing does. Any other error is thrown. */
+export function fileIdentityAt(path: string, opts: { follow?: boolean; probe?: IdentityProbe } = {}): FileIdentity | null {
+  return (opts.probe ?? realIdentityProbe)(path, opts.follow === true);
+}
+
+/** An inode of 0 is read as "the file system gives no inode" (design 14, decision 9; FUSE and native Windows are not
+ *  measured): such an identity says nothing about which file it is. */
+export function hasComparableInode(id: FileIdentity | null): id is FileIdentity {
+  return id !== null && id.ino !== 0n;
+}
+
+/** The two identities name one file: both comparable, same device, same inode. Never true for null or for inode 0. */
+export function sameFile(a: FileIdentity | null, b: FileIdentity | null): boolean {
+  return hasComparableInode(a) && hasComparableInode(b) && a.dev === b.dev && a.ino === b.ino;
 }
