@@ -123,6 +123,53 @@ export const isLockForeignObjectError = (e: unknown): boolean =>
 
 interface AcquiredLock { ctx: LockContext; release: () => void }
 
+/** Locks THIS thread published and could not take down when it released them (finding v-firstwrite-05 of the
+ *  B1 prototype; spec 4.5 does not speak about the release). A lock is released by its path, after the token
+ *  at that path was read back. When the path leads somewhere else at that moment (the folder the lock stands
+ *  in was replaced while the lock was held), or the file cannot be read, the release proves nothing and
+ *  leaves everything in place: the lock file stays where it was published, recording a holder that is alive.
+ *  Every other process then waits its budget on it, and this thread's own next acquisition classified it
+ *  'reentrant-self' and threw until the process ended.
+ *
+ *  So the release keeps the pair (lock path, token), in memory only, and the acquirer takes such a lock down
+ *  as soon as its own token stands at the path again: before the loop, and in it when it meets its own token
+ *  as the holder. The proof is the release's own, the random token this thread minted for an acquisition
+ *  whose critical section has ended; nothing is removed on the strength of a pid. Bounded at ORPHAN_MAX pairs
+ *  (ruling t-04): a pair whose path never leads back is dropped, oldest first, and its lock stays where it
+ *  stands. Insertion order is age. */
+const ORPHAN_MAX = 64;
+const orphanedOwnLocks = new Map<string, string>();   // token -> the lock path it was published at
+
+function rememberOrphan(lockPath: string, token: string): void {
+  orphanedOwnLocks.set(token, lockPath);
+  while (orphanedOwnLocks.size > ORPHAN_MAX) {
+    const oldest = orphanedOwnLocks.keys().next();
+    if (oldest.done === true) break;
+    orphanedOwnLocks.delete(oldest.value);
+  }
+}
+
+/** Take down every remembered lock whose token stands at its path again; answers whether the lock at `at`
+ *  was one of them. A pair whose path holds something else stays remembered (another object, another holder,
+ *  or still unreachable), and so does one whose read or unlink threw. No cost while nothing is remembered,
+ *  which is every process whose releases all proved ownership. */
+function reclaimOrphanedOwnLocks(at?: string): boolean {
+  if (orphanedOwnLocks.size === 0) return false;
+  let freedAt = false;
+  for (const [token, lockPath] of [...orphanedOwnLocks]) {
+    try {
+      if (lockTokenAt(lockPath) !== token) continue;
+      unlinkSync(lockPath);
+      orphanedOwnLocks.delete(token);
+      if (lockPath === at) freedAt = true;
+    } catch { /* not removable now: stays remembered */ }
+  }
+  return freedAt;
+}
+
+/** Test and probe seam: how many of its own locks this thread remembers as not released. */
+export function orphanedOwnLockCount(): number { return orphanedOwnLocks.size; }
+
 /** Shared acquire path for withFileLock/withFileLockAsync (extracted; zero behavior change for
  *  existing synchronous callers — same publish/contend/classify/reclaim loop, same error
  *  messages). Returns the acquired LockContext plus a release() thunk; deciding how the held
@@ -158,6 +205,9 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
   // still yields the CPU instead of spinning.
   const sleepWithinBudget = (): void => sleepSync(Math.max(1, Math.min(RETRY_MS, maxWaitMs - elapsedMs())));
   let publishedOnceMore = false;                            // per acquisition: the extra publication of the absent row (locks-R3) and of a steal at the budget end
+  // An orphan of ANY path is taken down here (see orphanedOwnLocks), so other processes wait on it only until
+  // this thread's next acquisition of any lock.
+  reclaimOrphanedOwnLocks();
 
   for (;;) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString('hex')}.tmp`;
@@ -210,6 +260,11 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
     }
     const holder = reading.holder;
 
+    // This thread's own token as the holder: a real re-entrant call, or an orphan whose folder came back after the
+    // look in front of the loop. An orphan is taken down and the publish retried at once, with no budget check and no
+    // sleep: this thread has just freed the lock itself. That cannot spin: a reclaim forgets the pair, so this runs at
+    // most once per remembered pair, and a lock that is not remembered reaches the throw.
+    if (holder === 'reentrant-self' && reclaimOrphanedOwnLocks(lockPath)) continue;
     if (holder === 'reentrant-self')
       throw new Error(`withFileLock: re-entrant acquisition of ${lockPath} from the same thread (pid ${process.pid}) — withFileLock is not re-entrant`);
     // A provably-dead holder gets ONE gated reclaim attempt, then we fall through to the normal
@@ -239,8 +294,10 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
   };
   const release = (): void => {
     // Release ONLY a lock we can prove is ours. Anything else (foreign payload, legacy dir, a link,
-    // unreadable) is left in place — deleting it would free a lock someone else may hold.
-    try { if (lockTokenAt(lockPath) === token) unlinkSync(lockPath); } catch { /* cannot prove ownership: leave it */ }
+    // unreadable) is left in place — deleting it would free a lock someone else may hold. What cannot
+    // be proven now is remembered (see orphanedOwnLocks): the path may lead back to it later.
+    try { if (lockTokenAt(lockPath) === token) { unlinkSync(lockPath); return; } } catch { /* cannot prove ownership, or the unlink failed */ }
+    rememberOrphan(lockPath, token);
   };
   return { ctx, release };
 }
@@ -279,8 +336,8 @@ type LockObject =
   | { kind: 'absent' };
 
 /** THE one read of a lock path (spec 4.5). Every site that used readFileSync on a lock path goes
- *  through it: the acquirer's classification, the reader wait, stillOwned, release, the reaper's
- *  re-verification, the reaper gate, and the `owner` entry of a legacy lock directory. readFileSync
+ *  through it: the acquirer's classification, the reader wait, stillOwned, release, the orphan reclaim,
+ *  the reaper's re-verification, the reaper gate, and the `owner` entry of a legacy lock directory. readFileSync
  *  followed links and blocked on a FIFO with no writer, which stopped the server's one thread.
  *  The name is examined without following a link (lstat); only a regular file is opened, with
  *  O_NONBLOCK (a FIFO that took the name after the look opens instead of blocking) and O_NOFOLLOW (a
@@ -326,7 +383,8 @@ function readLockObject(path: string): LockObject {
 
 /** The token recorded at a lock path, or null: read through readLockObject, so a link, a FIFO, a
  *  directory, an oversized or an unreadable file answers null and is never followed. stillOwned,
- *  release and the reaper gate use it to recognise their OWN lock and leave everything else in place. */
+ *  release, the orphan reclaim and the reaper gate use it to recognise their OWN lock and leave
+ *  everything else in place. */
 function lockTokenAt(path: string): string | null {
   const o = readLockObject(path);
   return o.kind === 'payload' && !o.oversized ? tryParsePayload(o.raw)?.token ?? null : null;
