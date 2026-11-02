@@ -2,7 +2,7 @@
 // Modes: default synthetic sweep | --real (read-only on the actual ledgers) | --report (summarize metrics.jsonl).
 // Establishes the HMAC-era baseline — the 2026-06-13 numbers predate the MAC gate and are NOT comparable.
 // Generator functions are exported for the future A4 JSONL-vs-SQLite comparison.
-import { writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, createReadStream, statSync } from 'node:fs';
+import { writeFileSync, mkdirSync, mkdtempSync, rmSync, createReadStream, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { createInterface } from 'node:readline';
@@ -11,6 +11,7 @@ import { ensureMaster, signVerify, digestContent } from '../src/memory/ledger-ma
 import { subkeyForScope, verifiedLiveStats } from '../src/memory/verified-read.js';
 import { MemoryStore } from '../src/memory/store.js';
 import { judgeProjectLayer, projectLedgerPath } from '../src/memory/ownership.js';
+import { hasOwnHelixEntry } from '../src/memory/project-root.js';
 
 // --- deterministic RNG (seedable) — reproducible fixtures, no Math.random ---
 function lcg(seed: number): () => number {
@@ -194,7 +195,7 @@ export function runReal(deps: RealDeps = {}): void {
   const scopes: Array<{ label: string; ledger: string; root?: string }> = [{ label: 'global', ledger: globalLedger }];
   // One physical file is never two participants (cwd == $HOME aliases the global ledger in the
   // default layout) — the same judgement the server, hook, and trigger measurement apply.
-  if (existsSync(join(cwd, '.helix')) && judgeProjectLayer({ root: cwd, home, ledger: projectLedgerPath(cwd), globalLedger }).state === 'owned') {
+  if (hasOwnHelixEntry(cwd) && judgeProjectLayer({ root: cwd, home, ledger: projectLedgerPath(cwd), globalLedger }).state === 'owned') {
     scopes.push({ label: 'project', ledger: projectLedgerPath(cwd), root: cwd });
   }
   for (const s of scopes) {

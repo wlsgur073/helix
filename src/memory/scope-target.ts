@@ -4,39 +4,13 @@
  *
  *  Third fix batch B1 (design 4.2 and 4.10): the project-to-project rule and the copies of the global
  *  rule (scripts/trigger-measure.ts, scripts/bench-replay.ts) are now the one judgement in ownership.ts
- *  (judgeProjectLayer), which takes the global ledger's path as an input. `aliasesGlobalLedger` stays
- *  here only for src/memory/project-root.ts, which applies it once for the server and the SessionStart
- *  hook. */
+ *  (judgeProjectLayer), which takes the global ledger's path as an input. The rule for the same directory
+ *  entry is isGlobalLedgerEntry, also in ownership.ts: resolveProjectLayer (src/memory/project-root.ts) and
+ *  resolveScopeTarget below share it, and it replaced `aliasesGlobalLedger`, which compared where two
+ *  appends land and so dropped the layer of a memory file linked to the global ledger. */
 import { isGlobalLedgerEntry, judgeProjectLayer, projectLedgerPath, type JudgementCause } from './ownership.js';
 import { resolvePath } from './path-identity.js';
 import { scopeKeyOf } from './witness-store.js';
-
-/**
- * Is `projectLedger` the SAME PHYSICAL FILE as `globalLedger`?
- *
- * Compared canonically, never textually: a symlinked `.helix` (or a symlinked `memory.jsonl`) that
- * points a project ledger at the global one is one inode wearing two names, and the lock and append
- * layers both resolve to that inode. A textual compare would call them distinct and hand the same
- * bytes two identities.
- *
- * The default install layout makes this reachable without any symlink at all: `HELIX_HOME` is
- * `$HOME/.helix`, so the global ledger is `$HOME/.helix/memory.jsonl` — precisely what
- * `projectLedgerPath($HOME)` returns.
- *
- * ALIAS-DOTDOT (second fix batch, D4): both sides are where an append through them lands, computed
- * the kernel's way (path-identity.ts resolvePath), not canonicalRoot. canonicalRoot collapses a
- * `..` after a symlinked directory as text and returns a DANGLING link's own location, so a project
- * ledger linked as `dl/../<path to the global ledger>`, or linked to a global ledger that does not
- * exist yet, read as a separate file while its appends landed in (or created) the global ledger. A
- * side that is not `resolved` is not called the same file here: the project layer then stays
- * configured and the judgement excludes it (rows 4 and 5), so its writes are refused rather
- * than silently routed to the global ledger.
- */
-export function aliasesGlobalLedger(projectLedger: string, globalLedger: string): boolean {
-  const p = resolvePath(projectLedger);
-  const g = resolvePath(globalLedger);
-  return p.kind === 'resolved' && g.kind === 'resolved' && p.path === g.path;
-}
 
 /** `'global'`, or an absolute project root. */
 export type Scope = 'global' | (string & {});

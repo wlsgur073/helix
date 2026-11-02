@@ -111,6 +111,12 @@ describe('resolveProjectDisposition (pure-ish; real fs for existence/ownership)'
     expect(resolveProjectDisposition(a, home, join(home, 'memory.jsonl'))).toBe('unowned');
     expect(resolveProjectDisposition(b, home, join(home, 'memory.jsonl'))).toBe('owned');
   });
+  it('a dangling .helix link is an entry, so the sink says unowned, not absent (row 3 judges it)', () => {
+    const home = tmpHome();
+    const root = tmpProj();
+    symlinkSync(join(root, 'nowhere'), join(root, '.helix'));
+    expect(resolveProjectDisposition(root, home, join(home, 'memory.jsonl'))).toBe('unowned');
+  });
 });
 
 // -------------------------------------------------------------------------------------------------

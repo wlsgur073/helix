@@ -209,6 +209,6 @@ async function main(): Promise<void> {
 // launcher's spelling, so the two disagree the moment a symlink is anywhere on the path — which is
 // the normal case for a plugin cache. main() then never ran and the hook exited 0 having injected
 // nothing, a silent failure of the headline feature. isEntryPoint realpaths both sides — the same
-// realpath identity the project-ledger guard in resolveProjectLayer gets from aliasesGlobalLedger (a
-// canonicalRoot comparison under the hood) for the same reason.
+// realpath identity the project-ledger guard in resolveProjectLayer gets from isGlobalLedgerEntry for
+// the same reason.
 if (isEntryPoint(import.meta.url)) void main();

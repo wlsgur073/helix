@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { realFsOps, writeAll, type DurableFsOps } from '../src/memory/fs-ops.js';
 import { judgeProjectLayer, projectLedgerPath } from '../src/memory/ownership.js';
+import { hasOwnHelixEntry } from '../src/memory/project-root.js';
 import { metricsEnabledFromGlobalConfig } from '../src/config.js';
 import { evaluateTrigger, type Leg, type MetricsEvent, type MetricsState, type ParticipantSize } from './trigger-eval.js';
 
@@ -101,7 +102,7 @@ function toParticipant(id: 'global' | 'project', outcome: ReadOutcome): Particip
  *  (design 4.2). 'absent' when there is no project layer at all. Only 'owned' ever contributes bytes/rows
  *  — see readTwoParticipants. */
 export function resolveProjectDisposition(root: string, home: string, globalLedger: string): 'owned' | 'unowned' | 'absent' {
-  if (!existsSync(join(root, '.helix'))) return 'absent';
+  if (!hasOwnHelixEntry(root)) return 'absent';
   return judgeProjectLayer({ root, ledger: projectLedgerPath(root), home, globalLedger }).state === 'owned' ? 'owned' : 'unowned';
 }
 

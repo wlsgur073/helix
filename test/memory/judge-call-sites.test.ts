@@ -52,15 +52,15 @@ function world(): W {
 }
 const helix = (w: W): void => { mkdirSync(join(w.a, '.helix'), { recursive: true }); };
 
-interface Layout { id: string; adopted: boolean; plant: (w: W) => void; state: 'aliased' | 'unusable'; row: string; cause: string; noHook?: true }
+interface Layout { id: string; adopted: boolean; plant: (w: W) => void; state: 'aliased' | 'unusable'; row: string; cause: string }
 const LAYOUTS: Layout[] = [
   { id: 'adopted, the memory path links to a file outside the project (D1)', adopted: true, state: 'aliased', row: '6', cause: 'outside-root',
     plant: (w) => { writeFileSync(join(w.b, 'out.jsonl'), ''); symlinkSync(join(w.b, 'out.jsonl'), projectLedgerPath(w.a)); } },
   { id: 'adopted, the memory file has a second hard link (D6)', adopted: true, state: 'aliased', row: '8', cause: 'hard-link',
     plant: (w) => { writeFileSync(projectLedgerPath(w.a), REC('m_1')); linkSync(projectLedgerPath(w.a), join(w.a, '.helix', 'second.jsonl')); } },
-  { id: 'adopted, the memory path links to the existing global ledger (the home is outside the project)', adopted: true, state: 'aliased', row: '6', cause: 'outside-root', noHook: true,
+  { id: 'adopted, the memory path links to the existing global ledger (the home is outside the project)', adopted: true, state: 'aliased', row: '6', cause: 'outside-root',
     plant: (w) => { writeFileSync(w.global, ''); symlinkSync(w.global, projectLedgerPath(w.a)); } },
-  { id: 'NOT adopted, the memory path links to the existing global ledger (T10-3 retired: no foreign-file text)', adopted: false, state: 'aliased', row: '6', cause: 'outside-root', noHook: true,
+  { id: 'NOT adopted, the memory path links to the existing global ledger (T10-3 retired: no foreign-file text)', adopted: false, state: 'aliased', row: '6', cause: 'outside-root',
     plant: (w) => { writeFileSync(w.global, REC('g_1')); symlinkSync(w.global, projectLedgerPath(w.a)); } },
   { id: 'NOT adopted, `.helix` is a regular file (row 3)', adopted: false, state: 'unusable', row: '3', cause: 'helix-not-directory',
     plant: (w) => { writeFileSync(join(w.a, '.helix'), 'x\n'); } },
@@ -204,8 +204,7 @@ describe('a no-scope erase never reaches an excluded layer (rulings D3, row R11)
 });
 
 describe('the SessionStart gather uses the same judgement', () => {
-  // The two layouts that link to the global ledger are not here: until A14 `resolveProjectLayer` still gives such a project no layer at all.
-  for (const l of LAYOUTS.filter((x) => x.noHook !== true)) {
+  for (const l of LAYOUTS) {
     it(`${l.id}: the hook reports ${l.state} and reads no project row`, () => {
       const w = build(l);
       const r = gatherScopedRecords({ home: w.home, globalLedger: w.global, cwd: w.a, userHome: tmp('jcs-uh-') });

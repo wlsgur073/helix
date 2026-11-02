@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveProjectLayer } from '../../src/memory/project-root.js';
@@ -64,19 +64,19 @@ describe('resolveProjectLayer', () => {
     expect(resolveProjectLayer({ cwd: dir(proj, 'sub'), userHome: home, globalLedger: join(proj, '.helix', 'memory.jsonl') })).toBeUndefined();
   });
 
-  // Ruling R6 (second fix batch §4.5): the same rule when the project's memory file is a LINK to the
-  // global ledger, dangling or not — the cwd's own folder and a parent's alike. No project layer, so an
-  // omitted-scope commit is global (pinned through the server bundle in
+  // Ruling R6 of the second fix batch is retired by decision D5: a project's memory file that is a LINK
+  // to the global ledger, dangling or not, keeps its layer, the cwd's own folder and a parent's alike, and
+  // the judgement excludes it (pinned through the server bundle in
   // test/acceptance/global-link-store.e2e.test.ts).
   it.each([['existing', true], ['absent (a dangling link)', false]] as const)(
-    'a .helix whose memory file links to the %s global ledger is the global store, for the cwd and for a parent', (_l, existing) => {
+    'a .helix whose memory file links to the %s global ledger keeps its project layer, for the cwd and for a parent (the judgement excludes it: D5)', (_l, existing) => {
       const b = base(); const home = dir(b, 'home');
       const globalLedger = join(dir(b, 'helixhome'), 'memory.jsonl');
       if (existing) writeFileSync(globalLedger, '');
       const proj = dir(home, 'proj'); dir(proj, '.helix');
       symlinkSync(globalLedger, join(proj, '.helix', 'memory.jsonl'));
-      expect(resolveProjectLayer({ cwd: proj, userHome: home, globalLedger })).toBeUndefined();
-      expect(resolveProjectLayer({ cwd: dir(proj, 'sub'), userHome: home, globalLedger })).toBeUndefined();
+      expect(resolveProjectLayer({ cwd: proj, userHome: home, globalLedger })).toEqual({ root: proj, ledger: join(proj, '.helix', 'memory.jsonl'), origin: 'cwd' });
+      expect(resolveProjectLayer({ cwd: dir(proj, 'sub'), userHome: home, globalLedger })).toEqual({ root: proj, ledger: join(proj, '.helix', 'memory.jsonl'), origin: 'ancestor' });
     });
 
   it('returns undefined when no .helix exists below the home boundary', () => {
@@ -140,5 +140,46 @@ describe('resolveProjectLayer', () => {
     expect(resolveProjectLayer({ cwd: dir(a, 's'), userHome: home, globalLedger: globalIn(home) })?.root).toBe(a);
     const c = dir(home, 'c'); dir(c, '.helix'); writeFileSync(join(c, '.helix', '.owner'), 'x');
     expect(resolveProjectLayer({ cwd: dir(c, 's'), userHome: home, globalLedger: globalIn(home) })?.root).toBe(c);
+  });
+
+  // Design 4.2, the paragraph on resolveProjectLayer: the same directory entry is no project, however the home is spelled.
+  it('the global ledger spelled through a linked parent directory is the same entry: no layer (home through a symlink)', () => {
+    const b = base(); const realHome = dir(b, 'real', 'u'); dir(realHome, '.helix');
+    const linked = join(b, 'pl'); symlinkSync(join(b, 'real'), linked);
+    const cwd = join(linked, 'u');                                          // the same folder, spelled through the link
+    expect(resolveProjectLayer({ cwd, userHome: b, globalLedger: join(realHome, '.helix', 'memory.jsonl') })).toBeUndefined();
+  });
+
+  it.each([['the global ledger exists', true], ['the global ledger does not exist yet', false]] as const)(
+    '.helix as a DIRECTORY link to the home is the global store (decision 16: "no link" applies to the memory file only): %s', (_l, existing) => {
+      const b = base(); const home = dir(b, 'home'); const proj = dir(home, 'proj');
+      if (existing) writeFileSync(join(home, 'memory.jsonl'), '');
+      symlinkSync(home, join(proj, '.helix'));
+      expect(resolveProjectLayer({ cwd: proj, userHome: home, globalLedger: join(home, 'memory.jsonl') })).toBeUndefined();
+    });
+
+  it('a global ledger that is itself a link keeps the layer when .helix is the home (decision 8, R5): the table judges it', () => {
+    const b = base(); const home = dir(b, 'home'); const proj = dir(home, 'proj'); dir(proj, '.helix');
+    const elsewhere = join(dir(b, 'elsewhere'), 'g.jsonl'); writeFileSync(elsewhere, '');
+    symlinkSync(elsewhere, join(proj, '.helix', 'memory.jsonl'));
+    const globalLedger = join(proj, '.helix', 'memory.jsonl');             // the same string, and its last component is a link
+    expect(resolveProjectLayer({ cwd: proj, userHome: home, globalLedger })).toEqual({ root: proj, ledger: globalLedger, origin: 'cwd' });
+  });
+
+  it('a DANGLING .helix link at the working directory is a layer (lstat; row 3 judges it unusable), a regular file too', () => {
+    const b = base(); const home = dir(b, 'home');
+    const dangling = dir(home, 'dangling'); symlinkSync(join(b, 'nowhere', 'h'), join(dangling, '.helix'));
+    const file = dir(home, 'file'); writeFileSync(join(file, '.helix'), 'x\n');
+    for (const proj of [dangling, file]) {
+      expect(resolveProjectLayer({ cwd: proj, userHome: home, globalLedger: globalIn(home) })).toEqual({ root: proj, ledger: join(proj, '.helix', 'memory.jsonl'), origin: 'cwd' });
+    }
+  });
+
+  it.skipIf(process.getuid?.() === 0)('a working directory below a mode-000 folder finds no layer: its .helix cannot be looked at (decision 8, R15)', () => {
+    const b = base(); const home = dir(b, 'home');
+    const locked = dir(home, 'locked'); const proj = dir(locked, 'proj'); dir(proj, '.helix');
+    chmodSync(locked, 0o000);
+    try { expect(resolveProjectLayer({ cwd: proj, userHome: home, globalLedger: globalIn(home) })).toBeUndefined(); }
+    finally { chmodSync(locked, 0o700); }
   });
 });

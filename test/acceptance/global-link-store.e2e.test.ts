@@ -1,11 +1,11 @@
-// Ruling R6 (second fix batch §4.5): a project whose memory file is a link — dangling or not — to the
-// GLOBAL ledger when the server starts is not refused. The existing rule (src/memory/project-root.ts: a
-// `.helix` holding the global ledger is the global store, not a project) gives the session NO project
-// layer, so an omitted-scope commit is a global commit (`"scope":"global"`), nothing is adopted, and an
-// explicit `scope: 'project'` is refused for the missing layer. Pinned through a server bundle built
-// FROM SOURCE (the startup-scan-classes.test.ts discipline), because the layer is decided once at server
-// start. A link that appears after start in a project not yet adopted is refused instead
-// (test/memory/preadopt-alias.test.ts).
+// Decision D5 (third fix batch, design 4.2) retires ruling R6 of the second fix batch (§4.5): a project whose
+// memory file is a link, dangling or not, to the GLOBAL ledger when the server starts keeps its project layer.
+// Only a memory path that IS the global ledger's own directory entry gives no layer (src/memory/project-root.ts),
+// so here the judgement excludes the layer as aliased: an omitted-scope commit is refused with the alias text,
+// nothing is adopted and nothing widens to global, and an explicit global commit goes through with the notice.
+// Pinned through a server bundle built FROM SOURCE (the startup-scan-classes.test.ts discipline), because the
+// layer is decided once at server start. A link that appears after start in a project not yet adopted is refused
+// in the same way (test/memory/preadopt-alias.test.ts).
 // Hermetic: a throwaway HOME and HELIX_HOME per case, every inherited HELIX_* stripped.
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
@@ -42,11 +42,11 @@ async function connect(home: string, cwd: string): Promise<Client> {
 const text = (r: unknown): string =>
   ((r as { content: Array<{ type: string; text?: string }> }).content ?? []).map((c) => c.text ?? '').join('');
 
-describe('a project memory file linked to the global ledger makes that .helix the global store (R6)', () => {
+describe('a project memory file linked to the global ledger keeps its project layer and is refused as an alias (D5; ruling R6 of the second batch is retired)', () => {
   it.each([
     ['a DANGLING link (the global ledger does not exist yet)', false],
     ['a link to the EXISTING global ledger', true],
-  ] as const)('%s: no project layer, an omitted-scope commit is global, nothing adopted, scope project refused', async (_label, existing) => {
+  ] as const)('%s: an omitted-scope commit is refused with the alias text, nothing is adopted or written, an explicit global commit goes through with the notice', async (_label, existing) => {
     const home = mkdtempSync(join(tmpdir(), 'helix-r6-home-'));
     const u = mkdtempSync(join(tmpdir(), 'helix-r6-proj-'));
     const globalLedger = join(home, 'memory.jsonl');
@@ -55,23 +55,20 @@ describe('a project memory file linked to the global ledger makes that .helix th
     symlinkSync(globalLedger, projectLedgerPath(u));
 
     const client = await connect(home, u);
-    const res = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'the deploy target is the blue cluster', source: 'user' } });
-    expect((res as { isError?: boolean }).isError ?? false).toBe(false);
-    const out = text(res);
-    expect(out.startsWith('committed {')).toBe(true);
-    const payload = JSON.parse(out.slice('committed '.length)) as Record<string, unknown>;
-    expect(payload.scope).toBe('global');
-    expect(Object.keys(payload)).toEqual(['id', 'scope', 'state', 'classification']);
-
-    expect(readFileSync(globalLedger, 'utf8')).toContain(payload.id as string);            // the global ledger holds it
-    expect(existsSync(join(u, '.helix', '.owner'))).toBe(false);                           // nothing adopted
+    const refused = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'the deploy target is the blue cluster', source: 'user' } });
+    expect((refused as { isError?: boolean }).isError).toBe(true);
+    expect(text(refused)).toContain("this project's memory file resolves outside this project");
+    expect(text(refused)).toContain('the write is refused rather than written somewhere else');
+    expect(existsSync(globalLedger) ? readFileSync(globalLedger, 'utf8') : '<absent>').toBe(existing ? '' : '<absent>');   // nothing widened to global
+    expect(existsSync(join(u, '.helix', '.owner'))).toBe(false);                                                          // nothing adopted
     const registry = existsSync(join(home, 'projects.json')) ? JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')) as Record<string, unknown> : {};
     expect(registry[canonicalRoot(u)]).toBeUndefined();
 
-    const refused = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'a project fact', source: 'user', scope: 'project' } });
-    expect((refused as { isError?: boolean }).isError).toBe(true);
-    expect(text(refused)).toContain("scope 'project' was requested but no project memory layer is active here");
-    expect(text(refused)).toContain('create a .helix folder at the project root and start a new session there');
-    expect(text(refused)).not.toContain('helix_memory_adopt');            // NOLAYER-ADOPT-HINT
+    const global = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'a fact for every project', source: 'user', scope: 'global' } });
+    expect((global as { isError?: boolean }).isError ?? false).toBe(false);
+    const payload = JSON.parse(text(global).slice('committed '.length)) as Record<string, unknown>;
+    expect(payload.scope).toBe('global');
+    expect(String(payload.notice)).toContain("while this session's project memory is off");
+    expect(readFileSync(globalLedger, 'utf8')).toContain(payload.id as string);
   }, 60_000);
 });

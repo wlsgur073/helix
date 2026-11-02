@@ -8,8 +8,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readFil
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
-import { stampOwnership, projectLedgerPath, projectDispositionOf, canonicalRoot, isOwned } from '../../src/memory/ownership.js';
-import { aliasesGlobalLedger, resolveScopeTarget } from '../../src/memory/scope-target.js';
+import { stampOwnership, projectLedgerPath, projectDispositionOf, canonicalRoot, isOwned, isGlobalLedgerEntry } from '../../src/memory/ownership.js';
+import { resolveScopeTarget } from '../../src/memory/scope-target.js';
 import { resolveProjectLayer } from '../../src/memory/project-root.js';
 import { lockPathOf, withFileLock } from '../../src/memory/lock.js';
 import { resolvePath, resolvedPathOrThrow } from '../../src/memory/path-identity.js';
@@ -75,29 +75,35 @@ describe('the global rule compares where both appends land (ALIAS-DOTDOT)', () =
     symlinkSync(['dl', '..', '..', basename(h), 'memory.jsonl'].join('/'), projectLedgerPath(a));
   };
 
-  it.each([['EXISTING', true], ['ABSENT', false]] as const)('a `dl/..` link into the %s global ledger is the global ledger', (_l, existing) => {
+  it.each([['EXISTING', true], ['ABSENT', false]] as const)('a `dl/..` link into the %s global ledger is not the global entry: the layer is kept and reads aliased (D5)', (_l, existing) => {
     const h = home(); const a = mkdtempSync(join(tmpdir(), 'helix-d4-proj-'));
+    const G = join(h, 'memory.jsonl');
     mkdirSync(join(a, '.helix'));
-    if (existing) writeFileSync(join(h, 'memory.jsonl'), '');
+    if (existing) writeFileSync(G, '');
     plantDotdotToGlobal(a, h);
-    expect(aliasesGlobalLedger(projectLedgerPath(a), join(h, 'memory.jsonl'))).toBe(true);
-    expect(resolveProjectLayer({ cwd: a, userHome: '/nonexistent-home', globalLedger: join(h, 'memory.jsonl') })).toBeUndefined();
-    expect(resolveScopeTarget(h, join(h, 'memory.jsonl'), a)).toMatchObject({ ok: false, reason: 'aliased', cause: 'outside-root' });
+    expect(isGlobalLedgerEntry(projectLedgerPath(a), G)).toBe(false);
+    expect(resolveProjectLayer({ cwd: a, userHome: '/nonexistent-home', globalLedger: G })).toEqual({ root: a, ledger: projectLedgerPath(a), origin: 'cwd' });
+    expect(projectDispositionOf({ root: a, home: h, ledger: projectLedgerPath(a), globalLedger: G, origin: 'cwd' })).toBe('aliased');
+    expect(resolveScopeTarget(h, G, a)).toMatchObject({ ok: false, reason: 'aliased', cause: 'outside-root' });
   });
 
-  it('a plain DANGLING link into a global ledger that does not exist yet is the global ledger', () => {
+  it('a plain DANGLING link into a global ledger that does not exist yet is not the global entry: the layer is kept and reads aliased (D5)', () => {
     const h = home(); const a = mkdtempSync(join(tmpdir(), 'helix-d4-proj-'));
+    const G = join(h, 'memory.jsonl');
     mkdirSync(join(a, '.helix'));
-    symlinkSync(join(h, 'memory.jsonl'), projectLedgerPath(a));
-    expect(existsSync(join(h, 'memory.jsonl'))).toBe(false);
-    expect(aliasesGlobalLedger(projectLedgerPath(a), join(h, 'memory.jsonl'))).toBe(true);
+    symlinkSync(G, projectLedgerPath(a));
+    expect(existsSync(G)).toBe(false);
+    expect(isGlobalLedgerEntry(projectLedgerPath(a), G)).toBe(false);
+    expect(resolveProjectLayer({ cwd: a, userHome: '/nonexistent-home', globalLedger: G })).toEqual({ root: a, ledger: projectLedgerPath(a), origin: 'cwd' });
+    expect(projectDispositionOf({ root: a, home: h, ledger: projectLedgerPath(a), globalLedger: G, origin: 'cwd' })).toBe('aliased');
+    expect(resolveScopeTarget(h, G, a)).toMatchObject({ ok: false, reason: 'aliased', cause: 'outside-root' });
   });
 
   it('two ordinary files stay distinct', () => {
     const h = home(); const a = mkdtempSync(join(tmpdir(), 'helix-d4-proj-'));
     mkdirSync(join(a, '.helix'));
     writeFileSync(projectLedgerPath(a), '');
-    expect(aliasesGlobalLedger(projectLedgerPath(a), join(h, 'memory.jsonl'))).toBe(false);
+    expect(isGlobalLedgerEntry(projectLedgerPath(a), join(h, 'memory.jsonl'))).toBe(false);
   });
 });
 
@@ -276,7 +282,7 @@ describe('a path Helix cannot resolve the kernel\'s way is excluded like an alia
     const globalLedger = join(h, 'memory.jsonl');
     symlinkSync(ff, projectLedgerPath(a));                         // a link whose body is not valid UTF-8
     expect(resolvePath(projectLedgerPath(a)).kind).toBe('unresolvable');
-    expect(aliasesGlobalLedger(projectLedgerPath(a), globalLedger)).toBe(false);
+    expect(isGlobalLedgerEntry(projectLedgerPath(a), globalLedger)).toBe(false);
     expect(resolveProjectLayer({ cwd: a, userHome: '/nonexistent-home', globalLedger })).toMatchObject({ root: a, ledger: projectLedgerPath(a) });
     expect(projectDispositionOf(desc(a, h))).toBe('aliased');
     expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/through a path Helix cannot resolve/);
