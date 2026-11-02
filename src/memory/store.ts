@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, rmdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, compactLedgerUnlocked, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, DESTINATION_CHANGED_REFUSAL, LedgerDestinationChangedError, LedgerProcLostError, isLedgerCreateRefusedError, isLedgerDestinationChangedError, isLedgerProcLostError, type CompactOptions, type CompactionStats, type JudgedDestination, type LedgerPath } from './ledger.js';
+import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, compactLedgerUnlocked, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, DESTINATION_CHANGED_REFUSAL, LedgerDestinationChangedError, LedgerProcLostError, isLedgerCreateRefusedError, isLedgerDestinationChangedError, isLedgerProcLostError, ledgerContentKindAt, type CompactOptions, type CompactionStats, type JudgedDestination, type LedgerContentKind, type LedgerPath } from './ledger.js';
 import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
 import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, discardTransition, assertWitnessWritable, isRecordStoredError, isWitnessAdvanceError, isWitnessBlockedError, isWitnessUnusableError, WitnessBlockedError } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
@@ -25,7 +25,7 @@ import { readLedgerWitnessed, readLedgerBytesWitnessed } from './witness-read.js
 import { interruptedAtPredecessor, type WitnessFileMark, type WitnessVerdict } from './witness-core.js';
 import { ledgerDigest, subkeyFingerprint, keyVectorEqual, type ScopeKeyComponent, type RecallCacheEntry } from './recall-cache.js';
 import type { MetricsSink } from '../metrics.js';
-import { withFileLock, isLockForeignObjectError, isLockPublishRefusedError, type LockContext } from './lock.js';
+import { withFileLock, isLockForeignObjectError, isLockPublishRefusedError, isLockTimeoutError, lockTimeoutCauseOf, type LockContext } from './lock.js';
 import { closeHeldDir } from './dir-bound.js';
 import { realFsOps } from './fs-ops.js';
 import { isUnresolvablePathError } from './path-identity.js';
@@ -197,8 +197,8 @@ const FIRST_WRITE_FAILED_NOT_UNDONE =
   "commit: the first write to this project's memory file failed and the adoption recorded for it could not be undone, so the project is adopted with no memory file — nothing was written. " +
   'Tell the user what happened; do not try to repair it for them.';
 
-/** The project writes the critical section of design 4.3 serves. B5 adds 'adopt'. */
-type ProjectWriteOp = 'commit' | 'erase' | 'confirm' | 'recheck' | 'compaction';
+/** The project writes the critical section of design 4.3 serves. */
+type ProjectWriteOp = 'commit' | 'erase' | 'confirm' | 'recheck' | 'compaction' | 'adopt';
 
 /** erase with scope 'project' (or any erase routed to the project) in a layer that is not owned: the project is not
  *  adopted, or stopped being adopted under the lock (FW-R13). It names no cause, because the same refusal answers a layer
@@ -216,6 +216,46 @@ const UNUSABLE_CAUSE =
   'read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix ' +
   'memory records)';
 const UNWRITABLE_CAUSE = "this project's memory folder cannot be written (a read-only folder or file system)";
+
+/** The `adopt` row of PROJECT_WRITE_REFUSAL. aliased and unusable are 4.9's texts (the first clause of the commit refusal,
+ *  then "— nothing was adopted."); unwritable and changed are in the 4.9 form; notAdopted is not reachable (adopt is the
+ *  operation that adopts) and carries the unusable text. */
+const ADOPT_REFUSAL = {
+  aliased: `adopt: ${ALIASED_CAUSE}, so the project layer is disabled here — nothing was adopted.`,
+  unusable: `adopt: ${UNUSABLE_CAUSE}, so the project layer is disabled here — nothing was adopted.`,
+  unwritable: `adopt: ${UNWRITABLE_CAUSE}, so nothing was adopted. Ask the user whether to make that folder writable; do not choose for them.`,
+  changed: "adopt: this project's memory file was replaced while the adoption waited for its lock — nothing was adopted. " +
+    'Try the adoption again; if it happens again, tell the user.',
+  notAdopted: `adopt: ${UNUSABLE_CAUSE}, so the project layer is disabled here — nothing was adopted.`,
+};
+
+/** adopt: the destination exists and holds content that is not ledger rows (design 4.4, second bullet). Design 4.9, verbatim. */
+const ADOPT_NOT_LEDGER_CONTENT =
+  "adopt: the file this project's memory path leads to holds content that is not Helix memory records — " +
+  "nothing was adopted. Ask the user which file this project's memory should be; do not choose for them.";
+
+/** adopt waited the lock's budget (5 s) behind another writer of the same ledger (4.4: "예산(5초)까지 기다리고"). 14 decision
+ *  8, t-07: the lock layer's own text names the lock path. It answers the timeout causes 'payload' (a holder that parsed)
+ *  and 'vanished' (contention: the lock was free at the last look), and a timeout mark that carries no cause (14 item 19). */
+const ADOPT_LOCK_BUSY_REFUSAL =
+  "adopt: another write to this project's memory file did not finish while the adoption waited for its lock — nothing was adopted. " +
+  'Try the adoption again; if it happens again, tell the user.';
+
+/** adopt waited the lock's budget (5 s) behind a lock whose holder cannot be identified or shown to be gone: the timeout
+ *  causes 'unreadable', 'unparseable' and 'legacy-dir', none of which the lock layer reclaims by itself, so a retry would
+ *  meet the same lock (14 item 19). The cause 'no-directory' gets the adopt row's `changed` text instead. */
+const ADOPT_LOCK_UNIDENTIFIED_REFUSAL =
+  "adopt: the lock beside this project's memory file has a holder Helix cannot identify or show to be gone (the lock file " +
+  'cannot be read or does not parse as a lock, its holder cannot be checked, or it is a lock folder left by an older ' +
+  'version), so Helix does not remove it — nothing was adopted. Ask the user to look at that lock; do not remove it for them.';
+
+/** adopt's own ownership record failed (FW-R4, 4.4 last paragraph: the first commit's hold and restore) and the restore put
+ *  both records back / could not put them back. In the form of the commit's two first-write texts. */
+const ADOPT_RECORD_FAILED_UNDONE =
+  'adopt: recording the adoption failed, so the project was not adopted and nothing was recorded. Tell the user what happened.';
+const ADOPT_RECORD_FAILED_NOT_UNDONE =
+  'adopt: recording the adoption failed and could not be undone, so the project may be partly adopted. ' +
+  'Tell the user what happened; do not try to repair it for them.';
 
 /** The fixed texts of a project write refused by the critical section, by operation. Constants: no path, no id,
  *  nothing of the call. commit and erase (aliased, unusable, notAdopted) are the 4.9 texts or A13's; every other cell is
@@ -263,6 +303,7 @@ const PROJECT_WRITE_REFUSAL: Record<ProjectWriteOp, { aliased: string; unusable:
     changed: "compaction: this project's memory file was replaced while the rewrite waited for its lock — nothing was rewritten.",
     notAdopted: "compaction: this project's memory is not adopted — nothing was rewritten.",
   },
+  adopt: ADOPT_REFUSAL,
 };
 
 /** The states in which an explicit 'global' commit bypassed a project layer that is off here (IT-M4). */
@@ -652,14 +693,15 @@ export class MemoryStore {
     return { ledger: p.ledger, project: p };
   }
 
-  /** THE critical section of a write to a project (design 4.3 steps 1 to 3), for every operation of `ProjectWriteOp`; B5
-   *  gives adopt the same function. `first` is the caller's lock-free judgement (step 1); it is refused here again, so no
+  /** THE critical section of a write to a project (design 4.3 steps 1 to 3), for every operation of `ProjectWriteOp`, adopt
+   *  included (design 4.4). `first` is the caller's lock-free judgement (step 1); it is refused here again, so no
    *  caller can come in with an excluded layer.
    *
    *  What the operation changes: the texts (`projectWriteRefusal`), the name in the witness refusal (`op` is the tool's
-   *  name: commit, erase, confirm, recheck), whether the layer must be owned (every operation but the commit; FW-R13: asked
-   *  in front of the lock and again under it, so a project that stopped being owned is refused with the operation's
-   *  not-adopted text), and whether the memory folder is created when it is missing (the commit only). The compaction asks
+   *  name: commit, erase, confirm, recheck, adopt), whether the layer must be owned (every operation but the commit and the
+   *  adopt; FW-R13: asked in front of the lock and again under it, so a project that stopped being owned is refused with the
+   *  operation's not-adopted text), whether the memory folder is created when it is missing (the commit and the adopt), and
+   *  whether the judgement skips row 2 for a project found in a parent directory (the adopt). The compaction asks
    *  no witness question in front of the lock: it is best effort and its own gate refuses an unusable file.
    *
    *  In front of the lock: the witness file must be usable (design 4.8 item 2; asked before the home is validated or
@@ -676,7 +718,11 @@ export class MemoryStore {
    *  'ancestor-unadopted' get their refusal; a judgement that passes with another destination than step 1's, or than the
    *  one the lock stands beside (ctx.path), is the changed-destination refusal: the path that was locked is not the path
    *  that would be written. A lock timeout, a foreign lock object, a lost `/proc` and an unusable witness file pass through
-   *  unconverted: each keeps its own text.
+   *  unconverted: each keeps its own text. One exception: the adopt's wait for this lock that ran out of its budget gets a
+   *  fixed text without the lock path, chosen by the timeout's cause (14 decision 8, t-07; 14 item 19): another writer
+   *  ('payload', 'vanished', or a mark with no cause) the busy text, a folder that went away ('no-directory') the adopt
+   *  row's `changed` text (a retry creates the folder again), a lock Helix cannot identify ('unreadable', 'unparseable',
+   *  'legacy-dir') the unidentified-lock text.
    *
    *  A folder this call created is removed again when the call is refused (FW-R6): the lock-free look found none, the
    *  call made it, and a refused call must not leave an empty `.helix` that the next start would find as a project layer.
@@ -689,13 +735,13 @@ export class MemoryStore {
     const home = this.homeDir();
     this.refuseExcludedProjectWrite(op, p, first);
     if (first.destination === undefined) throw this.projectWriteRefusal(op, 'unusable');   // no state that passes lacks a destination
-    if (op !== 'commit' && first.state !== 'owned') throw this.projectWriteRefusal(op, 'notAdopted');
+    if (op !== 'commit' && op !== 'adopt' && first.state !== 'owned') throw this.projectWriteRefusal(op, 'notAdopted');
     if (op !== 'compaction') assertWitnessWritable(home, op, { homeUnchecked: true });
     ensureHelixDir(home);
     if (isHelixDirLinked(p.root)) throw this.projectWriteRefusal(op, 'unusable');
     const folder = dirname(p.ledger);
     let madeFolder = false;
-    if (op === 'commit') {   // only the commit creates the memory folder
+    if (op === 'commit' || op === 'adopt') {   // only the commit and the adopt create the memory folder
       let folderThere = true;
       try { lstatSync(folder); } catch (e) { folderThere = (e as NodeJS.ErrnoException).code !== 'ENOENT'; }
       if (!folderThere) { mkdirSync(folder, { recursive: true }); madeFolder = true; }
@@ -704,14 +750,20 @@ export class MemoryStore {
     try {
       return withFileLock(p.ledger, (ctx) => {
         held = true;
-        const j = this.judgeLayer({ freshContent: true });
+        const j = this.judgeLayer(op === 'adopt' ? { forAdopt: true, freshContent: true } : { freshContent: true });
         this.refuseExcludedProjectWrite(op, p, j);
         if (j.destination === undefined || j.destination !== first.destination || ctx.path !== j.destination) throw this.projectWriteRefusal(op, 'changed');
-        if (op !== 'commit' && j.state !== 'owned') throw this.projectWriteRefusal(op, 'notAdopted');   // FW-R13
+        if (op !== 'commit' && op !== 'adopt' && j.state !== 'owned') throw this.projectWriteRefusal(op, 'notAdopted');   // FW-R13
         return body({ ctx, judgement: j, judged: { path: j.destination, identity: j.identity ?? null, dir: j.dirIdentity } });
       });
     } catch (e) {
       if (madeFolder && !isRecordStoredError(e)) { try { rmdirSync(folder); } catch { /* not empty, or gone: leave it */ } }
+      if (!held && op === 'adopt' && isLockTimeoutError(e)) {
+        const cause = lockTimeoutCauseOf(e);
+        if (cause === 'no-directory') throw this.projectWriteRefusal('adopt', 'changed', e);
+        if (cause === 'unreadable' || cause === 'unparseable' || cause === 'legacy-dir') throw new Error(ADOPT_LOCK_UNIDENTIFIED_REFUSAL, { cause: e });
+        throw new Error(ADOPT_LOCK_BUSY_REFUSAL, { cause: e });
+      }
       if (!held && isLockPublishRefusedError(e)) throw this.projectWriteRefusal(op, 'unwritable', e);
       // The check after the open and the rewrite's own look at the path raise the ledger layer's commit text: give the operation's.
       if (op !== 'commit' && isLedgerDestinationChangedError(e) && !isRecordStoredError(e) && (e as Error).message !== PROJECT_WRITE_REFUSAL[op].changed) throw this.projectWriteRefusal(op, 'changed', e);
@@ -1410,13 +1462,56 @@ export class MemoryStore {
     const active = canonicalRoot(p.root);
     if (canonicalRoot(expectedRoot) !== active)
       throw new Error(`adopt: the named project root is not the active project scope (${active})`);
-    stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp });
-    // Make signing possible going forward (future confirm/recheck can mint signed verifies), but
-    // do NOT sign or bless any pre-existing record: adoption must never launder an unsigned,
-    // pre-seeded elevated assert into a Verified one. R1's replay clamp already demotes such a
-    // record to Fresh — this only ensures the master exists, it signs nothing that already exists.
-    ensureMaster(this.homeDir());
+    // The gate (design 4.4; 13.3 decision 3), in the order of a commit: judged lock-free and refused when the judgement excludes
+    // the layer, BEFORE anything is recorded; then the ledger lock of the resolved destination, the judgement again under it, the
+    // content, the key, and only then the ownership record (lock order ledger, then registry: the first commit's). For a project
+    // found in a parent directory the judgement skips row 2 and applies rows 3 to 10 to that project directly (forAdopt). The
+    // serialisation is what lets the restore of a failed first commit (4.3 step 5) never undo an adoption made in between: a
+    // re-adoption keeps stamp, nonce and time, so the restoring side could not tell it from its own record by value. While
+    // another writer holds the ledger lock adopt waits the lock's budget; a foreign object at the lock keeps the lock layer's text.
+    this.underProjectLedgerLock(p, 'adopt', this.judgeLayer({ forAdopt: true, freshContent: true }), ({ judgement, judged }) => this.adoptUnderLock(p, judgement, judged));
     return active;
+  }
+
+  /** adopt's body, under the project ledger lock (design 4.4). In order: the content check (a destination that exists holds
+   *  nothing or parses as ledger rows by the first-1-MiB definition; for a memory path that is a link row 9a of the judgement has
+   *  just answered the same question, so this is what answers it for a memory path that is NOT a link); the witness file again
+   *  (the wait behind the lock can be 5 s; the first commit's order, 4.3 step 5 item 6); the key (FN-23: a damaged
+   *  signing key used to surface AFTER the adoption was recorded; it makes signing possible going forward but signs nothing that
+   *  exists: adoption must never launder an unsigned, pre-seeded elevated assert into a Verified one); the held `.helix`
+   *  descriptor; then the ownership record with the hold of 4.3 step 5, and its restore when the record fails halfway. */
+  private adoptUnderLock(p: { root: string; ledger: string }, judgement: LayerJudgement, judged: JudgedDestination): void {
+    if (judged.identity !== null) {
+      let kind: LedgerContentKind;
+      try { kind = ledgerContentKindAt(judged.path); }
+      catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code === 'ELOOP' || code === 'ENOENT' || code === 'EISDIR') throw this.projectWriteRefusal('adopt', 'changed', e);
+        throw e;
+      }
+      if (kind === 'other') throw new Error(ADOPT_NOT_LEDGER_CONTENT);
+    }
+    const home = this.homeDir();
+    assertWitnessWritable(home, 'adopt');
+    ensureMaster(home);
+    const opened = openOwnerDir(p.root, judgement, realFsOps);
+    if (opened.kind === 'changed') throw this.projectWriteRefusal('adopt', 'changed');
+    if (opened.kind === 'proc-lost') throw new LedgerProcLostError();
+    const owner = opened.dir;
+    try {
+      let snapshot: OwnershipSnapshot | null = null;
+      try {
+        stampOwnership(p.root, home, { now: this.opts.now, genStamp: this.opts.genStamp, capture: (s) => { snapshot = s; }, ownerDir: owner });
+      } catch (e) {
+        const taken = snapshot as OwnershipSnapshot | null;   // assigned in the callback above
+        if (taken === null) throw e;                           // failed before anything was recorded (a registry lock refused, for one): as it is
+        try { restoreOwnership(p.root, home, taken, owner); }
+        catch { throw new Error(ADOPT_RECORD_FAILED_NOT_UNDONE, { cause: e }); }
+        throw new Error(ADOPT_RECORD_FAILED_UNDONE, { cause: e });
+      }
+    } finally {
+      try { closeHeldDir(owner, realFsOps); } catch { /* a read-only descriptor loses nothing: a failed close must not replace an adoption made or the refusal in flight */ }
+    }
   }
 
   /** C1.4-③: the active project scope's trust disposition (`active`/`pending`), or 'active' when no

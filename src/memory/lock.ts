@@ -136,6 +136,26 @@ function markPublishRefused(e: unknown): unknown {
   return e;
 }
 
+/** The wait for the lock ran out of its budget (any cause sentence of `timeoutMessage`). The mark says that and the cause
+ *  kind (`lockTimeoutCauseOf`); the text keeps its lock path. The store answers the adopt operation with a fixed text chosen
+ *  by the cause (14 decision 8, t-07; 14 item 19). */
+export const isLockTimeoutError = (e: unknown): boolean =>
+  e instanceof Error && (e as { lockTimedOut?: unknown }).lockTimedOut === true;
+
+/** The kinds of cause a lock wait that ran out of its budget can carry (the `kind` of `TimeoutCause`). */
+export type LockTimeoutCause = TimeoutCause['kind'];
+
+/** The cause kind of a lock wait that ran out of its budget, or null when the error carries no such mark. The store answers
+ *  the adopt operation by it (14 item 19): another writer ('payload', 'vanished'), a folder that went away ('no-directory'),
+ *  or a lock Helix cannot identify ('unreadable', 'unparseable', 'legacy-dir'). */
+export function lockTimeoutCauseOf(e: unknown): LockTimeoutCause | null {
+  if (!isLockTimeoutError(e)) return null;
+  const kind = (e as { lockTimeoutCause?: unknown }).lockTimeoutCause;
+  return typeof kind === 'string' ? kind as LockTimeoutCause : null;
+}
+
+function markTimedOut(e: Error, kind: LockTimeoutCause): Error { return Object.assign(e, { lockTimedOut: true, lockTimeoutCause: kind }); }
+
 interface AcquiredLock { ctx: LockContext; release: () => void }
 
 /** Locks THIS thread published and could not take down when it released them (finding v-firstwrite-05 of the
@@ -249,7 +269,7 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
         if (elapsedMs() < maxWaitMs) { sleepWithinBudget(); continue; }
         // Budget over, and the two causes differ. No folder: no-directory. A folder that stands: a sweep took srcTmp, a
         // holder may well hold the lock, so the reading below picks the cause, as it does after an EEXIST.
-        if (!existsSync(dirname(lockPath))) throw new Error(timeoutMessage(lockPath, { kind: 'no-directory' }, elapsedMs()));
+        if (!existsSync(dirname(lockPath))) throw markTimedOut(new Error(timeoutMessage(lockPath, { kind: 'no-directory' }, elapsedMs())), 'no-directory');
       } else if (code !== 'EEXIST') throw markPublishRefused(e);   // real error (perms/disk) — bubble up untouched
     }
 
@@ -261,7 +281,7 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
     if (reading.kind === 'foreign') throw new LockForeignObjectError();      // D8: not opened, no budget spent
     if (reading.kind === 'absent') {
       if (elapsedMs() >= maxWaitMs) {
-        if (publishedOnceMore) throw new Error(timeoutMessage(lockPath, { kind: 'vanished' }, elapsedMs()));
+        if (publishedOnceMore) throw markTimedOut(new Error(timeoutMessage(lockPath, { kind: 'vanished' }, elapsedMs())), 'vanished');
         publishedOnceMore = true;                                            // decision 8 (locks-R3): publish once more, then refuse
         continue;
       }
@@ -269,7 +289,7 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
       continue;
     }
     if (reading.kind === 'unreadable') {                                      // may be a live holder's lock: wait the budget, then refuse
-      if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, { kind: 'unreadable' }, elapsedMs()));
+      if (elapsedMs() >= maxWaitMs) throw markTimedOut(new Error(timeoutMessage(lockPath, { kind: 'unreadable' }, elapsedMs())), 'unreadable');
       sleepWithinBudget();
       continue;
     }
@@ -293,13 +313,13 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
     const cleared = holder === 'dead' && stealUnderGate(lockPath, probe);
     if (elapsedMs() >= maxWaitMs) {
       if (cleared) {
-        if (publishedOnceMore) throw new Error(timeoutMessage(lockPath, { kind: 'vanished' }, elapsedMs()));
+        if (publishedOnceMore) throw markTimedOut(new Error(timeoutMessage(lockPath, { kind: 'vanished' }, elapsedMs())), 'vanished');
         publishedOnceMore = true;
         continue;
       }
       const cause: TimeoutCause = reading.payload !== null ? { kind: 'payload', holder: reading.payload }
         : reading.shape === 'legacy-dir' ? { kind: 'legacy-dir' } : { kind: 'unparseable' };
-      throw new Error(timeoutMessage(lockPath, cause, elapsedMs()));
+      throw markTimedOut(new Error(timeoutMessage(lockPath, cause, elapsedMs())), cause.kind);
     }
     sleepWithinBudget();
   }

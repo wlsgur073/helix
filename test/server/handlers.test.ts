@@ -10,6 +10,7 @@ import { isOwned, canonicalRoot } from '../../src/memory/ownership.js';
 import { subkeyForScope } from '../../src/memory/verified-read.js';
 import { signVerify, digestContent } from '../../src/memory/ledger-mac.js';
 import type { MemoryRecord } from '../../src/types.js';
+const RECORD_LINE = JSON.stringify({ id: 'm_foreign', tx: '2026-06-09T00:00:00.000Z', validFrom: '2026-06-09T00:00:00.000Z', validTo: null, type: 'assert', state: 'Fresh', content: 'a team fact', provenance: { source: 'user', sessionId: 'x' }, supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal' }) + '\n';
 
 function store() {
   let n = 0;
@@ -753,7 +754,7 @@ describe('M2: caller-controlled ids/paths quarantined in success prose', () => {
     const parent = mkdtempSync(join(tmpdir(), 'helix-m2-p-'));
     const proj = join(parent, evil); // the last path segment IS the prose-shaped string
     mkdirSync(join(proj, '.helix'), { recursive: true });
-    writeFileSync(join(proj, '.helix', 'memory.jsonl'), '{}\n');
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), RECORD_LINE);
     const s = new MemoryStore(join(home, 'memory.jsonl'), {
       home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => 'm_x',
       project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj },
@@ -770,7 +771,7 @@ describe('M2: caller-controlled ids/paths quarantined in success prose', () => {
     const parent = mkdtempSync(join(tmpdir(), 'helix-m2-p-'));
     const proj = join(parent, evil2); // the filesystem accepts '"' verbatim in a path segment (checked)
     mkdirSync(join(proj, '.helix'), { recursive: true });
-    writeFileSync(join(proj, '.helix', 'memory.jsonl'), '{}\n');
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), RECORD_LINE);
     const s = new MemoryStore(join(home, 'memory.jsonl'), {
       home, sessionId: 's1', now: () => '2026-06-09T00:00:00.000Z', genId: () => 'm_x',
       project: { ledger: join(proj, '.helix', 'memory.jsonl'), root: proj },
@@ -891,7 +892,7 @@ describe('scope + adopt handlers', () => {
   it('handleAdopt makes a pre-existing foreign project ledger owned', () => {
     const { store, proj, home } = layeredStore();
     mkdirSync(join(proj, '.helix'), { recursive: true });
-    writeFileSync(join(proj, '.helix', 'memory.jsonl'), '{}\n');
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), RECORD_LINE);
     expect(isOwned(proj, home)).toBe(false);
     handleAdopt(store, { projectRoot: proj }, { auditPath: join(home, 'audit.jsonl') });
     expect(isOwned(proj, home)).toBe(true);
@@ -916,7 +917,7 @@ describe('scope + adopt handlers', () => {
     // with nothing in audit.jsonl to show for it.
     const { store, proj, home } = layeredStore();
     mkdirSync(join(proj, '.helix'), { recursive: true });
-    writeFileSync(join(proj, '.helix', 'memory.jsonl'), '{}\n');
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), RECORD_LINE);
     const auditPath = join(home, 'audit.jsonl');
     const now = () => '2026-06-09T00:00:00.000Z';
 
