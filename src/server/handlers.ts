@@ -9,6 +9,7 @@ import { isIsoInstant } from '../memory/history.js';
 import { isWitnessAdvanceError, isWitnessBlockedError, isWitnessUnusableError, isRecordStoredError } from '../memory/witness-store.js';
 import { isLockForeignObjectError } from '../memory/lock.js';
 import { isLedgerProcLostError } from '../memory/ledger.js';
+import { isGlobalLedgerReadOnlyError } from '../memory/global-ledger.js';
 import { appendAudit, type VerifyAudit, type EraseAudit } from '../audit.js';
 import type { MemoryState, ScopedRecord } from '../types.js';
 import { readFileSync } from 'node:fs';
@@ -449,9 +450,11 @@ export function handleErase(store: MemoryStore, args: { id: string }, deps: Eras
     //     stored mark (W-R4) and keeps its row;
     //   anything else -> the append MAY have begun (post-append re-read, fsync), and a WitnessUnusableError
     //     WITH the mark came after it — say so, never 'rejected'.
+    // The refusal of a write to a read-only global ledger (design 4.7, the audit row) stands before any lock and any append,
+    // so it never carries the stored mark: 'rejected'.
     const row: EraseAudit = landedStateOf(e) !== null
       ? { kind: 'erase', ts, id: args.id, soft: true, witnessAdvance: 'failed' }
-      : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e) || (isWitnessUnusableError(e) && !isRecordStoredError(e)) || ((isLockForeignObjectError(e) || isLedgerProcLostError(e)) && !isRecordStoredError(e))
+      : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e) || (isWitnessUnusableError(e) && !isRecordStoredError(e)) || ((isLockForeignObjectError(e) || isLedgerProcLostError(e)) && !isRecordStoredError(e)) || isGlobalLedgerReadOnlyError(e)
         ? { kind: 'erase', ts, id: args.id, soft: true, outcome: 'rejected' }
         : { kind: 'erase', ts, id: args.id, soft: true, outcome: 'indeterminate' };
     appendAudit(deps.auditPath, row);

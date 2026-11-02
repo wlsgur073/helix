@@ -155,6 +155,16 @@ export const WITNESS_PATH_UNRESOLVABLE_NOTE =
 /** W-R6 (finding v-witness-05): a transient error (EMFILE, ENFILE, EINTR) on the witness read of the SessionStart hook's PROJECT scope; a block with the global records is still printed, and this says what it lacks. No 4.9 row. Static: no path, no interpolation, no imperative. */
 export const WITNESS_READ_TRANSIENT_NOTE =
   "(the rollback-witness file could not be read at this moment, so this project's memory is left out of this block; the next session reads it again)";
+/** Design 4.7: the note of a read while the GLOBAL ledger's path cannot be used for writing (it cannot be resolved, or it is a
+ *  link into a folder that does not exist; global-ledger.ts globalLedgerWriteState). A constant: no path, no interpolation,
+ *  no imperative. It stands FIRST among a read's `witnessNotes`, before the witness notes (and, in the handlers, after the
+ *  project-layer note), on recall, every inspect view and the SessionStart block. It must stay true in three states: records
+ *  are shown (an unresolvable path whose file the kernel can still open as given); none are shown (FN-25, a link loop, a
+ *  chain past the link limit); none are shown because the scope is held out by a pending journal (the 4.7 residue).
+ *  "Cannot be used for writing" covers FN-25; "records that can be read through that path are shown" is true in all three;
+ *  no "in this session": the state is the path's, asked on every call (design section 14 decision 8, table E, order item 1). */
+export const GLOBAL_LEDGER_READ_ONLY_NOTE =
+  "(the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), so global memory is read-only: records that can be read through that path are shown, and nothing can be stored, erased or re-graded there until the path is repaired)";
 
 /** The trusted out-of-band note a witness verdict warrants on a READ surface, or null when it needs
  *  none. `in-sync`/`unwitnessed-suffix` are healthy; `transition-heal` is resolved on the next WRITE

@@ -10,12 +10,14 @@ import { mkdtempSync, mkdirSync, symlinkSync, readFileSync, readdirSync, existsS
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
+import { isGlobalLedgerReadOnlyError } from '../../src/memory/global-ledger.js';
 
 function store(home: string, ledger: string = join(home, 'memory.jsonl')): MemoryStore {
   let n = 0;
   return new MemoryStore(ledger, { sessionId: 's', home, now: () => '2026-09-27T00:00:00.000Z', genId: () => `m_${++n}` });
 }
 const bytesOf = (p: string): Buffer => (existsSync(p) ? readFileSync(p) : Buffer.alloc(0));
+const thrownBy = (f: () => unknown): unknown => { try { f(); } catch (e) { return e; } return undefined; };
 
 const posixOnly = describe.skipIf(process.platform === 'win32');
 
@@ -125,18 +127,22 @@ posixOnly('a symlinked HELIX_HOME is refused before any ledger write (IT-H2)', (
     try {
       const s = store(link);
       expect(s.inspect()).toEqual([]);
-      expect(() => s.commit({ content: 'the queue is sqs', source: 'user' })).toThrow(/symlink/);
+      expect(isGlobalLedgerReadOnlyError(thrownBy(() => s.commit({ content: 'the queue is sqs', source: 'user' })))).toBe(true);
       expect(existsSync(target)).toBe(false);
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
 
   // A look at witness.json goes THROUGH the link, so what it answers is not about the home: the home's own refusal comes
   // first, whatever that look would say (design 4.8 item 2). Each ledger spelling is tried: one inside the home, whose lock
-  // would land at the link's target, and one outside it, whose folder would be created.
-  function refusedAsSymlink(base: string, link: string): void {
-    for (const ledger of [join(link, 'memory.jsonl'), join(base, 'lg', 'memory.jsonl')]) {
-      expect(() => store(link, ledger).commit({ content: 'the queue is sqs', source: 'user' })).toThrow(/symlink/);
-    }
+  // would land at the link's target, and one outside it, whose folder would be created. Third fix batch B1, task B6 (design
+  // 4.7): below a home that is a link loop or a chain past the link limit the inside spelling cannot be resolved (D3), so
+  // the global read-only refusal, which stands in front of ensureHelixDir, answers it (`inside: 'global-read-only'`).
+  function refusedAsSymlink(base: string, link: string, inside: 'symlink' | 'global-read-only' = 'symlink'): void {
+    const commit = (ledger: string): unknown => thrownBy(() => store(link, ledger).commit({ content: 'the queue is sqs', source: 'user' }));
+    const e = commit(join(link, 'memory.jsonl'));
+    if (inside === 'global-read-only') expect(isGlobalLedgerReadOnlyError(e)).toBe(true);
+    else expect((e as Error).message).toMatch(/symlink/);
+    expect((commit(join(base, 'lg', 'memory.jsonl')) as Error).message).toMatch(/symlink/);
     expect(existsSync(join(base, 'lg'))).toBe(false);
   }
 
@@ -146,7 +152,8 @@ posixOnly('a symlinked HELIX_HOME is refused before any ledger write (IT-H2)', (
     symlinkSync(link, link);
     try {
       expect(() => statSync(link)).toThrow(/ELOOP/);        // the fixture: no resolver can get through it
-      refusedAsSymlink(base, link);
+      // The global ledger inside a home past the link limit is unresolvable (design 4.1, the link limit), so 4.7's read-only refusal answers ahead of ensureHelixDir; a ledger outside that home keeps the symlinked-home refusal (section 14 item 20).
+      refusedAsSymlink(base, link, 'global-read-only');
       expect(readdirSync(base)).toEqual(['link']);
       expect(lstatSync(link).isSymbolicLink()).toBe(true);
     } finally { rmSync(base, { recursive: true, force: true }); }
@@ -160,7 +167,8 @@ posixOnly('a symlinked HELIX_HOME is refused before any ledger write (IT-H2)', (
     for (let i = 1; i <= 41; i++) { const next = join(base, `l${i}`); symlinkSync(link, next); link = next; }
     try {
       expect(() => statSync(link)).toThrow(/ELOOP/);        // the fixture: 41 links, one past the kernel's limit
-      refusedAsSymlink(base, link);
+      // The global ledger inside a home past the link limit is unresolvable (design 4.1, the link limit), so 4.7's read-only refusal answers ahead of ensureHelixDir; a ledger outside that home keeps the symlinked-home refusal (section 14 item 20).
+      refusedAsSymlink(base, link, 'global-read-only');
       expect(readdirSync(real)).toEqual([]);
     } finally { rmSync(base, { recursive: true, force: true }); }
   });

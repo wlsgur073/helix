@@ -6,7 +6,7 @@ import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
 import { forgedFactIds, isFactRow } from './verified-projection.js';
 import { withFileLock, type LockContext } from './lock.js';
-import { resolvePath, resolvedPathOrThrow, fileIdentityAt, hasComparableInode, sameFile, type FileIdentity } from './path-identity.js';
+import { resolvePath, resolvedPathOrThrow, UnresolvablePathError, fileIdentityAt, hasComparableInode, sameFile, type FileIdentity } from './path-identity.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { openJudgedDir, sampleDirIdentity, boundPath, fsyncDir, closeHeldDir } from './dir-bound.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
@@ -525,6 +525,14 @@ export const isLedgerNotRegularError = (e: unknown): boolean =>
  *  file with ERR_FS_FILE_TOO_LARGE before reading anything, and readLedgerFileBytes keeps that bound. */
 export const MAX_LEDGER_READ_BYTES = 2 ** 31 - 1;
 
+/** How a ledger read treats a path that cannot be resolved (path-identity.ts `unresolvable`). The default refuses with
+ *  UnresolvablePathError. 'as-given' is for the GLOBAL ledger alone (design 4.1 item 4, 4.7): its existing records stay
+ *  readable through the path as written. */
+export interface LedgerReadOptions { unresolvable?: 'refuse' | 'as-given' }
+
+/** The read options of the global ledger, for every reader that knows it reads that scope. */
+export const GLOBAL_LEDGER_READ: LedgerReadOptions = { unresolvable: 'as-given' };
+
 /** The ONE ledger file read (IT-H4), shared by parseLedger / readLedgerBytes / readLedgerRaw.
  *  readFileSync asked nothing about WHAT the path is: a FIFO with no writer blocks open(2) forever and
  *  a character device reads without bound. Neither is an I/O error, so no caller's catch ever saw
@@ -541,7 +549,7 @@ export const MAX_LEDGER_READ_BYTES = 2 ** 31 - 1;
  *  object that cannot be opened at all (a socket, a driverless device) is classified by stat, which
  *  never opens. ENOENT propagates unchanged so each caller keeps its absent-file convention. No size
  *  cap below readFileSync's own (spec decision Q3), so a ledger that grew legitimately stays readable. */
-function readLedgerFileBytesExact(path: string, flags: number): Buffer {
+function readLedgerFileBytesExact(path: string, flags: number, shownAs: string = path): Buffer {
   let fd: number;
   try {
     fd = openSync(path, flags);
@@ -556,13 +564,13 @@ function readLedgerFileBytesExact(path: string, flags: number): Buffer {
     if (code !== 'ENOENT' && code !== 'ELOOP') {
       let st: Stats | null = null;
       try { st = statSync(path); } catch { /* the stat failed as well: report the open's own error */ }
-      if (st !== null && !st.isFile()) throw new LedgerNotRegularError(path);
+      if (st !== null && !st.isFile()) throw new LedgerNotRegularError(shownAs);
     }
     throw e;
   }
   try {
     const st = fstatSync(fd);
-    if (!st.isFile()) throw new LedgerNotRegularError(path);
+    if (!st.isFile()) throw new LedgerNotRegularError(shownAs);
     if (st.size > MAX_LEDGER_READ_BYTES) {
       // readFileSync's own refusal, same class, message and code, so no caller sees a new error kind
       // (callers special-case only ENOENT). Checked before Buffer.alloc: a sparse file costs nothing
@@ -582,15 +590,40 @@ function readLedgerFileBytesExact(path: string, flags: number): Buffer {
   }
 }
 
-function readLedgerFileBytes(path: string): Buffer {
-  return readLedgerFileBytesExact(path, constants.O_RDONLY | constants.O_NONBLOCK);
+/** The read of a ledger by its path (design 4.1 item 4): the read opens the RESOLVED path with `O_NOFOLLOW | O_NONBLOCK`.
+ *  Only the read of an unresolvable global ledger opens the path as given (4.7), and only when the caller says so
+ *  (`GLOBAL_LEDGER_READ`). A `LedgerNotRegularError` names the path the caller gave, not the resolved one. */
+function readLedgerFileBytes(rawPath: string, opts: LedgerReadOptions = {}): Buffer {
+  // 4.1 item 4: the read opens the RESOLVED path and never follows its last component. An unresolvable path is refused
+  // unless the caller says it is the global ledger, which is then opened as given (links followed, as before). A
+  // missing folder and "cannot be inspected" surface as their fs error (ENOENT keeps each caller's absent-file convention).
+  const flags = constants.O_RDONLY | constants.O_NONBLOCK;
+  const r = resolvePath(rawPath);
+  if (r.kind === 'uninspectable') throw r.error;
+  if (r.kind === 'resolved') {
+    if (r.dirMissing) throw r.dirError ?? Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+    return readLedgerFileBytesExact(r.path, flags | constants.O_NOFOLLOW, rawPath);
+  }
+  if (opts.unresolvable !== 'as-given') throw new UnresolvablePathError(r.cause);
+  try {
+    return readLedgerFileBytesExact(rawPath, flags);
+  } catch (e) {
+    // G-R5: the path as given is opened only because it cannot be resolved, and the kernel may not be able to open it
+    // either (a link loop, a chain past the link limit, a path past the system limit). Nothing is reachable, so the scope
+    // reads as empty, as a link into a missing folder does, instead of failing every read surface.
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ELOOP' || code === 'ENAMETOOLONG') {
+      throw Object.assign(new Error('ENOENT: the global memory file cannot be opened by its path as given'), { code: 'ENOENT' });
+    }
+    throw e;
+  }
 }
 
 /** Read every record from the ledger, in append order. Missing file -> []. */
-export function parseLedger(path: LedgerPath): MemoryRecord[] {
+export function parseLedger(path: LedgerPath, opts?: LedgerReadOptions): MemoryRecord[] {
   let text: string;
   try {
-    text = readLedgerFileBytes(path).toString('utf8');
+    text = readLedgerFileBytes(path, opts).toString('utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw err;
@@ -605,9 +638,9 @@ export function parseLedger(path: LedgerPath): MemoryRecord[] {
  *  loop 1: restores the A4 cache's original zero-parse-on-HIT invariant, which readLedgerRaw's
  *  eager-parse-every-call composition had traded away). Same ENOENT convention as parseLedger/
  *  readLedgerRaw below: missing file -> an empty buffer, never a throw. */
-export function readLedgerBytes(path: LedgerPath): Buffer {
+export function readLedgerBytes(path: LedgerPath, opts?: LedgerReadOptions): Buffer {
   try {
-    return readLedgerFileBytes(path);
+    return readLedgerFileBytes(path, opts);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0);
     throw err;
@@ -641,10 +674,10 @@ export function readLedgerBytesExactly(at: string): Buffer {
  *  where a caller genuinely wants records unconditionally (historyView/asOfView/verifiedLiveStats —
  *  not a cache-gated path, so there is no HIT to keep parse-free). recallInput is NOT one of these
  *  sites (Fix loop 1) — see readLedgerBytes above. */
-export function readLedgerRaw(path: LedgerPath): { bytes: Buffer; records: MemoryRecord[]; skippedNonBlank: number } {
+export function readLedgerRaw(path: LedgerPath, opts?: LedgerReadOptions): { bytes: Buffer; records: MemoryRecord[]; skippedNonBlank: number } {
   let bytes: Buffer;
   try {
-    bytes = readLedgerFileBytes(path);
+    bytes = readLedgerFileBytes(path, opts);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
     throw err;

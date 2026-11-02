@@ -13,7 +13,8 @@ import { join } from 'node:path';
 import { isEntryPoint } from '../entry-point.js';
 import { strayTrustFiles } from '../memory/trust-store-layout.js';
 import { formatSessionStartContext } from './format-context.js';
-import { newNonce, collectWitnessReadNotes, SYMLINKED_HOME_NOTE, WITNESS_READ_TRANSIENT_NOTE } from '../memory/content-frame.js';
+import { newNonce, collectWitnessReadNotes, SYMLINKED_HOME_NOTE, WITNESS_READ_TRANSIENT_NOTE, GLOBAL_LEDGER_READ_ONLY_NOTE } from '../memory/content-frame.js';
+import { isGlobalLedgerReadOnly } from '../memory/global-ledger.js';
 import { isSymlinkedHome } from '../memory/home-permissions.js';
 import { projectDispositionOf, type ProjectDisposition } from '../memory/ownership.js';
 import { resolveProjectLayer } from '../memory/project-root.js';
@@ -123,7 +124,7 @@ export function gatherScopedRecords({ home, globalLedger, cwd, userHome }: Gathe
   }
   return {
     records, integrityAvailable, replays, projectDisposition,
-    witnessNotes: [...collectWitnessReadNotes(verdicts), ...(projectReadFailed ? [WITNESS_READ_TRANSIENT_NOTE] : [])],
+    witnessNotes: [...(isGlobalLedgerReadOnly(globalLedger) ? [GLOBAL_LEDGER_READ_ONLY_NOTE] : []), ...collectWitnessReadNotes(verdicts), ...(projectReadFailed ? [WITNESS_READ_TRANSIENT_NOTE] : [])],
     everyScopePristine: !projectUnread && verdicts.every((v) => v.witnessFile !== 'unusable' && v.verdict.kind === 'first-contact' && v.verdict.reason === 'pristine'),
   };
 }

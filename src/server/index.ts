@@ -4,7 +4,8 @@ import { join, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { MemoryStore } from '../memory/store.js';
-import { parseLedger, isLedgerNotRegularError } from '../memory/ledger.js';
+import { parseLedger, isLedgerNotRegularError, GLOBAL_LEDGER_READ } from '../memory/ledger.js';
+import { isGlobalLedgerReadOnly, GLOBAL_READ_ONLY_STARTUP_LINE } from '../memory/global-ledger.js';
 import { scanLegacyElevated, classifyLegacyOffenders } from '../memory/legacy-scan.js';
 import { hardenHomePermissions } from '../memory/home-permissions.js';
 import { subkeyForScope } from '../memory/verified-read.js';
@@ -152,6 +153,9 @@ if (stray.length > 0) {
   }
 }
 
+// Design 4.7: a global ledger whose path cannot be used for writing is said once, at the start.
+if (isGlobalLedgerReadOnly(globalLedger)) process.stderr.write(`${GLOBAL_READ_ONLY_STARTUP_LINE}\n`); // ASCII only
+
 // Auto-compaction is read GLOBAL-only (never via loadConfig's project layer): it is destructive — it
 // can close the soft-erase undo window — so a foreign checkout's `.helix/config.json` must never be
 // able to enable or tune it. Default OFF; the store's own gates decide whether it ever fires.
@@ -201,7 +205,7 @@ const scanScopes: Array<{ ledger: string; root?: string }> = [
 for (const { ledger, root } of scanScopes) {
   try {
     const subkey = subkeyForScope(home, root);
-    const records = parseLedger(ledger);
+    const records = parseLedger(ledger, root === undefined ? GLOBAL_LEDGER_READ : undefined);
     const scan = scanLegacyElevated(records, (r) => (subkey ? verifyVerify(r, subkey) : false));
     const { forged, tampered, otherKey, newerVersion, unverifiable } = classifyLegacyOffenders(records, scan.offenders, !!subkey, subkey);
     if (forged.length > 0) process.stderr.write(`helix: WARNING - ${forged.length} forged/legacy elevated record(s) in ${ledger}; trust states there are not tool-minted\n`); // ASCII only

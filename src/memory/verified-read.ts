@@ -3,7 +3,7 @@
 // through these two functions so the trust grades they show can never drift — a forged or edited
 // ledger record replays as Fresh on EVERY read surface, not just the tool surface.
 import type { LedgerPath } from './ledger.js';
-import { readLedgerRaw } from './ledger.js';
+import { readLedgerRaw, GLOBAL_LEDGER_READ } from './ledger.js';
 import type { MemoryRecord } from '../types.js';
 import { tryReadMaster, deriveSubkey, verifyVerify } from './ledger-mac.js';
 import { scopeNonce, globalScopeNonce, trustStateOf } from './ownership.js';
@@ -75,7 +75,7 @@ export function verifiedLiveStats(
   projectRoot?: string,
 ): { projection: VerifiedProjection; stats: ReplayStats } {
   const t0 = performance.now();
-  const { bytes, records } = readLedgerRaw(ledger);   // single raw-read seam (witness feature, W-T4): ENOENT -> bytes.length 0, matching the prior statSync tolerance
+  const { bytes, records } = readLedgerRaw(ledger, projectRoot === undefined ? GLOBAL_LEDGER_READ : undefined);   // no project root is the global scope (design 4.7); single raw-read seam (witness feature, W-T4): ENOENT -> bytes.length 0, matching the prior statSync tolerance
   const t1 = performance.now();
   const projection = verifiedLiveOf(records, home, projectRoot);
   const t2 = performance.now();

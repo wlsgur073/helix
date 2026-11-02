@@ -3,15 +3,12 @@
 // texts as the lock-free look. The late commit is stopped by a seam after its lock-free checks and before it asks for
 // the ledger lock; inside that window another store changes the target; then the late commit goes on.
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import * as lockMod from '../../src/memory/lock.js';
-import { lockPathOf } from '../../src/memory/lock.js';
 import * as dirBoundMod from '../../src/memory/dir-bound.js';
 import { realFsOps } from '../../src/memory/fs-ops.js';
-import { appendWitnessed } from '../../src/memory/witness-write.js';
-import type { MemoryRecord } from '../../src/types.js';
-import { fixture, cleanupFixtures, rowsIn, NOW, type FirstWriteFixture } from '../helpers/first-write-fixture.js';
+import { fixture, cleanupFixtures, rowsIn, type FirstWriteFixture } from '../helpers/first-write-fixture.js';
 
 afterEach(() => { vi.restoreAllMocks(); cleanupFixtures(); });
 
@@ -34,11 +31,6 @@ const supersedeRows = (path: string, target: string): number =>
   readFileSync(path, 'utf8').split('\n').filter((l) => l.trim() !== '')
     .map((l) => JSON.parse(l) as { type: string; supersedes: string | null })
     .filter((r) => r.type === 'supersede' && r.supersedes === target).length;
-
-const record = (id: string): MemoryRecord => ({
-  id, tx: NOW, validFrom: NOW, validTo: null, type: 'assert', state: 'Fresh', content: `fact ${id}`,
-  provenance: { source: 'user', sessionId: 's' }, supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
-});
 
 interface Case {
   id: string;
@@ -114,19 +106,6 @@ describe('the target of a supersede commit is checked again under the ledger loc
     armOnce(fx.ledger, () => unlinkSync(join(fx.helix, '.owner')));
     expect(lateCommit(fx, 'project', 'user', t)).toMatch(/commit: supersedes target not found \(dead or unknown id\)/);
     expect(rowsIn(fx.ledger)).not.toContain(LATE);
-  });
-});
-
-describe('appendWitnessed runs a check inside the ledger lock (the global scope\'s step 6)', () => {
-  it('beforeAppend runs with the lock held, after the witness look, and a throw from it appends nothing', () => {
-    const fx = fixture();
-    let lockHeld = false;
-    expect(() => appendWitnessed(fx.globalLedger, record('m_x'), fx.home, undefined, 'commit', () => {
-      lockHeld = existsSync(lockPathOf(fx.globalLedger));
-      throw new Error('stop here');
-    })).toThrow(/stop here/);
-    expect(lockHeld).toBe(true);
-    expect(existsSync(fx.globalLedger)).toBe(false);
   });
 });
 

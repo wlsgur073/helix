@@ -9,6 +9,7 @@ import { MemoryStore } from '../../src/memory/store.js';
 import { lockPathOf, withFileLock } from '../../src/memory/lock.js';
 import { resolvedPathOrThrow, isUnresolvablePathError } from '../../src/memory/path-identity.js';
 import { appendRecord } from '../../src/memory/ledger.js';
+import { isGlobalLedgerReadOnlyError, GLOBAL_WRITE_REFUSAL } from '../../src/memory/global-ledger.js';
 import type { MemoryRecord } from '../../src/types.js';
 
 const ff = Buffer.from([0xff]);
@@ -62,9 +63,12 @@ describe('a link whose kernel destination is not valid UTF-8 is unresolvable: no
   it('a global ledger linked to such a file: a commit is refused and nothing is written', () => {
     const { d, link, target, targetDir } = plantLinkToFfName();
     const s = new MemoryStore(link, { home: join(d, 'home'), sessionId: 's' });
-    expect(isUnresolvablePathError(thrownBy(() => s.commit({ content: 'alpha deploy fact', source: 'user' })))).toBe(true);
+    const e = thrownBy(() => s.commit({ content: 'alpha deploy fact', source: 'user' }));
+    expect(isGlobalLedgerReadOnlyError(e)).toBe(true);
+    expect((e as Error).message).toBe(GLOBAL_WRITE_REFUSAL.commit);
     expect(readFileSync(target, 'utf8')).toBe('');
     expect(names(targetDir)).toEqual([ffName.toString('latin1')]);
+    expect(readdirSync(join(d, 'home')).filter((n) => n.endsWith('.lock'))).toEqual([]);
   });
 
   it('a link through a DIRECTORY named <0xff>: unresolvable too, and the append is refused', () => {

@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, rmdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, compactLedgerUnlocked, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, DESTINATION_CHANGED_REFUSAL, LedgerDestinationChangedError, LedgerProcLostError, isLedgerCreateRefusedError, isLedgerDestinationChangedError, isLedgerProcLostError, ledgerContentKindAt, type CompactOptions, type CompactionStats, type JudgedDestination, type LedgerContentKind, type LedgerPath } from './ledger.js';
-import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
+import { parseLedger, parseLedgerHealth, readLedgerBytes, GLOBAL_LEDGER_READ, compactLedgerUnlocked, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, DESTINATION_CHANGED_REFUSAL, LedgerDestinationChangedError, LedgerProcLostError, isLedgerCreateRefusedError, isLedgerDestinationChangedError, isLedgerProcLostError, ledgerContentKindAt, type CompactOptions, type CompactionStats, type JudgedDestination, type LedgerContentKind, type LedgerPath } from './ledger.js';
+import { appendWitnessedUnlocked } from './witness-write.js';
 import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, discardTransition, assertWitnessWritable, isRecordStoredError, isWitnessAdvanceError, isWitnessBlockedError, isWitnessUnusableError, WitnessBlockedError } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
@@ -16,7 +16,7 @@ import { type RecallOptions } from './projection.js';
 import { rankWithArtifacts, buildRankArtifacts, assertQueryWithinBounds, type Expansion } from './retrieval.js';
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
-import { frameAsData, newNonce, collectWitnessReadNotes, asOfWitnessNotes } from './content-frame.js';
+import { frameAsData, newNonce, collectWitnessReadNotes, asOfWitnessNotes, GLOBAL_LEDGER_READ_ONLY_NOTE } from './content-frame.js';
 import { stampOwnership, restoreOwnership, openOwnerDir, judgeProjectLayer, canonicalRoot, isReviewableRoot, isHelixDirLinked, trustStateOf, type LayerJudgement, type OwnershipSnapshot, type ProjectDisposition, type ProjectOrigin, type TrustState } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, isFutureMacVersion } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
@@ -28,7 +28,8 @@ import type { MetricsSink } from '../metrics.js';
 import { withFileLock, isLockForeignObjectError, isLockPublishRefusedError, isLockTimeoutError, lockTimeoutCauseOf, type LockContext } from './lock.js';
 import { closeHeldDir } from './dir-bound.js';
 import { realFsOps } from './fs-ops.js';
-import { isUnresolvablePathError } from './path-identity.js';
+import { isUnresolvablePathError, fileIdentityAt, resolvePath } from './path-identity.js';
+import { globalLedgerWriteState, GlobalLedgerReadOnlyError, GLOBAL_DESTINATION_CHANGED, type GlobalWriteOp } from './global-ledger.js';
 import { ensureHelixDir } from './home-permissions.js';
 import { MAX_COMMIT_CONTENT_CHARS, RECALL_RECENCY_APPENDIX_COUNT, RECALL_APPENDIX_FUTURE_TOLERANCE_MS } from '../limits.js';
 
@@ -460,6 +461,10 @@ export class MemoryStore {
     if (!canCommit({ provenance: { source, sessionId: this.session() } })) {
       throw new Error('commit: missing provenance');
     }
+    // Design 4.7: a commit routed to a read-only global ledger is refused here, before the supersede pre-check reads anything
+    // and before any lock or home write. These are exactly the two routes targetLedger sends to the global ledger; an
+    // explicit 'project' without a layer keeps its own refusal.
+    if (input.scope === 'global' || (input.scope === undefined && !this.opts.project)) this.refuseReadOnlyGlobal('commit');
     // ALIAS-P2P (item 7, fix round 1): refused HERE, before the supersede pre-check below ever calls
     // ledgerOf(input.supersedes) — that call used to read through the alias (pulling the OTHER
     // project's live record into this scope, and its Tier-1/Tier-2 guards could then leak whether
@@ -534,8 +539,10 @@ export class MemoryStore {
       if (first === null) throw new Error('commit: internal error — a project write without its judgement');
       this.commitToProject(target.project, first, record, input, source);
     } else {
-      appendWitnessed(target.ledger, record, this.homeDir(), this.scopeRootOf(target.ledger), 'commit',
-        input.supersedes ? () => this.assertSupersedeTargetUnderLock(target.ledger, input, source) : undefined);   // step 6 for the global scope (D10); B6 moves it into the global inner function
+      this.underGlobalLedgerLock('commit', ({ judged }) => {
+        if (input.supersedes) this.assertSupersedeTargetUnderLock(target.ledger, input, source);   // step 6 for the global scope (D10)
+        appendWitnessedUnlocked(target.ledger, record, this.homeDir(), undefined, 'commit', 'commit', judged);
+      });
     }
     const out: CommitResult = { record, scope: target.ledger === this.global ? 'global' : 'project' };
     if (redactions) out.redactions = redactions;
@@ -771,6 +778,83 @@ export class MemoryStore {
     }
   }
 
+  /** Is the global ledger read-only (design 4.7: its path cannot be resolved, or it reaches a missing folder through a
+   *  link)? Asked afresh on every call: the state is the path's, and a path repaired in the middle of a session is
+   *  writable again at the next call. Side-effect free. */
+  private globalReadOnly(): boolean {
+    return globalLedgerWriteState(this.global).kind === 'read-only';
+  }
+
+  /** The typed pre-refusal of a write to a read-only global ledger, or nothing. It stands in front of every lock and of
+   *  everything the store writes to the home. */
+  private refuseReadOnlyGlobal(op: GlobalWriteOp): void {
+    const w = globalLedgerWriteState(this.global);
+    if (w.kind === 'read-only') throw new GlobalLedgerReadOnlyError(op, w.cause);
+  }
+
+  /** Order item 3 (4.7, second table, "거부의 위치"): a confirm or recheck whose id names a row of the GLOBAL ledger is
+   *  refused while that ledger is read-only, before the target is looked up (the lookup reads the verified projection, and
+   *  the first read with a key present mints the global scope nonce into projects.json) and before the recheck's check
+   *  runs. The test is key-free: any row of the ledger, read through the path as given, that carries the id. An id that
+   *  is nowhere, or only in the project, goes on to the ordinary path. */
+  private refuseReadOnlyGlobalTarget(id: string, op: 'confirm' | 'recheck'): void {
+    if (!this.globalReadOnly()) return;
+    let carried = false;
+    try { carried = parseLedger(this.global, GLOBAL_LEDGER_READ).some((r) => r.id === id); } catch { /* cannot be shown: the ordinary path decides */ }
+    if (carried) this.refuseReadOnlyGlobal(op);
+  }
+
+  /** A read's out-of-frame notes with the read-only note in FRONT when it applies (design 4.7: recall, every inspect view,
+   *  and the SessionStart block). */
+  private withGlobalNote(notes: string[]): string[] {
+    return this.globalReadOnly() ? [GLOBAL_LEDGER_READ_ONLY_NOTE, ...notes] : notes;
+  }
+
+  /** THE inner function of every write to the GLOBAL ledger (design 4.7, the first table's first two rows and the second
+   *  table's row "거부의 위치"): the commit, the erase's tombstone, the two grade changes, the auto-compaction and the
+   *  permanent erase's rewrite. Five entry points used to reach the global ledger by four routes, each with its own steps
+   *  in front of the lock.
+   *    1. A read-only global ledger is refused with the operation's fixed text (GlobalLedgerReadOnlyError): before the
+   *       witness check, before ensureHelixDir may create the home or tighten its mode, before the ledger's folder is
+   *       created and before a lock is tried.
+   *    2. The witness file must be usable (4.8 item 2), asked in front of the home's validation (G-R3). Not for the
+   *       auto-compaction, whose gate is the rewrite's own.
+   *    3. ensureHelixDir and the folder of a plain path (today's creation, unchanged).
+   *    4. The ledger lock at the resolved destination. Under it the path is resolved again: it must be the path the lock
+   *       stands beside, and the destination's identity is sampled HERE, where the append's check after the open compares
+   *       the descriptor with it (G-R7). A path that became read-only while the call waited is refused with step 1's text;
+   *       one that resolves elsewhere gets the global changed-destination text.
+   *  Lock order: the global ledger lock first; the body takes the registry lock (the global scope nonce), the key lock (a
+   *  first mint) and the witness lock under it and never another ledger lock. */
+  private underGlobalLedgerLock<T>(op: GlobalWriteOp, body: (held: { ctx: LockContext; judged: JudgedDestination }) => T): T {
+    this.refuseReadOnlyGlobal(op);
+    const home = this.homeDir();
+    if (op !== 'compaction') assertWitnessWritable(home, op, { homeUnchecked: true });
+    ensureHelixDir(home);
+    mkdirSync(dirname(this.global), { recursive: true });
+    try {
+      return withFileLock(this.global, (ctx) => {
+        const r = resolvePath(this.global);
+        if (r.kind === 'unresolvable') throw new GlobalLedgerReadOnlyError(op, 'unresolvable');
+        if (r.kind === 'uninspectable') throw r.error;
+        if (r.dirMissing || r.path !== ctx.path) throw this.globalChanged(op);
+        return body({ ctx, judged: { path: r.path, identity: fileIdentityAt(r.path) } });
+      });
+    } catch (e) {
+      // The append's own check after the open raises the project commit's text: give the global scope its own.
+      if (isLedgerDestinationChangedError(e) && !isRecordStoredError(e) && (e as Error).message !== GLOBAL_DESTINATION_CHANGED[op]) throw this.globalChanged(op, e);
+      throw e;
+    }
+  }
+
+  /** The changed-destination refusal of a global write. An erase's is the typed pre-write refusal the erase handler audits
+   *  as 'rejected' (nothing was written), as for a project erase. */
+  private globalChanged(op: GlobalWriteOp, cause?: unknown): Error {
+    const text = GLOBAL_DESTINATION_CHANGED[op];
+    if (op === 'erase') return new EraseRefusedError(text, cause === undefined ? undefined : { cause });
+    return new LedgerDestinationChangedError(text);   // the ledger layer's type, as projectWriteRefusal does; it takes no cause
+  }
+
   /** A commit to a project: the body of the critical section (design 4.3 steps 4 and 6). Step 6 first, in the place where
    *  step 3 judged again: a supersede commit checks its target again. A project that is not owned under the lock has no live
    *  target in its scope, so a supersede there is the target-not-found refusal (and never reaches the foreign-file or the
@@ -911,6 +995,7 @@ export class MemoryStore {
     const key: ScopeKeyComponent[] = [];
     const verdicts: Array<{ scope: MemoryScope; verdict: WitnessVerdict; witnessFile?: WitnessFileMark }> = [];
     const reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; bytes: Buffer; subkey: Buffer | null; readMs: number; journalPending: boolean; mismatch: boolean }> = [];
+    const globalReadOnly = this.globalReadOnly();
     for (const s of scopes) {
       // W-T7 + §7: witness verdict + identity + journalPending, all off the SAME (final) witness snapshot
       // classified against the SAME (final) bytes — witness-first with a single alarm retry (no self-race,
@@ -923,8 +1008,9 @@ export class MemoryStore {
       verdicts.push({ scope: s.scope, verdict: w.verdict, witnessFile: w.witnessFile });
       // `mismatch` is the STABLE (witness-first + retry-once) rollback verdict — threaded into
       // maybeAutoCompact below so it never advances the witness onto a rolled-back scope (spec §4.2
-      // PR-1, belt-and-braces above compactLedger's own authoritative gate).
-      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs: w.readMs, journalPending: w.journalPending, mismatch: w.verdict.kind === 'mismatch' || w.witnessFile !== undefined });
+      // PR-1, belt-and-braces above compactLedger's own authoritative gate). Also set for a read-only global scope
+      // (design 4.7): the rewrite would be refused, so the once-per-session guard is kept and no failure metric is written.
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs: w.readMs, journalPending: w.journalPending, mismatch: w.verdict.kind === 'mismatch' || w.witnessFile !== undefined || (s.scope === 'global' && globalReadOnly) });
     }
 
     // A pending journal means an in-flight rewrite: the cache is bypassed BOTH directions (no read,
@@ -1168,7 +1254,7 @@ export class MemoryStore {
       framed: frameAsData([...items, ...appendix].map(({ record, scope, contentDigest }) => ({ record, scope, contentDigest })), this.nonce()),  // I7: fresh nonce per call
       integrityAvailable: available,
       projectDisposition: disposition,
-      witnessNotes: collectWitnessReadNotes(verdicts),
+      witnessNotes: this.withGlobalNote(collectWitnessReadNotes(verdicts)),
     };
   }
 
@@ -1200,18 +1286,18 @@ export class MemoryStore {
    *  Reads the verified projection, computes the next per-target generation and the content digest,
    *  signs, and appends — all under ONE ledger lock so a concurrent writer can't race the gen. A project ledger runs in
    *  the critical section of design 4.3 (the lock at the resolved destination, the layer judged again under it, and a
-   *  project that is not owned there refused with the operation's text); the global ledger keeps its own lock until B6. */
+   *  project that is not owned there refused with the operation's text); the global ledger runs in `underGlobalLedgerLock`. */
   private writeVerify(targetId: string, state: MemoryState, source: ProvenanceSource, op: 'confirm' | 'recheck'): MemoryRecord {
     const ledger = this.ledgerOf(targetId);
     const p = this.opts.project;
     if (p && ledger === p.ledger) {
       return this.underProjectLedgerLock(p, op, this.judgeLayer({ freshContent: true }), ({ judged }) => this.writeVerifyLocked(ledger, targetId, state, source, op, judged));
     }
-    return withFileLock(ledger, () => this.writeVerifyLocked(ledger, targetId, state, source, op, undefined));
+    return this.underGlobalLedgerLock(op, ({ judged }) => this.writeVerifyLocked(ledger, targetId, state, source, op, judged));
   }
 
   /** writeVerify's body, for a caller that holds the ledger lock. `op` is the tool's name in a witness refusal; `judged` is
-   *  the destination judged under that lock, undefined on the global ledger. */
+   *  the destination judged under that lock (the project's critical section or `underGlobalLedgerLock`). */
   private writeVerifyLocked(ledger: LedgerPath, targetId: string, state: MemoryState, source: ProvenanceSource, op: 'confirm' | 'recheck', judged: JudgedDestination | undefined): MemoryRecord {
     ensureMaster(this.homeDir());                 // mint the master on first sign (different lock)
     // C1.4-③: a pending scope withholds its subkey (subkeyForScope returns null), which would
@@ -1250,18 +1336,19 @@ export class MemoryStore {
 
   /** A ledger rewrite (the auto-compaction, the permanent erase) through the same order as every project write: for a
    *  project ledger the critical section, then the rewrite under the lock it holds and through the directory it judged;
-   *  for the global ledger `compactLedger` with its own lock, as before (B6). `first` is the caller's lock-free
+   *  for the global ledger `underGlobalLedgerLock`. `first` is the caller's lock-free
    *  judgement, or null to make it here. */
   private rewriteLedger(ledger: LedgerPath, op: 'compaction' | 'erase', first: LayerJudgement | null, opts: CompactOptions): CompactionStats {
     const p = this.opts.project;
     if (p && ledger === p.ledger) {
       return this.underProjectLedgerLock(p, op, first ?? this.judgeLayer({ freshContent: true }), ({ ctx, judged }) => compactLedgerUnlocked(ledger, opts, ctx, judged));
     }
-    return compactLedger(ledger, opts);
+    return this.underGlobalLedgerLock(op, ({ ctx, judged }) => compactLedgerUnlocked(ledger, opts, ctx, judged));
   }
 
   /** Content-bound mechanical reality-check. Mints at most Corroborated; never Verified. */
   recheck(id: string, check: RealityCheck): RecheckResult {
+    this.refuseReadOnlyGlobalTarget(id, 'recheck');
     const target = this.liveTarget(id);
     const binding = checkBinding(target.content, check, target.classification);   // R10: the record's classification decides the redaction sentence
     if (!binding.bound) throw new Error(`recheck: ${binding.reason}`);
@@ -1276,6 +1363,7 @@ export class MemoryStore {
 
   /** Human out-of-band vouch → Verified. Target-gated: only a source=user item is eligible. */
   confirm(id: string): { record: MemoryRecord } {
+    this.refuseReadOnlyGlobalTarget(id, 'confirm');
     const target = this.liveTarget(id);
     if (target.provenance.source !== 'user') {
       throw new Error('confirm: only a source=user item is eligible (re-commit as source=user to take authorship first)');
@@ -1328,7 +1416,7 @@ export class MemoryStore {
     addScope(this.global, 'global', undefined);
     const p = this.opts.project;
     if (p && disposition === 'owned') addScope(p.ledger, 'project', p.root);
-    return { records, projectDisposition: disposition, witnessNotes: collectWitnessReadNotes(verdicts) };
+    return { records, projectDisposition: disposition, witnessNotes: this.withGlobalNote(collectWitnessReadNotes(verdicts)) };
   }
 
   /** Live + closed rows across scopes for the bitemporal history view. Live rows come WHOLESALE from
@@ -1394,7 +1482,7 @@ export class MemoryStore {
     const p = this.opts.project;
     if (p && disposition === 'owned') addScope(p.ledger, 'project');
 
-    return { rows, anomalies, truncated, integrityAvailable, projectDisposition: disposition, witnessNotes: collectWitnessReadNotes(verdicts) };
+    return { rows, anomalies, truncated, integrityAvailable, projectDisposition: disposition, witnessNotes: this.withGlobalNote(collectWitnessReadNotes(verdicts)) };
   }
 
   /** Point-in-time forensic snapshot at system-time `t` (spec C §5). Mirrors historyView's ATOMIC
@@ -1438,7 +1526,7 @@ export class MemoryStore {
     if (p && disposition === 'owned') addScope(p.ledger, 'project');
     // The as-of surface never clamps, so the LIVE mismatch note (which promises a clamp) is false here.
     // Mapped at the SOURCE so a library caller gets the surface-true wording, not only the tool.
-    return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: asOfWitnessNotes(collectWitnessReadNotes(verdicts, { asOf: true })) };
+    return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: this.withGlobalNote(asOfWitnessNotes(collectWitnessReadNotes(verdicts, { asOf: true }))) };
   }
 
   /** Explicitly adopt the active project ledger (trust its current contents): a pre-existing ledger
@@ -1569,7 +1657,7 @@ export class MemoryStore {
    *  Snapshot-relative: computed before the mutation lock, exactly like the presence check it
    *  replaces; a concurrent writer can create the ambiguity after this returns. */
   private findEraseTarget(ledger: LedgerPath, id: string, permanent: boolean): 'record' | 'marker' | 'ambiguous' | 'absent' {
-    const records = parseLedger(ledger);
+    const records = parseLedger(ledger, ledger === this.global ? GLOBAL_LEDGER_READ : undefined);
     const isRecordRow = (r: MemoryRecord): boolean =>
       !isMarkerShape(r) && (permanent || r.type === 'assert' || r.type === 'supersede');
     const fam = permanent ? this.familyPrefixOf(id) : null;   // R1: the family match serves the permanent path only
@@ -1637,7 +1725,7 @@ export class MemoryStore {
       for (const c of candidates) {
         // IT-H4: the same file-type-checked read as every ledger reader (a FIFO candidate used to block
         // here forever). A missing candidate reads as empty, which has no corrupt lines.
-        const text = readLedgerBytes(c).toString('utf8');
+        const text = readLedgerBytes(c, c === this.global ? GLOBAL_LEDGER_READ : undefined).toString('utf8');
         if (parseLedgerHealth(text).skippedNonBlank > 0) {
           throw new EraseRefusedError('erase: a ledger has skipped (corrupt/torn) lines — pass an explicit scope');
         }
@@ -1689,6 +1777,7 @@ export class MemoryStore {
     const { ledger, kind, layer } = target;
     const p = this.opts.project;
     const inProject = !!p && ledger === p.ledger;
+    if (!inProject) this.refuseReadOnlyGlobal('erase');   // design 4.7: before the advisory read, so a permanent erase never stores a tombstone it cannot purge
     // Anti-laundering (spec §4.2 PR-1): a PERMANENT erase ends in a witnessed compactLedger rewrite,
     // which refuses to advance the witness over a MISMATCH. Gate the WHOLE permanent erase up front on
     // the scope's stable (witness-first + retry-once) verdict, so a rolled-back scope is refused BEFORE
@@ -1717,7 +1806,7 @@ export class MemoryStore {
           supersedes: id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
         };
         if (inProject) this.underProjectLedgerLock(p!, 'erase', layer, ({ judged }) => appendWitnessedUnlocked(ledger, tombstone, this.homeDir(), p!.root, 'erase', 'erase', judged));
-        else appendWitnessed(ledger, tombstone, this.homeDir(), this.scopeRootOf(ledger), 'erase');
+        else this.underGlobalLedgerLock('erase', ({ judged }) => appendWitnessedUnlocked(ledger, tombstone, this.homeDir(), undefined, 'erase', 'erase', judged));
       }
       if (opts.permanent) {
         // HMAC-aware compaction: preserve genuine signed verifies for this ledger, drop forgeries.

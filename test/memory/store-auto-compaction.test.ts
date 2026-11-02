@@ -30,6 +30,14 @@ vi.mock('../../src/memory/ledger.js', async (importOriginal) => {
       faultyFsOnce = null; // one-shot: only the dedicated test below arms it
       return actual.compactLedger(ledgerPath, fsOps ? { ...opts, fsOps } : opts);
     },
+    // Third fix batch B1 (design 4.7): the store's global rewrite runs the unlocked body under its own inner function
+    // (store.ts underGlobalLedgerLock), so the same one-shot seam wraps that entry point too.
+    compactLedgerUnlocked: (...args: Parameters<typeof actual.compactLedgerUnlocked>) => {
+      const [ledgerPath, opts, ctx, judged] = args;
+      const fsOps = faultyFsOnce;
+      faultyFsOnce = null;
+      return actual.compactLedgerUnlocked(ledgerPath, fsOps ? { ...opts, fsOps } : opts, ctx, judged);
+    },
   };
 });
 

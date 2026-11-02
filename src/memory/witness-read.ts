@@ -36,7 +36,7 @@
  *      The wait reads only the lock file and /proc; it never changes a verdict, and a scope that is
  *      still interrupted after the third read is withheld exactly as before. */
 import type { MemoryRecord } from '../types.js';
-import { readLedgerRaw, readLedgerBytes, type LedgerPath } from './ledger.js';
+import { readLedgerRaw, readLedgerBytes, GLOBAL_LEDGER_READ, type LedgerPath } from './ledger.js';
 import { awaitLiveHolder, type HolderWaitOutcome } from './lock.js';
 import { classifyState, readScopeWitness, scopeKeyOf, WITNESS_READ_AS_GIVEN, type ScopeWitnessState } from './witness-store.js';
 import type { WitnessFileMark, WitnessVerdict } from './witness-core.js';
@@ -136,7 +136,7 @@ export function readLedgerWitnessed(path: LedgerPath, home: string, projectRoot?
   const scopeKey = scopeKeyOf(home, projectRoot);
   const { ledger, state, verdict } = witnessedRead(
     () => readScopeWitness(home, scopeKey, WITNESS_READ_AS_GIVEN),
-    () => { const t0 = performance.now(); const r = readLedgerRaw(path); return { ...r, parseMs: performance.now() - t0 }; },
+    () => { const t0 = performance.now(); const r = readLedgerRaw(path, projectRoot === undefined ? GLOBAL_LEDGER_READ : undefined); return { ...r, parseMs: performance.now() - t0 }; },
     () => awaitLedgerRewriter(path),
   );
   return {
@@ -180,7 +180,7 @@ export function readLedgerBytesWitnessed(
   const scopeKey = scopeKeyOf(home, projectRoot);
   const { ledger, state, verdict } = witnessedRead(
     () => readScopeWitness(home, scopeKey, WITNESS_READ_AS_GIVEN),
-    () => { const t0 = performance.now(); const bytes = readLedgerBytes(path); return { bytes, readMs: performance.now() - t0 }; },
+    () => { const t0 = performance.now(); const bytes = readLedgerBytes(path, projectRoot === undefined ? GLOBAL_LEDGER_READ : undefined); return { bytes, readMs: performance.now() - t0 }; },
     opts.rewriterWait === false ? undefined : () => awaitLedgerRewriter(path),
   );
   return {

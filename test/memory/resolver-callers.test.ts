@@ -12,7 +12,7 @@ import { appendRecord, parseLedger } from '../../src/memory/ledger.js';
 import { readScopeWitness, WITNESS_READ_AS_GIVEN } from '../../src/memory/witness-store.js';
 import { isUnresolvablePathError } from '../../src/memory/path-identity.js';
 import { MemoryStore } from '../../src/memory/store.js';
-import { WITNESS_INIT_NOTE, WITNESS_PATH_UNRESOLVABLE_NOTE } from '../../src/memory/content-frame.js';
+import { WITNESS_INIT_NOTE, WITNESS_PATH_UNRESOLVABLE_NOTE, GLOBAL_LEDGER_READ_ONLY_NOTE } from '../../src/memory/content-frame.js';
 import type { MemoryRecord } from '../../src/types.js';
 
 const d = realpathSync(mkdtempSync(join(tmpdir(), 'helix-callers-')));
@@ -138,7 +138,9 @@ describe('witness-store reads its path through the resolver', () => {
       expect(notes).toContain(WITNESS_PATH_UNRESOLVABLE_NOTE);
       expect(notes).not.toContain(WITNESS_INIT_NOTE);
     }
-    expect(store.asOfView('2026-10-01T00:00:00.000Z').witnessNotes).toEqual([]);
+    // B6 (design 4.7): the global ledger below such a home cannot be resolved either, so every view, the as-of view
+    // included, carries the read-only note; neither witness note is in the as-of view.
+    expect(store.asOfView('2026-10-01T00:00:00.000Z').witnessNotes).toEqual([GLOBAL_LEDGER_READ_ONLY_NOTE]);
   });
 });
 
