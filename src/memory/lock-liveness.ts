@@ -70,9 +70,8 @@ export const realProbe: LivenessProbe = {
   timeNs() { try { return readlinkSync('/proc/self/ns/time'); } catch { return null; } },
   uptimeSec() { return gatedUptimeSec(); },
   bootInstantMs() {
-    // Reads the GATED value, not the raw one. Both consumers of this number turn it into a `dead`
-    // verdict from their own malformed-payload path in lock.ts — acquireFileLock's holder
-    // classification step classifies there, stealUnderGate's steal check unlinks there — and the
+    // Reads the GATED value, not the raw one. The one reader of this number, readLockHolder in lock.ts,
+    // turns it into a `dead` verdict on its malformed-payload path, which the reaper acts on, and the
     // subtraction below reads the wall clock and the uptime non-atomically — wall clock first — so
     // on a platform where the clock can step between the two reads the result can be erroneously
     // HIGH, under which a LIVE lock's mtime looks pre-boot and gets stolen. PRECONDITION, stated

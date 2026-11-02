@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, unlinkSync, linkSync, lstatSync, rmSync, readdirSync } from 'node:fs';
+import { writeFileSync, unlinkSync, linkSync, lstatSync, rmSync, readdirSync, openSync, closeSync, readSync, fstatSync, constants } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { dirname, basename, join } from 'node:path';
@@ -14,11 +14,11 @@ import { resolvedPathOrThrow } from './path-identity.js';
 // than assume the boundary away, classifyHolder (lock-liveness.ts) records each side's time
 // namespace identity and refuses both time-derived proofs where the identities differ or either
 // side has none to compare (D-28, 2026-09-20); that uncertainty resolves to alive-unknown, never
-// to evidence. The ONE residual is the malformed-payload litter check (`st.mtimeMs <
-// probe.bootInstantMs()`), present at both litter sites below — the classification branch in
-// acquireFileLock and the re-verify branch in stealUnderGate: an unparseable payload carries no
-// recorded identity to compare a namespace against, and no namespace-independent boot instant
-// exists, so both paths still read the file's mtime against THIS process's own boot instant.
+// to evidence. The ONE residual is the malformed-payload litter check (`mtimeMs <
+// probe.bootInstantMs()`), present at one site below, readLockHolder, which the acquirer, the reader
+// wait and the reaper's re-verification share: an unparseable payload carries no recorded identity
+// to compare a namespace against, and no namespace-independent boot instant exists, so that site
+// still reads the file's mtime against THIS process's own boot instant.
 // During a mixed-build rollout (the launch barrier means a running process keeps its old bytes
 // until restarted), an old-build holder's payload carries no timeNs — absent, normalizes to null
 // — so it never matches a new-build waiter's real value and the recycled-pid proof cannot fire
@@ -32,7 +32,8 @@ import { resolvedPathOrThrow } from './path-identity.js';
 // holder with the liveness matrix (lock-liveness.ts): only a provably-DEAD holder is ever
 // reclaimed (Task 4's reaper gate); age plays no role anywhere — age cannot distinguish suspension
 // from death, and that misclassification was exactly the erased-plaintext-resurrection defect
-// (D3). Uncertainty always waits.
+// (D3). Uncertainty always waits, with one exception (D8): an object Helix never publishes at a
+// lock path (a link, a FIFO, a socket, a device) is refused at once.
 // This lock defends against ACCIDENTAL concurrency + OS scheduling + crashes, not an adversary.
 
 const RETRY_MS = 25;
@@ -83,6 +84,17 @@ function timeoutMessage(lockPath: string, holder: LockPayload | null, waitedMs: 
     `Removing the lock while its holder is merely SUSPENDED reintroduces the concurrency this lock prevents.`;
 }
 
+export const LOCK_FOREIGN_OBJECT_REFUSAL =
+  'withFileLock: the lock file for this path is not a lock Helix wrote (a link, a FIFO, a socket or a device ' +
+  'stands at its name) — refusing to read it or wait on it. Ask the user to look at that object and remove it; do ' +
+  'not remove it for them.';
+export class LockForeignObjectError extends Error {
+  readonly lockForeignObject = true;   // the marker isLockForeignObjectError reads
+  constructor() { super(LOCK_FOREIGN_OBJECT_REFUSAL); this.name = 'LockForeignObjectError'; }
+}
+export const isLockForeignObjectError = (e: unknown): boolean =>
+  e instanceof Error && (e as { lockForeignObject?: unknown }).lockForeignObject === true;
+
 interface AcquiredLock { ctx: LockContext; release: () => void }
 
 /** Shared acquire path for withFileLock/withFileLockAsync (extracted; zero behavior change for
@@ -119,7 +131,7 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
   // overshoot the caller's budget by up to one RETRY_MS. Floor of 1ms so a nearly-exhausted budget
   // still yields the CPU instead of spinning.
   const sleepWithinBudget = (): void => sleepSync(Math.max(1, Math.min(RETRY_MS, maxWaitMs - elapsedMs())));
-  let lastHolder: LockPayload | null = null;
+  let publishedOnceMore = false;                            // per acquisition: the absent row's extra publication (locks-R3)
 
   for (;;) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString('hex')}.tmp`;
@@ -154,8 +166,21 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
     // liveness matrix. readLockHolder is the ONE classification; awaitLiveHolder (the IT-M6 reader
     // wait) applies it too, so a waiter and an acquirer can never disagree about a holder.
     const reading = readLockHolder(lockPath, self, probe);
-    lastHolder = reading?.payload ?? null;
-    if (reading === null) continue;                         // vanished between attempts — retry immediately
+    if (reading.kind === 'foreign') throw new LockForeignObjectError();      // D8: not opened, no budget spent
+    if (reading.kind === 'absent') {
+      if (elapsedMs() >= maxWaitMs) {
+        if (publishedOnceMore) throw new Error(timeoutMessage(lockPath, null, elapsedMs()));
+        publishedOnceMore = true;                                            // decision 8 (locks-R3): publish once more, then refuse
+        continue;
+      }
+      sleepWithinBudget();
+      continue;
+    }
+    if (reading.kind === 'unreadable') {                                      // may be a live holder's lock: wait the budget, then refuse
+      if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, elapsedMs()));
+      sleepWithinBudget();
+      continue;
+    }
     const holder = reading.holder;
 
     if (holder === 'reentrant-self')
@@ -167,29 +192,26 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
     // (automatic reclaim disabled until repair, the documented fail-closed residue). The steal
     // grants nothing: the loop still re-publishes from scratch on the next pass.
     if (holder === 'dead') stealUnderGate(lockPath, probe);
-    if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, lastHolder, elapsedMs()));
+    if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, reading.payload, elapsedMs()));
     sleepWithinBudget();
   }
 
   const ctx: LockContext = {
-    stillOwned() {
-      try { return tryParsePayload(readFileSync(lockPath, 'utf8'))?.token === token; } catch { return false; }
-    },
+    stillOwned() { return lockTokenAt(lockPath) === token; },
   };
   const release = (): void => {
-    // Release ONLY a lock we can prove is ours. Anything else (foreign payload, legacy dir,
+    // Release ONLY a lock we can prove is ours. Anything else (foreign payload, legacy dir, a link,
     // unreadable) is left in place — deleting it would free a lock someone else may hold.
-    try {
-      if (!lstatSync(lockPath).isDirectory() && tryParsePayload(readFileSync(lockPath, 'utf8'))?.token === token) unlinkSync(lockPath);
-    } catch { /* gone/unreadable — cannot prove ownership — leave it */ }
+    try { if (lockTokenAt(lockPath) === token) unlinkSync(lockPath); } catch { /* cannot prove ownership: leave it */ }
   };
   return { ctx, release };
 }
 
-/** What awaitLiveHolder found. 'none': nothing to wait for (no lock file, a holder that classifies
- *  dead or reentrant-self, or a target whose lock path does not resolve). 'released': the holder seen
- *  at entry gave the lock up within the budget (the file is gone, or it now records a different
- *  acquisition). 'timeout': that holder still had it when the budget ran out. */
+/** What awaitLiveHolder found. 'none': nothing to wait for (no lock file, a foreign or unreadable
+ *  object, a holder that classifies dead or reentrant-self, at entry or during the wait, or a target
+ *  whose lock path does not resolve). 'released': the holder seen at entry gave the lock up within the
+ *  budget (the file is gone, it now records a different acquisition, or another object replaced it).
+ *  'timeout': that holder still had it when the budget ran out. */
 export type HolderWaitOutcome = 'none' | 'released' | 'timeout';
 
 export interface HolderWaitOptions {
@@ -200,75 +222,157 @@ export interface HolderWaitOptions {
   sleep?: (ms: number) => void;
 }
 
-/** One reading of a lock file: the holder's class, the payload when it parses (null for a legacy
- *  directory or an unparseable file), and a snapshot that names this acquisition. */
-interface LockHolderReading { holder: HolderClass; payload: LockPayload | null; snapshot: string }
+/** Upper bound on what is read from a lock path. A payload this version publishes is about 220 bytes. */
+const LOCK_READ_MAX_BYTES = 64 * 1024;
 
-/** The snapshot of a legacy lock DIRECTORY: its inode plus its owner file ('' when ownerless). */
-function legacyDirSnapshot(lockPath: string, ino: number): string {
-  let owner = '';
-  try { owner = readFileSync(join(lockPath, 'owner'), 'utf8'); } catch { /* ownerless legacy dir */ }
-  return `d:${ino}:${owner}`;
-}
+/** What stands at a lock path, or at a legacy lock directory's `owner` entry (spec 4.5).
+ *  - payload:    a regular file and the bytes read from it, at most LOCK_READ_MAX_BYTES. `oversized`
+ *                says the file holds more than that; the caller then treats it like a payload that
+ *                does not parse, whatever its first bytes are.
+ *  - legacy-dir: a directory (the pre-redesign lock form).
+ *  - foreign:    a symlink, a FIFO, a socket, a device: never opened.
+ *  - unreadable: a regular file that could not be opened or read, or a name that could not be examined.
+ *  - absent:     nothing at the name (at the look, or at the open that followed it). */
+type LockObject =
+  | { kind: 'payload'; ino: number; mtimeMs: number; raw: string; oversized: boolean }
+  | { kind: 'legacy-dir'; ino: number }
+  | { kind: 'foreign' }
+  | { kind: 'unreadable' }
+  | { kind: 'absent' };
 
-/** An identity for the lock file as it stands, or null when there is none: inode plus the full
- *  payload (every acquisition publishes a fresh random token, so a released-and-retaken lock never
- *  repeats a snapshot even when the filesystem reuses the inode number). The same identity
- *  readLockHolder records, read without classifying. */
-function holderSnapshot(lockPath: string): string | null {
+/** THE one read of a lock path (spec 4.5). Every site that used readFileSync on a lock path goes
+ *  through it: the acquirer's classification, the reader wait, stillOwned, release, the reaper's
+ *  re-verification, the reaper gate, and the `owner` entry of a legacy lock directory. readFileSync
+ *  followed links and blocked on a FIFO with no writer, which stopped the server's one thread.
+ *  The name is examined without following a link (lstat); only a regular file is opened, with
+ *  O_NONBLOCK (a FIFO that took the name after the look opens instead of blocking) and O_NOFOLLOW (a
+ *  link that took the name fails ELOOP); the DESCRIPTOR is then asked what was opened; at most
+ *  LOCK_READ_MAX_BYTES + 1 bytes are read. Never throws. By result: lstat ENOENT or open ENOENT is
+ *  `absent`; a non-regular non-directory at the look, open ELOOP, or a descriptor that is not a
+ *  regular file is `foreign`; every other failure is `unreadable`. */
+function readLockObject(path: string): LockObject {
   try {
-    const st = lstatSync(lockPath);
-    return st.isDirectory() ? legacyDirSnapshot(lockPath, st.ino) : `f:${st.ino}:${readFileSync(lockPath, 'utf8')}`;
-  } catch { return null; }
-}
-
-/** THE classification of a lock file's holder, shared by acquireFileLock's contention branch and
- *  awaitLiveHolder (L1): a legacy DIRECTORY lock -> its owner pid (classifyLegacyDir); an unparseable
- *  payload -> 'dead' only when the file predates this boot (litter), else 'alive-unknown'; a payload ->
- *  classifyHolder against `self`. For a payload file the snapshot records the very bytes classified, so
- *  a poll compares against exactly that acquisition. null = no lock file, or it vanished (or a probe
- *  threw) mid-read — the acquirer retries, the waiter has nothing to wait for. Never publishes,
- *  reclaims or unlinks anything. */
-function readLockHolder(lockPath: string, self: LockPayload, probe: LivenessProbe): LockHolderReading | null {
+    const st = lstatSync(path);
+    if (st.isDirectory()) return { kind: 'legacy-dir', ino: st.ino };
+    if (!st.isFile()) return { kind: 'foreign' };
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'absent' } : { kind: 'unreadable' };
+  }
+  let fd: number;
   try {
-    const st = lstatSync(lockPath);
-    if (st.isDirectory()) {
-      const snapshot = legacyDirSnapshot(lockPath, st.ino);
-      return { holder: classifyLegacyDir(lockPath, probe), payload: null, snapshot };
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return { kind: 'absent' };       // released between the look and the open
+    if (code === 'ELOOP') return { kind: 'foreign' };       // a link took the name between the look and the open
+    return { kind: 'unreadable' };
+  }
+  try {
+    const st = fstatSync(fd);
+    if (st.isDirectory()) return { kind: 'legacy-dir', ino: st.ino };
+    if (!st.isFile()) return { kind: 'foreign' };
+    const buf = Buffer.allocUnsafe(LOCK_READ_MAX_BYTES + 1);
+    let n = 0;
+    while (n < buf.length) {
+      const got = readSync(fd, buf, n, buf.length - n, null);
+      if (got === 0) break;
+      n += got;
     }
-    const raw = readFileSync(lockPath, 'utf8');
-    const snapshot = `f:${st.ino}:${raw}`;
-    const parsed = tryParsePayload(raw);
+    return { kind: 'payload', ino: st.ino, mtimeMs: st.mtimeMs, raw: buf.toString('utf8', 0, Math.min(n, LOCK_READ_MAX_BYTES)), oversized: n > LOCK_READ_MAX_BYTES };
+  } catch {
+    return { kind: 'unreadable' };
+  } finally {
+    try { closeSync(fd); } catch { /* a failed close of a read-only descriptor changes nothing */ }
+  }
+}
+
+/** The token recorded at a lock path, or null: read through readLockObject, so a link, a FIFO, a
+ *  directory, an oversized or an unreadable file answers null and is never followed. stillOwned,
+ *  release and the reaper gate use it to recognise their OWN lock and leave everything else in place. */
+function lockTokenAt(path: string): string | null {
+  const o = readLockObject(path);
+  return o.kind === 'payload' && !o.oversized ? tryParsePayload(o.raw)?.token ?? null : null;
+}
+
+/** The `owner` entry of a legacy lock DIRECTORY, read through readLockObject (spec 4.5, locks-R4):
+ *  its text when it is a regular file inside the cap, else null. null covers an ownerless directory
+ *  and an owner entry that is a link, a FIFO, a socket, a device, a directory, unreadable or over the
+ *  cap: the directory then classifies alive-unknown, as an ownerless one does. */
+function legacyOwner(lockPath: string): string | null {
+  const o = readLockObject(join(lockPath, 'owner'));
+  return o.kind === 'payload' && !o.oversized ? o.raw : null;
+}
+
+/** One reading of a lock path. `holder` is a regular file or a legacy directory, with the holder's
+ *  class, the payload when it parses (null for a legacy directory or a payload that does not parse)
+ *  and a snapshot that names this acquisition: the inode plus the bytes read (a legacy directory: its
+ *  inode plus its owner text, '' when it has none). Every acquisition publishes a fresh random token,
+ *  so a released-and-retaken lock never repeats a snapshot even when the filesystem reuses the inode
+ *  number. The other three kinds are the rows of spec 4.5. */
+type LockHolderReading =
+  | { kind: 'holder'; holder: HolderClass; payload: LockPayload | null; snapshot: string; shape: 'payload' | 'unparseable' | 'legacy-dir' }
+  | { kind: 'foreign' }
+  | { kind: 'unreadable' }
+  | { kind: 'absent' };
+
+/** THE classification of what stands at a lock path, the one site of the litter rule, shared by
+ *  acquireFileLock's contention branch, awaitLiveHolder (L1) and the reaper's re-verification under
+ *  its gate: a legacy DIRECTORY lock -> its owner pid (classifyLegacyOwner); a payload that does not
+ *  parse, or a regular file over the read cap -> 'dead' only when the file predates this boot
+ *  (litter), else 'alive-unknown'; a payload -> classifyHolder against `self`. For a regular file the
+ *  snapshot records the very bytes classified, so a poll compares against exactly that acquisition.
+ *  `foreign`, `unreadable` and `absent` are passed on from readLockObject; a probe that throws while
+ *  classifying reads as `unreadable` (the holder could not be identified). Never publishes, reclaims
+ *  or unlinks anything. */
+function readLockHolder(lockPath: string, self: LockPayload, probe: LivenessProbe): LockHolderReading {
+  const o = readLockObject(lockPath);
+  if (o.kind === 'foreign' || o.kind === 'unreadable' || o.kind === 'absent') return { kind: o.kind };
+  try {
+    if (o.kind === 'legacy-dir') {
+      const owner = legacyOwner(lockPath);
+      return { kind: 'holder', holder: classifyLegacyOwner(owner, probe), payload: null, snapshot: `d:${o.ino}:${owner ?? ''}`, shape: 'legacy-dir' };
+    }
+    const snapshot = `f:${o.ino}:${o.raw}`;
+    const parsed = o.oversized ? null : tryParsePayload(o.raw);
     if (parsed === null) {
       const boot = probe.bootInstantMs();
-      return { holder: boot !== null && st.mtimeMs < boot ? 'dead' : 'alive-unknown', payload: null, snapshot };
+      return { kind: 'holder', holder: boot !== null && o.mtimeMs < boot ? 'dead' : 'alive-unknown', payload: null, snapshot, shape: 'unparseable' };
     }
-    return { holder: classifyHolder(parsed, self, probe), payload: parsed, snapshot };
-  } catch { return null; }
+    return { kind: 'holder', holder: classifyHolder(parsed, self, probe), payload: parsed, snapshot, shape: 'payload' };
+  } catch { return { kind: 'unreadable' }; }
 }
 
 /** READ-ONLY wait for a live holder of `target`'s lock (IT-M6: a witnessed reader that still sees a
  *  rewrite's journal over the old bytes waits for the rewriter instead of withholding the scope).
  *  Never publishes, reclaims, steals or unlinks anything: it reads the lock file and, through
  *  `probe`, /proc and kill(pid, 0). A holder that classifies alive or alive-unknown is waited for,
- *  polling every `pollMs`, until the lock file is gone or records a different acquisition, or
- *  `maxWaitMs` passes. No lock, a dead holder (its rewrite can no longer land) and this thread's own
- *  lock (nothing can land while we wait on ourselves) return 'none' at once. */
+ *  polling every `pollMs` and classifying it again at each poll, until anything else stands at the
+ *  lock path ('released'), that acquisition classifies dead or reentrant-self ('none'), or `maxWaitMs`
+ *  passes. No lock, a foreign or unreadable object (neither is confirmed as a rewrite's holder), a
+ *  dead holder (its rewrite can no longer land) and this thread's own lock (nothing can land while we
+ *  wait on ourselves) return 'none' at once. */
 export function awaitLiveHolder(target: string, opts: HolderWaitOptions): HolderWaitOutcome {
   const probe = opts.probe ?? realProbe;
   let lockPath: string;
   try { lockPath = lockPathOf(target); } catch { return 'none'; }   // e.g. the ledger's directory does not exist
-  const current = readLockHolder(lockPath, selfIdentity('holder-wait', probe), probe);
-  if (current === null || current.holder === 'dead' || current.holder === 'reentrant-self') return 'none';
+  const self = selfIdentity('holder-wait', probe);
+  const current = readLockHolder(lockPath, self, probe);
+  if (current.kind !== 'holder' || current.holder === 'dead' || current.holder === 'reentrant-self') return 'none';
   const seen = current.snapshot;
+  const look = (): HolderWaitOutcome | null => {
+    const now = readLockHolder(lockPath, self, probe);
+    if (now.kind !== 'holder' || now.snapshot !== seen) return 'released';
+    return now.holder === 'dead' || now.holder === 'reentrant-self' ? 'none' : null;
+  };
   const sleep = opts.sleep ?? sleepSync;
   const pollMs = opts.pollMs ?? RETRY_MS;
   const startedAt = performance.now();
   for (;;) {
     const left = opts.maxWaitMs - (performance.now() - startedAt);
-    if (left <= 0) return holderSnapshot(lockPath) === seen ? 'timeout' : 'released';
+    if (left <= 0) return look() ?? 'timeout';
     sleep(Math.max(1, Math.min(pollMs, left)));
-    if (holderSnapshot(lockPath) !== seen) return 'released';
+    const outcome = look();
+    if (outcome !== null) return outcome;
   }
 }
 
@@ -304,12 +408,11 @@ export async function withFileLockAsync<T>(target: string, fn: (ctx: LockContext
 }
 
 /** Legacy (pre-redesign) lock DIRECTORY: owner file carries `pid-hex`. kill0-only classification —
- *  no ticks/boot/ns were recorded. An OWNERLESS dir is permanently alive-unknown: the old holder
- *  may sit suspended between its mkdir and its owner stamp, and no evidence can distinguish that
- *  from a crash — manual removal only (the timeout error names the path). */
-function classifyLegacyDir(lockPath: string, probe: LivenessProbe): HolderClass {
-  let raw: string;
-  try { raw = readFileSync(join(lockPath, 'owner'), 'utf8'); } catch { return 'alive-unknown'; }
+ *  no ticks/boot/ns were recorded. An OWNERLESS dir (`raw` null, see legacyOwner) is permanently
+ *  alive-unknown: the old holder may sit suspended between its mkdir and its owner stamp, and no
+ *  evidence can distinguish that from a crash — manual removal only (the timeout error names the path). */
+function classifyLegacyOwner(raw: string | null, probe: LivenessProbe): HolderClass {
+  if (raw === null) return 'alive-unknown';
   const pid = Number(raw.split('-')[0]);
   if (!Number.isSafeInteger(pid) || pid <= 0) return 'alive-unknown';
   const k = probe.kill0(pid);
@@ -339,24 +442,15 @@ function stealUnderGate(lockPath: string, probe: LivenessProbe): void {
     try { linkSync(gateSrc, gatePath); } finally { try { unlinkSync(gateSrc); } catch { /* raced */ } }
   } catch { return; }                                              // gate busy (same boot) — no steal this round
   try {
-    const st = lstatSync(lockPath);
-    if (st.isDirectory()) {
-      if (classifyLegacyDir(lockPath, probe) !== 'dead') return;   // re-verify under the gate
-      rmSync(lockPath, { recursive: true, force: true });
-    } else {
-      const raw = readFileSync(lockPath, 'utf8');
-      const parsed = tryParsePayload(raw);
-      if (parsed !== null) {
-        if (classifyHolder(parsed, selfIdentity(gateToken, probe), probe) !== 'dead') return; // changed/alive — abandon
-      } else {
-        const boot = probe.bootInstantMs();
-        if (boot === null || st.mtimeMs >= boot) return;           // malformed but same-boot — abandon
-      }
-      unlinkSync(lockPath);
-    }
+    // Re-verify under the gate with THE classification (readLockHolder). Anything that is not provably
+    // dead now (changed, alive, same-boot junk, foreign, unreadable, gone) is left alone.
+    const victim = readLockHolder(lockPath, selfIdentity(gateToken, probe), probe);
+    if (victim.kind !== 'holder' || victim.holder !== 'dead') return;
+    if (victim.shape === 'legacy-dir') rmSync(lockPath, { recursive: true, force: true });
+    else unlinkSync(lockPath);
   } catch { /* victim vanished or fs error — abandon; outer loop re-evaluates */ }
   finally {
-    try { if (tryParsePayload(readFileSync(gatePath, 'utf8'))?.token === gateToken) unlinkSync(gatePath); } catch { /* leave */ }
+    try { if (lockTokenAt(gatePath) === gateToken) unlinkSync(gatePath); } catch { /* leave */ }
   }
 }
 

@@ -13,7 +13,7 @@
 // seam added (the sanctioned interception, witness-concurrent.test.ts).
 import { describe, it, expect, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, unlinkSync, existsSync, readFileSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -29,7 +29,7 @@ import {
 } from '../../src/memory/witness-read.js';
 import * as lockMod from '../../src/memory/lock.js';
 import { awaitLiveHolder, lockPathOf, writeLockFileForTest, type HolderWaitOptions } from '../../src/memory/lock.js';
-import { selfIdentity } from '../../src/memory/lock-liveness.js';
+import { realProbe, selfIdentity } from '../../src/memory/lock-liveness.js';
 import { sha256Hex, type JournalEntry, type WitnessEntry } from '../../src/memory/witness-core.js';
 import { WITNESS_TRANSITION_NOTE } from '../../src/memory/content-frame.js';
 import { gatherScopedRecords } from '../../src/hooks/session-start.js';
@@ -322,6 +322,35 @@ describe('IT-M6 (2): awaitLiveHolder reads the ledger lock and never takes it', 
       expect(awaitLiveHolder(ledger, { maxWaitMs: 60, pollMs: 25 })).toBe('timeout');
       writeFileSync(join(lockPath, 'owner'), `${deadPid()}-cafe`);     // a dead legacy holder
       expect(awaitLiveHolder(ledger, { maxWaitMs: 2_000 })).toBe('none');
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('the holder is classified again at every poll: one that dies during the wait ends it with none, not timeout (m-8)', () => {
+    const home = newHome();
+    try {
+      const ledger = join(home, 'memory.jsonl');
+      writeFileSync(ledger, '');
+      let kill: 'alive' | 'dead' = 'alive';
+      const probe = { ...realProbe, kill0: () => kill, startTicksOf: () => '4242', stateOf: () => 'S' };
+      writeLockFileForTest(lockPathOf(ledger), { ...selfIdentity('f'.repeat(32)), pid: 999_999, startTicks: '4242', threadId: 5 });
+      let pauses = 0;
+      const out = awaitLiveHolder(ledger, { maxWaitMs: 2_000, pollMs: 25, probe, sleep: () => { pauses += 1; if (pauses === 2) kill = 'dead'; } });
+      expect(out).toBe('none');
+      expect(pauses).toBe(2);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('an object that replaces the holder during the wait ends it with released, not timeout (locks-R1)', () => {
+    const home = newHome();
+    try {
+      const ledger = join(home, 'memory.jsonl');
+      writeFileSync(ledger, '');
+      const lockPath = liveHolderLock(ledger);
+      const out = awaitLiveHolder(ledger, {
+        maxWaitMs: 2_000,
+        sleep: () => { unlinkSync(lockPath); symlinkSync(join(home, 'nowhere'), lockPath); },
+      });
+      expect(out).toBe('released');
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 
