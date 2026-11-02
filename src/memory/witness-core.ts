@@ -23,6 +23,14 @@ export type WitnessVerdict =
   | { kind: 'transition-interrupted'; journal: JournalEntry }
   | { kind: 'mismatch' };
 
+/** What a read knows about witness.json itself, beyond the verdict. The mark travels BESIDE the verdict and is never a
+ *  value of the union: the verdict is written to no file today, and a mark that travels beside it cannot start to be
+ *  (design section 3, persisted shapes do not change). `'unusable'`: the file is present but cannot be read or parsed,
+ *  is not a regular file, or a link stands at its name; the state was then read as empty, so the verdict beside it is a
+ *  first contact. `'as-given'`: the home's parent path cannot be resolved and the file was opened by the path as
+ *  written (D3). */
+export type WitnessFileMark = 'unusable' | 'as-given';
+
 export function sha256Hex(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
 }

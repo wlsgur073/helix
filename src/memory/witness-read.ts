@@ -38,8 +38,8 @@
 import type { MemoryRecord } from '../types.js';
 import { readLedgerRaw, readLedgerBytes, type LedgerPath } from './ledger.js';
 import { awaitLiveHolder, type HolderWaitOutcome } from './lock.js';
-import { classifyState, readScopeWitness, scopeKeyOf, type ScopeWitnessState } from './witness-store.js';
-import type { WitnessVerdict } from './witness-core.js';
+import { classifyState, readScopeWitness, scopeKeyOf, WITNESS_READ_AS_GIVEN, type ScopeWitnessState } from './witness-store.js';
+import type { WitnessFileMark, WitnessVerdict } from './witness-core.js';
 
 /** IT-M6 reader-wait budget: how long a witnessed read waits for a live holder of the scope's ledger
  *  lock before it re-reads, and how often it looks. The SessionStart hook runs under a 10 s limit
@@ -116,6 +116,8 @@ export interface LedgerWitnessed {
    *  degraded to false under macInvalid — a corrupt journal is treated as absent, same as the verdict
    *  path (classifyState never consults a macInvalid journal either). */
   journalPending: boolean;
+  /** The mark of the SAME final witness state: the file is unusable, or was opened as written. */
+  witnessFile?: WitnessFileMark;
   /** Read+parse time of the FINAL ledger read (readLedgerRaw), in ms — for stats-emitting callers
    *  (verifiedLiveWitnessed's parseMs) that must time the ledger read WITHOUT the witness read/classify/
    *  retry folded in, keeping the A3 replay curve comparable across surfaces. Ignored by others. */
@@ -133,7 +135,7 @@ export interface LedgerWitnessed {
 export function readLedgerWitnessed(path: LedgerPath, home: string, projectRoot?: string): LedgerWitnessed {
   const scopeKey = scopeKeyOf(home, projectRoot);
   const { ledger, state, verdict } = witnessedRead(
-    () => readScopeWitness(home, scopeKey),
+    () => readScopeWitness(home, scopeKey, WITNESS_READ_AS_GIVEN),
     () => { const t0 = performance.now(); const r = readLedgerRaw(path); return { ...r, parseMs: performance.now() - t0 }; },
     () => awaitLedgerRewriter(path),
   );
@@ -143,6 +145,7 @@ export function readLedgerWitnessed(path: LedgerPath, home: string, projectRoot?
     verdict,
     witnessIdentity: state.entry?.mac ?? 'witness-absent',
     journalPending: state.journal !== null,
+    ...(state.file !== undefined ? { witnessFile: state.file } : {}),
     parseMs: ledger.parseMs,
   };
 }
@@ -152,6 +155,7 @@ export interface LedgerBytesWitnessed {
   verdict: WitnessVerdict;
   witnessIdentity: string;   // the witness entry's own MAC, or 'witness-absent' (see LedgerWitnessed)
   journalPending: boolean;   // an in-flight rewrite transition is open (see LedgerWitnessed)
+  witnessFile?: WitnessFileMark;   // the mark of the SAME final witness state (see LedgerWitnessed)
   readMs: number;            // time of the FINAL readLedgerBytes call, in ms (recall's parseMs component)
 }
 
@@ -175,7 +179,7 @@ export function readLedgerBytesWitnessed(
 ): LedgerBytesWitnessed {
   const scopeKey = scopeKeyOf(home, projectRoot);
   const { ledger, state, verdict } = witnessedRead(
-    () => readScopeWitness(home, scopeKey),
+    () => readScopeWitness(home, scopeKey, WITNESS_READ_AS_GIVEN),
     () => { const t0 = performance.now(); const bytes = readLedgerBytes(path); return { bytes, readMs: performance.now() - t0 }; },
     opts.rewriterWait === false ? undefined : () => awaitLedgerRewriter(path),
   );
@@ -184,6 +188,7 @@ export function readLedgerBytesWitnessed(
     verdict,
     witnessIdentity: state.entry?.mac ?? 'witness-absent',
     journalPending: state.journal !== null,
+    ...(state.file !== undefined ? { witnessFile: state.file } : {}),
     readMs: ledger.readMs,
   };
 }

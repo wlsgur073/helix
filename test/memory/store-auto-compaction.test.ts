@@ -1,7 +1,7 @@
 // Auto-compaction on the recall path (spec 2026-07-09), invariants I1-I6.
 // NOTE: I4/I5 uses chmodSync to force a write failure — Linux/WSL (the repo's platform).
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, chmodSync, statSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync, copyFileSync, symlinkSync, chmodSync, statSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -92,6 +92,43 @@ describe('auto-compaction on recall', () => {
       const hit = store.recall('deploy');       // MISS -> eligible -> compaction
       expect(parseLedger(ledger).length).toBeLessThan(rowsBefore); // dead weight dropped
       expect(hit.items.length).toBeGreaterThan(0); // recall still returns the live facts
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('D3 (W-R8): a home path that cannot be resolved suppresses the attempt too: an in-sync, eligible ledger is untouched and no compaction metric (failure included) is written', () => {
+    const src = newHome(); const base = newHome();
+    try {
+      makeDirty(new MemoryStore(join(src, 'memory.jsonl'), { home: src, sessionId: 't', now: () => FUTURE }));
+      const dir = Buffer.concat([Buffer.from(`${base}/real`), Buffer.from([0xff])]);
+      mkdirSync(dir, { mode: 0o700 });
+      for (const n of readdirSync(src)) copyFileSync(join(src, n), Buffer.concat([dir, Buffer.from(`/${n}`)]));
+      const home = join(base, 'home'); symlinkSync(dir, home);
+      const ledger = join(home, 'memory.jsonl');
+      const { sink, emitted } = recordingSink();
+      const store = new MemoryStore(ledger, { home, sessionId: 't', now: () => FUTURE, compaction: enabled, metricsSink: sink });
+      const before = readFileSync(ledger, 'utf8');
+      expect(store.recall('deploy').items.length).toBeGreaterThan(0);
+      expect(readFileSync(ledger, 'utf8')).toBe(before);
+      expect(emitted).toEqual([]);
+    } finally { rmSync(src, { recursive: true, force: true }); rmSync(base, { recursive: true, force: true }); }
+  });
+
+  it('D9 (W-R8): a witness file that cannot be used suppresses the attempt: the ledger is untouched, no compaction metric (failure included) is written, the once-per-session guard is kept, and the same store compacts after the file is restored', () => {
+    const home = newHome();
+    try {
+      const ledger = join(home, 'memory.jsonl');
+      const { sink, emitted } = recordingSink();
+      const store = new MemoryStore(ledger, { home, sessionId: 't', now: () => FUTURE, compaction: enabled, metricsSink: sink });
+      makeDirty(store);
+      const good = readFileSync(join(home, 'witness.json'));
+      writeFileSync(join(home, 'witness.json'), 'not json {{{');
+      const before = readFileSync(ledger, 'utf8');
+      store.recall('deploy');                                  // a MISS: eligible on its rows, not attempted
+      expect(readFileSync(ledger, 'utf8')).toBe(before);
+      expect(emitted).toEqual([]);
+      writeFileSync(join(home, 'witness.json'), good);          // restored: the witness identity changes, so the next recall is a MISS again
+      store.recall('deploy');
+      expect(parseLedger(ledger).length).toBeLessThan(before.split('\n').filter(Boolean).length);
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 

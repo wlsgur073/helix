@@ -2,7 +2,7 @@ import type { MemoryRecord, AsOfVerify, MemoryState } from '../types.js';
 import { buildProjection } from './projection.js';
 import { digestContent } from './ledger-mac.js';
 import { isIsoInstant } from './history.js';
-import type { WitnessVerdict } from './witness-core.js';
+import type { WitnessFileMark, WitnessVerdict } from './witness-core.js';
 
 export interface VerifiedProjection {
   live: Map<string, MemoryRecord>;
@@ -30,13 +30,14 @@ export function clampElevated(p: VerifiedProjection): VerifiedProjection {
 }
 
 /** Read-side witness enforcement over a verified projection (spec §4). `mismatch` clamps elevated
- *  grades to Fresh (D1; D1b — rows are still served); `transition-interrupted` excludes the whole
+ *  grades to Fresh (D1; D1b — rows are still served), and so does a witness file that cannot be used
+ *  (`witnessFile === 'unusable'`, design D9); `transition-interrupted` excludes the whole
  *  scope (empty live map + no compromised flags); every other verdict passes through untouched.
  *  keyAvailable (the master-key signal) is orthogonal to the witness and always carried. asOf uses a
  *  facts-level rule (exclude only, never clamp), so this projection helper is P1/P2-live only. */
-export function enforceWitnessProjection(p: VerifiedProjection, verdict: WitnessVerdict): VerifiedProjection {
+export function enforceWitnessProjection(p: VerifiedProjection, verdict: WitnessVerdict, witnessFile?: WitnessFileMark): VerifiedProjection {
   if (verdict.kind === 'transition-interrupted') return { live: new Map(), compromised: new Set(), keyAvailable: p.keyAvailable };
-  if (verdict.kind === 'mismatch') return clampElevated(p);
+  if (verdict.kind === 'mismatch' || witnessFile === 'unusable') return clampElevated(p);
   return p;
 }
 

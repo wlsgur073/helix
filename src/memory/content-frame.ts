@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { BlastRadius, MemoryState, ProvenanceSource, ScopedRecord } from '../types.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
-import type { WitnessVerdict } from './witness-core.js';
+import type { WitnessFileMark, WitnessVerdict } from './witness-core.js';
 
 /** 128-bit CSPRNG hex nonce. Impure — callers invoke it; pure framers take the result as a param. */
 export function newNonce(): string {
@@ -143,6 +143,18 @@ export const WITNESS_TRANSITION_NOTE =
  *  ends it. Same constraints as every witness note: static, no interpolation, no path, no imperative. */
 export const WITNESS_INIT_NOTE =
   '(rollback witness: this memory scope has no verified baseline, so a rollback of its current contents would go undetected; the next write records them as the baseline)';
+/** D9 and decision 6: the note of a read whose witness FILE is present but cannot be used. The 4.9 row of the unreadable witness file, verbatim. Static: no path, no interpolation, no imperative.
+ *  It REPLACES the first-contact note of that scope: that one promises a baseline at the next write, and here the next write is refused. */
+export const WITNESS_FILE_UNUSABLE_NOTE =
+  '(the rollback-witness file exists but cannot be read or parsed, or a link stands at its name, so grades cannot be checked against it: elevated grades are shown as Fresh and nothing can be stored until that file is restored or removed)';
+/** D3 for the witness file (W-R1): the home's parent path cannot be resolved, the file was opened as written and the real verdict computed. No 4.9 row.
+ *  It stands beside a mismatch or transition note, which stays true, and REPLACES the first-contact note: that one promises a baseline at the next write, and here the next write is refused.
+ *  The as-of view limits no grade, so this note, whose last clause says grades are checked against that file, stays out of it. */
+export const WITNESS_PATH_UNRESOLVABLE_NOTE =
+  "(the rollback-witness file's path cannot be resolved, so nothing can be stored or erased in this session: existing records are shown, and their grades are checked against that file as it stands)";
+/** W-R6 (finding v-witness-05): a transient error (EMFILE, ENFILE, EINTR) on the witness read of the SessionStart hook's PROJECT scope; a block with the global records is still printed, and this says what it lacks. No 4.9 row. Static: no path, no interpolation, no imperative. */
+export const WITNESS_READ_TRANSIENT_NOTE =
+  "(the rollback-witness file could not be read at this moment, so this project's memory is left out of this block; the next session reads it again)";
 
 /** The trusted out-of-band note a witness verdict warrants on a READ surface, or null when it needs
  *  none. `in-sync`/`unwitnessed-suffix` are healthy; `transition-heal` is resolved on the next WRITE
@@ -169,11 +181,21 @@ export function asOfWitnessNotes(notes: string[]): string[] {
 /** Map an ordered list of per-scope verdicts (global first, then project) to their notes — deduped,
  *  order-preserving. Two scopes sharing a verdict render the note once (spec: ordered + deduped). */
 export function collectWitnessNotes(verdicts: WitnessVerdict[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const v of verdicts) {
-    const note = witnessNoteFor(v);
-    if (note !== null && !seen.has(note)) { seen.add(note); out.push(note); }
+  return collectWitnessReadNotes(verdicts.map((verdict) => ({ verdict })));
+}
+
+/** collectWitnessNotes over reads that may carry a mark about the witness file itself, in the same order and deduped.
+ *  `opts.asOf` is the as-of view, which limits no grade: neither mark gets a note of its own there (W-R2). */
+export function collectWitnessReadNotes(reads: ReadonlyArray<{ verdict: WitnessVerdict; witnessFile?: WitnessFileMark }>, opts: { asOf?: boolean } = {}): string[] {
+  const seen = new Set<string>(); const out: string[] = [];
+  const add = (note: string | null): void => { if (note !== null && !seen.has(note)) { seen.add(note); out.push(note); } };
+  for (const r of reads) {
+    if (r.witnessFile === 'unusable') { if (!opts.asOf) add(WITNESS_FILE_UNUSABLE_NOTE); continue; }   // as-of: no note at all for that scope (W-R2)
+    if (r.witnessFile === 'as-given') {
+      if (!opts.asOf) add(WITNESS_PATH_UNRESOLVABLE_NOTE);
+      if (r.verdict.kind === 'first-contact') continue;                 // its note promises a baseline at a write that is refused (W-R2's reasoning)
+    }
+    add(witnessNoteFor(r.verdict));
   }
   return out;
 }

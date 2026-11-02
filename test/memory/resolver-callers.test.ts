@@ -9,8 +9,10 @@ import { fileURLToPath } from 'node:url';
 import * as lockModule from '../../src/memory/lock.js';
 import { withFileLock, lockPathOf } from '../../src/memory/lock.js';
 import { appendRecord, parseLedger } from '../../src/memory/ledger.js';
-import { readScopeWitness } from '../../src/memory/witness-store.js';
+import { readScopeWitness, WITNESS_READ_AS_GIVEN } from '../../src/memory/witness-store.js';
 import { isUnresolvablePathError } from '../../src/memory/path-identity.js';
+import { MemoryStore } from '../../src/memory/store.js';
+import { WITNESS_INIT_NOTE, WITNESS_PATH_UNRESOLVABLE_NOTE } from '../../src/memory/content-frame.js';
 import type { MemoryRecord } from '../../src/types.js';
 
 const d = realpathSync(mkdtempSync(join(tmpdir(), 'helix-callers-')));
@@ -109,11 +111,34 @@ describe('witness-store reads its path through the resolver', () => {
     expect(readScopeWitness(join(sd, 'nohome'), '@global')).toEqual({ entry: null, journal: null, macInvalid: false });
   });
 
-  it('a home whose physical folder name is not valid UTF-8: the read throws UnresolvablePathError (interim; A15 reads it as written)', () => {
+  it('a home whose physical folder name is not valid UTF-8: the default read refuses with the witness refusal (reason unresolvable); the read option opens the file as written', () => {
     const { sd } = fresh();
     const ffHome = B(sd, '/', FF, 'home'); mkdirSync(ffHome);
     symlinkSync(ffHome, join(sd, 'hl'));
-    expect(isUnresolvablePathError(thrownBy(() => readScopeWitness(join(sd, 'hl'), '@global')))).toBe(true);
+    const e = thrownBy(() => readScopeWitness(join(sd, 'hl'), '@global')) as { witnessUnusable?: boolean; reason?: string };
+    expect(e.witnessUnusable).toBe(true); expect(e.reason).toBe('unresolvable');
+    expect(readScopeWitness(join(sd, 'hl'), '@global', WITNESS_READ_AS_GIVEN)).toEqual({ entry: null, journal: null, macInvalid: false, file: 'as-given' });   // no file there yet: an empty store, but read through the path as written, and the mark says so (W-R1)
+  });
+
+  it('records under such a home with no witness file: every live read holds the path note and not the first-contact note, whose next write is refused; the as-of view holds neither', () => {
+    const { sd } = fresh();
+    const ffHome = B(sd, '/', FF, 'home'); mkdirSync(ffHome);
+    const row = JSON.stringify({
+      id: 'm_1', tx: '2026-07-05T00:00:00.000Z', validFrom: '2026-07-05T00:00:00.000Z', validTo: null,
+      type: 'assert', state: 'Fresh', content: 'alpha fixture fact', provenance: { source: 'user', sessionId: 's' },
+      supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+    });
+    writeFileSync(B(ffHome, '/memory.jsonl'), `${row}\n`);
+    symlinkSync(ffHome, join(sd, 'hl'));
+    const home = join(sd, 'hl');
+    const store = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 't', now: () => '2026-10-01T00:00:00.000Z' });
+    const recall = store.recall('alpha');
+    expect(recall.items.length).toBe(1);
+    for (const notes of [recall.witnessNotes, store.currentView().witnessNotes, store.historyView().witnessNotes]) {
+      expect(notes).toContain(WITNESS_PATH_UNRESOLVABLE_NOTE);
+      expect(notes).not.toContain(WITNESS_INIT_NOTE);
+    }
+    expect(store.asOfView('2026-10-01T00:00:00.000Z').witnessNotes).toEqual([]);
   });
 });
 

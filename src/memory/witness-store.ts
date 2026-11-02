@@ -4,17 +4,17 @@
  *  is not re-entrant per path, lock.ts:166-167), so the functions below never call each other; each
  *  re-derives its own view of the current disk state under its own lock acquisition. */
 import { randomBytes, createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { lstatSync, openSync, fstatSync, readFileSync, closeSync, constants, type Stats } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { withFileLock } from './lock.js';
-import { canonicalRoot, resolvePath, resolvedPathOrThrow, UnresolvablePathError } from './path-identity.js';
+import { canonicalRoot, resolvePath, resolvedPathOrThrow } from './path-identity.js';
 import { ensureMaster, tryReadMaster } from './ledger-mac.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import { ensureHelixDir } from './home-permissions.js';
 import {
   classifyWitness, advanceAllowed, cleanupClearAllowed, sha256Hex,
-  type WitnessEntry, type JournalEntry, type WitnessVerdict,
+  type WitnessEntry, type JournalEntry, type WitnessVerdict, type WitnessFileMark,
 } from './witness-core.js';
 import type { MemoryState } from '../types.js';
 
@@ -68,7 +68,13 @@ export class WitnessBlockedError extends Error {
 export const isWitnessBlockedError = (e: unknown): boolean =>
   e instanceof Error && (e as { witnessBlocked?: unknown }).witnessBlocked === true;
 
-export interface ScopeWitnessState { entry: WitnessEntry | null; journal: JournalEntry | null; macInvalid: boolean }
+export interface ScopeWitnessState {
+  entry: WitnessEntry | null;
+  journal: JournalEntry | null;
+  macInvalid: boolean;
+  /** Set only by a read with `WITNESS_READ_AS_GIVEN`; see WitnessFileMark. */
+  file?: WitnessFileMark;
+}
 
 interface ScopeFile { entry: WitnessEntry | null; journal: JournalEntry | null }
 interface WitnessStoreFile { v: 1; scopes: Record<string, ScopeFile> }
@@ -104,19 +110,140 @@ function signedJournal(scopeKey: string, master: Buffer, unsigned: Omit<JournalE
 // the witness lock and resolve the witness path through path-identity.ts ONCE, matching the
 // resolve-once-under-the-lock discipline ledger.ts's compactLedger uses). ----
 
-function readStoreFileAt(path: string): WitnessStoreFile {
+export type WitnessUnusableReason = 'unresolvable' | 'link' | 'not-regular' | 'unreadable' | 'unparseable' | 'transient';
+
+const WITNESS_UNUSABLE_REFUSAL_BODY =                                                           // 4.9 row "witness", verbatim after `<op>: `
+  'the rollback-witness file cannot be used (its path cannot be resolved, a link stands at its name, it is ' +
+  'not a regular file, or it cannot be read or parsed) — the write is refused rather than replacing that ' +
+  'file, which would drop the baseline of every scope. Ask the user whether to restore it from a backup or ' +
+  'to remove it, which starts every scope again from first contact; do not choose for them.';
+const WITNESS_TRANSIENT_FAILURE_BODY =                                                          // no 4.9 row: no advice to remove the file
+  'the rollback-witness file could not be read at this moment (the system is out of file descriptors, or ' +
+  'the read was interrupted), so this call failed. The file itself was not found to be damaged; try the ' +
+  'call again.';
+export function witnessUnusableRefusal(op: string): string { return `${op}: ${WITNESS_UNUSABLE_REFUSAL_BODY}`; }
+
+/** witness.json cannot be used, or could not be read this once (`reason: 'transient'`). A read failure is this error and
+ *  never "no pending journal" (D9, second item). */
+export class WitnessUnusableError extends Error {
+  readonly witnessUnusable = true;                                                              // the marker; never `instanceof`
+  constructor(readonly op: string, readonly reason: WitnessUnusableReason) {
+    super(reason === 'transient' ? `${op}: ${WITNESS_TRANSIENT_FAILURE_BODY}` : witnessUnusableRefusal(op));
+    this.name = 'WitnessUnusableError';
+  }
+}
+export const isWitnessUnusableError = (e: unknown): boolean =>
+  e instanceof Error && (e as { witnessUnusable?: unknown }).witnessUnusable === true;
+
+const TRANSIENT_READ_CODES: ReadonlySet<string> = new Set(['EMFILE', 'ENFILE', 'EINTR']);
+const codeOf = (e: unknown): string | undefined => (e as NodeJS.ErrnoException | null)?.code;
+/** O_NOFOLLOW: a link that takes the name after the look is not followed (ELOOP). O_NONBLOCK: a FIFO that takes it
+ *  opens instead of blocking, and the descriptor is then asked what it is. */
+const WITNESS_READ_OPEN = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
+
+type WitnessFileRead =
+  | { kind: 'absent'; path: string | null; asGiven: boolean }          // path null: no folder to create it in
+  | { kind: 'store'; path: string; store: WitnessStoreFile; asGiven: boolean }
+  | { kind: 'unusable'; reason: Exclude<WitnessUnusableReason, 'transient'> }
+  | { kind: 'transient' }
+  | { kind: 'uninspectable'; error: NodeJS.ErrnoException };           // the way to the file cannot be examined (EACCES, ENOTDIR on the home's path): raised as that fs error, as before (W-R7)
+
+const isEnvelope = (parsed: unknown): parsed is WitnessStoreFile => {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  const o = parsed as { v?: unknown; scopes?: unknown };
+  return o.v === 1 && o.scopes !== null && typeof o.scopes === 'object' && !Array.isArray(o.scopes);   // what the scopes hold is NOT looked at (D9 fourth item)
+};
+
+/** THE one look at witness.json (design 4.8): used lock-free by readScopeWitness and by A16's pre-append check, and under the witness
+ *  lock by the five mutating functions, so the rule is one rule. Never throws; nothing is remembered between calls (D9 fifth item). */
+function readWitnessFile(rawPath: string, asGiven: boolean): WitnessFileRead {
+  // 1. The resolver FIRST, because it follows a link and the look below does not. A link that took the name before the
+  // look is seen by the look, whatever the resolver said; a link that takes it after the look stands at r.path itself,
+  // where O_NOFOLLOW and the replace check guard the right name. In the other order a link that lands between the two
+  // passes the look and turns r.path into its destination, which is then read and replaced.
+  const r = resolvePath(rawPath);
+  try {                                                                 // 2. the NAME, without following a link (decision 6)
+    const st = lstatSync(rawPath);
+    if (st.isSymbolicLink()) return { kind: 'unusable', reason: 'link' };
+    if (!st.isFile()) return { kind: 'unusable', reason: 'not-regular' };
+  } catch (e) {
+    if (TRANSIENT_READ_CODES.has(codeOf(e) ?? '')) return { kind: 'transient' };
+    // absent, or not examinable from here: the resolver answers for the path
+  }
+  let path: string; let given = false;
+  if (r.kind === 'unresolvable') {
+    if (!asGiven) return { kind: 'unusable', reason: 'unresolvable' };
+    path = rawPath; given = true;                                       // D3: a read opens the path as written; no link stands at its last name (examined above)
+  } else if (r.kind === 'uninspectable') {
+    const code = r.error.code ?? '';
+    if (code === 'ENOENT') return { kind: 'absent', path: null, asGiven: false };   // a spelling the kernel refuses to open: for the kernel no file is there
+    return TRANSIENT_READ_CODES.has(code) ? { kind: 'transient' } : { kind: 'uninspectable', error: r.error };
+  } else if (r.dirMissing) {
+    return { kind: 'absent', path: null, asGiven: false };              // a virgin home has no witness state (IT-H1)
+  } else path = r.path;
+  let fd: number;                                                       // 3. only a regular file is opened; the DESCRIPTOR is asked again what it is
+  try { fd = openSync(path, WITNESS_READ_OPEN); }
+  catch (e) {
+    const code = codeOf(e) ?? '';
+    if (code === 'ENOENT') return { kind: 'absent', path, asGiven: given };
+    if (code === 'ELOOP') return { kind: 'unusable', reason: 'link' };           // a link took the name between the look and the open
+    return TRANSIENT_READ_CODES.has(code) ? { kind: 'transient' } : { kind: 'unusable', reason: 'unreadable' };
+  }
+  let text: string;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<WitnessStoreFile>;
-    return { v: 1, scopes: parsed.scopes ?? {} };
-  } catch { return { v: 1, scopes: {} }; }
+    if (!fstatSync(fd).isFile()) return { kind: 'unusable', reason: 'not-regular' };
+    text = readFileSync(fd, 'utf8');
+  } catch (e) {
+    return TRANSIENT_READ_CODES.has(codeOf(e) ?? '') ? { kind: 'transient' } : { kind: 'unusable', reason: 'unreadable' };
+  } finally { try { closeSync(fd); } catch { /* a failed close of a read-only descriptor */ } }
+  let parsed: unknown;                                                  // 4. only a missing file is an empty store
+  try { parsed = JSON.parse(text); } catch { return { kind: 'unusable', reason: 'unparseable' }; }
+  if (!isEnvelope(parsed)) return { kind: 'unusable', reason: 'unparseable' };
+  return { kind: 'store', path, store: { v: 1, scopes: parsed.scopes }, asGiven: given };
+}
+
+/** Before the witness LOCK is asked for: the lock file's place comes from the resolver, which follows a link, so a link
+ *  at witness.json would move the lock to the destination's side. An absent or non-examinable name falls through. */
+function assertWitnessPathLockable(rawPath: string, op: string): void {
+  let link = false;
+  try { link = lstatSync(rawPath).isSymbolicLink(); } catch { /* absent, or not examinable from here */ }
+  if (link) throw new WitnessUnusableError(op, 'link');
+  if (resolvePath(rawPath).kind === 'unresolvable') throw new WitnessUnusableError(op, 'unresolvable');
+}
+
+/** The store as a caller holding the witness lock sees it, and the path it replaces. Only a missing file is an empty
+ *  store; a missing folder raises the kernel's own ENOENT, as before. */
+function loadStoreLocked(rawPath: string, op: string): { path: string; store: WitnessStoreFile } {
+  const f = readWitnessFile(rawPath, false);
+  if (f.kind === 'uninspectable') throw f.error;
+  if (f.kind === 'unusable') throw new WitnessUnusableError(op, f.reason);
+  if (f.kind === 'transient') throw new WitnessUnusableError(op, 'transient');
+  if (f.kind === 'store') return { path: f.path, store: f.store };
+  return { path: f.path ?? resolvedPathOrThrow(rawPath), store: { v: 1, scopes: {} } };
+}
+
+/** The look at the name right before the rename (W-R3): a link or any non-regular object that took the name after the
+ *  locked read is refused, never replaced. */
+function assertReplaceTarget(path: string, op: string): void {
+  let st: Stats;
+  try { st = lstatSync(path); }
+  catch (e) {
+    const code = codeOf(e) ?? '';
+    if (code === 'ENOENT') return;
+    if (TRANSIENT_READ_CODES.has(code)) throw new WitnessUnusableError(op, 'transient');
+    throw e;
+  }
+  if (st.isSymbolicLink()) throw new WitnessUnusableError(op, 'link');
+  if (!st.isFile()) throw new WitnessUnusableError(op, 'not-regular');
 }
 
 /** Atomic replace: sweep orphans, write `.w-<hex32>.tmp` ('wx' + fchmod 0600), writeAll, fsync,
  *  close, rename over witness.json, fsync the parent dir. `fsOps` is the SAME injectable
  *  fs-ops.ts:DurableFsOps seam compactLedger/appendRecordUnlocked already use — defaults to
  *  realFsOps, so production behavior is unchanged; tests can inject a faulty fsOps to exercise the
- *  disk-full/short-write/fsync failpoints on this specific file (Task 8). */
-function writeStoreFileAt(path: string, store: WitnessStoreFile, fsOps: DurableFsOps = realFsOps): void {
+ *  disk-full/short-write/fsync failpoints on this specific file (Task 8). The name is looked at once
+ *  more before the rename (assertReplaceTarget); `op` names the refusal, and a refusal leaves no tmp. */
+function writeStoreFileAt(path: string, store: WitnessStoreFile, fsOps: DurableFsOps = realFsOps, op = 'witness'): void {
   const dir = dirname(path);
   const tmp = `${path}.w-${randomBytes(16).toString('hex')}.tmp`;
   sweepOrphanTmps(path, { fsOps, keep: tmp });
@@ -128,6 +255,11 @@ function writeStoreFileAt(path: string, store: WitnessStoreFile, fsOps: DurableF
     fsOps.closeSync(fd);
   } catch (e) {
     try { fsOps.closeSync(fd); } catch { /* already closed by a throwing close */ }
+    try { fsOps.unlinkSync(tmp); } catch { /* best-effort cleanup */ }
+    throw e;
+  }
+  try { assertReplaceTarget(path, op); }
+  catch (e) {
     try { fsOps.unlinkSync(tmp); } catch { /* best-effort cleanup */ }
     throw e;
   }
@@ -148,18 +280,28 @@ function deriveState(scopeKey: string, master: Buffer | null, raw: ScopeFile | u
   return { entry, journal, macInvalid };
 }
 
-/** Lock-free read; MAC-invalid entry/journal reported via `macInvalid`, returned as null. The path is
- *  resolved through path-identity.ts. A home that does not exist yet (a fresh install) has no witness
- *  state: the resolver marks the missing directory `dirMissing`, which is read here as absence (IT-H1)
- *  — witness-read.ts promises a valid verdict on a virgin home. Anything else (ENOTDIR from a file
- *  standing in the path, EACCES) still propagates. */
-export function readScopeWitness(home: string, scopeKey: string): ScopeWitnessState {
-  const r = resolvePath(witnessPath(home));
-  if (r.kind === 'unresolvable') throw new UnresolvablePathError(r.cause);   // A15 opens such a path as written; until then the read refuses
-  if (r.kind === 'uninspectable') throw r.error;
-  if (r.dirMissing) return { entry: null, journal: null, macInvalid: false };   // a virgin home has no witness state (IT-H1)
-  const store = readStoreFileAt(r.path);
-  return deriveState(scopeKey, tryReadMaster(home), store.scopes[scopeKey]);
+/** How a caller wants witness.json answered. The default, for a writer or a planner: refuse an unresolvable path and an
+ *  unusable file. `unresolvable: 'as-given'` opens an unresolvable path as written (D3); `unusable: 'mark'` answers an
+ *  unusable file as an empty state carrying `file: 'unusable'`. `op` names the refusal. */
+export interface WitnessReadOptions { unresolvable?: 'refuse' | 'as-given'; unusable?: 'refuse' | 'mark'; op?: string }
+/** What a read surface passes: it never throws for an unusable file, and a transient error still fails the call. */
+export const WITNESS_READ_AS_GIVEN: WitnessReadOptions = { unresolvable: 'as-given', unusable: 'mark' };
+
+/** Lock-free read; MAC-invalid entry/journal reported via `macInvalid`, returned as null. Only a missing
+ *  file is an empty store (D9). A home that does not exist yet (a fresh install) has no witness state
+ *  (IT-H1): witness-read.ts promises a valid verdict on a virgin home. A way to the file that cannot be
+ *  examined (ENOTDIR from a file standing in the path, EACCES) still propagates as that fs error (W-R7). */
+export function readScopeWitness(home: string, scopeKey: string, opts: WitnessReadOptions = {}): ScopeWitnessState {
+  const f = readWitnessFile(witnessPath(home), opts.unresolvable === 'as-given');
+  const op = opts.op ?? 'witness';
+  if (f.kind === 'uninspectable') throw f.error;
+  if (f.kind === 'transient') throw new WitnessUnusableError(op, 'transient');                    // fails this call for every caller (D9 sixth item)
+  if (f.kind === 'unusable' && opts.unusable !== 'mark') throw new WitnessUnusableError(op, f.reason);
+  if (f.kind === 'absent' && f.path === null) return { entry: null, journal: null, macInvalid: false };   // no home folder: nothing to read, not even a key (IT-H1)
+  const master = tryReadMaster(home);   // read in EVERY other case, an absent or unusable store included: a corrupt HOME key must still make this throw (prototype finding F-2; trust-store-home.e2e case C)
+  if (f.kind === 'unusable') return { entry: null, journal: null, macInvalid: false, file: 'unusable' };
+  const state = deriveState(scopeKey, master, f.kind === 'store' ? f.store.scopes[scopeKey] : undefined);
+  return f.asGiven ? { ...state, file: 'as-given' } : state;
 }
 
 /** Classify `bytes` against an ALREADY-DERIVED scope state (readScopeWitness) — the core mapping
@@ -200,12 +342,12 @@ function appendWitnessLogLine(home: string, line: { v: 1; scope: string; epoch: 
  *  TOFU adoption: the new entry's epoch resets to 1, matching a genuine first-contact. `fsOps`
  *  (Task 8): injectable seam for the witness.json replace itself — defaults to realFsOps. */
 export function advanceWitness(home: string, scopeKey: string, bytes: Buffer, headTx: string | null, fsOps: DurableFsOps = realFsOps): void {
+  const rawPath = witnessPath(home);
+  assertWitnessPathLockable(rawPath, 'advanceWitness');
   ensureHelixDir(home);
   const master = ensureMaster(home);
-  const rawPath = witnessPath(home);
   withFileLock(rawPath, () => {
-    const path = resolvedPathOrThrow(rawPath);
-    const store = readStoreFileAt(path);
+    const { path, store } = loadStoreLocked(rawPath, 'advanceWitness');
     const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
     const verdict = classifyState(state, bytes);
     if (!advanceAllowed(verdict)) {
@@ -219,7 +361,7 @@ export function advanceWitness(home: string, scopeKey: string, bytes: Buffer, he
     const unsigned = { epoch: effectiveEntry?.epoch ?? 1, byteLength: bytes.length, prefixHash: sha256Hex(bytes), headTx };
     const entry = signedEntry(scopeKey, master, unsigned);
     const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry, journal: effectiveJournal } } };
-    writeStoreFileAt(path, nextStore, fsOps);
+    writeStoreFileAt(path, nextStore, fsOps, 'advanceWitness');
   });
 }
 
@@ -271,12 +413,12 @@ export function openTransition(
   },
   fsOps: DurableFsOps = realFsOps,
 ): JournalEntry {
+  const rawPath = witnessPath(home);
+  assertWitnessPathLockable(rawPath, 'openTransition');
   ensureHelixDir(home);
   const master = ensureMaster(home);
-  const rawPath = witnessPath(home);
   return withFileLock(rawPath, () => {
-    const path = resolvedPathOrThrow(rawPath);
-    const store = readStoreFileAt(path);
+    const { path, store } = loadStoreLocked(rawPath, 'openTransition');
     const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
     const entry = state.macInvalid ? null : state.entry;
     const pending = state.macInvalid ? null : state.journal;
@@ -296,7 +438,7 @@ export function openTransition(
     const journal = signedJournal(scopeKey, master, unsigned);
     appendWitnessLogLine(home, { v: 1, scope: scopeKey, epoch: plan.epoch, kind: plan.kind, tx: plan.tx, nonce: plan.nonce }, fsOps);
     const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry, journal } } };
-    writeStoreFileAt(path, nextStore, fsOps);
+    writeStoreFileAt(path, nextStore, fsOps, 'openTransition');
     return journal;
   });
 }
@@ -310,12 +452,12 @@ export function openTransition(
  *  expected head at the journal's epoch, and the slot clears. `fsOps` (Task 8): injectable seam for
  *  the witness.json replace itself — defaults to realFsOps. */
 export function completeTransition(home: string, scopeKey: string, bytes: Buffer, headTx: string | null, fsOps: DurableFsOps = realFsOps): void {
+  const rawPath = witnessPath(home);
+  assertWitnessPathLockable(rawPath, 'completeTransition');
   ensureHelixDir(home);
   const master = ensureMaster(home);
-  const rawPath = witnessPath(home);
   withFileLock(rawPath, () => {
-    const path = resolvedPathOrThrow(rawPath);
-    const store = readStoreFileAt(path);
+    const { path, store } = loadStoreLocked(rawPath, 'completeTransition');
     const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
     const journal = state.macInvalid ? null : state.journal;
     if (!journal) throw new WitnessAdvanceError('completeTransition: no pending journal for scope');
@@ -330,7 +472,7 @@ export function completeTransition(home: string, scopeKey: string, bytes: Buffer
     const unsigned = { epoch: journal.epoch, byteLength: journal.expected.byteLength, prefixHash: journal.expected.prefixHash, headTx };
     const nextEntry = signedEntry(scopeKey, master, unsigned);
     const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry: nextEntry, journal: null } } };
-    writeStoreFileAt(path, nextStore, fsOps);
+    writeStoreFileAt(path, nextStore, fsOps, 'completeTransition');
   });
 }
 
@@ -372,12 +514,12 @@ export function completeTransition(home: string, scopeKey: string, bytes: Buffer
  *  waits for that holder and reads again (witness-read.ts, IT-M6); that changes when it reads, never
  *  how it classifies. */
 export function discardTransition(home: string, scopeKey: string, nonce: string, fsOps: DurableFsOps = realFsOps): void {
+  const rawPath = witnessPath(home);
+  assertWitnessPathLockable(rawPath, 'discardTransition');
   ensureHelixDir(home);
   const master = ensureMaster(home);
-  const rawPath = witnessPath(home);
   withFileLock(rawPath, () => {
-    const path = resolvedPathOrThrow(rawPath);
-    const store = readStoreFileAt(path);
+    const { path, store } = loadStoreLocked(rawPath, 'discardTransition');
     const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
     const journal = state.macInvalid ? null : state.journal;
     if (!journal) throw new WitnessAdvanceError('discardTransition: no pending journal for scope');
@@ -394,7 +536,7 @@ export function discardTransition(home: string, scopeKey: string, nonce: string,
     const entry = state.macInvalid ? null : state.entry;
     appendWitnessLogLine(home, { v: 1, scope: scopeKey, epoch: journal.epoch, kind: journal.kind, tx: journal.tx, nonce: journal.nonce, op: 'discard' }, fsOps);
     const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry, journal: null } } };
-    writeStoreFileAt(path, nextStore, fsOps);
+    writeStoreFileAt(path, nextStore, fsOps, 'discardTransition');
   });
 }
 
@@ -410,11 +552,11 @@ export function discardTransition(home: string, scopeKey: string, nonce: string,
  *  is retained, tested, as defense-in-depth against a partial-write adversary the model otherwise
  *  excludes; no production caller invokes it today. */
 export function maybeCleanupClear(home: string, scopeKey: string, bytes: Buffer, fsOps: DurableFsOps = realFsOps): boolean {
-  ensureHelixDir(home);
   const rawPath = witnessPath(home);
+  assertWitnessPathLockable(rawPath, 'maybeCleanupClear');
+  ensureHelixDir(home);
   return withFileLock(rawPath, () => {
-    const path = resolvedPathOrThrow(rawPath);
-    const store = readStoreFileAt(path);
+    const { path, store } = loadStoreLocked(rawPath, 'maybeCleanupClear');
     const master = tryReadMaster(home); // never mints: clearing produces no new signed content
     const state = deriveState(scopeKey, master, store.scopes[scopeKey]);
     const journal = state.macInvalid ? null : state.journal;
@@ -422,7 +564,7 @@ export function maybeCleanupClear(home: string, scopeKey: string, bytes: Buffer,
     const entry = state.macInvalid ? null : state.entry;
     if (!cleanupClearAllowed(bytes, entry, journal)) return false;
     const nextStore: WitnessStoreFile = { v: 1, scopes: { ...store.scopes, [scopeKey]: { entry, journal: null } } };
-    writeStoreFileAt(path, nextStore, fsOps);
+    writeStoreFileAt(path, nextStore, fsOps, 'maybeCleanupClear');
     return true;
   });
 }

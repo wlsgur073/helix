@@ -13,13 +13,14 @@ import { join } from 'node:path';
 import { isEntryPoint } from '../entry-point.js';
 import { strayTrustFiles } from '../memory/trust-store-layout.js';
 import { formatSessionStartContext } from './format-context.js';
-import { newNonce, collectWitnessNotes, SYMLINKED_HOME_NOTE } from '../memory/content-frame.js';
+import { newNonce, collectWitnessReadNotes, SYMLINKED_HOME_NOTE, WITNESS_READ_TRANSIENT_NOTE } from '../memory/content-frame.js';
 import { isSymlinkedHome } from '../memory/home-permissions.js';
 import { projectDispositionOf, type ProjectDisposition } from '../memory/ownership.js';
 import { resolveProjectLayer } from '../memory/project-root.js';
 import { verifiedLiveWitnessed, type ReplayStats } from '../memory/verified-read.js';
 import { enforceWitnessProjection } from '../memory/verified-projection.js';
-import type { WitnessVerdict } from '../memory/witness-core.js';
+import type { WitnessFileMark, WitnessVerdict } from '../memory/witness-core.js';
+import { isWitnessUnusableError } from '../memory/witness-store.js';
 import { createMetricsSink } from '../metrics.js';
 import { metricsEnabledFromGlobalConfig } from '../config.js';
 import type { MemoryScope, ScopedRecord } from '../types.js';
@@ -55,7 +56,9 @@ export interface GatherResult {
    *  `pristine` (no witness entry and an absent or empty ledger, the notion the #2 fix introduced). No
    *  earlier Helix block can have carried a fact from such a scope, so main() leaves out the supersede
    *  note. A rollback that deletes both a ledger and its witness entry reads the same way, the
-   *  trade-off #2 accepted. */
+   *  trade-off #2 accepted. A scope that was not read, or whose verdict came from an unusable witness
+   *  file, is not known to be empty: either answers false. A project the judgement excludes is never
+   *  read and does not count. */
   everyScopePristine: boolean;
 }
 
@@ -72,7 +75,9 @@ export function gatherScopedRecords({ home, globalLedger, cwd, userHome }: Gathe
   const records: ScopedRecord[] = [];
   let integrityAvailable = true;
   const replays: Array<{ scope: MemoryScope } & ReplayStats> = [];
-  const verdicts: WitnessVerdict[] = [];
+  const verdicts: Array<{ verdict: WitnessVerdict; witnessFile?: WitnessFileMark }> = [];
+  let projectReadFailed = false;
+  let projectUnread = false;
 
   // W-T7: verifiedLiveWitnessed reads bytes ONCE per scope and returns projection + witness verdict
   // (no self-race); enforceWitnessProjection then clamps a mismatch / excludes an interrupted scope,
@@ -80,9 +85,9 @@ export function gatherScopedRecords({ home, globalLedger, cwd, userHome }: Gathe
   const g = verifiedLiveWitnessed(globalLedger, home);
   replays.push({ scope: 'global', ...g.stats });
   if (!g.projection.keyAvailable) integrityAvailable = false;
-  const gProj = enforceWitnessProjection(g.projection, g.verdict);
+  const gProj = enforceWitnessProjection(g.projection, g.verdict, g.witnessFile);
   for (const r of gProj.live.values()) records.push({ record: r, scope: 'global' });
-  verdicts.push(g.verdict);
+  verdicts.push({ verdict: g.verdict, witnessFile: g.witnessFile });
 
   // Project root: the hook's stdin cwd, or the nearest parent project above it — the SAME resolver the
   // server uses (src/memory/project-root.ts), so the two cannot disagree about which project a session
@@ -103,16 +108,23 @@ export function gatherScopedRecords({ home, globalLedger, cwd, userHome }: Gathe
           const project = verifiedLiveWitnessed(layer.ledger, home, layer.root);
           replays.push({ scope: 'project', ...project.stats });
           if (!project.projection.keyAvailable) integrityAvailable = false;
-          const pProj = enforceWitnessProjection(project.projection, project.verdict);
+          const pProj = enforceWitnessProjection(project.projection, project.verdict, project.witnessFile);
           for (const r of pProj.live.values()) records.push({ record: r, scope: 'project' });
-          verdicts.push(project.verdict);
+          verdicts.push({ verdict: project.verdict, witnessFile: project.witnessFile });
         }
-      } catch { /* unreadable/foreign project ledger → global only */ }
+      } catch (e) {
+        projectUnread = true;
+        // W-R6: on a read the only WitnessUnusableError is the transient one (the read option marks every other
+        // case), and a global block is still printed, so the note says what it lacks. Otherwise: unreadable/foreign
+        // project ledger → global only.
+        if (isWitnessUnusableError(e)) projectReadFailed = true;
+      }
     }
   }
   return {
-    records, integrityAvailable, replays, projectDisposition, witnessNotes: collectWitnessNotes(verdicts),
-    everyScopePristine: verdicts.every((v) => v.kind === 'first-contact' && v.reason === 'pristine'),
+    records, integrityAvailable, replays, projectDisposition,
+    witnessNotes: [...collectWitnessReadNotes(verdicts), ...(projectReadFailed ? [WITNESS_READ_TRANSIENT_NOTE] : [])],
+    everyScopePristine: !projectUnread && verdicts.every((v) => v.witnessFile !== 'unusable' && v.verdict.kind === 'first-contact' && v.verdict.reason === 'pristine'),
   };
 }
 

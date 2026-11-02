@@ -9,7 +9,7 @@ import { tryReadMaster, deriveSubkey, verifyVerify } from './ledger-mac.js';
 import { scopeNonce, globalScopeNonce, trustStateOf } from './ownership.js';
 import { buildVerifiedProjection, type VerifiedProjection } from './verified-projection.js';
 import { readLedgerWitnessed } from './witness-read.js';
-import type { WitnessVerdict } from './witness-core.js';
+import type { WitnessFileMark, WitnessVerdict } from './witness-core.js';
 
 /**
  * Resolve the per-scope HMAC subkey that verifies a ledger's signed `verify` records. Mirrors
@@ -116,6 +116,7 @@ export interface WitnessedLive {
   verdict: WitnessVerdict;
   witnessIdentity: string;   // the witness entry's own MAC, or 'witness-absent' (cache-key component)
   journalPending: boolean;   // an in-flight rewrite transition is open (bypass caches, exclude reads)
+  witnessFile?: WitnessFileMark;   // 'unusable' limits grades (enforceWitnessProjection); 'as-given' limits none: the verdict is the real file's
 }
 
 export function verifiedLiveWitnessed(ledger: LedgerPath, home: string, projectRoot?: string): WitnessedLive {
@@ -128,6 +129,7 @@ export function verifiedLiveWitnessed(ledger: LedgerPath, home: string, projectR
     verdict: w.verdict,
     witnessIdentity: w.witnessIdentity,
     journalPending: w.journalPending,
+    ...(w.witnessFile !== undefined ? { witnessFile: w.witnessFile } : {}),
     stats: {
       rows: w.records.length,
       liveRows: projection.live.size,

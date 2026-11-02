@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, appendFileSync, writeFileSync, mkdirSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,8 @@ import { formatSessionStartContext } from '../../src/hooks/format-context.js';
 import { MemoryStore } from '../../src/memory/store.js';
 import { digestContent } from '../../src/memory/ledger-mac.js';
 import { stampOwnership } from '../../src/memory/ownership.js';
+import * as verifiedReadMod from '../../src/memory/verified-read.js';
+import { WitnessUnusableError } from '../../src/memory/witness-store.js';
 
 const N = 'c'.repeat(32); // fixed test nonce
 
@@ -241,5 +243,47 @@ describe('gatherScopedRecords everyScopePristine (issue #7)', () => {
     const g = gatherScopedRecords({ home, globalLedger: join(home, 'memory.jsonl'), cwd: proj });
     expect(g.projectDisposition).toBe('owned');
     expect(g.everyScopePristine).toBe(true);
+  });
+
+  it.each([
+    ['the transient witness error', (): Error => new WitnessUnusableError('witness', 'transient')],
+    ['another error', (): Error => new Error('the project ledger cannot be read')],
+  ])('is false when an owned pristine project could not be read, whatever the global scope says: %s', (_name, failure) => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-i7-home-'));
+    const proj = mkdtempSync(join(tmpdir(), 'helix-i7-proj-'));
+    stampOwnership(proj, home, { genStamp: () => 'OWN' });
+    const real = verifiedReadMod.verifiedLiveWitnessed;
+    const spy = vi.spyOn(verifiedReadMod, 'verifiedLiveWitnessed').mockImplementation((ledger, h, root) => {
+      if (root !== undefined) throw failure();
+      return real(ledger, h, root);
+    });
+    try {
+      const g = gatherScopedRecords({ home, globalLedger: join(home, 'memory.jsonl'), cwd: proj });
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(g.projectDisposition).toBe('owned');
+      expect(g.records).toEqual([]);
+      expect(g.everyScopePristine).toBe(false);
+    } finally { spy.mockRestore(); }
+  });
+
+  it('is false over an unparseable witness file with empty ledgers: a wiped ledger reads pristine there, where a healthy file would give a mismatch', () => {
+    const home = mkdtempSync(join(tmpdir(), 'helix-i7-home-'));
+    const proj = mkdtempSync(join(tmpdir(), 'helix-i7-proj-'));
+    stampOwnership(proj, home, { genStamp: () => 'OWN' });
+    writeFileSync(join(home, 'witness.json'), 'not json {{{');
+    const globalLedger = join(home, 'memory.jsonl');
+    expect(gatherScopedRecords({ home, globalLedger }).everyScopePristine).toBe(false);
+    const g = gatherScopedRecords({ home, globalLedger, cwd: proj });
+    expect(g.projectDisposition).toBe('owned');
+    expect(g.everyScopePristine).toBe(false);
+  });
+
+  it('stays true for an as-given read of a pristine scope: that verdict is computed from the real file', () => {
+    const base = mkdtempSync(join(tmpdir(), 'helix-i7-'));
+    const dir = Buffer.concat([Buffer.from(`${base}/real`), Buffer.from([0xff])]);
+    mkdirSync(dir, { mode: 0o700 });
+    symlinkSync(dir, join(base, 'home'));
+    const home = join(base, 'home');
+    expect(gatherScopedRecords({ home, globalLedger: join(home, 'memory.jsonl') }).everyScopePristine).toBe(true);
   });
 });

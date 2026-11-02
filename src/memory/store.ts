@@ -16,13 +16,13 @@ import { type RecallOptions } from './projection.js';
 import { rankWithArtifacts, buildRankArtifacts, assertQueryWithinBounds, type Expansion } from './retrieval.js';
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
-import { frameAsData, newNonce, collectWitnessNotes, asOfWitnessNotes } from './content-frame.js';
+import { frameAsData, newNonce, collectWitnessReadNotes, asOfWitnessNotes } from './content-frame.js';
 import { stampOwnership, judgeProjectLayer, canonicalRoot, isReviewableRoot, trustStateOf, type LayerJudgement, type ProjectDisposition, type ProjectOrigin, type TrustState } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, isFutureMacVersion } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedLiveWitnessed, verifiedProjectionWithSubkey } from './verified-read.js';
 import { readLedgerWitnessed, readLedgerBytesWitnessed } from './witness-read.js';
-import { interruptedAtPredecessor, type WitnessVerdict } from './witness-core.js';
+import { interruptedAtPredecessor, type WitnessFileMark, type WitnessVerdict } from './witness-core.js';
 import { ledgerDigest, subkeyFingerprint, keyVectorEqual, type ScopeKeyComponent, type RecallCacheEntry } from './recall-cache.js';
 import type { MetricsSink } from '../metrics.js';
 import { withFileLock } from './lock.js';
@@ -582,7 +582,7 @@ export class MemoryStore {
    *  file (not a participating scope) can appear/disappear across calls without forcing a rebuild; the
    *  caller (recall) re-computes `disposition` fresh every call regardless of cache hit/miss, which is
    *  what lets the disclosure note still flip under a cache HIT. */
-  private recallInput(disposition: ProjectDisposition): { scoped: ScopedRecord[]; available: boolean; artifacts: ReturnType<typeof buildRankArtifacts>; verdicts: Array<{ scope: MemoryScope; verdict: WitnessVerdict }> } {
+  private recallInput(disposition: ProjectDisposition): { scoped: ScopedRecord[]; available: boolean; artifacts: ReturnType<typeof buildRankArtifacts>; verdicts: Array<{ scope: MemoryScope; verdict: WitnessVerdict; witnessFile?: WitnessFileMark }> } {
     const scopes: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined }> = [
       { ledger: this.global, scope: 'global', root: undefined },
     ];
@@ -597,7 +597,7 @@ export class MemoryStore {
     // it stays reserved for non-cache-gated sites (historyView/asOfView/verifiedLiveStats).
     const home = this.homeDir();
     const key: ScopeKeyComponent[] = [];
-    const verdicts: Array<{ scope: MemoryScope; verdict: WitnessVerdict }> = [];
+    const verdicts: Array<{ scope: MemoryScope; verdict: WitnessVerdict; witnessFile?: WitnessFileMark }> = [];
     const reads: Array<{ ledger: LedgerPath; scope: MemoryScope; root: string | undefined; bytes: Buffer; subkey: Buffer | null; readMs: number; journalPending: boolean; mismatch: boolean }> = [];
     for (const s of scopes) {
       // W-T7 + §7: witness verdict + identity + journalPending, all off the SAME (final) witness snapshot
@@ -608,11 +608,11 @@ export class MemoryStore {
       const bytes = w.bytes;                          // I1: owned immutable buffer, read once — NO parse yet
       const subkey = this.subkeyForLedger(s.ledger);  // I3: resolved fresh from disk, never memoized
       key.push({ scopeId: s.ledger, digest: ledgerDigest(bytes), fingerprint: subkeyFingerprint(subkey), witness: w.witnessIdentity });
-      verdicts.push({ scope: s.scope, verdict: w.verdict });
+      verdicts.push({ scope: s.scope, verdict: w.verdict, witnessFile: w.witnessFile });
       // `mismatch` is the STABLE (witness-first + retry-once) rollback verdict — threaded into
       // maybeAutoCompact below so it never advances the witness onto a rolled-back scope (spec §4.2
       // PR-1, belt-and-braces above compactLedger's own authoritative gate).
-      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs: w.readMs, journalPending: w.journalPending, mismatch: w.verdict.kind === 'mismatch' });
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs: w.readMs, journalPending: w.journalPending, mismatch: w.verdict.kind === 'mismatch' || w.witnessFile !== undefined });
     }
 
     // A pending journal means an in-flight rewrite: the cache is bypassed BOTH directions (no read,
@@ -703,6 +703,7 @@ export class MemoryStore {
       // swallows it (functionally safe — a rolled-back scope is never silently re-blessed), but skipping
       // explicitly keeps the common path off a swallowed-exception crutch and does not consume the
       // once-per-session guard on a doomed attempt (the guard is only set when a scope actually fires).
+      // Also set for a scope whose witness file cannot be used or resolved: W-R8, the guard is not spent.
       if (r.mismatch) continue;
       let mtimeMs = 0; let totalBytes = 0;
       try { const st = statSync(r.ledger); mtimeMs = st.mtimeMs; totalBytes = st.size; } catch { continue; }
@@ -791,9 +792,9 @@ export class MemoryStore {
     // rank artifacts still pair positionally; a genuine exclusion rebuilds them over the served set.
     const excluded = new Set<MemoryScope>();
     const clamped = new Set<MemoryScope>();
-    for (const { scope, verdict } of verdicts) {
+    for (const { scope, verdict, witnessFile } of verdicts) {
       if (verdict.kind === 'transition-interrupted') excluded.add(scope);
-      else if (verdict.kind === 'mismatch') clamped.add(scope);
+      else if (verdict.kind === 'mismatch' || witnessFile === 'unusable') clamped.add(scope);
     }
     const enforcedScoped = (excluded.size === 0 && clamped.size === 0)
       ? scoped
@@ -855,7 +856,7 @@ export class MemoryStore {
       framed: frameAsData([...items, ...appendix].map(({ record, scope, contentDigest }) => ({ record, scope, contentDigest })), this.nonce()),  // I7: fresh nonce per call
       integrityAvailable: available,
       projectDisposition: disposition,
-      witnessNotes: collectWitnessNotes(verdicts.map((v) => v.verdict)),
+      witnessNotes: collectWitnessReadNotes(verdicts),
     };
   }
 
@@ -972,7 +973,7 @@ export class MemoryStore {
     const disposition = this.projectDisposition();
     const home = this.homeDir();
     const records: ScopedRecord[] = [];
-    const verdicts: WitnessVerdict[] = [];
+    const verdicts: Array<{ verdict: WitnessVerdict; witnessFile?: WitnessFileMark }> = [];
     const addScope = (ledger: LedgerPath, scope: MemoryScope, root: string | undefined): void => {
       const w = verifiedLiveWitnessed(ledger, home, root);
       this.opts.metricsSink?.emitReplay({
@@ -980,7 +981,7 @@ export class MemoryStore {
         rows: w.stats.rows, liveRows: w.stats.liveRows, bytes: w.stats.bytes,
         parseMs: w.stats.parseMs, projectMs: w.stats.projectMs, keyAvailable: w.stats.keyAvailable,
       });
-      const proj = enforceWitnessProjection(w.projection, w.verdict);
+      const proj = enforceWitnessProjection(w.projection, w.verdict, w.witnessFile);
       for (const r of proj.live.values()) {
         records.push({
           record: r, scope,
@@ -988,12 +989,12 @@ export class MemoryStore {
           contentDigest: digestContent(r.content),   // proof-of-read token for a guarded supersede
         });
       }
-      verdicts.push(w.verdict);
+      verdicts.push({ verdict: w.verdict, witnessFile: w.witnessFile });
     };
     addScope(this.global, 'global', undefined);
     const p = this.opts.project;
     if (p && disposition === 'owned') addScope(p.ledger, 'project', p.root);
-    return { records, projectDisposition: disposition, witnessNotes: collectWitnessNotes(verdicts) };
+    return { records, projectDisposition: disposition, witnessNotes: collectWitnessReadNotes(verdicts) };
   }
 
   /** Live + closed rows across scopes for the bitemporal history view. Live rows come WHOLESALE from
@@ -1023,7 +1024,7 @@ export class MemoryStore {
     // witness-EXCLUDED scopes' key availability — indistinguishable while every scope shares the
     // one master key. If per-scope keys ever ship, compute over included scopes only.
     let integrityAvailable = true;
-    const verdicts: WitnessVerdict[] = [];
+    const verdicts: Array<{ verdict: WitnessVerdict; witnessFile?: WitnessFileMark }> = [];
 
     const addScope = (ledger: LedgerPath, scope: MemoryScope) => {
       const root = this.scopeRootOf(ledger);
@@ -1031,14 +1032,14 @@ export class MemoryStore {
       // records feed both projections — all from the SAME final read pair, so the verdict can never
       // race the projection and an ordinary concurrent append never yields a spurious mismatch.
       const w = readLedgerWitnessed(ledger, home, root);
-      verdicts.push(w.verdict);
+      verdicts.push({ verdict: w.verdict, witnessFile: w.witnessFile });
       if (w.verdict.kind === 'transition-interrupted') return; // exclude the whole scope (live AND closed rows)
       // Live rows (graded) — membership authority + LEFT-join enrichment, identical to verifiedOf —
       // then the witness clamp (mismatch => elevated LIVE grades drop to Fresh; closed rows below keep
       // their historical state, like asOf).
       const rawV = verifiedLiveOf(w.records, home, root);
       if (!rawV.keyAvailable) integrityAvailable = false; // key-absent => every grade clamped Fresh (fail-safe)
-      const v = enforceWitnessProjection(rawV, w.verdict);
+      const v = enforceWitnessProjection(rawV, w.verdict, w.witnessFile);
       for (const r of v.live.values()) {
         rows.push({
           record: r, scope, txTo: null, closedBy: null,
@@ -1059,7 +1060,7 @@ export class MemoryStore {
     const p = this.opts.project;
     if (p && disposition === 'owned') addScope(p.ledger, 'project');
 
-    return { rows, anomalies, truncated, integrityAvailable, projectDisposition: disposition, witnessNotes: collectWitnessNotes(verdicts) };
+    return { rows, anomalies, truncated, integrityAvailable, projectDisposition: disposition, witnessNotes: collectWitnessReadNotes(verdicts) };
   }
 
   /** Point-in-time forensic snapshot at system-time `t` (spec C §5). Mirrors historyView's ATOMIC
@@ -1073,14 +1074,14 @@ export class MemoryStore {
     const facts: ScopedAsOfFact[] = [];
     let keyAvailable = true;
     let truncated = false;
-    const verdicts: WitnessVerdict[] = [];
+    const verdicts: Array<{ verdict: WitnessVerdict; witnessFile?: WitnessFileMark }> = [];
 
     const addScope = (ledger: LedgerPath, scope: MemoryScope) => {
       const root = this.scopeRootOf(ledger);
       // ONE witnessed read per scope (spec §7): witness-first + retry-once, so the verdict and the
       // records come from the SAME final read pair (no spurious mismatch from a concurrent append).
       const w = readLedgerWitnessed(ledger, home, root);
-      verdicts.push(w.verdict);
+      verdicts.push({ verdict: w.verdict, witnessFile: w.witnessFile });
       if (w.verdict.kind === 'transition-interrupted') return; // exclude the scope entirely; the note still renders below
       const subkey = this.subkeyForLedger(ledger);
       const out = buildAsOfEvidence(w.records, t, {
@@ -1103,7 +1104,7 @@ export class MemoryStore {
     if (p && disposition === 'owned') addScope(p.ledger, 'project');
     // The as-of surface never clamps, so the LIVE mismatch note (which promises a clamp) is false here.
     // Mapped at the SOURCE so a library caller gets the surface-true wording, not only the tool.
-    return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: asOfWitnessNotes(collectWitnessNotes(verdicts)) };
+    return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: asOfWitnessNotes(collectWitnessReadNotes(verdicts, { asOf: true })) };
   }
 
   /** Explicitly adopt the active project ledger (trust its current contents): a pre-existing ledger
