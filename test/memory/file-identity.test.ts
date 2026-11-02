@@ -151,7 +151,7 @@ describe('the descriptor seam and the check after the open', () => {
     const e = thrownBy(() => appendRecordUnlocked(f, rec('m_b'), withFstat(() => ({ ino: 2n ** 60n + 1n })), judged));
     expect(isLedgerDestinationChangedError(e)).toBe(true);
     expect(readFileSync(f, 'utf8')).toBe(before);
-    appendRecordUnlocked(f, rec('m_c'), withFstat(() => ({ ino: 2n ** 60n })), judged);   // control: the same inode on both sides lands
+    withInodeAtName(2n ** 60n, () => appendRecordUnlocked(f, rec('m_c'), withFstat(() => ({ ino: 2n ** 60n })), judged));   // control: the same inode on both sides lands (the name answers it too: since 14 item 22 a present file is compared with the file at the name)
     expect(readFileSync(f, 'utf8')).toContain('"m_c"');
   });
 

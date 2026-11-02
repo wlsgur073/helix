@@ -227,15 +227,16 @@ function openForAppend(path: string, absentWhenJudged: boolean, mustCreate: bool
 
 /** The check after the open, before the first byte (design 4.1 item 3). O_NOFOLLOW sees the last component only: a
  *  DIRECTORY component replaced by a link after the resolution is followed by the open. So the descriptor must be
- *  the destination as judged and the path, resolved again, must still be that destination. A file that was absent
- *  when it was judged has no identity to compare: there the file at the path as resolved again must be the
- *  descriptor's. An inode of 0 on either side skips the identity half, keeps the re-resolution and never refuses by
- *  itself (design 14, decision 9). A check that cannot be made answers false. */
+ *  the destination as judged (the identity half; a file absent when it was judged has no identity to compare), the
+ *  path, resolved again, must still be that destination, and the file at the path as resolved again must be the
+ *  descriptor's. The last two apply to both kinds of file: a held folder renamed away and replaced by a new one at the
+ *  same name before the open leaves the descriptor on the judged file and the path resolving to the same string
+ *  (design 14, item 22). An inode of 0 on either side skips the comparison it stands in, keeps the re-resolution and
+ *  never refuses by itself (design 14, decision 9). A check that cannot be made answers false. */
 function destinationUnchanged(rawPath: LedgerPath, path: string, judged: FileIdentity | null, opened: FileIdentity): boolean {
   if (hasComparableInode(judged) && hasComparableInode(opened) && !sameFile(judged, opened)) return false;
   const again = resolvePath(rawPath);
   if (again.kind !== 'resolved' || again.dirMissing || again.path !== path) return false;
-  if (judged !== null) return true;
   let now: FileIdentity | null;
   try { now = fileIdentityAt(again.path); } catch { return false; }
   if (now === null) return false;
@@ -267,9 +268,10 @@ function removeOwnCreation(path: string, opened: FileIdentity, fsOps: DurableFsO
  *  loss. The judged directory is held by a descriptor bound to the judged path (dir-bound.ts, design decision 2): the
  *  file is opened and removed through it, the orphan sweep lists it, and the directory fsync goes through it; without `/proc`
  *  the plain path is used, and `/proc` lost while the process runs throws LedgerProcLostError with nothing written. The
- *  file is opened with O_NOFOLLOW and, before the first byte and before the sweep, the descriptor and the path resolved
- *  again are checked (destinationUnchanged): a changed destination throws LedgerDestinationChangedError with nothing
- *  written. `judged` is the destination as a caller judged it under the lock; without it the destination is sampled
+ *  file is opened with O_NOFOLLOW and, before the first byte and before the sweep, the descriptor, the path resolved
+ *  again and the file at that path are checked (destinationUnchanged; the file at the path must be the descriptor's,
+ *  whether it was created or present when it was judged): a changed destination throws LedgerDestinationChangedError
+ *  with nothing written. `judged` is the destination as a caller judged it under the lock; without it the destination is sampled
  *  here, right before the open. A file this call created is taken away again on every failure before the row is durable,
  *  while it is still this call's (design 4.3 step 5, item 4). An error raised after the row's fsync returned (the file's
  *  close, the directory fsync, the close of the held directory) keeps the file and carries the stored mark, because the
