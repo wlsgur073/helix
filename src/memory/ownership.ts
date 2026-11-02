@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
-import { join, dirname, isAbsolute } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, fstatSync, openSync, writeSync, fsyncSync, closeSync, constants } from 'node:fs';
+import { join, resolve, dirname, basename, isAbsolute } from 'node:path';
 import { withFileLock } from './lock.js';
 import { ensureHelixDir } from './home-permissions.js';
 import { fsyncDir } from './fs-ops.js';
-import { canonicalRoot, resolvePath } from './path-identity.js';
+import { canonicalRoot, resolvePath, fileIdentityAt, sameFile, type FileIdentity } from './path-identity.js';
+import { ledgerContentKindOfFd } from './ledger.js';
+import { sampleDirIdentity } from './dir-bound.js';
 
 // Moved to path-identity.ts (design section 7); exported again from here so no caller moves.
 export { canonicalRoot };
@@ -194,12 +196,10 @@ export function isOwned(projectRoot: string, home: string): boolean {
  *  automatically, so an unowned one discloses itself instead of staying silent. */
 export type ProjectOrigin = 'cwd' | 'ancestor';
 
-/** A project layer's read-side participation state (B1/B2). 'unadopted-present' is a disclosure
- *  trigger: a foreign, un-owned ledger file sits where Helix would read one, and is excluded from
- *  every read surface. 'aliased' (item 7) is the second disclosure trigger: an OWNED project whose
- *  ledger leads to another adopted project's ledger file, excluded from every read surface the same
- *  way, with its own constant note. 'unusable' (third fix batch B1, row 5 of design 4.2): a memory path that
- *  cannot be inspected, excluded from every read like 'aliased', with its own constant note. */
+/** A project layer's state (design 4.2). Only 'owned' participates; 'unadopted-present', 'aliased', 'unusable' and
+ *  'ancestor-unadopted' are disclosure states, each excluded from every read with its own constant note. 'aliased'
+ *  (rows 4, 6, 7, 8) and 'unusable' (rows 3, 5, 9, 9a, 10) hold whether or not the project is adopted. An in-memory
+ *  union that nothing in src/ stores: the trigger sink maps it to `unowned` (A13). */
 export type ProjectDisposition = 'inactive' | 'owned' | 'unadopted-present' | 'aliased' | 'unusable' | 'ancestor-unadopted';
 
 /** Rows 4 and 5 of design 4.2 (third fix batch B1): a memory path the resolver cannot resolve (a name that is not
@@ -244,6 +244,131 @@ export function aliasesAdoptedLedger(project: { root: string; home: string; ledg
     if (other.kind === 'resolved' && other.path === real) return true;
   }
   return false;
+}
+
+/** The row of design 4.2's table that answered. */
+export type JudgementRow = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '9a' | '10' | '11' | '12' | '13';
+
+/** Why a layer is 'aliased' or 'unusable'. */
+export type JudgementCause = 'helix-not-directory' | 'unresolvable' | 'uninspectable' | 'outside-root' | 'global-ledger' | 'other-project' | 'home-directory' | 'unjudgeable-target' | 'hard-link' | 'not-regular' | 'unreadable' | 'not-ledger-content' | 'target-directory-missing';
+
+/** One answer of the table. `cause` is set for 'aliased' and 'unusable' only. `destination` is the resolved path of the
+ *  memory path, set from row 6 on. `identity` and `dirIdentity` are set on rows 11 to 13 only: the device and inode of
+ *  the destination and of the directory that holds it at judgement time, `null` when nothing stands there. */
+export interface LayerJudgement { state: ProjectDisposition; row: JudgementRow; cause?: JudgementCause; destination?: string; identity?: FileIdentity | null; dirIdentity?: FileIdentity | null }
+
+/** A project layer as the judgement reads it: the layer, its home, and the global ledger it is compared with. */
+export interface JudgedLayer { root: string; ledger: string; home: string; globalLedger: string; origin?: ProjectOrigin }
+
+const under = (dir: string, name: string): string => (dir === '/' ? `/${name}` : `${dir}/${name}`);
+/** `path` is `dir` itself or lies below it, compared by path component (row 6). */
+function withinDir(dir: string, path: string): boolean { return path === dir || path.startsWith(dir === '/' ? '/' : `${dir}/`); }
+
+/** What stands at a RESOLVED destination: its identity (A5's FileIdentity) and what rows 8 and 9 read. */
+interface Standing extends FileIdentity { readonly regular: boolean; readonly nlink: bigint }
+/** What stands at a RESOLVED path (its last component is not a link): null when nothing does, 'error' otherwise. */
+function standingAt(path: string): Standing | null | 'error' {
+  try { const st = lstatSync(path, { bigint: true }); return { dev: st.dev, ino: st.ino, regular: st.isFile(), nlink: st.nlink }; }
+  catch (e) { return (e as NodeJS.ErrnoException).code === 'ENOENT' ? null : 'error'; }
+}
+
+/** Row 7's "the same" (decision 15): equal resolved strings, or both exist with one device and inode (A5's sameFile, so an
+ *  inode of 0 is never "the same": only the string comparison is left then, decision 9). `named` is false when the resolver
+ *  cannot name the target's destination (unresolvable or uninspectable): decision 6 then applies. For such a target the identity half still works through a stat of the path as
+ *  given when the kernel can do it. */
+function compareWith(dest: { path: string; id: Standing | null }, targetPath: string): { same: boolean; named: boolean } {
+  const t = resolvePath(targetPath);
+  const named = t.kind === 'resolved';
+  if (t.kind === 'resolved' && t.path === dest.path) return { same: true, named };
+  if (dest.id === null) return { same: false, named };
+  try { return { same: sameFile(dest.id, fileIdentityAt(t.kind === 'resolved' ? t.path : targetPath, { follow: t.kind !== 'resolved' })), named }; }
+  catch { return { same: false, named }; }
+}
+
+function openedVerdict(path: string, readContent: boolean): 'ok' | 'not-regular' | 'unreadable' | 'not-ledger-content' {
+  let fd: number;
+  try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); } catch { return 'unreadable'; }
+  try {
+    if (!fstatSync(fd).isFile()) return 'not-regular';          // replaced between the lstat and the open
+    if (!readContent) return 'ok';
+    try { return ledgerContentKindOfFd(fd) === 'other' ? 'not-ledger-content' : 'ok'; } catch { return 'unreadable'; }
+  } finally { closeSync(fd); }
+}
+
+/** The "same directory entry" of design 4.2's paragraph on resolveProjectLayer: one last name, directories that are one
+ *  directory the kernel's way, and a memory path whose last component is not a link. Both sides stay as given, because
+ *  `resolve` folds `dl/..` as text while an append reads it the kernel's way (the ALIAS-DOTDOT class). */
+export function isGlobalLedgerEntry(projectLedger: string, globalLedger: string): boolean {
+  if (basename(projectLedger) !== basename(globalLedger)) return false;
+  if (projectLedger !== globalLedger) {
+    const da = resolvePath(dirname(projectLedger)), db = resolvePath(dirname(globalLedger));
+    if (da.kind !== 'resolved' || db.kind !== 'resolved' || da.path !== db.path) return false;
+  }
+  try { return !lstatSync(projectLedger).isSymbolicLink(); }
+  catch { return true; }   // nothing there yet, or it cannot be looked at: one entry all the same, and no link is known
+}
+
+export function judgeProjectLayer(project: JudgedLayer | undefined, opts: { forAdopt?: boolean } = {}): LayerJudgement {
+  try { return judge(project, opts.forAdopt === true); }
+  catch { return { state: 'unusable', row: '5', cause: 'uninspectable' }; }
+}
+
+function judge(project: JudgedLayer | undefined, forAdopt: boolean): LayerJudgement {
+  if (!project) return { state: 'inactive', row: '1' };                                             // row 1
+  const owned = isOwned(project.root, project.home);
+  if (project.origin === 'ancestor' && !owned && !forAdopt) return { state: 'ancestor-unadopted', row: '2' };   // row 2: its files are not inspected
+  let helix: ReturnType<typeof lstatSync> | null = null;                                            // row 3: lstat, a dangling link is there
+  try { helix = lstatSync(join(project.root, '.helix')); } catch { /* absent or not inspectable: rows 4 and 5 answer */ }
+  if (helix !== null && !helix.isDirectory()) return { state: 'unusable', row: '3', cause: 'helix-not-directory' };
+  const dest = resolvePath(project.ledger);                                                         // rows 4, 5: the memory path and the root
+  const root = resolvePath(resolve(project.root));                                                  // (the root normalised as text, then resolved the kernel's way)
+  if (dest.kind === 'unresolvable' || root.kind === 'unresolvable') return { state: 'aliased', row: '4', cause: 'unresolvable' };
+  if (dest.kind === 'uninspectable' || root.kind === 'uninspectable') return { state: 'unusable', row: '5', cause: 'uninspectable' };
+  const destination = dest.path;
+  if (!withinDir(root.path, destination)) return { state: 'aliased', row: '6', cause: 'outside-root', destination };   // row 6 (D1), by path component
+  const id = standingAt(destination);
+  if (id === 'error') return { state: 'unusable', row: '9', cause: 'unreadable', destination };
+  let memoryPathIsLink = false;
+  try { memoryPathIsLink = lstatSync(project.ledger).isSymbolicLink(); } catch { /* nothing at the memory path */ }
+  const isOwnPath = destination === under(root.path, '.helix/memory.jsonl');
+  // Row 7, first comparison: the global ledger. No exception.
+  const g = compareWith({ path: destination, id }, project.globalLedger);
+  if (g.same) return { state: 'aliased', row: '7', cause: 'global-ledger', destination };
+  // The project's own .helix/memory.jsonl is exempt from the three rules below (decision 9) and from the second comparison
+  // (T7-1): without that a project inside HELIX_HOME could not write its own file.
+  if (!isOwnPath) {
+    // Decision 6, second rule: while the global ledger cannot be named, a memory path that is a link cannot be told from it.
+    if (!g.named && memoryPathIsLink) return { state: 'aliased', row: '7', cause: 'unjudgeable-target', destination };
+    // Decision 7: a destination inside the HELIX_HOME directory. A home that cannot be named has nothing to compare.
+    const home = resolvePath(project.home);
+    if (home.kind === 'resolved' && withinDir(home.path, destination)) return { state: 'aliased', row: '7', cause: 'home-directory', destination };
+    // Second comparison: another registered project's ledger.
+    const ownKey = canonicalRoot(project.root);
+    for (const key of Object.keys(readRegistry(project.home))) {
+      if (key === GLOBAL_KEY || key === ownKey) continue;
+      const ledgerOfKey = projectLedgerPath(key);
+      const c = compareWith({ path: destination, id }, ledgerOfKey);
+      if (c.same) return { state: 'aliased', row: '7', cause: 'other-project', destination };
+      if (!c.named) {   // decision 6, first rule: a registered project whose ledger cannot be named answers for everything inside its root
+        const r = resolvePath(key);
+        if (withinDir(r.kind === 'resolved' ? r.path : key, destination)) return { state: 'aliased', row: '7', cause: 'unjudgeable-target', destination };
+      }
+    }
+  }
+  if (id !== null) {
+    if (id.regular && id.nlink !== 1n) return { state: 'aliased', row: '8', cause: 'hard-link', destination };   // row 8 (D6), regular files only
+    if (!id.regular) return { state: 'unusable', row: '9', cause: 'not-regular', destination };                 // row 9: never opened
+    const opened = openedVerdict(destination, memoryPathIsLink);                                                 // row 9, row 9a (a link only)
+    if (opened === 'not-ledger-content') return { state: 'unusable', row: '9a', cause: opened, destination };
+    if (opened !== 'ok') return { state: 'unusable', row: '9', cause: opened, destination };
+  } else if (memoryPathIsLink && dest.dirMissing) {
+    return { state: 'unusable', row: '10', cause: 'target-directory-missing', destination };                     // row 10
+  }
+  const identity = id === null ? null : { dev: id.dev, ino: id.ino };                                           // rows 11 to 13
+  const dirIdentity = sampleDirIdentity(dirname(destination));   // A6's sample; an error other than ENOENT or ENOTDIR reaches the outer catch (row 5)
+  if (owned) return { state: 'owned', row: '11', destination, identity, dirIdentity };
+  if (id !== null) return { state: 'unadopted-present', row: '12', destination, identity, dirIdentity };
+  return { state: 'inactive', row: '13', destination, identity, dirIdentity };
 }
 
 /** Shared, side-effect-free four-state snapshot of a project layer's disposition — the SAME predicate

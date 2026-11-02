@@ -1,4 +1,4 @@
-import { mkdirSync, statSync, openSync, fstatSync, readSync, closeSync, constants, type Stats } from 'node:fs';
+import { mkdirSync, statSync, openSync, fstatSync, readFileSync, readSync, closeSync, constants, type Stats } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
@@ -359,6 +359,19 @@ export function parseLedgerHealth(text: string): { records: MemoryRecord[]; skip
     else skippedNonBlank++;   // structurally invalid OR too-deep — same treatment as a torn line, but counted
   }
   return { records, skippedNonBlank };
+}
+
+/** What a file's content is, for the one question design 4.4 defines ("parses as ledger rows", decision 13 of
+ *  section 13.3) and row 9a of 4.2 shares: `rows` when at least one non-blank line is a well-formed record by
+ *  THIS reader's own test (isWellFormedRecord; signatures are not looked at, skipped lines are not counted),
+ *  `empty` when no line is non-blank, `other` for everything else. */
+export type LedgerContentKind = 'empty' | 'rows' | 'other';
+
+/** The content kind of an OPEN regular file, read from its start to its end. A12 replaces this body with the
+ *  bounded reader (first 1 MiB, design 14 decision 1); the name and the answers stay. Throws what readFileSync throws. */
+export function ledgerContentKindOfFd(fd: number): LedgerContentKind {
+  const { records, skippedNonBlank } = parseLedgerHealth(readFileSync(fd, 'utf8'));
+  return records.length > 0 ? 'rows' : skippedNonBlank > 0 ? 'other' : 'empty';
 }
 
 /** Parse already-read ledger TEXT into records (parseLedger's body minus the file read). Lets a

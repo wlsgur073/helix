@@ -6,9 +6,8 @@
 import { randomBytes, createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { canonicalRoot } from './ownership.js';
 import { withFileLock } from './lock.js';
-import { resolvePath, resolvedPathOrThrow, UnresolvablePathError } from './path-identity.js';
+import { canonicalRoot, resolvePath, resolvedPathOrThrow, UnresolvablePathError } from './path-identity.js';
 import { ensureMaster, tryReadMaster } from './ledger-mac.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
