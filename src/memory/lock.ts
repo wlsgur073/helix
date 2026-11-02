@@ -1,4 +1,4 @@
-import { writeFileSync, unlinkSync, linkSync, lstatSync, rmSync, readdirSync, openSync, closeSync, readSync, fstatSync, constants } from 'node:fs';
+import { writeFileSync, unlinkSync, linkSync, lstatSync, rmSync, readdirSync, openSync, closeSync, readSync, fstatSync, existsSync, constants } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { dirname, basename, join } from 'node:path';
@@ -60,6 +60,15 @@ export function writeLockFileForTest(lockPath: string, payload: object): void {
   try { linkSync(src, lockPath); } finally { unlinkSync(src); }
 }
 
+/** Why the acquire loop gave up, which decides the sentence after the timeout message's head. */
+type TimeoutCause =
+  | { kind: 'payload'; holder: LockPayload }   // a holder that parsed: its pid, its start time and how to identify it
+  | { kind: 'unparseable' }                    // a regular file whose content is not a lock payload, or is over the read cap
+  | { kind: 'unreadable' }                     // the file exists but its holder could not be read or identified
+  | { kind: 'no-directory' }                   // the publish step answered ENOENT at the budget end and the lock's folder is not there
+  | { kind: 'legacy-dir' }                     // locks-R5: a legacy lock directory that did not classify dead
+  | { kind: 'vanished' };                      // locks-R5: the budget ran out with the lock free (read absent, or cleared by this call) and its one more publication spent
+
 /** The only thing an operator sees when acquisition fails, so it must not recommend an inference this
  *  file refuses to make for itself. It used to say "Verify liveness with: kill -0 <pid>", which is the
  *  one check that cannot decide the case: kill -0 answers that SOME process holds the pid, never that
@@ -67,21 +76,38 @@ export function writeLockFileForTest(lockPath: string, payload: object): void {
  *  that produces this timeout — a reused pid answers alive, so the advice handed the operator exactly
  *  the misclassification that age-based stealing was rejected for, and then told them to delete the
  *  lock on the strength of it. */
-function timeoutMessage(lockPath: string, holder: LockPayload | null, waitedMs: number): string {
+function timeoutMessage(lockPath: string, cause: TimeoutCause, waitedMs: number): string {
   const head = `withFileLock: timed out after ${waitedMs}ms acquiring ${lockPath}`;
-  if (holder === null) {
-    return `${head} — holder unreadable, so it is never auto-reclaimed. Inspect ${lockPath} by hand; ` +
-      `a lock file that does not parse was not written by this version.`;
+  switch (cause.kind) {
+    case 'unparseable':
+      return `${head} — the lock file does not parse as a lock this version writes (it is empty, holds other content, ` +
+        `or is larger than a lock payload), so its holder cannot be identified and it is not reclaimed in the boot it ` +
+        `was written in. Inspect ${lockPath} by hand.`;
+    case 'unreadable':
+      return `${head} — the lock file exists but its holder could not be read or identified (a permission or I/O error, ` +
+        `or a failed liveness check), so it is never auto-reclaimed. Inspect ${lockPath} by hand.`;
+    case 'no-directory':
+      return `${head} — the lock could not be published because its directory does not exist (it was removed, or a path ` +
+        `component is missing). Nothing holds this lock; check the folder of ${lockPath}.`;
+    case 'legacy-dir':
+      return `${head} — a lock directory written by an older version stands there and its owner could not be shown dead, ` +
+        `so it is never auto-reclaimed. Inspect ${lockPath} by hand.`;
+    case 'vanished':
+      return `${head} — the lock was free at the last look, but another process held it on every earlier attempt inside ` +
+        `the budget (contention, not a stuck holder). Try again.`;
+    case 'payload': {
+      const holder = cause.holder;
+      const who = `held by pid ${holder.pid} (recorded start ${holder.startTicks ?? 'NONE — this platform does not expose one'})`;
+      const identify = holder.startTicks === null
+        ? `Because no start time was recorded, a waiter cannot tell the original holder from an unrelated ` +
+          `process that later reused pid ${holder.pid}; kill -0 cannot separate them either. Identify it: ` +
+          `ps -p ${holder.pid} -o pid,lstart,command — and confirm it is a Helix run before acting.`
+        : `The holder classified live on every attempt. Confirm it is the run that took the lock by ` +
+          `comparing its start time against the value above (ps -p ${holder.pid} -o pid,lstart,command).`;
+      return `${head} — ${who}. ${identify} ` +
+        `Removing the lock while its holder is merely SUSPENDED reintroduces the concurrency this lock prevents.`;
+    }
   }
-  const who = `held by pid ${holder.pid} (recorded start ${holder.startTicks ?? 'NONE — this platform does not expose one'})`;
-  const identify = holder.startTicks === null
-    ? `Because no start time was recorded, a waiter cannot tell the original holder from an unrelated ` +
-      `process that later reused pid ${holder.pid}; kill -0 cannot separate them either. Identify it: ` +
-      `ps -p ${holder.pid} -o pid,lstart,command — and confirm it is a Helix run before acting.`
-    : `The holder classified live on every attempt. Confirm it is the run that took the lock by ` +
-      `comparing its start time against the value above (ps -p ${holder.pid} -o pid,lstart,command).`;
-  return `${head} — ${who}. ${identify} ` +
-    `Removing the lock while its holder is merely SUSPENDED reintroduces the concurrency this lock prevents.`;
 }
 
 export const LOCK_FOREIGN_OBJECT_REFUSAL =
@@ -131,7 +157,7 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
   // overshoot the caller's budget by up to one RETRY_MS. Floor of 1ms so a nearly-exhausted budget
   // still yields the CPU instead of spinning.
   const sleepWithinBudget = (): void => sleepSync(Math.max(1, Math.min(RETRY_MS, maxWaitMs - elapsedMs())));
-  let publishedOnceMore = false;                            // per acquisition: the absent row's extra publication (locks-R3)
+  let publishedOnceMore = false;                            // per acquisition: the extra publication of the absent row (locks-R3) and of a steal at the budget end
 
   for (;;) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString('hex')}.tmp`;
@@ -154,11 +180,12 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
       if (code === 'EPERM' || code === 'EOPNOTSUPP' || code === 'ENOTSUP')
         throw new Error(`withFileLock: filesystem refuses hard links for ${lockPath}; ledger locking is unsupported on this filesystem`);
       if (code === 'ENOENT') {                              // srcTmp swept mid-flight, OR the ledger's dir vanished mid-acquire — retry ON THE BUDGET
-        if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, elapsedMs())); // a vanished dir throws ENOENT every pass; a bare non-yielding `continue` would spin at 100% CPU forever (the stealUnderGate fall-through class), so route it through the normal cadence
-        sleepWithinBudget();
-        continue;
-      }
-      if (code !== 'EEXIST') throw e;                       // real error (perms/disk) — bubble up untouched
+        // a vanished dir throws ENOENT every pass; a bare non-yielding `continue` would spin at 100% CPU forever (the stealUnderGate fall-through class), so route it through the normal cadence
+        if (elapsedMs() < maxWaitMs) { sleepWithinBudget(); continue; }
+        // Budget over, and the two causes differ. No folder: no-directory. A folder that stands: a sweep took srcTmp, a
+        // holder may well hold the lock, so the reading below picks the cause, as it does after an EEXIST.
+        if (!existsSync(dirname(lockPath))) throw new Error(timeoutMessage(lockPath, { kind: 'no-directory' }, elapsedMs()));
+      } else if (code !== 'EEXIST') throw e;                // real error (perms/disk) — bubble up untouched
     }
 
     // Held. Classify the recorded holder: a legacy dir by its owner pid (pid-gated reclaim), an
@@ -169,7 +196,7 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
     if (reading.kind === 'foreign') throw new LockForeignObjectError();      // D8: not opened, no budget spent
     if (reading.kind === 'absent') {
       if (elapsedMs() >= maxWaitMs) {
-        if (publishedOnceMore) throw new Error(timeoutMessage(lockPath, null, elapsedMs()));
+        if (publishedOnceMore) throw new Error(timeoutMessage(lockPath, { kind: 'vanished' }, elapsedMs()));
         publishedOnceMore = true;                                            // decision 8 (locks-R3): publish once more, then refuse
         continue;
       }
@@ -177,7 +204,7 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
       continue;
     }
     if (reading.kind === 'unreadable') {                                      // may be a live holder's lock: wait the budget, then refuse
-      if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, elapsedMs()));
+      if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, { kind: 'unreadable' }, elapsedMs()));
       sleepWithinBudget();
       continue;
     }
@@ -190,9 +217,20 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
     // stealUnderGate a no-op, and an unconditional continue there would spin without ever advancing
     // `waited` — a non-yielding infinite loop. Falling through means a stuck gate simply times out
     // (automatic reclaim disabled until repair, the documented fail-closed residue). The steal
-    // grants nothing: the loop still re-publishes from scratch on the next pass.
-    if (holder === 'dead') stealUnderGate(lockPath, probe);
-    if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, reading.payload, elapsedMs()));
+    // grants nothing: the loop still re-publishes from scratch on the next pass. A steal that cleared
+    // the lock at the budget end leaves `reading` describing a lock that is gone, so that pass answers
+    // as the absent row does and `reading` is never printed.
+    const cleared = holder === 'dead' && stealUnderGate(lockPath, probe);
+    if (elapsedMs() >= maxWaitMs) {
+      if (cleared) {
+        if (publishedOnceMore) throw new Error(timeoutMessage(lockPath, { kind: 'vanished' }, elapsedMs()));
+        publishedOnceMore = true;
+        continue;
+      }
+      const cause: TimeoutCause = reading.payload !== null ? { kind: 'payload', holder: reading.payload }
+        : reading.shape === 'legacy-dir' ? { kind: 'legacy-dir' } : { kind: 'unparseable' };
+      throw new Error(timeoutMessage(lockPath, cause, elapsedMs()));
+    }
     sleepWithinBudget();
   }
 
@@ -426,8 +464,9 @@ function classifyLegacyOwner(raw: string | null, probe: LivenessProbe): HolderCl
  *  victim: the second reaper's delayed unlink removing the first one's FRESH lock was the last
  *  double-hold execution left (Codex round 2). The gate is never auto-stolen within its own boot —
  *  a reaper crash inside this tiny section disables automatic reclaim until reboot or manual
- *  repair (documented fail-closed residue). Gates from other boots are inert litter: removable. */
-function stealUnderGate(lockPath: string, probe: LivenessProbe): void {
+ *  repair (documented fail-closed residue). Gates from other boots are inert litter: removable.
+ *  Answers whether THIS call removed the lock: false for a busy gate and for a victim left alone. */
+function stealUnderGate(lockPath: string, probe: LivenessProbe): boolean {
   const bootId = probe.bootId() ?? 'noboot';
   const gatePath = `${lockPath}.reap.${bootId}`;
   const dir = dirname(lockPath);
@@ -440,15 +479,16 @@ function stealUnderGate(lockPath: string, probe: LivenessProbe): void {
   try {
     writeFileSync(gateSrc, JSON.stringify(selfIdentity(gateToken, probe)), { flag: 'wx', mode: 0o600 });
     try { linkSync(gateSrc, gatePath); } finally { try { unlinkSync(gateSrc); } catch { /* raced */ } }
-  } catch { return; }                                              // gate busy (same boot) — no steal this round
+  } catch { return false; }                                        // gate busy (same boot) — no steal this round
   try {
     // Re-verify under the gate with THE classification (readLockHolder). Anything that is not provably
     // dead now (changed, alive, same-boot junk, foreign, unreadable, gone) is left alone.
     const victim = readLockHolder(lockPath, selfIdentity(gateToken, probe), probe);
-    if (victim.kind !== 'holder' || victim.holder !== 'dead') return;
+    if (victim.kind !== 'holder' || victim.holder !== 'dead') return false;
     if (victim.shape === 'legacy-dir') rmSync(lockPath, { recursive: true, force: true });
     else unlinkSync(lockPath);
-  } catch { /* victim vanished or fs error — abandon; outer loop re-evaluates */ }
+    return true;
+  } catch { return false; }                                        // victim vanished or fs error — abandon; outer loop re-evaluates
   finally {
     try { if (lockTokenAt(gatePath) === gateToken) unlinkSync(gatePath); } catch { /* leave */ }
   }

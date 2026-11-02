@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, existsSync, writeFileSync, readFileSync, symlinkSync, lstatSync, readdirSync, utimesSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, existsSync, writeFileSync, readFileSync, symlinkSync, lstatSync, readdirSync, utimesSync, rmSync, chmodSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,11 @@ import { withFileLock, withFileLockAsync, lockPathOf, writeLockFileForTest } fro
 import { selfIdentity, realProbe, tryParsePayload, type LivenessProbe, type LockPayload } from '../../src/memory/lock-liveness.js';
 
 const target = (): string => { const d = mkdtempSync(join(tmpdir(), 'helix-lock-')); writeFileSync(join(d, 'ledger.jsonl'), ''); return join(d, 'ledger.jsonl'); };
+const masked = (msg: string, lockPath: string): string => msg.split(lockPath).join('<lock>').replace(/after \d+ms/, 'after <n>ms');
+const TIMEOUT_HEAD = 'withFileLock: timed out after <n>ms acquiring <lock> — ';
+const messageOf = (t: string, opts: Parameters<typeof withFileLock>[2]): string => {
+  try { withFileLock(t, () => 1, opts); return ''; } catch (e) { return masked((e as Error).message, lockPathOf(t)); }
+};
 
 describe('withFileLock (link-published)', () => {
   it('runs fn under the lock, the lock is a FILE with a full payload, and it is removed afterward', () => {
@@ -120,11 +125,17 @@ describe('withFileLock (link-published)', () => {
     const ledger = join(d, 'ledger.jsonl');
     writeFileSync(ledger, '');
     const liveHolder = { ...selfIdentity('f'.repeat(32)), threadId: 99 }; // same pid+ticks, diff thread => alive => never stolen
-    writeLockFileForTest(lockPathOf(ledger), liveHolder);
+    const lockPath = lockPathOf(ledger);
+    writeLockFileForTest(lockPath, liveHolder);
     const killer = spawn(process.execPath, ['-e', `require('fs').renameSync(${JSON.stringify(d)}, ${JSON.stringify(gone)})`], { stdio: 'ignore' });
     const t0 = Date.now();
     try {
-      expect(() => withFileLock(ledger, () => 1, { maxWaitMs: 1000 })).toThrow(/timed out/);
+      let message = '';
+      try { withFileLock(ledger, () => 1, { maxWaitMs: 2_000 }); } catch (e) { message = (e as Error).message; }
+      expect(message).toMatch(/timed out/);
+      expect(masked(message, lockPath)).toBe(TIMEOUT_HEAD +
+        'the lock could not be published because its directory does not exist (it was removed, or a path component is missing). ' +
+        'Nothing holds this lock; check the folder of <lock>.');
       const elapsed = Date.now() - t0;
       expect(elapsed).toBeLessThan(3000); // budgeted (~maxWaitMs); a non-yielding spin would only end at the 5s hard-kill
     } finally {
@@ -217,6 +228,47 @@ describe('timeout guidance does not recommend an inference the code itself refus
       startTicks: null, bootId: null, pidNs: null,
     });
     expect(msg).toMatch(/reus/i);
+  });
+});
+
+describe('timeout texts when no holder can be shown (spec 4.5)', () => {
+  it('a lock file that does not parse says so and says it is not reclaimed in the boot it was written in', () => {
+    const t = target();
+    writeFileSync(lockPathOf(t), '{not json');                       // same boot: alive-unknown
+    expect(messageOf(t, { maxWaitMs: 80 })).toBe(TIMEOUT_HEAD +
+      'the lock file does not parse as a lock this version writes (it is empty, holds other content, or is larger than a lock payload), ' +
+      'so its holder cannot be identified and it is not reclaimed in the boot it was written in. Inspect <lock> by hand.');
+  });
+  it('a holder that cannot be read or identified (a liveness check that throws) says that, not "does not parse"', () => {
+    const t = target();
+    writeLockFileForTest(lockPathOf(t), { ...selfIdentity('a'.repeat(32)), pid: 999_999, startTicks: '4242', threadId: 5 });
+    const probe = { ...realProbe, kill0() { throw new Error('injected'); } };
+    expect(messageOf(t, { maxWaitMs: 80, probe })).toBe(TIMEOUT_HEAD +
+      'the lock file exists but its holder could not be read or identified (a permission or I/O error, or a failed liveness check), ' +
+      'so it is never auto-reclaimed. Inspect <lock> by hand.');
+  });
+  it.skipIf(process.getuid?.() === 0)('an unreadable regular file (mode 000) gets the same text', () => {
+    const t = target();
+    writeLockFileForTest(lockPathOf(t), { ...selfIdentity('b'.repeat(32)), threadId: 99 });
+    chmodSync(lockPathOf(t), 0o000);
+    try {
+      expect(messageOf(t, { maxWaitMs: 80 })).toContain('the lock file exists but its holder could not be read or identified');
+    } finally { chmodSync(lockPathOf(t), 0o600); rmSync(lockPathOf(t)); }
+  });
+  it('a legacy lock directory whose owner could not be shown dead says it was written by an older version', () => {
+    const t = target();
+    mkdirSync(lockPathOf(t));
+    writeFileSync(join(lockPathOf(t), 'owner'), `${process.pid}-cafe`);   // a live legacy holder
+    expect(messageOf(t, { maxWaitMs: 80 })).toBe(TIMEOUT_HEAD +
+      'a lock directory written by an older version stands there and its owner could not be shown dead, so it is never auto-reclaimed. Inspect <lock> by hand.');
+  });
+  it('a live payload still names its holder (the payload text is unchanged)', () => {
+    const t = target();
+    writeLockFileForTest(lockPathOf(t), { ...selfIdentity('c'.repeat(32)), pid: 999_999, startTicks: '4242', threadId: 5 });
+    const probe = { ...realProbe, kill0: () => 'alive' as const, startTicksOf: () => '4242', stateOf: () => 'S' };
+    const m = messageOf(t, { maxWaitMs: 80, probe });
+    expect(m).toContain('held by pid 999999 (recorded start 4242)');
+    expect(m).toContain('The holder classified live on every attempt.');
   });
 });
 
