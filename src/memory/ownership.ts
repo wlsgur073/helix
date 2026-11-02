@@ -191,6 +191,13 @@ export function isOwned(projectRoot: string, home: string): boolean {
   return stamp !== null && stamp === entry.stamp;
 }
 
+/** Is the project's `.helix` a symlink right now? Asked in front of the ledger lock of a project write: the lock comes
+ *  before the ownership record (design 4.3 step 2), and a lock file published through a `.helix` that became a link since
+ *  the judgement would be created in the folder the link leads to. A name that is absent is not a link. */
+export function isHelixDirLinked(projectRoot: string): boolean {
+  try { return lstatSync(join(projectRoot, '.helix')).isSymbolicLink(); } catch { return false; }
+}
+
 /** Where a configured project layer was found (src/memory/project-root.ts): the session's own working
  *  directory, or a parent of it. Only the ownership gate reads it — a parent's folder is never claimed
  *  automatically, so an unowned one discloses itself instead of staying silent. */
@@ -429,7 +436,7 @@ export function stampOwnership(
     // ours — a lost/overwritten .owner leaves isOwned() false while the entry lingers (the REPAIR
     // path), and gating here let a foreign ledger that raced into that window be silently adopted.
     if (opts.autoAdoptLedger && existsSync(opts.autoAdoptLedger))
-      throw new Error('commit: a project memory file appeared here that Helix did not create — adopt it explicitly (helix_memory_adopt) or remove it');
+      throw new Error('commit: a project memory file exists here that Helix did not create — ask the user whether to adopt it (helix_memory_adopt) or to move it away; do not choose for them.');
     // Reused-path safety (F6, revised; C1.4-③ closes the conferral half). Earlier this REFUSED when
     // the current .owner did not match the entry — but that bricked a legitimate lost-.owner repair
     // with no recovery ceremony. Deletion safety lives at the compaction chokepoint (a wrong/foreign

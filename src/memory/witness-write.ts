@@ -38,7 +38,7 @@
 import { dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import type { MemoryRecord } from '../types.js';
-import { appendRecordUnlocked, readLedgerBytes, type LedgerPath } from './ledger.js';
+import { appendRecordUnlocked, readLedgerBytes, type LedgerPath, type JudgedDestination } from './ledger.js';
 import { withFileLock } from './lock.js';
 import { ensureHelixDir } from './home-permissions.js';
 import { advanceAllowed, type WitnessVerdict } from './witness-core.js';
@@ -51,8 +51,10 @@ import {
  *  signing `writeVerify`; withFileLock is not re-entrant per path). Never takes the ledger lock
  *  itself; the nested witness-lock calls inside (completeTransition/advanceWitness) are a different
  *  path and safe to acquire regardless of who holds the ledger lock. `refusalOp` is the name in front of the witness refusal
- *  (W-R5: the tool's name, `confirm` and `recheck`, not the store's `verify`); `op` stays what WitnessBlockedError carries. */
-export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined, op: 'commit' | 'erase' | 'verify', refusalOp: string = op): void {
+ *  (W-R5: the tool's name, `confirm` and `recheck`, not the store's `verify`); `op` stays what WitnessBlockedError carries.
+ *  `judged` is the destination a project write judged under the ledger lock (design 4.3 step 3); it is handed to the append,
+ *  which refuses a path that resolves elsewhere and compares the descriptor with the judged identity. */
+export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined, op: 'commit' | 'erase' | 'verify', refusalOp: string = op, judged?: JudgedDestination): void {
   // The first step. A directory at witness.json stored the row and failed after it, and every retry stored it again (FN-03); an
   // unreadable or damaged file was read as an empty store and replaced (D9). `homeUnchecked`: ensureHelixDir, next, names a home's fault.
   assertWitnessWritable(home, refusalOp, { homeUnchecked: true });
@@ -109,7 +111,7 @@ export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord
     );
   }
 
-  appendRecordUnlocked(ledger, record);   // outside the marked try: an error after the row's fsync comes out marked, an earlier failure as it is
+  appendRecordUnlocked(ledger, record, undefined, judged);   // outside the marked try: an error after the row's fsync comes out marked, an earlier failure as it is
   try {
     const after = readLedgerBytes(ledger); // re-read under the same lock — tail-repair safe
 

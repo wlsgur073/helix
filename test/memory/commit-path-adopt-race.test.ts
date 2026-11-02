@@ -5,11 +5,7 @@
 // Every existing guard test calls stampOwnership itself, so deleting the argument at
 // MemoryStore.targetLedger's call site reopens the defect end-to-end with the suite green.
 //
-// Reaching that re-check from the commit path requires the race it exists for. targetLedger refuses
-// any ledger that is present BEFORE the lock is taken, so a foreign file planted up front hits the
-// pre-check instead — a different guard with a different message. The two messages differ by one
-// word ("exists here" vs "appeared here") and this asserts the SECOND, so an ordering slip surfaces
-// as a clearly different failure rather than as a false pass.
+// Since B1 the foreign-file refusal has ONE text (design 4.3, last paragraph: "appeared here" is merged into "exists here"); the race still ends in stampOwnership's re-check until the restore task replaces that re-check by the exclusive creation, and this test asserts the text, not the mechanism.
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, existsSync, rmSync } from 'node:fs';
@@ -52,11 +48,9 @@ describe('the commit path carries the auto-adopt re-check (N-OWNERSHIP-REPAIR.b)
       expect(existsSync(ledger), 'the plant landed too early; the pre-check would fire instead').toBe(false);
 
       const store = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's1', project: { root: proj, ledger } });
-      // Passes targetLedger's pre-check (no ledger yet), then blocks on the registry lock the worker
-      // holds. The worker plants the file inside that window, so the re-check under the lock is what
-      // decides — which is exactly the argument this leg is about.
+      // Holds the ledger lock and passes its judgement under it (no file yet), then blocks on the registry lock the worker holds. The worker plants the file inside that window, so the re-check under the registry lock is what decides.
       expect(() => store.commit({ content: 'a fact', source: 'user', scope: 'project' }))
-        .toThrow(/appeared here that Helix did not create/);
+        .toThrow(/exists here that Helix did not create/);
 
       await waitFor(join(barriers, 'planted'));
       expect(existsSync(ledger), 'the worker never planted the foreign ledger').toBe(true);

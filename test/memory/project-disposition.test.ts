@@ -59,10 +59,9 @@ describe('project disposition snapshot (B1)', () => {
       // Read half: unadopted-present is excluded from recall, same as pre-B1 behavior.
       expect(store.recall('charlie foreign fact').items).toEqual([]);
 
-      // Write half: commit to project scope still fails loud with the adopt-hint error — B1 must not
-      // change targetLedger()'s independent, fresh commit-side check.
+      // Write half: commit to project scope still fails loud, now with the foreign-file text of design 4.9 (D7), made under the ledger lock (4.3 step 4).
       expect(() => store.commit({ content: 'x', source: 'user', scope: 'project' }))
-        .toThrow(/adopt it explicitly.*helix_memory_adopt/);
+        .toThrow(/ask the user whether to adopt it \(helix_memory_adopt\) or to move it away/);
     } finally { rmSync(home, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
   });
 

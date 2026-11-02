@@ -147,6 +147,20 @@ export class LedgerDestinationChangedError extends Error {
 export const isLedgerDestinationChangedError = (e: unknown): boolean =>
   e instanceof Error && (e as { ledgerDestinationChanged?: unknown }).ledgerDestinationChanged === true;
 
+/** The exclusive creation of a first write met something at the name (design 4.3 step 4 and step 5, the item on the
+ *  texts): EEXIST (a file or a link, even a dangling one) or ELOOP. Nothing was written and nothing that stood there was
+ *  touched. The store answers the foreign-file text; the kernel's code stays readable. */
+export class LedgerCreateRefusedError extends Error {
+  readonly ledgerCreateRefused = true;
+  constructor(readonly code: string) {
+    super('the memory file could not be created exclusively: something stands at its name');
+    this.name = 'LedgerCreateRefusedError';
+  }
+}
+
+export const isLedgerCreateRefusedError = (e: unknown): boolean =>
+  e instanceof Error && (e as { ledgerCreateRefused?: unknown }).ledgerCreateRefused === true;
+
 /** The refusal when `/proc` was usable and no longer is (design 4.1 item 3): the append can no longer hold the judged
  *  directory, and the fallback is for a host that never had `/proc`. A constant: no path, no interpolation. */
 export const PROC_LOST_REFUSAL =
@@ -169,7 +183,13 @@ export const isLedgerProcLostError = (e: unknown): boolean =>
 /** The destination as a caller judged it, sampled under the ledger lock: the resolved path and the device and
  *  inode that stood there, `identity` null when nothing did. `dir` is the identity of the directory that holds it:
  *  undefined, the append samples the directory itself; null, the judgement found no directory and the append refuses. */
-export interface JudgedDestination { path: string; identity: FileIdentity | null; dir?: FileIdentity | null }
+export interface JudgedDestination {
+  path: string;
+  identity: FileIdentity | null;
+  dir?: FileIdentity | null;
+  /** The first write to a project nobody adopted: create with O_CREAT | O_EXCL | O_NOFOLLOW, never fall back to a plain open. */
+  createExclusive?: boolean;
+}
 
 /** O_NOFOLLOW (design 4.1 item 3): the last component of the resolved path is never followed, so a link that
  *  appears there after the resolution ends in ELOOP with nothing written. Where the platform does not define the
@@ -183,16 +203,20 @@ const DESTINATION_CHANGED_OPEN_ERRORS = new Set(['ELOOP', 'EISDIR', 'ENOENT']);
 /** Open the resolved destination for append. `created` is true only when THIS call made the file. A destination
  *  absent when it was judged is created exclusively; a file that appeared since (EEXIST) is opened as it stands and
  *  is appended to. A destination present when it was judged is opened without O_CREAT: gone now, it is a changed
- *  destination, never a file to create afresh. */
-function openForAppend(path: string, absentWhenJudged: boolean, fsOps: DurableFsOps): { fd: number; created: boolean } {
-  try {
-    if (absentWhenJudged) {
-      try {
-        return { fd: fsOps.openSync(path, APPEND_OPEN | constants.O_CREAT | constants.O_EXCL, 0o600), created: true };   // owner-only ON CREATE; umask can only clear bits, never set them
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-      }
+ *  destination, never a file to create afresh. `mustCreate` (createExclusive) creates in either case and has no
+ *  fallback: EEXIST or ELOOP is LedgerCreateRefusedError. */
+function openForAppend(path: string, absentWhenJudged: boolean, mustCreate: boolean, fsOps: DurableFsOps): { fd: number; created: boolean } {
+  if (absentWhenJudged || mustCreate) {
+    try {
+      return { fd: fsOps.openSync(path, APPEND_OPEN | constants.O_CREAT | constants.O_EXCL, 0o600), created: true };   // owner-only ON CREATE; umask can only clear bits, never set them
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (mustCreate && (code === 'EEXIST' || code === 'ELOOP')) throw new LedgerCreateRefusedError(code);
+      if (DESTINATION_CHANGED_OPEN_ERRORS.has(code ?? '')) throw new LedgerDestinationChangedError();
+      if (code !== 'EEXIST') throw e;   // EEXIST with mustCreate false: a file appeared; fall through to the plain open (R-5)
     }
+  }
+  try {
     return { fd: fsOps.openSync(path, APPEND_OPEN), created: false };
   } catch (e) {
     if (DESTINATION_CHANGED_OPEN_ERRORS.has((e as NodeJS.ErrnoException).code ?? '')) throw new LedgerDestinationChangedError();
@@ -261,7 +285,7 @@ export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, 
   try {                                                 // outside the `finally` blocks on purpose: a close that throws from one replaces the error in flight, and this catch sees the replacement
     try {
       const at = boundPath(held, basename(path));
-      const { fd, created } = openForAppend(at, before === null, fsOps);
+      const { fd, created } = openForAppend(at, before === null, judged?.createExclusive === true, fsOps);
       try {
         const st = fsOps.fstatSync(fd);
         const opened = { dev: st.dev, ino: st.ino };

@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, type CompactionStats, type LedgerPath } from './ledger.js';
+import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, LedgerDestinationChangedError, isLedgerCreateRefusedError, type CompactionStats, type JudgedDestination, type LedgerPath } from './ledger.js';
 import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
-import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, discardTransition, WitnessBlockedError } from './witness-store.js';
+import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, discardTransition, assertWitnessWritable, isRecordStoredError, WitnessBlockedError } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated, isIsoInstant } from './history.js';
@@ -17,7 +17,7 @@ import { rankWithArtifacts, buildRankArtifacts, assertQueryWithinBounds, type Ex
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce, collectWitnessReadNotes, asOfWitnessNotes } from './content-frame.js';
-import { stampOwnership, judgeProjectLayer, canonicalRoot, isReviewableRoot, trustStateOf, type LayerJudgement, type ProjectDisposition, type ProjectOrigin, type TrustState } from './ownership.js';
+import { stampOwnership, judgeProjectLayer, canonicalRoot, isReviewableRoot, isHelixDirLinked, trustStateOf, type LayerJudgement, type ProjectDisposition, type ProjectOrigin, type TrustState } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, isFutureMacVersion } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedLiveWitnessed, verifiedProjectionWithSubkey } from './verified-read.js';
@@ -25,7 +25,8 @@ import { readLedgerWitnessed, readLedgerBytesWitnessed } from './witness-read.js
 import { interruptedAtPredecessor, type WitnessFileMark, type WitnessVerdict } from './witness-core.js';
 import { ledgerDigest, subkeyFingerprint, keyVectorEqual, type ScopeKeyComponent, type RecallCacheEntry } from './recall-cache.js';
 import type { MetricsSink } from '../metrics.js';
-import { withFileLock } from './lock.js';
+import { withFileLock, isLockPublishRefusedError, type LockContext } from './lock.js';
+import { ensureHelixDir } from './home-permissions.js';
 import { MAX_COMMIT_CONTENT_CHARS, RECALL_RECENCY_APPENDIX_COUNT, RECALL_APPENDIX_FUTURE_TOLERANCE_MS } from '../limits.js';
 
 export interface MemoryStoreOptions {
@@ -171,6 +172,18 @@ const ERASE_UNUSABLE_REFUSAL =
   'be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory ' +
   'records) — nothing was erased.';
 
+/** 13.3 decision 5 (design 4.3 step 2): the ledger lock of a project could not be published because the memory folder
+ *  refuses the write (EACCES) or stands on a read-only file system (EROFS). */
+const UNWRITABLE_PROJECT_WRITE_REFUSAL =
+  "commit: this project's memory folder cannot be written (a read-only folder or file system), so nothing was written. " +
+  'Ask the user whether to store this fact in global memory, which every project sees, or to make that folder writable; do not choose for them.';
+
+/** A project memory file Helix did not create (design 4.3 step 4, third case; the EEXIST and ELOOP of the exclusive
+ *  creation answer it too). ONE text: the "appeared here" wording is gone. */
+const FOREIGN_FILE_REFUSAL =
+  'commit: a project memory file exists here that Helix did not create — ask the user whether to adopt it ' +
+  '(helix_memory_adopt) or to move it away; do not choose for them.';
+
 /** The states in which an explicit 'global' commit bypassed a project layer that is off here (IT-M4). */
 export type BypassedProjectDisposition = 'ancestor-unadopted' | 'aliased' | 'unusable' | 'unadopted-present';
 /** What `commitScoped` reports: the record, the scope it was written to, and two disclosures.
@@ -199,6 +212,10 @@ export const isEraseRefusedError = (e: unknown): boolean =>
 
 /** IT-M16: what `MemoryStore.erase` found the id naming (see its docstring). */
 export type EraseOutcome = 'erased' | 'not-live' | 'absent';
+
+/** What underProjectLedgerLock hands its body: the held lock, the judgement read under it, and the destination that
+ *  judgement passed, for the append. */
+interface HeldProjectLedger { ctx: LockContext; judgement: LayerJudgement; judged: JudgedDestination }
 
 /** Orchestrates the deterministic core modules over a real JSONL ledger file. */
 export class MemoryStore {
@@ -324,13 +341,17 @@ export class MemoryStore {
     // ALIAS-P2P (item 7, fix round 1): refused HERE, before the supersede pre-check below ever calls
     // ledgerOf(input.supersedes) — that call used to read through the alias (pulling the OTHER
     // project's live record into this scope, and its Tier-1/Tier-2 guards could then leak whether
-    // that record exists and is human-authored) before targetLedger()'s own refusal fired at the very
+    // that record exists and is human-authored) before commitToProject()'s own refusal fired at the very
     // end of this method. "Project-routed" = a project layer is configured and the caller did not
     // explicitly ask for 'global' (explicit 'project', or an omitted scope — the same set
     // targetLedger() below eventually routes to the project ledger for). An explicit scope:'global'
     // commit is untouched here: its supersede target resolves through the (now alias-excluding)
     // ledgerOf below, never through this check.
-    if (input.scope !== 'global' && this.opts.project) this.refuseExcludedProjectWrite(this.opts.project, this.judgeLayer({ freshContent: true }));
+    let first: LayerJudgement | null = null;
+    if (input.scope !== 'global' && this.opts.project) {
+      first = this.judgeLayer({ freshContent: true });
+      this.refuseExcludedProjectWrite(this.opts.project, first);
+    }
     if (input.supersedes) {
       const targetLedger = this.ledgerOf(input.supersedes);
       const target = this.verifiedOf(targetLedger).live.get(input.supersedes);
@@ -338,8 +359,8 @@ export class MemoryStore {
       // Cross-scope guard (spec §15): the supersede record is written to the ledger for input.scope,
       // but projection is per-ledger. If the target lives in a different ledger than the write, the
       // supersede would NOT evict it — both stay live (a duplicate, stale fact never removed). Reject
-      // the scope mismatch. (Side-effect-free write-ledger resolution: mirrors targetLedger() routing
-      // WITHOUT its ownership-claim side effect, so a rejected commit never stamps/creates a ledger.
+      // the scope mismatch. (Side-effect-free write-ledger resolution: mirrors targetLedger() routing,
+      // and commitToProject() claims ownership only after it, so a rejected commit never stamps/creates a ledger.
       // M-3: one cell now diverges on purpose rather than mirrors it — an explicit 'project' scope
       // with no active project layer, which targetLedger() REFUSES outright, this line still routes
       // to global. Harmless: that refusal fires at the real targetLedger() call below, before any
@@ -440,12 +461,17 @@ export class MemoryStore {
       provenance: { source, sessionId: this.session() },
       supersedes: input.supersedes ?? null, blastRadius: input.blastRadius ?? null, reverifyTrigger: null, classification,
     };
-    const ledger = this.targetLedger(input.scope);
-    appendWitnessed(ledger, record, this.homeDir(), this.scopeRootOf(ledger), 'commit');
-    const out: CommitResult = { record, scope: ledger === this.global ? 'global' : 'project' };
+    const target = this.targetLedger(input.scope);
+    if (target.project) {
+      if (first === null) throw new Error('commit: internal error — a project write without its judgement');
+      this.commitToProject(target.project, first, record);
+    } else {
+      appendWitnessed(target.ledger, record, this.homeDir(), this.scopeRootOf(target.ledger), 'commit');   // the global scope keeps its own path until B6
+    }
+    const out: CommitResult = { record, scope: target.ledger === this.global ? 'global' : 'project' };
     if (redactions) out.redactions = redactions;
-    // IT-M4: an explicit 'global' commit skips every project check above (targetLedger returns before
-    // any ownership read), so the result could not say it bypassed a project layer that is off here.
+    // IT-M4: an explicit 'global' commit skips every project check above (commitToProject never runs),
+    // so the result could not say it bypassed a project layer that is off here.
     // The disposition is computed ONLY on this path — explicit 'global' with a layer configured — and
     // after the append, so a refused or failed write never pays for it. Side-effect free.
     if (input.scope === 'global' && this.opts.project) {
@@ -464,7 +490,7 @@ export class MemoryStore {
 
   /** The single condition + message for refusing a project-routed write on a layer the judgement excludes, shared by
    *  commitScoped()'s early check (fired before the supersede block ever calls ledgerOf, which used to read through an
-   *  alias) and by targetLedger()'s own routing below, so the two call sites can never carry different wording or drift
+   *  alias) and by commitToProject()'s critical section, so the two call sites can never carry different wording or drift
    *  out of sync. 'aliased' and 'unusable' hold whether or not the project is adopted.
    *
    *  Issue #1: a project layer found in a PARENT directory is used only once adopted, and nothing claims it
@@ -487,11 +513,11 @@ export class MemoryStore {
     }
   }
 
-  /** Resolve the ledger to write to. Project scope claims ownership on first use and refuses a
-   *  pre-existing unowned (foreign) ledger. With no project layer active, an OMITTED scope falls
-   *  back to global — the contextual default — while an EXPLICIT 'project' is REFUSED rather than
+  /** Resolve the ledger to write to, and the project layer when it is a project's. The routing only: the judgement, the
+   *  ownership claim and the foreign-file refusal moved into commitToProject. With no project layer active, an OMITTED
+   *  scope falls back to global — the contextual default — while an EXPLICIT 'project' is REFUSED rather than
    *  silently widened; see the argument on that branch below. */
-  private targetLedger(scope: MemoryScope | undefined): LedgerPath {
+  private targetLedger(scope: MemoryScope | undefined): { ledger: LedgerPath; project?: { root: string; ledger: string } } {
     const p = this.opts.project;
     // An EXPLICIT project scope with no project layer used to fall through to the global ledger with
     // no signal: the caller named the narrower ledger and its record was persisted in the broader
@@ -507,23 +533,95 @@ export class MemoryStore {
         'to the global ledger.',
       );
     }
-    if (scope === 'global' || !p) return this.global;
-    // Rows 3 to 10 of design 4.2 hold whether or not the project is adopted: an excluded layer is refused before
-    // anything is stamped, never written through and never silently widened to the global ledger.
-    const j = this.judgeLayer({ freshContent: true });
-    this.refuseExcludedProjectWrite(p, j);
-    if (j.state !== 'owned') {
-      if (j.state === 'unadopted-present') {
-        throw new Error(
-          'commit: a project memory file exists here that Helix did not create — ' +
-          'adopt it explicitly (helix_memory_adopt) or remove it',
-        );
-      }
-      // autoAdoptLedger: re-check under the registry lock that no foreign ledger appeared between the
-      // judgement above and the stamp — closing the check-then-adopt TOCTOU on the auto-adopt path.
-      stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });
+    if (scope === 'global' || !p) return { ledger: this.global };
+    return { ledger: p.ledger, project: p };
+  }
+
+  /** THE critical section of a write to a project (design 4.3 steps 1 to 3), for the commit; B3 and B5 give the other
+   *  writers the same function. `first` is the caller's lock-free judgement (step 1); it is refused here again, so no
+   *  caller can come in with an excluded layer.
+   *
+   *  In front of the lock: the witness file must be usable (design 4.8 item 2; asked before the home is validated or
+   *  tightened and before a lock file is published in the project: FW-R10); the home is validated; a `.helix` that
+   *  became a link is refused (row 3's condition, row 3's fixed text); and a memory folder that is missing is created
+   *  when the memory path is no link (design 4.2, line 110: row 10 refuses a link whose folder is missing, so only a plain
+   *  `.helix/memory.jsonl` reaches the mkdir). The judgement used for the append is taken after the folder exists:
+   *  row 13 with no folder has `dirIdentity === null`, which the held-directory append refuses (A6).
+   *
+   *  Step 2: the ledger lock of the resolved destination. A lock file that cannot be PUBLISHED because the folder refuses
+   *  the write gets UNWRITABLE_PROJECT_WRITE_REFUSAL (13.3 decision 5); an error raised inside the held section (the
+   *  registry's or the key's lock, a home that cannot be written) is never converted: `held` tells the two apart.
+   *  Step 3: under the lock the layer is judged again with the content read afresh; 'aliased', 'unusable' and
+   *  'ancestor-unadopted' get their refusal; a judgement that passes with another destination than step 1's, or than the
+   *  one the lock stands beside (ctx.path), is the changed-destination refusal: the path that was locked is not the path
+   *  that would be written.
+   *
+   *  Lock order: this ledger lock first; the body takes the registry lock, the key lock (a first mint) and the witness lock
+   *  under it and never another ledger lock. */
+  private underProjectLedgerLock<T>(p: { root: string; ledger: string }, first: LayerJudgement, body: (held: HeldProjectLedger) => T): T {
+    const home = this.homeDir();
+    this.refuseExcludedProjectWrite(p, first);
+    if (first.destination === undefined) throw new Error(UNUSABLE_PROJECT_WRITE_REFUSAL);   // no state that passes lacks a destination
+    assertWitnessWritable(home, 'commit', { homeUnchecked: true });
+    ensureHelixDir(home);
+    if (isHelixDirLinked(p.root)) throw new Error(UNUSABLE_PROJECT_WRITE_REFUSAL);
+    const folder = dirname(p.ledger);
+    let folderThere = true;
+    try { lstatSync(folder); } catch (e) { folderThere = (e as NodeJS.ErrnoException).code !== 'ENOENT'; }
+    if (!folderThere) mkdirSync(folder, { recursive: true });
+    let held = false;   // true once THIS lock is published
+    try {
+      return withFileLock(p.ledger, (ctx) => {
+        held = true;
+        const j = this.judgeLayer({ freshContent: true });
+        this.refuseExcludedProjectWrite(p, j);
+        if (j.destination === undefined || j.destination !== first.destination || ctx.path !== j.destination) throw new LedgerDestinationChangedError();
+        return body({ ctx, judgement: j, judged: { path: j.destination, identity: j.identity ?? null, dir: j.dirIdentity } });
+      });
+    } catch (e) {
+      if (!held && isLockPublishRefusedError(e)) throw new Error(UNWRITABLE_PROJECT_WRITE_REFUSAL, { cause: e });
+      throw e;
     }
-    return p.ledger;
+  }
+
+  /** A commit to a project: the body of the critical section (design 4.3 step 4), on the ownership the judgement read
+   *  under the lock. owned: the row is appended. Nobody owns it and a file stands at the destination: the foreign-file
+   *  refusal, made HERE only (FW-R1: a lock-free copy could refuse a late racer for a file Helix itself had just created;
+   *  under the lock that commit is finished and the project reads owned). Nobody owns it and nothing stands there:
+   *  firstProjectWrite. B4 adds the supersede re-check (step 6) as the first statement of the callback. */
+  private commitToProject(p: { root: string; ledger: string }, first: LayerJudgement, record: MemoryRecord): void {
+    this.underProjectLedgerLock(p, first, ({ judgement, judged }) => {
+      if (judgement.state === 'owned') {
+        appendWitnessedUnlocked(p.ledger, record, this.homeDir(), p.root, 'commit', 'commit', judged);
+      } else if (judgement.state === 'unadopted-present') {
+        throw new Error(FOREIGN_FILE_REFUSAL);
+      } else {
+        this.firstProjectWrite(p, record, judged);
+      }
+    });
+  }
+
+  /** The first write to a project nobody adopted, under its ledger lock (design 4.3 step 4, second case). The checks that
+   *  do not concern the project's file stand in front of the ownership record: the witness file must be usable and the
+   *  signing key must exist or be mintable (a damaged key, or a foreign object at the key's lock on a fresh home, refuses
+   *  here with nothing recorded: 14 decision 3). Then ownership is recorded (registry, then `.owner`) and the memory file
+   *  is created exclusively and the row written through that descriptor by the entry point that does not take the lock
+   *  again. A refused creation (EEXIST, ELOOP) answers the foreign-file text.
+   *
+   *  B1 has no restore: a failure that stored no row leaves the ownership records, as every append failure did at HEAD; B2
+   *  puts them back. An error that carries the stored mark is thrown as it is. */
+  private firstProjectWrite(p: { root: string; ledger: string }, record: MemoryRecord, judged: JudgedDestination): void {
+    const home = this.homeDir();
+    assertWitnessWritable(home, 'commit');
+    ensureMaster(home);
+    try {
+      stampOwnership(p.root, home, { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });
+      appendWitnessedUnlocked(p.ledger, record, home, p.root, 'commit', 'commit', { ...judged, createExclusive: true });
+    } catch (e) {
+      if (isRecordStoredError(e)) throw e;   // the row is in the ledger: the ownership stays (B2's restore keys on the same test)
+      if (isLedgerCreateRefusedError(e)) throw new Error(FOREIGN_FILE_REFUSAL, { cause: e });
+      throw e;
+    }
   }
 
   /** Snapshot the project layer's disposition, for the READ side (recall/inspect/history/asOf — see
@@ -538,7 +636,7 @@ export class MemoryStore {
    *
    *  The states and their rows are the judgement's (ownership.ts ProjectDisposition, judgeProjectLayer).
    *  This read answers row 9a from the per-process memory; the write side judges again with
-   *  `freshContent` (targetLedger, commitScoped, resolveEraseTarget). What stays HERE is the call-site
+   *  `freshContent` (commitToProject, commitScoped, resolveEraseTarget). What stays HERE is the call-site
    *  contract: invoke it ONCE per public read call (recall/currentView/historyView/asOfView each do so,
    *  then thread the snapshot as a parameter into every private helper that needs it, never
    *  re-invoking this within that call). */
@@ -1232,7 +1330,7 @@ export class MemoryStore {
     };
     if (scope) {
       // An EXPLICIT project scope with no project layer used to route to the GLOBAL ledger with no
-      // signal — for a DESTRUCTIVE operation. Refused, mirroring targetLedger's commit-side refusal.
+      // signal — for a DESTRUCTIVE operation. Refused, mirroring commitToProject's commit-side refusal.
       // A project layer exists only when the server started in or below a directory holding .helix/
       // (src/memory/project-root.ts), so adopting cannot cure this state on its own.
       if (scope === 'project' && !p) {

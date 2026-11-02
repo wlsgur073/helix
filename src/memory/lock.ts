@@ -43,7 +43,7 @@ function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-export interface LockContext { stillOwned(): boolean; }
+export interface LockContext { stillOwned(): boolean; readonly path: string; }
 export interface LockOptions { maxWaitMs?: number; probe?: LivenessProbe; }
 
 /** The lock path of a target: the path resolver's answer (path-identity.ts resolvePath) plus `.lock`, so the lock
@@ -120,6 +120,21 @@ export class LockForeignObjectError extends Error {
 }
 export const isLockForeignObjectError = (e: unknown): boolean =>
   e instanceof Error && (e as { lockForeignObject?: unknown }).lockForeignObject === true;
+
+/** The lock could not be PUBLISHED because its directory refuses the write (EACCES) or stands on a read-only file
+ *  system (EROFS). The fs error keeps its class, code and message; the mark only says at which step it was raised, so
+ *  the project-scope write can answer with its fixed text (design 4.3 step 2, 13.3 decision 5) and never mistake an
+ *  EACCES raised inside the critical section (the registry's or the key's lock, a home that cannot be written) for it. */
+export const isLockPublishRefusedError = (e: unknown): boolean =>
+  e instanceof Error && (e as { lockPublishRefused?: unknown }).lockPublishRefused === true;
+
+function markPublishRefused(e: unknown): unknown {
+  const code = (e as NodeJS.ErrnoException | null)?.code;
+  if ((code === 'EACCES' || code === 'EROFS') && e instanceof Error) {
+    try { Object.assign(e, { lockPublishRefused: true }); } catch { /* a frozen error keeps its own text */ }
+  }
+  return e;
+}
 
 interface AcquiredLock { ctx: LockContext; release: () => void }
 
@@ -235,7 +250,7 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
         // Budget over, and the two causes differ. No folder: no-directory. A folder that stands: a sweep took srcTmp, a
         // holder may well hold the lock, so the reading below picks the cause, as it does after an EEXIST.
         if (!existsSync(dirname(lockPath))) throw new Error(timeoutMessage(lockPath, { kind: 'no-directory' }, elapsedMs()));
-      } else if (code !== 'EEXIST') throw e;                // real error (perms/disk) — bubble up untouched
+      } else if (code !== 'EEXIST') throw markPublishRefused(e);   // real error (perms/disk) — bubble up untouched
     }
 
     // Held. Classify the recorded holder: a legacy dir by its owner pid (pid-gated reclaim), an
@@ -290,6 +305,7 @@ function acquireFileLock(target: string, opts: LockOptions = {}): AcquiredLock {
   }
 
   const ctx: LockContext = {
+    path: canon,
     stillOwned() { return lockTokenAt(lockPath) === token; },
   };
   const release = (): void => {

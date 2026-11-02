@@ -4,7 +4,7 @@
  *  two can never disagree about which project a session is in.
  *
  *  The walk only DISCOVERS a parent project. Whether its ledger is read or written is still the
- *  ownership gate's decision (projectDispositionOf, MemoryStore.targetLedger), and a parent directory's
+ *  ownership gate's decision (projectDispositionOf, MemoryStore.commitToProject), and a parent directory's
  *  folder is never claimed automatically: a walk that auto-adopted would hand the memory of every
  *  session started below a shared directory (`/tmp`, a Windows drive root) to whoever created a
  *  `.helix/` there — the class of bug git fixed as CVE-2022-24765.
