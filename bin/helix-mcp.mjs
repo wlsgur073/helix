@@ -410,11 +410,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants8) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants4);
+          this.rhs = optimizeExpr(this.rhs, names, constants8);
         return this;
       }
       get names() {
@@ -431,10 +431,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants8) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants4);
+        this.rhs = optimizeExpr(this.rhs, names, constants8);
         return this;
       }
       get names() {
@@ -495,8 +495,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants4) {
-        this.code = optimizeExpr(this.code, names, constants4);
+      optimizeNames(names, constants8) {
+        this.code = optimizeExpr(this.code, names, constants8);
         return this;
       }
       get names() {
@@ -525,12 +525,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants8) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants4))
+          if (n.optimizeNames(names, constants8))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -583,12 +583,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants8) {
         var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants4);
-        if (!(super.optimizeNames(names, constants4) || this.else))
+        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants8);
+        if (!(super.optimizeNames(names, constants8) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants4);
+        this.condition = optimizeExpr(this.condition, names, constants8);
         return this;
       }
       get names() {
@@ -611,10 +611,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants4) {
-        if (!super.optimizeNames(names, constants4))
+      optimizeNames(names, constants8) {
+        if (!super.optimizeNames(names, constants8))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants4);
+        this.iteration = optimizeExpr(this.iteration, names, constants8);
         return this;
       }
       get names() {
@@ -650,10 +650,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants4) {
-        if (!super.optimizeNames(names, constants4))
+      optimizeNames(names, constants8) {
+        if (!super.optimizeNames(names, constants8))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants4);
+        this.iterable = optimizeExpr(this.iterable, names, constants8);
         return this;
       }
       get names() {
@@ -695,11 +695,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants4) {
+      optimizeNames(names, constants8) {
         var _a, _b;
-        super.optimizeNames(names, constants4);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants4);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants4);
+        super.optimizeNames(names, constants8);
+        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants8);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants8);
         return this;
       }
       get names() {
@@ -1000,7 +1000,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants4) {
+    function optimizeExpr(expr, names, constants8) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -1015,14 +1015,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants4[n.str];
+        const c = constants8[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants4[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants8[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -2984,7 +2984,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve2.call(this, root, ref);
+      let _sch = resolve3.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3011,7 +3011,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve2(root, ref) {
+    function resolve3(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3841,7 +3841,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve2(baseURI, relativeURI, options) {
+    function resolve3(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -4209,7 +4209,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve2,
+      resolve: resolve3,
       resolveComponent,
       equal,
       serialize,
@@ -7200,8 +7200,8 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join13, dirname as dirname15 } from "node:path";
-import { existsSync as existsSync9 } from "node:fs";
+import { join as join15, dirname as dirname16 } from "node:path";
+import { existsSync as existsSync8 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -13328,12 +13328,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve2) => {
+    return new Promise((resolve3) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve2();
+        resolve3();
       } else {
-        this._stdout.once("drain", resolve2);
+        this._stdout.once("drain", resolve3);
       }
     });
   }
@@ -13341,13 +13341,14 @@ var StdioServerTransport = class {
 
 // src/memory/store.ts
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync4, statSync as statSync3 } from "node:fs";
-import { dirname as dirname9 } from "node:path";
+import { existsSync as existsSync4, lstatSync as lstatSync8, mkdirSync as mkdirSync5, rmdirSync, statSync as statSync6 } from "node:fs";
+import { dirname as dirname10 } from "node:path";
 
 // src/memory/ledger.ts
-import { mkdirSync as mkdirSync5, statSync as statSync2, openSync as openSync4, fstatSync as fstatSync2, readSync as readSync2, closeSync as closeSync4, constants } from "node:fs";
-import { randomBytes as randomBytes5 } from "node:crypto";
-import { dirname as dirname7 } from "node:path";
+import { mkdirSync as mkdirSync3, statSync as statSync4, openSync as openSync5, fstatSync as fstatSync4, readSync as readSync3, closeSync as closeSync5, constants as constants4 } from "node:fs";
+import { randomBytes as randomBytes4 } from "node:crypto";
+import { basename as basename4, dirname as dirname7 } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 // src/memory/firewall.ts
 var VERIFYING_SOURCES = /* @__PURE__ */ new Set(["user", "reality-check"]);
@@ -13702,14 +13703,14 @@ function buildProjection(records) {
 
 // src/memory/ledger-mac.ts
 import { createHash, createHmac, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-import { openSync as openSync2, fsyncSync as fsyncSync2, closeSync as closeSync2, readFileSync as readFileSync3, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync, chmodSync as chmodSync2 } from "node:fs";
-import { dirname as dirname4, join as join4 } from "node:path";
+import { openSync as openSync3, fsyncSync as fsyncSync2, closeSync as closeSync3, readFileSync as readFileSync2, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync as statSync3, chmodSync as chmodSync2 } from "node:fs";
+import { dirname as dirname5, join as join5 } from "node:path";
 
 // src/memory/lock.ts
-import { readFileSync as readFileSync2, writeFileSync, unlinkSync, linkSync, lstatSync, realpathSync, rmSync, readdirSync } from "node:fs";
+import { writeFileSync, unlinkSync, linkSync, lstatSync as lstatSync2, rmSync, readdirSync, openSync, closeSync, readSync, fstatSync, existsSync, constants } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { performance as performance2 } from "node:perf_hooks";
-import { dirname, basename, join } from "node:path";
+import { dirname as dirname2, basename as basename2, join as join2 } from "node:path";
 
 // src/memory/lock-liveness.ts
 import { readFileSync, readlinkSync } from "node:fs";
@@ -13830,36 +13831,261 @@ function classifyHolder(recorded, self, probe) {
   return recorded.startTicks === null ? "alive-unknown" : "alive";
 }
 
+// src/memory/path-identity.ts
+import { lstatSync, readlinkSync as readlinkSync2, realpathSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+function canonicalRoot(projectRoot) {
+  try {
+    return registryKeyPath(projectRoot);
+  } catch {
+    return resolve(projectRoot);
+  }
+}
+function registryKeyPath(target) {
+  try {
+    return realpathSync(target);
+  } catch {
+    return join(realpathSync(dirname(target)), basename(target));
+  }
+}
+var MAX_SYMLINK_HOPS = 40;
+function utf8OrNull(b) {
+  const s = b.toString("utf8");
+  return Buffer.from(s, "utf8").equals(b) ? s : null;
+}
+var codeOf = (e) => e?.code;
+function failureOf(e) {
+  const code = codeOf(e);
+  if (code === "ENAMETOOLONG") return { kind: "unresolvable", cause: "path-too-long" };
+  if (code === "ELOOP") return { kind: "unresolvable", cause: "too-many-links" };
+  return { kind: "uninspectable", error: e };
+}
+function namesDirectory(p) {
+  const last = p.slice(p.lastIndexOf("/") + 1);
+  return last === "" || last === "." || last === "..";
+}
+var under = (dir, name) => dir === "/" ? `/${name}` : `${dir}/${name}`;
+function physicalDir(dir) {
+  let real;
+  try {
+    real = realpathSync.native(dir, { encoding: "buffer" });
+  } catch (e) {
+    return codeOf(e) === "ENOENT" ? missingDir(dir, e) : failureOf(e);
+  }
+  const text = utf8OrNull(real);
+  return text === null ? { kind: "unresolvable", cause: "non-utf8-name" } : { kind: "dir", path: text, missing: null };
+}
+function missingDir(dir, error2) {
+  const parts = dir.split("/");
+  for (let keep = parts.length - 1; keep >= 0; keep--) {
+    const head = parts.slice(0, keep).join("/");
+    const prefix = head !== "" ? head : isAbsolute(dir) ? "/" : ".";
+    let real;
+    try {
+      real = realpathSync.native(prefix, { encoding: "buffer" });
+    } catch (e) {
+      if (codeOf(e) === "ENOENT") continue;
+      return failureOf(e);
+    }
+    const text = utf8OrNull(real);
+    if (text === null) return { kind: "unresolvable", cause: "non-utf8-name" };
+    const rest = parts.slice(keep).filter((c) => c !== "" && c !== ".");
+    if (rest.includes("..")) return { kind: "uninspectable", error: error2 };
+    return { kind: "dir", path: rest.length === 0 ? text : under(text, rest.join("/")), missing: rest.length === 0 ? null : error2 };
+  }
+  return { kind: "uninspectable", error: error2 };
+}
+function directoryAnswer(p) {
+  try {
+    statSync(p);
+  } catch (e) {
+    return failureOf(e);
+  }
+  return existingAnswer(p);
+}
+function existingAnswer(p) {
+  let real;
+  try {
+    real = realpathSync.native(p, { encoding: "buffer" });
+  } catch (e) {
+    return failureOf(e);
+  }
+  const text = utf8OrNull(real);
+  return text === null ? { kind: "unresolvable", cause: "non-utf8-name" } : { kind: "resolved", path: text, dirMissing: false };
+}
+function creationAnswer(p) {
+  const d = physicalDir(dirname(p));
+  if (d.kind !== "dir") return d;
+  const path = under(d.path, basename(p));
+  return d.missing === null ? { kind: "resolved", path, dirMissing: false } : { kind: "resolved", path, dirMissing: true, dirError: d.missing };
+}
+function resolvePath(input) {
+  const given = input === "" ? "." : input;
+  if (namesDirectory(given)) return directoryAnswer(given);
+  let p = given;
+  for (let hops = 0; ; hops++) {
+    let isLink2;
+    try {
+      isLink2 = lstatSync(p).isSymbolicLink();
+    } catch (e) {
+      return codeOf(e) === "ENOENT" ? creationAnswer(p) : failureOf(e);
+    }
+    if (!isLink2) return existingAnswer(p);
+    if (hops === 0) {
+      try {
+        statSync(p);
+      } catch (e) {
+        if (codeOf(e) !== "ENOENT") return failureOf(e);
+      }
+    }
+    if (hops === MAX_SYMLINK_HOPS) return { kind: "unresolvable", cause: "too-many-links" };
+    let body;
+    try {
+      body = utf8OrNull(readlinkSync2(p, { encoding: "buffer" }));
+    } catch (e) {
+      return failureOf(e);
+    }
+    if (body === null) return { kind: "unresolvable", cause: "non-utf8-name" };
+    let q2;
+    if (isAbsolute(body)) q2 = body;
+    else {
+      const from = physicalDir(dirname(p));
+      if (from.kind !== "dir") return from;
+      q2 = `${from.path}/${body}`;
+    }
+    if (namesDirectory(q2)) return directoryAnswer(q2);
+    const dir = physicalDir(dirname(q2));
+    if (dir.kind !== "dir") return dir;
+    const next = under(dir.path, basename(q2));
+    if (dir.missing !== null) return { kind: "resolved", path: next, dirMissing: true, dirError: dir.missing };
+    p = next;
+  }
+}
+var UNRESOLVABLE_PATH_MESSAGE = "the path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, or too many links)";
+var UnresolvablePathError = class extends Error {
+  constructor(reason) {
+    super(UNRESOLVABLE_PATH_MESSAGE);
+    this.reason = reason;
+    this.name = "UnresolvablePathError";
+  }
+  reason;
+  /** The marker isUnresolvablePathError reads (a property, never class identity). */
+  unresolvablePath = true;
+};
+var isUnresolvablePathError = (e) => e instanceof Error && e.unresolvablePath === true;
+function resolvedPathOrThrow(path) {
+  const r = resolvePath(path);
+  if (r.kind === "unresolvable") throw new UnresolvablePathError(r.cause);
+  if (r.kind === "uninspectable") throw r.error;
+  if (r.dirMissing) throw r.dirError ?? Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+  return r.path;
+}
+var realIdentityProbe = (path, follow) => {
+  try {
+    const st = follow ? statSync(path, { bigint: true }) : lstatSync(path, { bigint: true });
+    return { dev: st.dev, ino: st.ino };
+  } catch (e) {
+    if (codeOf(e) === "ENOENT") return null;
+    throw e;
+  }
+};
+function fileIdentityAt(path, opts = {}) {
+  return (opts.probe ?? realIdentityProbe)(path, opts.follow === true);
+}
+function hasComparableInode(id) {
+  return id !== null && id.ino !== 0n;
+}
+function sameFile(a, b) {
+  return hasComparableInode(a) && hasComparableInode(b) && a.dev === b.dev && a.ino === b.ino;
+}
+
 // src/memory/lock.ts
 var RETRY_MS = 25;
 var DEFAULT_MAX_WAIT_MS = 5e3;
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
-function canonical(target) {
-  try {
-    const real = realpathSync.native(target, { encoding: "buffer" });
-    const text = real.toString("utf8");
-    if (Buffer.from(text, "utf8").equals(real)) return text;
-  } catch {
-  }
-  return join(realpathSync.native(dirname(target)), basename(target));
-}
 function lockPathOf(target) {
-  return canonical(target) + ".lock";
+  return resolvedPathOrThrow(target) + ".lock";
 }
-function timeoutMessage(lockPath, holder, waitedMs) {
+function timeoutMessage(lockPath, cause, waitedMs) {
   const head = `withFileLock: timed out after ${waitedMs}ms acquiring ${lockPath}`;
-  if (holder === null) {
-    return `${head} \u2014 holder unreadable, so it is never auto-reclaimed. Inspect ${lockPath} by hand; a lock file that does not parse was not written by this version.`;
+  switch (cause.kind) {
+    case "unparseable":
+      return `${head} \u2014 the lock file does not parse as a lock this version writes (it is empty, holds other content, or is larger than a lock payload), so its holder cannot be identified. Such a file is cleared only if it predates the last boot, where the platform reports one, and not while another process holds the clearing step. Inspect ${lockPath} by hand.`;
+    case "unreadable":
+      return `${head} \u2014 the lock file exists but its holder could not be read or identified (a permission or I/O error, or a failed liveness check), so it is never auto-reclaimed. Inspect ${lockPath} by hand.`;
+    case "no-directory":
+      return `${head} \u2014 the lock could not be published because its directory does not exist (it was removed, or a path component is missing). Nothing holds this lock; check the folder of ${lockPath}.`;
+    case "legacy-dir":
+      return `${head} \u2014 a lock directory written by an older version stands there. It is cleared only when its owner is shown dead, and not while another process holds the clearing step. Inspect ${lockPath} by hand.`;
+    case "vanished":
+      return `${head} \u2014 the lock was free at the last look, but it could not be taken inside the budget (contention, not a stuck holder). Try again.`;
+    case "payload": {
+      const holder = cause.holder;
+      const who = `held by pid ${holder.pid} (recorded start ${holder.startTicks ?? "NONE \u2014 this platform does not expose one"})`;
+      const identify = holder.startTicks === null ? `Because no start time was recorded, a waiter cannot tell the original holder from an unrelated process that later reused pid ${holder.pid}; kill -0 cannot separate them either. Identify it: ps -p ${holder.pid} -o pid,lstart,command \u2014 and confirm it is a Helix run before acting.` : `This lock is cleared only when its holder is shown dead, and not while another process holds the clearing step. Confirm it is the run that took the lock by comparing its start time against the value above (ps -p ${holder.pid} -o pid,lstart,command).`;
+      return `${head} \u2014 ${who}. ${identify} Removing the lock while its holder is merely SUSPENDED reintroduces the concurrency this lock prevents.`;
+    }
   }
-  const who = `held by pid ${holder.pid} (recorded start ${holder.startTicks ?? "NONE \u2014 this platform does not expose one"})`;
-  const identify = holder.startTicks === null ? `Because no start time was recorded, a waiter cannot tell the original holder from an unrelated process that later reused pid ${holder.pid}; kill -0 cannot separate them either. Identify it: ps -p ${holder.pid} -o pid,lstart,command \u2014 and confirm it is a Helix run before acting.` : `The holder classified live on every attempt. Confirm it is the run that took the lock by comparing its start time against the value above (ps -p ${holder.pid} -o pid,lstart,command).`;
-  return `${head} \u2014 ${who}. ${identify} Removing the lock while its holder is merely SUSPENDED reintroduces the concurrency this lock prevents.`;
+}
+var LOCK_FOREIGN_OBJECT_REFUSAL = "withFileLock: the lock file for this path is not a lock Helix wrote (a link, a FIFO, a socket or a device stands at its name) \u2014 refusing to read it or wait on it. Ask the user to look at that object and remove it; do not remove it for them.";
+var LockForeignObjectError = class extends Error {
+  lockForeignObject = true;
+  // the marker isLockForeignObjectError reads
+  constructor() {
+    super(LOCK_FOREIGN_OBJECT_REFUSAL);
+    this.name = "LockForeignObjectError";
+  }
+};
+var isLockForeignObjectError = (e) => e instanceof Error && e.lockForeignObject === true;
+var isLockPublishRefusedError = (e) => e instanceof Error && e.lockPublishRefused === true;
+function markPublishRefused(e) {
+  const code = e?.code;
+  if ((code === "EACCES" || code === "EROFS") && e instanceof Error) {
+    try {
+      Object.assign(e, { lockPublishRefused: true });
+    } catch {
+    }
+  }
+  return e;
+}
+var isLockTimeoutError = (e) => e instanceof Error && e.lockTimedOut === true;
+function lockTimeoutCauseOf(e) {
+  if (!isLockTimeoutError(e)) return null;
+  const kind = e.lockTimeoutCause;
+  return typeof kind === "string" ? kind : null;
+}
+function markTimedOut(e, kind) {
+  return Object.assign(e, { lockTimedOut: true, lockTimeoutCause: kind });
+}
+var ORPHAN_MAX = 64;
+var orphanedOwnLocks = /* @__PURE__ */ new Map();
+function rememberOrphan(lockPath, token) {
+  orphanedOwnLocks.set(token, lockPath);
+  while (orphanedOwnLocks.size > ORPHAN_MAX) {
+    const oldest = orphanedOwnLocks.keys().next();
+    if (oldest.done === true) break;
+    orphanedOwnLocks.delete(oldest.value);
+  }
+}
+function reclaimOrphanedOwnLocks(at) {
+  if (orphanedOwnLocks.size === 0) return false;
+  let freedAt = false;
+  for (const [token, lockPath] of [...orphanedOwnLocks]) {
+    try {
+      if (lockTokenAt(lockPath) !== token) continue;
+      unlinkSync(lockPath);
+      orphanedOwnLocks.delete(token);
+      if (lockPath === at) freedAt = true;
+    } catch {
+    }
+  }
+  return freedAt;
 }
 function acquireFileLock(target, opts = {}) {
   const probe = opts.probe ?? realProbe;
-  const canon = canonical(target);
+  const canon = resolvedPathOrThrow(target);
   const lockPath = canon + ".lock";
   const token = randomBytes(16).toString("hex");
   const self = selfIdentity(token, probe);
@@ -13867,7 +14093,8 @@ function acquireFileLock(target, opts = {}) {
   const startedAt = performance2.now();
   const elapsedMs = () => Math.round(performance2.now() - startedAt);
   const sleepWithinBudget = () => sleepSync(Math.max(1, Math.min(RETRY_MS, maxWaitMs - elapsedMs())));
-  let lastHolder = null;
+  let publishedOnceMore = false;
+  reclaimOrphanedOwnLocks();
   for (; ; ) {
     const srcTmp = `${canon}.lk-${randomBytes(16).toString("hex")}.tmp`;
     const payloadText = JSON.stringify({ ...self, uptimeSec: probe.uptimeSec() });
@@ -13888,72 +14115,127 @@ function acquireFileLock(target, opts = {}) {
       if (code === "EPERM" || code === "EOPNOTSUPP" || code === "ENOTSUP")
         throw new Error(`withFileLock: filesystem refuses hard links for ${lockPath}; ledger locking is unsupported on this filesystem`);
       if (code === "ENOENT") {
-        if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, null, elapsedMs()));
-        sleepWithinBudget();
-        continue;
-      }
-      if (code !== "EEXIST") throw e;
+        if (elapsedMs() < maxWaitMs) {
+          sleepWithinBudget();
+          continue;
+        }
+        if (!existsSync(dirname2(lockPath))) throw markTimedOut(new Error(timeoutMessage(lockPath, { kind: "no-directory" }, elapsedMs())), "no-directory");
+      } else if (code !== "EEXIST") throw markPublishRefused(e);
     }
     const reading = readLockHolder(lockPath, self, probe);
-    lastHolder = reading?.payload ?? null;
-    if (reading === null) continue;
+    if (reading.kind === "foreign") throw new LockForeignObjectError();
+    if (reading.kind === "absent") {
+      if (elapsedMs() >= maxWaitMs) {
+        if (publishedOnceMore) throw markTimedOut(new Error(timeoutMessage(lockPath, { kind: "vanished" }, elapsedMs())), "vanished");
+        publishedOnceMore = true;
+        continue;
+      }
+      sleepWithinBudget();
+      continue;
+    }
+    if (reading.kind === "unreadable") {
+      if (elapsedMs() >= maxWaitMs) throw markTimedOut(new Error(timeoutMessage(lockPath, { kind: "unreadable" }, elapsedMs())), "unreadable");
+      sleepWithinBudget();
+      continue;
+    }
     const holder = reading.holder;
+    if (holder === "reentrant-self" && reclaimOrphanedOwnLocks(lockPath)) continue;
     if (holder === "reentrant-self")
       throw new Error(`withFileLock: re-entrant acquisition of ${lockPath} from the same thread (pid ${process.pid}) \u2014 withFileLock is not re-entrant`);
-    if (holder === "dead") stealUnderGate(lockPath, probe);
-    if (elapsedMs() >= maxWaitMs) throw new Error(timeoutMessage(lockPath, lastHolder, elapsedMs()));
+    const cleared = holder === "dead" && stealUnderGate(lockPath, probe);
+    if (elapsedMs() >= maxWaitMs) {
+      if (cleared) {
+        if (publishedOnceMore) throw markTimedOut(new Error(timeoutMessage(lockPath, { kind: "vanished" }, elapsedMs())), "vanished");
+        publishedOnceMore = true;
+        continue;
+      }
+      const cause = reading.payload !== null ? { kind: "payload", holder: reading.payload } : reading.shape === "legacy-dir" ? { kind: "legacy-dir" } : { kind: "unparseable" };
+      throw markTimedOut(new Error(timeoutMessage(lockPath, cause, elapsedMs())), cause.kind);
+    }
     sleepWithinBudget();
   }
   const ctx = {
+    path: canon,
     stillOwned() {
-      try {
-        return tryParsePayload(readFileSync2(lockPath, "utf8"))?.token === token;
-      } catch {
-        return false;
-      }
+      return lockTokenAt(lockPath) === token;
     }
   };
   const release = () => {
     try {
-      if (!lstatSync(lockPath).isDirectory() && tryParsePayload(readFileSync2(lockPath, "utf8"))?.token === token) unlinkSync(lockPath);
+      if (lockTokenAt(lockPath) === token) {
+        unlinkSync(lockPath);
+        return;
+      }
     } catch {
     }
+    rememberOrphan(lockPath, token);
   };
   return { ctx, release };
 }
-function legacyDirSnapshot(lockPath, ino) {
-  let owner = "";
+var LOCK_READ_MAX_BYTES = 64 * 1024;
+function readLockObject(path) {
   try {
-    owner = readFileSync2(join(lockPath, "owner"), "utf8");
-  } catch {
+    const st = lstatSync2(path);
+    if (st.isDirectory()) return { kind: "legacy-dir", ino: st.ino };
+    if (!st.isFile()) return { kind: "foreign" };
+  } catch (e) {
+    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "unreadable" };
   }
-  return `d:${ino}:${owner}`;
+  let fd;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (e) {
+    const code = e.code;
+    if (code === "ENOENT") return { kind: "absent" };
+    if (code === "ELOOP") return { kind: "foreign" };
+    return { kind: "unreadable" };
+  }
+  try {
+    const st = fstatSync(fd);
+    if (st.isDirectory()) return { kind: "legacy-dir", ino: st.ino };
+    if (!st.isFile()) return { kind: "foreign" };
+    const buf = Buffer.allocUnsafe(LOCK_READ_MAX_BYTES + 1);
+    let n = 0;
+    while (n < buf.length) {
+      const got = readSync(fd, buf, n, buf.length - n, null);
+      if (got === 0) break;
+      n += got;
+    }
+    return { kind: "payload", ino: st.ino, mtimeMs: st.mtimeMs, raw: buf.toString("utf8", 0, Math.min(n, LOCK_READ_MAX_BYTES)), oversized: n > LOCK_READ_MAX_BYTES };
+  } catch {
+    return { kind: "unreadable" };
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
 }
-function holderSnapshot(lockPath) {
-  try {
-    const st = lstatSync(lockPath);
-    return st.isDirectory() ? legacyDirSnapshot(lockPath, st.ino) : `f:${st.ino}:${readFileSync2(lockPath, "utf8")}`;
-  } catch {
-    return null;
-  }
+function lockTokenAt(path) {
+  const o = readLockObject(path);
+  return o.kind === "payload" && !o.oversized ? tryParsePayload(o.raw)?.token ?? null : null;
+}
+function legacyOwner(lockPath) {
+  const o = readLockObject(join2(lockPath, "owner"));
+  return o.kind === "payload" && !o.oversized ? o.raw : null;
 }
 function readLockHolder(lockPath, self, probe) {
+  const o = readLockObject(lockPath);
+  if (o.kind === "foreign" || o.kind === "unreadable" || o.kind === "absent") return { kind: o.kind };
   try {
-    const st = lstatSync(lockPath);
-    if (st.isDirectory()) {
-      const snapshot2 = legacyDirSnapshot(lockPath, st.ino);
-      return { holder: classifyLegacyDir(lockPath, probe), payload: null, snapshot: snapshot2 };
+    if (o.kind === "legacy-dir") {
+      const owner = legacyOwner(lockPath);
+      return { kind: "holder", holder: classifyLegacyOwner(owner, probe), payload: null, snapshot: `d:${o.ino}:${owner ?? ""}`, shape: "legacy-dir" };
     }
-    const raw = readFileSync2(lockPath, "utf8");
-    const snapshot = `f:${st.ino}:${raw}`;
-    const parsed = tryParsePayload(raw);
+    const snapshot = `f:${o.ino}:${o.raw}`;
+    const parsed = o.oversized ? null : tryParsePayload(o.raw);
     if (parsed === null) {
       const boot = probe.bootInstantMs();
-      return { holder: boot !== null && st.mtimeMs < boot ? "dead" : "alive-unknown", payload: null, snapshot };
+      return { kind: "holder", holder: boot !== null && o.mtimeMs < boot ? "dead" : "alive-unknown", payload: null, snapshot, shape: "unparseable" };
     }
-    return { holder: classifyHolder(parsed, self, probe), payload: parsed, snapshot };
+    return { kind: "holder", holder: classifyHolder(parsed, self, probe), payload: parsed, snapshot, shape: "payload" };
   } catch {
-    return null;
+    return { kind: "unreadable" };
   }
 }
 function awaitLiveHolder(target, opts) {
@@ -13964,17 +14246,24 @@ function awaitLiveHolder(target, opts) {
   } catch {
     return "none";
   }
-  const current = readLockHolder(lockPath, selfIdentity("holder-wait", probe), probe);
-  if (current === null || current.holder === "dead" || current.holder === "reentrant-self") return "none";
+  const self = selfIdentity("holder-wait", probe);
+  const current = readLockHolder(lockPath, self, probe);
+  if (current.kind !== "holder" || current.holder === "dead" || current.holder === "reentrant-self") return "none";
   const seen = current.snapshot;
+  const look = () => {
+    const now = readLockHolder(lockPath, self, probe);
+    if (now.kind !== "holder" || now.snapshot !== seen) return "released";
+    return now.holder === "dead" || now.holder === "reentrant-self" ? "none" : null;
+  };
   const sleep = opts.sleep ?? sleepSync;
   const pollMs = opts.pollMs ?? RETRY_MS;
   const startedAt = performance2.now();
   for (; ; ) {
     const left = opts.maxWaitMs - (performance2.now() - startedAt);
-    if (left <= 0) return holderSnapshot(lockPath) === seen ? "timeout" : "released";
+    if (left <= 0) return look() ?? "timeout";
     sleep(Math.max(1, Math.min(pollMs, left)));
-    if (holderSnapshot(lockPath) !== seen) return "released";
+    const outcome = look();
+    if (outcome !== null) return outcome;
   }
 }
 function withFileLock(target, fn, opts = {}) {
@@ -13985,13 +14274,8 @@ function withFileLock(target, fn, opts = {}) {
     release();
   }
 }
-function classifyLegacyDir(lockPath, probe) {
-  let raw;
-  try {
-    raw = readFileSync2(join(lockPath, "owner"), "utf8");
-  } catch {
-    return "alive-unknown";
-  }
+function classifyLegacyOwner(raw, probe) {
+  if (raw === null) return "alive-unknown";
   const pid = Number(raw.split("-")[0]);
   if (!Number.isSafeInteger(pid) || pid <= 0) return "alive-unknown";
   const k = probe.kill0(pid);
@@ -14003,12 +14287,12 @@ function classifyLegacyDir(lockPath, probe) {
 function stealUnderGate(lockPath, probe) {
   const bootId = probe.bootId() ?? "noboot";
   const gatePath = `${lockPath}.reap.${bootId}`;
-  const dir = dirname(lockPath);
-  const prefix = `${basename(lockPath)}.reap.`;
+  const dir = dirname2(lockPath);
+  const prefix = `${basename2(lockPath)}.reap.`;
   for (const name of readdirSyncSafe(dir)) {
-    if (name.startsWith(prefix) && name !== basename(gatePath)) {
+    if (name.startsWith(prefix) && name !== basename2(gatePath)) {
       try {
-        unlinkSync(join(dir, name));
+        unlinkSync(join2(dir, name));
       } catch {
       }
     }
@@ -14026,28 +14310,19 @@ function stealUnderGate(lockPath, probe) {
       }
     }
   } catch {
-    return;
+    return false;
   }
   try {
-    const st = lstatSync(lockPath);
-    if (st.isDirectory()) {
-      if (classifyLegacyDir(lockPath, probe) !== "dead") return;
-      rmSync(lockPath, { recursive: true, force: true });
-    } else {
-      const raw = readFileSync2(lockPath, "utf8");
-      const parsed = tryParsePayload(raw);
-      if (parsed !== null) {
-        if (classifyHolder(parsed, selfIdentity(gateToken, probe), probe) !== "dead") return;
-      } else {
-        const boot = probe.bootInstantMs();
-        if (boot === null || st.mtimeMs >= boot) return;
-      }
-      unlinkSync(lockPath);
-    }
+    const victim = readLockHolder(lockPath, selfIdentity(gateToken, probe), probe);
+    if (victim.kind !== "holder" || victim.holder !== "dead") return false;
+    if (victim.shape === "legacy-dir") rmSync(lockPath, { recursive: true, force: true });
+    else unlinkSync(lockPath);
+    return true;
   } catch {
+    return false;
   } finally {
     try {
-      if (tryParsePayload(readFileSync2(gatePath, "utf8"))?.token === gateToken) unlinkSync(gatePath);
+      if (lockTokenAt(gatePath) === gateToken) unlinkSync(gatePath);
     } catch {
     }
   }
@@ -14061,8 +14336,8 @@ function readdirSyncSafe(dir) {
 }
 
 // src/memory/fs-ops.ts
-import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, renameSync, unlinkSync as unlinkSync2, linkSync as linkSync2, fchmodSync, readdirSync as readdirSync2 } from "node:fs";
-var realDirFsyncSyscalls = { openSync, fsyncSync, closeSync };
+import { openSync as openSync2, readSync as readSync2, writeSync, fsyncSync, closeSync as closeSync2, fstatSync as fstatSync2, statSync as statSync2, readlinkSync as readlinkSync3, renameSync, unlinkSync as unlinkSync2, linkSync as linkSync2, fchmodSync, readdirSync as readdirSync2 } from "node:fs";
+var realDirFsyncSyscalls = { openSync: openSync2, fsyncSync, closeSync: closeSync2 };
 var DIR_FSYNC_UNSUPPORTED = /* @__PURE__ */ new Set(["EINVAL", "EISDIR", "ENOTSUP", "EOPNOTSUPP", "EPERM", "EACCES"]);
 var isUnsupported = (e) => DIR_FSYNC_UNSUPPORTED.has(e?.code ?? "");
 function fsyncDir(dir, sys = realDirFsyncSyscalls, platform = process.platform) {
@@ -14081,15 +14356,22 @@ function fsyncDir(dir, sys = realDirFsyncSyscalls, platform = process.platform) 
     sys.closeSync(dfd);
   }
 }
+var realProcFdSyscalls = {
+  statSync: (path) => {
+    const st = statSync2(path, { bigint: true });
+    return { dev: st.dev, ino: st.ino };
+  },
+  readlinkSync: (path) => readlinkSync3(path)
+};
 var realFsOps = {
-  openSync,
-  readSync,
+  openSync: openSync2,
+  readSync: readSync2,
   writeSync,
   fsyncSync,
-  closeSync,
+  closeSync: closeSync2,
   fstatSync: (fd) => {
-    const s = fstatSync(fd);
-    return { size: s.size, nlink: s.nlink, mode: s.mode };
+    const s = fstatSync2(fd, { bigint: true });
+    return { size: Number(s.size), nlink: Number(s.nlink), mode: Number(s.mode), dev: s.dev, ino: s.ino };
   },
   renameSync,
   unlinkSync: unlinkSync2,
@@ -14109,7 +14391,7 @@ function writeAll(fs, fd, data) {
 }
 
 // src/memory/ledger-sweep.ts
-import { dirname as dirname2, basename as basename2, join as join2 } from "node:path";
+import { dirname as dirname3, basename as basename3, join as join3 } from "node:path";
 var HEX32 = "[0-9a-f]{32}";
 function orphanTmpPattern(base) {
   const esc2 = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -14117,14 +14399,14 @@ function orphanTmpPattern(base) {
 }
 function sweepOrphanTmps(artifactPath, opts = {}) {
   const fs = opts.fsOps ?? realFsOps;
-  const dir = dirname2(artifactPath);
-  const pat = orphanTmpPattern(basename2(artifactPath));
-  const keepName = opts.keep ? basename2(opts.keep) : null;
+  const dir = dirname3(artifactPath);
+  const pat = orphanTmpPattern(basename3(artifactPath));
+  const keepName = opts.keep ? basename3(opts.keep) : null;
   let removed = 0;
   for (const name of fs.readdirSync(dir)) {
     if (!pat.test(name) || name === keepName) continue;
     try {
-      fs.unlinkSync(join2(dir, name));
+      fs.unlinkSync(join3(dir, name));
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
       continue;
@@ -14136,8 +14418,8 @@ function sweepOrphanTmps(artifactPath, opts = {}) {
 }
 
 // src/memory/home-permissions.ts
-import { lstatSync as lstatSync2, chmodSync, readdirSync as readdirSync3, mkdirSync, existsSync } from "node:fs";
-import { join as join3, dirname as dirname3, sep } from "node:path";
+import { lstatSync as lstatSync3, chmodSync, readdirSync as readdirSync3, mkdirSync, existsSync as existsSync2 } from "node:fs";
+import { join as join4, dirname as dirname4, sep } from "node:path";
 var OWNED_FILES = [
   "memory.jsonl",
   "audit.jsonl",
@@ -14168,7 +14450,7 @@ function finalName(dir) {
 function hardenHomePermissions(home2, deps) {
   if (process.platform === "win32") return;
   try {
-    const dir = lstatSync2(finalName(home2));
+    const dir = lstatSync3(finalName(home2));
     if (dir.isSymbolicLink()) {
       deps.warn(`helix: HELIX_HOME ${home2} is a symlink \u2014 Helix refuses to write through it, so nothing can be saved to memory (point HELIX_HOME at the directory itself)`);
       return;
@@ -14187,9 +14469,9 @@ function hardenHomePermissions(home2, deps) {
   }
   for (const name of OWNED_FILES) {
     if (!present.has(name)) continue;
-    const path = join3(home2, name);
+    const path = join4(home2, name);
     try {
-      const st = lstatSync2(path);
+      const st = lstatSync3(path);
       if (st.isSymbolicLink()) {
         deps.warn(`helix: ${path} is a symlink \u2014 refusing to change permissions through it (repair or remove it by hand)`);
         continue;
@@ -14214,7 +14496,7 @@ function ensureHelixDir(dir) {
   const name = finalName(dir);
   let st = null;
   try {
-    st = lstatSync2(name);
+    st = lstatSync3(name);
   } catch {
     st = null;
   }
@@ -14228,8 +14510,8 @@ function ensureHelixDir(dir) {
     if ((st.mode & 63) !== 0) chmodSync(name, 448);
     return;
   }
-  const parent = dirname3(name);
-  if (!existsSync(parent)) {
+  const parent = dirname4(name);
+  if (!existsSync2(parent)) {
     throw new Error(`refusing to create ${dir}: its parent ${parent} does not exist (Helix creates one directory, never a chain)`);
   }
   try {
@@ -14237,6 +14519,13 @@ function ensureHelixDir(dir) {
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
     ensureHelixDir(name);
+  }
+}
+function isSymlinkedHome(home2) {
+  try {
+    return lstatSync3(finalName(home2)).isSymbolicLink();
+  } catch {
+    return false;
   }
 }
 
@@ -14259,7 +14548,7 @@ var LedgerMacError = class extends Error {
 };
 var MASTER_LEN = 32;
 function masterPath(home2) {
-  return join4(home2, "ledger-mac-master.key");
+  return join5(home2, "ledger-mac-master.key");
 }
 function ensureMaster(home2) {
   const path = masterPath(home2);
@@ -14272,14 +14561,14 @@ function ensureMaster(home2) {
     sweepOrphanTmps(path, {});
     const key = randomBytes2(MASTER_LEN);
     const tmp = `${path}.k-${randomBytes2(16).toString("hex")}.tmp`;
-    const fd = openSync2(tmp, "wx", 384);
+    const fd = openSync3(tmp, "wx", 384);
     let published = false;
     try {
       try {
         writeAll(realFsOps, fd, key);
         fsyncSync2(fd);
       } finally {
-        closeSync2(fd);
+        closeSync3(fd);
       }
       try {
         linkSync3(tmp, path);
@@ -14293,7 +14582,7 @@ function ensureMaster(home2) {
       } catch {
       }
     }
-    fsyncDir(dirname4(path));
+    fsyncDir(dirname5(path));
     if (published) return key;
     const winner = tryReadMasterStrict(path);
     if (!winner) throw new LedgerMacError("master key vanished during concurrent mint");
@@ -14303,14 +14592,14 @@ function ensureMaster(home2) {
 function tryReadMasterStrict(path) {
   let buf;
   try {
-    buf = readFileSync3(path);
+    buf = readFileSync2(path);
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
   }
   if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
   try {
-    if ((statSync(path).mode & 63) !== 0) chmodSync2(path, 384);
+    if ((statSync3(path).mode & 63) !== 0) chmodSync2(path, 384);
   } catch {
   }
   return buf;
@@ -14462,9 +14751,9 @@ function clampElevated(p) {
   }
   return { live, compromised: p.compromised, keyAvailable: p.keyAvailable };
 }
-function enforceWitnessProjection(p, verdict) {
+function enforceWitnessProjection(p, verdict, witnessFile) {
   if (verdict.kind === "transition-interrupted") return { live: /* @__PURE__ */ new Map(), compromised: /* @__PURE__ */ new Set(), keyAvailable: p.keyAvailable };
-  if (verdict.kind === "mismatch") return clampElevated(p);
+  if (verdict.kind === "mismatch" || witnessFile === "unusable") return clampElevated(p);
   return p;
 }
 var isPromotion = (s) => s === "Verified" || s === "Corroborated";
@@ -14563,6 +14852,99 @@ function buildVerifiedProjection(records, opts) {
   return { live, compromised, keyAvailable: true };
 }
 
+// src/memory/dir-bound.ts
+import { lstatSync as lstatSync4, constants as constants2 } from "node:fs";
+import { join as join6 } from "node:path";
+var PROC_SELF_FD = "/proc/self/fd";
+var memory = /* @__PURE__ */ new WeakMap();
+var DIR_OPEN = constants2.O_RDONLY | constants2.O_DIRECTORY | constants2.O_NOFOLLOW;
+var DIR_CHANGED_OPEN_ERRORS = /* @__PURE__ */ new Set(["ELOOP", "ENOTDIR", "ENOENT"]);
+function procFdAvailable(fsOps) {
+  return process.platform === "linux" && memory.get(fsOps.procFd ?? realProcFdSyscalls) !== "absent";
+}
+function sampleDirIdentity(dir) {
+  try {
+    const st = lstatSync4(dir, { bigint: true });
+    return st.isDirectory() ? { dev: st.dev, ino: st.ino } : null;
+  } catch (e) {
+    const code = e.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw e;
+  }
+}
+function sameHeldObject(seen, held) {
+  if (seen.dev !== held.dev) return false;
+  return !hasComparableInode(seen) || !hasComparableInode(held) || seen.ino === held.ino;
+}
+function openJudgedDir(dir, judged, fsOps) {
+  if (judged === null) return { kind: "changed" };
+  if (!procFdAvailable(fsOps)) return { kind: "unbound", dir: { dir, fd: null } };
+  let fd;
+  try {
+    fd = fsOps.openSync(dir, DIR_OPEN);
+  } catch (e) {
+    if (DIR_CHANGED_OPEN_ERRORS.has(e.code ?? "")) return { kind: "changed" };
+    throw e;
+  }
+  let bound = false;
+  try {
+    const st = fsOps.fstatSync(fd);
+    const held = { dev: st.dev, ino: st.ino };
+    if (hasComparableInode(judged) && hasComparableInode(held) && !sameFile(held, judged)) return { kind: "changed" };
+    const sys = fsOps.procFd ?? realProcFdSyscalls;
+    const magic = `${PROC_SELF_FD}/${fd}`;
+    let ours;
+    try {
+      ours = sameHeldObject(sys.statSync(magic), held);
+    } catch {
+      ours = false;
+    }
+    if (!ours) {
+      if (memory.get(sys) === "present") return { kind: "proc-lost" };
+      memory.set(sys, "absent");
+      return { kind: "unbound", dir: { dir, fd: null } };
+    }
+    memory.set(sys, "present");
+    let named;
+    try {
+      named = sys.readlinkSync(magic);
+    } catch {
+      return { kind: "proc-lost" };
+    }
+    if (named !== dir) return { kind: "changed" };
+    bound = true;
+    return { kind: "bound", dir: { dir, fd } };
+  } finally {
+    if (!bound) fsOps.closeSync(fd);
+  }
+}
+function boundPath(held, name) {
+  return held.fd === null ? join6(held.dir, name) : `${PROC_SELF_FD}/${held.fd}/${name}`;
+}
+function fsyncDir2(held, fsOps) {
+  fsOps.fsyncDir(held.fd === null ? held.dir : `${PROC_SELF_FD}/${held.fd}`);
+}
+function unbindError(e, held) {
+  if (held.fd === null || e === null || typeof e !== "object") return e;
+  const prefix = new RegExp(`${PROC_SELF_FD}/${held.fd}(?=[/']|$)`, "g");
+  const fields = e;
+  for (const key of ["message", "path", "dest"]) {
+    const was = fields[key];
+    if (typeof was !== "string") continue;
+    const now = was.replace(prefix, () => held.dir);
+    if (now !== was) {
+      try {
+        fields[key] = now;
+      } catch {
+      }
+    }
+  }
+  return e;
+}
+function closeHeldDir(held, fsOps) {
+  if (held.fd !== null) fsOps.closeSync(held.fd);
+}
+
 // src/memory/witness-core.ts
 import { createHash as createHash2 } from "node:crypto";
 function sha256Hex(bytes) {
@@ -14597,277 +14979,14 @@ function fenceId(epoch, nonce) {
 }
 
 // src/memory/witness-store.ts
-import { randomBytes as randomBytes4, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { readFileSync as readFileSync5 } from "node:fs";
-import { dirname as dirname6, join as join6 } from "node:path";
-
-// src/memory/ownership.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync3, readlinkSync as readlinkSync2, openSync as openSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync3, realpathSync as realpathSync2 } from "node:fs";
-import { join as join5, resolve, dirname as dirname5, basename as basename3, isAbsolute } from "node:path";
-function isReviewableRoot(projectRoot) {
-  return isAbsolute(projectRoot);
-}
-function canonicalRoot(projectRoot) {
-  try {
-    return registryKeyPath(projectRoot);
-  } catch {
-    return resolve(projectRoot);
-  }
-}
-function registryKeyPath(target) {
-  try {
-    return realpathSync2(target);
-  } catch {
-    return join5(realpathSync2(dirname5(target)), basename3(target));
-  }
-}
-function projectLedgerPath(projectRoot) {
-  return join5(projectRoot, ".helix", "memory.jsonl");
-}
-var GLOBAL_KEY = "@global";
-function registryPath(home2) {
-  return join5(home2, "projects.json");
-}
-function ownerFile(projectRoot) {
-  return join5(projectRoot, ".helix", ".owner");
-}
-function isPlainObject2(x) {
-  return typeof x === "object" && x !== null && !Array.isArray(x);
-}
-function isValidRegistry(x) {
-  if (!isPlainObject2(x)) return false;
-  for (const v of Object.values(x)) {
-    if (!isPlainObject2(v)) return false;
-    if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
-    if (v.trustState !== void 0 && v.trustState !== "active" && v.trustState !== "pending") return false;
-  }
-  return true;
-}
-function loadRegistry(home2) {
-  const path = registryPath(home2);
-  let st;
-  try {
-    st = lstatSync3(path);
-  } catch (e) {
-    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
-  }
-  if (st.isSymbolicLink()) return { kind: "corrupt" };
-  let text;
-  try {
-    text = readFileSync4(path, "utf8");
-  } catch {
-    return { kind: "corrupt" };
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { kind: "corrupt" };
-  }
-  if (!isValidRegistry(parsed)) return { kind: "corrupt" };
-  return { kind: "ok", reg: parsed };
-}
-function readRegistry(home2) {
-  const r = loadRegistry(home2);
-  return r.kind === "ok" ? r.reg : {};
-}
-function assertNotSymlink(path, what) {
-  let st;
-  try {
-    st = lstatSync3(path);
-  } catch {
-    return;
-  }
-  if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
-}
-function writeAll2(fd, data) {
-  const buf = Buffer.from(data, "utf8");
-  for (let off = 0; off < buf.length; ) off += writeSync2(fd, buf, off, buf.length - off);
-}
-function atomicWriteFile(path, data, mode) {
-  const tmp = `${path}.${randomBytes3(8).toString("hex")}.tmp`;
-  const fd = openSync3(tmp, "wx", mode);
-  try {
-    writeAll2(fd, data);
-    fsyncSync3(fd);
-  } finally {
-    closeSync3(fd);
-  }
-  try {
-    renameSync2(tmp, path);
-  } catch (e) {
-    try {
-      unlinkSync4(tmp);
-    } catch {
-    }
-    throw e;
-  }
-  fsyncDir(dirname5(path));
-}
-function atomicWriteRegistry(home2, reg) {
-  const path = registryPath(home2);
-  assertNotSymlink(path, "registry");
-  atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
-}
-function atomicWriteOwner(projectRoot, stamp) {
-  atomicWriteFile(ownerFile(projectRoot), stamp, 384);
-}
-function readOwner(projectRoot) {
-  const path = ownerFile(projectRoot);
-  try {
-    if (lstatSync3(dirname5(path)).isSymbolicLink()) return null;
-    const st = lstatSync3(path);
-    if (!st.isFile()) return null;
-    if (st.nlink > 1) return null;
-    return readFileSync4(path, "utf8").trim();
-  } catch {
-    return null;
-  }
-}
-function isOwned(projectRoot, home2) {
-  const entry = readRegistry(home2)[canonicalRoot(projectRoot)];
-  if (!entry) return false;
-  const stamp = readOwner(projectRoot);
-  return stamp !== null && stamp === entry.stamp;
-}
-var MAX_SYMLINK_HOPS = 40;
-function utf8OrNull(b) {
-  const s = b.toString("utf8");
-  return Buffer.from(s, "utf8").equals(b) ? s : null;
-}
-var isNameTooLong = (e) => e?.code === "ENAMETOOLONG";
-function physicalPath(p) {
-  try {
-    return utf8OrNull(realpathSync2.native(p, { encoding: "buffer" }));
-  } catch (e) {
-    if (isNameTooLong(e)) return null;
-  }
-  try {
-    const parent = utf8OrNull(realpathSync2.native(dirname5(p), { encoding: "buffer" }));
-    return parent === null ? null : join5(parent, basename3(p));
-  } catch (e) {
-    return isNameTooLong(e) ? null : resolve(p);
-  }
-}
-function ledgerDestination(ledger) {
-  let p = ledger;
-  for (let hops = 0; ; hops++) {
-    let st;
-    try {
-      st = lstatSync3(p);
-    } catch (e) {
-      if (e.code === "ENOENT") return physicalPath(p);
-      return isNameTooLong(e) ? null : canonicalRoot(ledger);
-    }
-    if (!st.isSymbolicLink()) return physicalPath(p);
-    if (hops === MAX_SYMLINK_HOPS) return null;
-    let target;
-    try {
-      target = utf8OrNull(readlinkSync2(p, { encoding: "buffer" }));
-    } catch {
-      return canonicalRoot(ledger);
-    }
-    if (target === null) return null;
-    let q2;
-    if (isAbsolute(target)) q2 = target;
-    else {
-      const dir = physicalPath(dirname5(p));
-      if (dir === null) return null;
-      q2 = `${dir}/${target}`;
-    }
-    const qDir = physicalPath(dirname5(q2));
-    if (qDir === null) return null;
-    p = join5(qDir, basename3(q2));
-  }
-}
-function aliasesAdoptedLedger(project2) {
-  const real = ledgerDestination(project2.ledger);
-  if (real === null) return true;
-  const ownKey = canonicalRoot(project2.root);
-  if (real === projectLedgerPath(ownKey)) return false;
-  for (const key of Object.keys(readRegistry(project2.home))) {
-    if (key === GLOBAL_KEY || key === ownKey) continue;
-    const other = ledgerDestination(projectLedgerPath(key));
-    if (other !== null && other === real) return true;
-  }
-  return false;
-}
-function projectDispositionOf(project2) {
-  if (!project2) return "inactive";
-  if (isOwned(project2.root, project2.home)) return aliasesAdoptedLedger(project2) ? "aliased" : "owned";
-  if (project2.origin === "ancestor") return "ancestor-unadopted";
-  return existsSync2(project2.ledger) ? "unadopted-present" : "inactive";
-}
-function startupScanReadsProject(project2, home2) {
-  const d = projectDispositionOf({ root: project2.root, ledger: project2.ledger, home: home2, origin: project2.origin });
-  if (d === "owned") return true;
-  if (d === "aliased" || d === "ancestor-unadopted") return false;
-  return !aliasesAdoptedLedger({ root: project2.root, home: home2, ledger: project2.ledger });
-}
-function stampOwnership(projectRoot, home2, opts = {}) {
-  const gen = opts.genStamp ?? (() => randomBytes3(16).toString("hex"));
-  const key = canonicalRoot(projectRoot);
-  ensureHelixDir(home2);
-  withFileLock(registryPath(home2), () => {
-    const loaded = loadRegistry(home2);
-    if (loaded.kind === "corrupt")
-      throw new Error(`stampOwnership: registry at ${registryPath(home2)} is present but unparseable \u2014 restore it before adopting (refusing to overwrite and lose other projects)`);
-    const reg = loaded.kind === "ok" ? loaded.reg : {};
-    const existing = reg[key];
-    if (opts.autoAdoptLedger && existsSync2(opts.autoAdoptLedger))
-      throw new Error("commit: a project memory file appeared here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it");
-    const priorOwner = readOwner(projectRoot);
-    const ambiguousReadopt = existing !== void 0 && priorOwner !== existing.stamp;
-    const trustState = ambiguousReadopt ? "pending" : existing?.trustState ?? "active";
-    const stamp = existing?.stamp ?? gen();
-    const macNonce = existing?.macNonce ?? gen();
-    const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
-    const helixDir = join5(projectRoot, ".helix");
-    assertNotSymlink(helixDir, ".helix directory");
-    mkdirSync3(helixDir, { recursive: true });
-    reg[key] = { stamp, adoptedAt, macNonce, trustState };
-    atomicWriteRegistry(home2, reg);
-    atomicWriteOwner(projectRoot, stamp);
-  });
-}
-function trustStateOf(projectRoot, home2) {
-  const entry = readRegistry(home2)[canonicalRoot(projectRoot)];
-  return entry?.trustState ?? "active";
-}
-function scopeNonce(projectRoot, home2) {
-  const entry = readRegistry(home2)[canonicalRoot(projectRoot)];
-  return entry?.macNonce ?? null;
-}
-function globalScopeNonce(home2) {
-  const r = loadRegistry(home2);
-  if (r.kind === "corrupt") return null;
-  const fast = r.kind === "ok" ? r.reg[GLOBAL_KEY]?.macNonce : void 0;
-  if (fast) return fast;
-  ensureHelixDir(home2);
-  try {
-    return withFileLock(registryPath(home2), () => {
-      const r2 = loadRegistry(home2);
-      if (r2.kind === "corrupt") return null;
-      const reg = r2.kind === "ok" ? r2.reg : {};
-      const existing = reg[GLOBAL_KEY]?.macNonce;
-      if (existing) return existing;
-      const macNonce = randomBytes3(16).toString("hex");
-      reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
-      atomicWriteRegistry(home2, reg);
-      return macNonce;
-    });
-  } catch {
-    return null;
-  }
-}
-
-// src/memory/witness-store.ts
+import { randomBytes as randomBytes3, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { lstatSync as lstatSync5, openSync as openSync4, fstatSync as fstatSync3, readFileSync as readFileSync3, closeSync as closeSync4, constants as constants3 } from "node:fs";
+import { dirname as dirname6, join as join7 } from "node:path";
 function witnessPath(home2) {
-  return join6(home2, "witness.json");
+  return join7(home2, "witness.json");
 }
 function witnessLogPath(home2) {
-  return join6(home2, "witness-log.jsonl");
+  return join7(home2, "witness-log.jsonl");
 }
 function scopeKeyOf(home2, projectRoot) {
   return projectRoot === void 0 ? "@global" : canonicalRoot(projectRoot);
@@ -14897,6 +15016,18 @@ var WitnessBlockedError = class extends Error {
   witnessBlocked = true;
 };
 var isWitnessBlockedError = (e) => e instanceof Error && e.witnessBlocked === true;
+function markRecordStored(e, state) {
+  const mark = { recordStored: true, storedState: state };
+  if (e instanceof Error) {
+    try {
+      Object.assign(e, mark);
+      if (isRecordStoredError(e)) return e;
+    } catch {
+    }
+  }
+  return Object.assign(new Error("a step after the write failed", { cause: e }), mark);
+}
+var isRecordStoredError = (e) => e instanceof Error && e.recordStored === true;
 function macKeyFor(scopeKey, master) {
   return Buffer.from(hkdfSync2("sha256", master, Buffer.from(scopeKey), "helix-witness-mac-v1", 32));
 }
@@ -14922,17 +15053,133 @@ function signedJournal(scopeKey, master, unsigned) {
   const base = { ...unsigned, mac: "" };
   return { ...base, mac: macOf(scopeKey, master, base) };
 }
-function readStoreFileAt(path) {
-  try {
-    const parsed = JSON.parse(readFileSync5(path, "utf8"));
-    return { v: 1, scopes: parsed.scopes ?? {} };
-  } catch {
-    return { v: 1, scopes: {} };
-  }
+var WITNESS_UNUSABLE_REFUSAL_BODY = (
+  // 4.9 row "witness", verbatim after `<op>: `
+  "the rollback-witness file cannot be used (its path cannot be resolved, a link stands at its name, it is not a regular file, or it cannot be read or parsed) \u2014 the write is refused rather than replacing that file, which would drop the baseline of every scope. Ask the user whether to restore it from a backup or to remove it, which starts every scope again from first contact; do not choose for them."
+);
+var WITNESS_TRANSIENT_FAILURE_BODY = (
+  // no 4.9 row: no advice to remove the file
+  "the rollback-witness file could not be read at this moment (the system is out of file descriptors, or the read was interrupted), so this call failed. The file itself was not found to be damaged; try the call again."
+);
+function witnessUnusableRefusal(op) {
+  return `${op}: ${WITNESS_UNUSABLE_REFUSAL_BODY}`;
 }
-function writeStoreFileAt(path, store2, fsOps = realFsOps) {
+var WitnessUnusableError = class extends Error {
+  // the marker; never `instanceof`
+  constructor(op, reason) {
+    super(reason === "transient" ? `${op}: ${WITNESS_TRANSIENT_FAILURE_BODY}` : witnessUnusableRefusal(op));
+    this.op = op;
+    this.reason = reason;
+    this.name = "WitnessUnusableError";
+  }
+  op;
+  reason;
+  witnessUnusable = true;
+};
+var isWitnessUnusableError = (e) => e instanceof Error && e.witnessUnusable === true;
+var TRANSIENT_READ_CODES = /* @__PURE__ */ new Set(["EMFILE", "ENFILE", "EINTR"]);
+var codeOf2 = (e) => e?.code;
+var WITNESS_READ_OPEN = constants3.O_RDONLY | constants3.O_NONBLOCK | constants3.O_NOFOLLOW;
+var isEnvelope = (parsed) => {
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  const o = parsed;
+  return o.v === 1 && o.scopes !== null && typeof o.scopes === "object" && !Array.isArray(o.scopes);
+};
+function readWitnessFile(rawPath, asGiven) {
+  const r = resolvePath(rawPath);
+  try {
+    const st = lstatSync5(rawPath);
+    if (st.isSymbolicLink()) return { kind: "unusable", reason: "link" };
+    if (!st.isFile()) return { kind: "unusable", reason: "not-regular" };
+  } catch (e) {
+    if (TRANSIENT_READ_CODES.has(codeOf2(e) ?? "")) return { kind: "transient" };
+  }
+  let path;
+  let given = false;
+  if (r.kind === "unresolvable") {
+    if (!asGiven) return { kind: "unusable", reason: "unresolvable" };
+    path = rawPath;
+    given = true;
+  } else if (r.kind === "uninspectable") {
+    const code = r.error.code ?? "";
+    if (code === "ENOENT") return { kind: "absent", path: null, asGiven: false };
+    return TRANSIENT_READ_CODES.has(code) ? { kind: "transient" } : { kind: "uninspectable", error: r.error };
+  } else if (r.dirMissing) {
+    return { kind: "absent", path: null, asGiven: false };
+  } else path = r.path;
+  let fd;
+  try {
+    fd = openSync4(path, WITNESS_READ_OPEN);
+  } catch (e) {
+    const code = codeOf2(e) ?? "";
+    if (code === "ENOENT") return { kind: "absent", path, asGiven: given };
+    if (code === "ELOOP") return { kind: "unusable", reason: "link" };
+    return TRANSIENT_READ_CODES.has(code) ? { kind: "transient" } : { kind: "unusable", reason: "unreadable" };
+  }
+  let text;
+  try {
+    if (!fstatSync3(fd).isFile()) return { kind: "unusable", reason: "not-regular" };
+    text = readFileSync3(fd, "utf8");
+  } catch (e) {
+    return TRANSIENT_READ_CODES.has(codeOf2(e) ?? "") ? { kind: "transient" } : { kind: "unusable", reason: "unreadable" };
+  } finally {
+    try {
+      closeSync4(fd);
+    } catch {
+    }
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { kind: "unusable", reason: "unparseable" };
+  }
+  if (!isEnvelope(parsed)) return { kind: "unusable", reason: "unparseable" };
+  return { kind: "store", path, store: { v: 1, scopes: parsed.scopes }, asGiven: given };
+}
+function assertWitnessWritable(home2, op, opts = {}) {
+  if (opts.homeUnchecked && isSymlinkedHome(home2)) return;
+  const f = readWitnessFile(witnessPath(home2), false);
+  if (f.kind === "uninspectable") {
+    if (opts.homeUnchecked) return;
+    throw f.error;
+  }
+  if (f.kind === "unusable") throw new WitnessUnusableError(op, f.reason);
+  if (f.kind === "transient") throw new WitnessUnusableError(op, "transient");
+}
+function assertWitnessPathLockable(rawPath, op) {
+  let link = false;
+  try {
+    link = lstatSync5(rawPath).isSymbolicLink();
+  } catch {
+  }
+  if (link) throw new WitnessUnusableError(op, "link");
+  if (resolvePath(rawPath).kind === "unresolvable") throw new WitnessUnusableError(op, "unresolvable");
+}
+function loadStoreLocked(rawPath, op) {
+  const f = readWitnessFile(rawPath, false);
+  if (f.kind === "uninspectable") throw f.error;
+  if (f.kind === "unusable") throw new WitnessUnusableError(op, f.reason);
+  if (f.kind === "transient") throw new WitnessUnusableError(op, "transient");
+  if (f.kind === "store") return { path: f.path, store: f.store };
+  return { path: f.path ?? resolvedPathOrThrow(rawPath), store: { v: 1, scopes: {} } };
+}
+function assertReplaceTarget(path, op) {
+  let st;
+  try {
+    st = lstatSync5(path);
+  } catch (e) {
+    const code = codeOf2(e) ?? "";
+    if (code === "ENOENT") return;
+    if (TRANSIENT_READ_CODES.has(code)) throw new WitnessUnusableError(op, "transient");
+    throw e;
+  }
+  if (st.isSymbolicLink()) throw new WitnessUnusableError(op, "link");
+  if (!st.isFile()) throw new WitnessUnusableError(op, "not-regular");
+}
+function writeStoreFileAt(path, store2, fsOps = realFsOps, op = "witness") {
   const dir = dirname6(path);
-  const tmp = `${path}.w-${randomBytes4(16).toString("hex")}.tmp`;
+  const tmp = `${path}.w-${randomBytes3(16).toString("hex")}.tmp`;
   sweepOrphanTmps(path, { fsOps, keep: tmp });
   const fd = fsOps.openSync(tmp, "wx");
   try {
@@ -14945,6 +15192,15 @@ function writeStoreFileAt(path, store2, fsOps = realFsOps) {
       fsOps.closeSync(fd);
     } catch {
     }
+    try {
+      fsOps.unlinkSync(tmp);
+    } catch {
+    }
+    throw e;
+  }
+  try {
+    assertReplaceTarget(path, op);
+  } catch (e) {
     try {
       fsOps.unlinkSync(tmp);
     } catch {
@@ -14969,16 +15225,18 @@ function deriveState(scopeKey, master, raw) {
   }
   return { entry, journal, macInvalid };
 }
-function readScopeWitness(home2, scopeKey) {
-  let path;
-  try {
-    path = canonical(witnessPath(home2));
-  } catch (e) {
-    if (e.code === "ENOENT") return { entry: null, journal: null, macInvalid: false };
-    throw e;
-  }
-  const store2 = readStoreFileAt(path);
-  return deriveState(scopeKey, tryReadMaster(home2), store2.scopes[scopeKey]);
+var WITNESS_READ_AS_GIVEN = { unresolvable: "as-given", unusable: "mark" };
+function readScopeWitness(home2, scopeKey, opts = {}) {
+  const f = readWitnessFile(witnessPath(home2), opts.unresolvable === "as-given");
+  const op = opts.op ?? "witness";
+  if (f.kind === "uninspectable") throw f.error;
+  if (f.kind === "transient") throw new WitnessUnusableError(op, "transient");
+  if (f.kind === "unusable" && opts.unusable !== "mark") throw new WitnessUnusableError(op, f.reason);
+  if (f.kind === "absent" && f.path === null) return { entry: null, journal: null, macInvalid: false };
+  const master = tryReadMaster(home2);
+  if (f.kind === "unusable") return { entry: null, journal: null, macInvalid: false, file: "unusable" };
+  const state = deriveState(scopeKey, master, f.kind === "store" ? f.store.scopes[scopeKey] : void 0);
+  return f.asGiven ? { ...state, file: "as-given" } : state;
 }
 function classifyState(state, bytes) {
   if (state.macInvalid) return { kind: "first-contact", reason: "mac-invalid" };
@@ -14994,12 +15252,12 @@ function appendWitnessLogLine(home2, line, fsOps) {
   }
 }
 function advanceWitness(home2, scopeKey, bytes, headTx, fsOps = realFsOps) {
+  const rawPath = witnessPath(home2);
+  assertWitnessPathLockable(rawPath, "advanceWitness");
   ensureHelixDir(home2);
   const master = ensureMaster(home2);
-  const rawPath = witnessPath(home2);
   withFileLock(rawPath, () => {
-    const path = canonical(rawPath);
-    const store2 = readStoreFileAt(path);
+    const { path, store: store2 } = loadStoreLocked(rawPath, "advanceWitness");
     const state = deriveState(scopeKey, master, store2.scopes[scopeKey]);
     const verdict = classifyState(state, bytes);
     if (!advanceAllowed(verdict)) {
@@ -15010,7 +15268,7 @@ function advanceWitness(home2, scopeKey, bytes, headTx, fsOps = realFsOps) {
     const unsigned = { epoch: effectiveEntry?.epoch ?? 1, byteLength: bytes.length, prefixHash: sha256Hex(bytes), headTx };
     const entry = signedEntry(scopeKey, master, unsigned);
     const nextStore = { v: 1, scopes: { ...store2.scopes, [scopeKey]: { entry, journal: effectiveJournal } } };
-    writeStoreFileAt(path, nextStore, fsOps);
+    writeStoreFileAt(path, nextStore, fsOps, "advanceWitness");
   });
 }
 function planTransition(home2, scopeKey, kind) {
@@ -15019,18 +15277,18 @@ function planTransition(home2, scopeKey, kind) {
   const entry = state.macInvalid ? null : state.entry;
   const pending = state.macInvalid ? null : state.journal;
   const epoch = Math.max((entry?.epoch ?? 0) + 1, pending ? pending.epoch + 1 : 0);
-  const nonce = randomBytes4(16).toString("hex");
+  const nonce = randomBytes3(16).toString("hex");
   const predecessor = entry ? { byteLength: entry.byteLength, prefixHash: entry.prefixHash } : null;
   const supersedes = pending?.nonce ?? null;
   return { epoch, nonce, predecessor, supersedes };
 }
 function openTransition(home2, scopeKey, plan, fsOps = realFsOps) {
+  const rawPath = witnessPath(home2);
+  assertWitnessPathLockable(rawPath, "openTransition");
   ensureHelixDir(home2);
   const master = ensureMaster(home2);
-  const rawPath = witnessPath(home2);
   return withFileLock(rawPath, () => {
-    const path = canonical(rawPath);
-    const store2 = readStoreFileAt(path);
+    const { path, store: store2 } = loadStoreLocked(rawPath, "openTransition");
     const state = deriveState(scopeKey, master, store2.scopes[scopeKey]);
     const entry = state.macInvalid ? null : state.entry;
     const pending = state.macInvalid ? null : state.journal;
@@ -15052,17 +15310,17 @@ function openTransition(home2, scopeKey, plan, fsOps = realFsOps) {
     const journal = signedJournal(scopeKey, master, unsigned);
     appendWitnessLogLine(home2, { v: 1, scope: scopeKey, epoch: plan.epoch, kind: plan.kind, tx: plan.tx, nonce: plan.nonce }, fsOps);
     const nextStore = { v: 1, scopes: { ...store2.scopes, [scopeKey]: { entry, journal } } };
-    writeStoreFileAt(path, nextStore, fsOps);
+    writeStoreFileAt(path, nextStore, fsOps, "openTransition");
     return journal;
   });
 }
 function completeTransition(home2, scopeKey, bytes, headTx, fsOps = realFsOps) {
+  const rawPath = witnessPath(home2);
+  assertWitnessPathLockable(rawPath, "completeTransition");
   ensureHelixDir(home2);
   const master = ensureMaster(home2);
-  const rawPath = witnessPath(home2);
   withFileLock(rawPath, () => {
-    const path = canonical(rawPath);
-    const store2 = readStoreFileAt(path);
+    const { path, store: store2 } = loadStoreLocked(rawPath, "completeTransition");
     const state = deriveState(scopeKey, master, store2.scopes[scopeKey]);
     const journal = state.macInvalid ? null : state.journal;
     if (!journal) throw new WitnessAdvanceError("completeTransition: no pending journal for scope");
@@ -15077,16 +15335,20 @@ function completeTransition(home2, scopeKey, bytes, headTx, fsOps = realFsOps) {
     const unsigned = { epoch: journal.epoch, byteLength: journal.expected.byteLength, prefixHash: journal.expected.prefixHash, headTx };
     const nextEntry = signedEntry(scopeKey, master, unsigned);
     const nextStore = { v: 1, scopes: { ...store2.scopes, [scopeKey]: { entry: nextEntry, journal: null } } };
-    writeStoreFileAt(path, nextStore, fsOps);
+    writeStoreFileAt(path, nextStore, fsOps, "completeTransition");
   });
 }
+function journalPublished(home2, scopeKey, nonce) {
+  const state = readScopeWitness(home2, scopeKey);
+  return !state.macInvalid && state.journal !== null && state.journal.nonce === nonce;
+}
 function discardTransition(home2, scopeKey, nonce, fsOps = realFsOps) {
+  const rawPath = witnessPath(home2);
+  assertWitnessPathLockable(rawPath, "discardTransition");
   ensureHelixDir(home2);
   const master = ensureMaster(home2);
-  const rawPath = witnessPath(home2);
   withFileLock(rawPath, () => {
-    const path = canonical(rawPath);
-    const store2 = readStoreFileAt(path);
+    const { path, store: store2 } = loadStoreLocked(rawPath, "discardTransition");
     const state = deriveState(scopeKey, master, store2.scopes[scopeKey]);
     const journal = state.macInvalid ? null : state.journal;
     if (!journal) throw new WitnessAdvanceError("discardTransition: no pending journal for scope");
@@ -15101,7 +15363,7 @@ function discardTransition(home2, scopeKey, nonce, fsOps = realFsOps) {
     const entry = state.macInvalid ? null : state.entry;
     appendWitnessLogLine(home2, { v: 1, scope: scopeKey, epoch: journal.epoch, kind: journal.kind, tx: journal.tx, nonce: journal.nonce, op: "discard" }, fsOps);
     const nextStore = { v: 1, scopes: { ...store2.scopes, [scopeKey]: { entry, journal: null } } };
-    writeStoreFileAt(path, nextStore, fsOps);
+    writeStoreFileAt(path, nextStore, fsOps, "discardTransition");
   });
 }
 
@@ -15146,26 +15408,127 @@ function witnessFenceRecord(epoch, nonce, tx) {
 function aliasedLedgerMessage(nlink) {
   return `ledger has ${nlink} hard links \u2014 aliased ledgers are unsupported (see SECURITY.md); refusing to write`;
 }
-function appendRecordUnlocked(rawPath, record2, fsOps = realFsOps) {
-  mkdirSync5(dirname7(rawPath), { recursive: true });
-  const path = canonical(rawPath);
-  sweepOrphanTmps(path, { fsOps });
-  const fd = fsOps.openSync(path, "a+", 384);
-  try {
-    const st = fsOps.fstatSync(fd);
-    if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
-    let line = JSON.stringify(record2) + "\n";
-    if (st.size > 0) {
-      const tail = Buffer.alloc(1);
-      fsOps.readSync(fd, tail, 0, 1, st.size - 1);
-      if (tail[0] !== 10) line = "\n" + line;
-    }
-    writeAll(fsOps, fd, line);
-    fsOps.fsyncSync(fd);
-  } finally {
-    fsOps.closeSync(fd);
+var DESTINATION_CHANGED_REFUSAL = "commit: this project's memory file changed while the write was in progress \u2014 nothing was written. Try the commit again; if it happens again, tell the user.";
+var LedgerDestinationChangedError = class extends Error {
+  /** The marker isLedgerDestinationChangedError reads (a property, never class identity). */
+  ledgerDestinationChanged = true;
+  constructor(message = DESTINATION_CHANGED_REFUSAL) {
+    super(message);
+    this.name = "LedgerDestinationChangedError";
   }
-  fsOps.fsyncDir(dirname7(path));
+};
+var isLedgerDestinationChangedError = (e) => e instanceof Error && e.ledgerDestinationChanged === true;
+var LedgerCreateRefusedError = class extends Error {
+  constructor(code) {
+    super("the memory file could not be created exclusively: something stands at its name");
+    this.code = code;
+    this.name = "LedgerCreateRefusedError";
+  }
+  code;
+  ledgerCreateRefused = true;
+};
+var isLedgerCreateRefusedError = (e) => e instanceof Error && e.ledgerCreateRefused === true;
+var PROC_LOST_REFUSAL = "Helix can no longer confirm which folder this write goes into, because the system's process file table became unavailable after this session started \u2014 nothing was written. Restart the session; if it happens again, tell the user.";
+var LedgerProcLostError = class extends Error {
+  /** The marker isLedgerProcLostError reads (a property, never class identity). */
+  ledgerProcLost = true;
+  constructor(message = PROC_LOST_REFUSAL) {
+    super(message);
+    this.name = "LedgerProcLostError";
+  }
+};
+var isLedgerProcLostError = (e) => e instanceof Error && e.ledgerProcLost === true;
+var APPEND_OPEN = constants4.O_RDWR | constants4.O_APPEND | constants4.O_NOFOLLOW;
+var DESTINATION_CHANGED_OPEN_ERRORS = /* @__PURE__ */ new Set(["ELOOP", "EISDIR", "ENOENT"]);
+function openForAppend(path, absentWhenJudged, mustCreate, fsOps) {
+  if (absentWhenJudged || mustCreate) {
+    try {
+      return { fd: fsOps.openSync(path, APPEND_OPEN | constants4.O_CREAT | constants4.O_EXCL, 384), created: true };
+    } catch (e) {
+      const code = e.code;
+      if (mustCreate && (code === "EEXIST" || code === "ELOOP")) throw new LedgerCreateRefusedError(code);
+      if (DESTINATION_CHANGED_OPEN_ERRORS.has(code ?? "")) throw new LedgerDestinationChangedError();
+      if (code !== "EEXIST") throw e;
+    }
+  }
+  try {
+    return { fd: fsOps.openSync(path, APPEND_OPEN), created: false };
+  } catch (e) {
+    if (DESTINATION_CHANGED_OPEN_ERRORS.has(e.code ?? "")) throw new LedgerDestinationChangedError();
+    throw e;
+  }
+}
+function destinationUnchanged(rawPath, path, judged, opened) {
+  if (hasComparableInode(judged) && hasComparableInode(opened) && !sameFile(judged, opened)) return false;
+  const again = resolvePath(rawPath);
+  if (again.kind !== "resolved" || again.dirMissing || again.path !== path) return false;
+  let now;
+  try {
+    now = fileIdentityAt(again.path);
+  } catch {
+    return false;
+  }
+  if (now === null) return false;
+  if (!hasComparableInode(now) || !hasComparableInode(opened)) return true;
+  return sameFile(now, opened);
+}
+function removeOwnCreation(path, opened, fsOps) {
+  try {
+    if (!sameFile(fileIdentityAt(path), opened)) return;
+    fsOps.unlinkSync(path);
+    fsOps.fsyncDir(dirname7(path));
+  } catch {
+  }
+}
+function appendRecordUnlocked(rawPath, record2, fsOps = realFsOps, judged) {
+  mkdirSync3(dirname7(rawPath), { recursive: true });
+  const path = resolvedPathOrThrow(rawPath);
+  if (judged !== void 0 && judged.path !== path) throw new LedgerDestinationChangedError();
+  const before = judged !== void 0 ? judged.identity : fileIdentityAt(path);
+  const dirSample = judged !== void 0 && judged.dir !== void 0 ? judged.dir : sampleDirIdentity(dirname7(path));
+  const bound = openJudgedDir(dirname7(path), dirSample, fsOps);
+  if (bound.kind === "changed") throw new LedgerDestinationChangedError();
+  if (bound.kind === "proc-lost") throw new LedgerProcLostError();
+  const held = bound.dir;
+  let rowDurable = false;
+  try {
+    try {
+      const at = boundPath(held, basename4(path));
+      const { fd, created } = openForAppend(at, before === null, judged?.createExclusive === true, fsOps);
+      let opened = null;
+      const undoCreation = () => {
+        if (created && opened !== null) removeOwnCreation(at, opened, fsOps);
+      };
+      try {
+        const st = fsOps.fstatSync(fd);
+        opened = { dev: st.dev, ino: st.ino };
+        if (!destinationUnchanged(rawPath, path, before, opened)) throw new LedgerDestinationChangedError();
+        if (st.nlink === 0) throw new LedgerDestinationChangedError();
+        if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
+        sweepOrphanTmps(at, { fsOps });
+        if (fsOps.fstatSync(fd).nlink === 0) throw new LedgerDestinationChangedError();
+        let line = JSON.stringify(record2) + "\n";
+        if (st.size > 0) {
+          const tail = Buffer.alloc(1);
+          fsOps.readSync(fd, tail, 0, 1, st.size - 1);
+          if (tail[0] !== 10) line = "\n" + line;
+        }
+        writeAll(fsOps, fd, line);
+        fsOps.fsyncSync(fd);
+        rowDurable = true;
+      } catch (e) {
+        undoCreation();
+        throw e;
+      } finally {
+        fsOps.closeSync(fd);
+      }
+      fsyncDir2(held, fsOps);
+    } finally {
+      closeHeldDir(held, fsOps);
+    }
+  } catch (e) {
+    throw unbindError(rowDurable ? markRecordStored(e, record2.state) : e, held);
+  }
 }
 var MAX_PARSE_DEPTH = 64;
 function withinDepth(v, max) {
@@ -15202,6 +15565,95 @@ function parseLedgerHealth(text) {
   }
   return { records, skippedNonBlank };
 }
+var LEDGER_CONTENT_READ_BOUND_BYTES = 1024 * 1024;
+var RECORD_KEY_NAMES = ['"id"', '"content"', '"tx"', '"provenance"'].map((k) => Buffer.from(k));
+function mayBeRecordLine(line) {
+  let e = line.length - 1;
+  while (e >= 0 && (line[e] === 32 || line[e] === 9 || line[e] === 13)) e--;
+  if (e < 0 || line[e] !== 125) return false;
+  if (line.indexOf(92) !== -1) return true;
+  for (const k of RECORD_KEY_NAMES) if (line.indexOf(k) === -1) return false;
+  return true;
+}
+function ledgerContentKindOfFd(fd) {
+  const LEAD = 0, MAYBE_BLANK = 1, CANDIDATE = 2, SKIP = 3;
+  const chunk = Buffer.allocUnsafe(65536);
+  let state = LEAD;
+  let sawNonBlank = false;
+  let pending = [];
+  let decoder = null;
+  const endLine = () => {
+    let record2 = false;
+    if (state === CANDIDATE) {
+      const line = pending.length === 1 ? pending[0] : Buffer.concat(pending);
+      if (mayBeRecordLine(line)) {
+        try {
+          record2 = isWellFormedRecord(JSON.parse(line.toString("utf8")));
+        } catch {
+        }
+      }
+      pending = [];
+    } else if (state === MAYBE_BLANK) {
+      if (decoder.end().trim() !== "") sawNonBlank = true;
+      decoder = null;
+    }
+    state = LEAD;
+    return record2;
+  };
+  for (let pos = 0; ; ) {
+    if (pos >= LEDGER_CONTENT_READ_BOUND_BYTES) {
+      if (readSync3(fd, chunk, 0, 1, pos) === 0) break;
+      return "other";
+    }
+    const n = readSync3(fd, chunk, 0, Math.min(chunk.length, LEDGER_CONTENT_READ_BOUND_BYTES - pos), pos);
+    if (n === 0) break;
+    pos += n;
+    const buf = chunk.subarray(0, n);
+    for (let i = 0; i < n; ) {
+      const nl = buf.indexOf(10, i);
+      const end = nl === -1 ? n : nl;
+      let j = i;
+      if (state === LEAD) {
+        while (j < end && (buf[j] === 32 || buf[j] === 9 || buf[j] === 13)) j++;
+        if (j < end) {
+          const b = buf[j];
+          if (b === 123) {
+            state = CANDIDATE;
+            sawNonBlank = true;
+          } else if (sawNonBlank || b < 128 && b !== 11 && b !== 12) {
+            state = SKIP;
+            sawNonBlank = true;
+          } else {
+            state = MAYBE_BLANK;
+            decoder = new StringDecoder("utf8");
+          }
+        }
+      }
+      if (j < end) {
+        if (state === CANDIDATE) pending.push(nl !== -1 && pending.length === 0 ? buf.subarray(j, end) : Buffer.from(buf.subarray(j, end)));
+        else if (state === MAYBE_BLANK && decoder.write(buf.subarray(j, end)).trim() !== "") {
+          sawNonBlank = true;
+          state = SKIP;
+          decoder = null;
+        }
+      }
+      if (nl === -1) break;
+      if (endLine()) return "rows";
+      i = nl + 1;
+    }
+  }
+  if (endLine()) return "rows";
+  return sawNonBlank ? "other" : "empty";
+}
+function ledgerContentKindAt(path) {
+  const fd = openSync5(path, constants4.O_RDONLY | constants4.O_NOFOLLOW | constants4.O_NONBLOCK);
+  try {
+    if (!fstatSync4(fd).isFile()) return "other";
+    return ledgerContentKindOfFd(fd);
+  } finally {
+    closeSync5(fd);
+  }
+}
 function parseLedgerText(text) {
   return parseLedgerHealth(text).records;
 }
@@ -15215,64 +15667,95 @@ var LedgerNotRegularError = class extends Error {
 };
 var isLedgerNotRegularError = (e) => e instanceof Error && e.ledgerNotRegular === true;
 var MAX_LEDGER_READ_BYTES = 2 ** 31 - 1;
-function readLedgerFileBytes(path) {
+var GLOBAL_LEDGER_READ = { unresolvable: "as-given" };
+function readLedgerFileBytesExact(path, flags, shownAs = path) {
   let fd;
   try {
-    fd = openSync4(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    fd = openSync5(path, flags);
   } catch (e) {
-    if (e.code !== "ENOENT") {
+    const code = e.code;
+    if (code !== "ENOENT" && code !== "ELOOP") {
       let st = null;
       try {
-        st = statSync2(path);
+        st = statSync4(path);
       } catch {
       }
-      if (st !== null && !st.isFile()) throw new LedgerNotRegularError(path);
+      if (st !== null && !st.isFile()) throw new LedgerNotRegularError(shownAs);
     }
     throw e;
   }
   try {
-    const st = fstatSync2(fd);
-    if (!st.isFile()) throw new LedgerNotRegularError(path);
+    const st = fstatSync4(fd);
+    if (!st.isFile()) throw new LedgerNotRegularError(shownAs);
     if (st.size > MAX_LEDGER_READ_BYTES) {
       throw Object.assign(new RangeError(`File size (${st.size}) is greater than 2 GiB`), { code: "ERR_FS_FILE_TOO_LARGE" });
     }
     const buf = Buffer.alloc(st.size);
     let len = 0;
     while (len < buf.length) {
-      const n = readSync2(fd, buf, len, buf.length - len, null);
+      const n = readSync3(fd, buf, len, buf.length - len, null);
       if (n === 0) break;
       len += n;
     }
     return len === buf.length ? buf : buf.subarray(0, len);
   } finally {
     try {
-      closeSync4(fd);
+      closeSync5(fd);
     } catch {
     }
   }
 }
-function parseLedger(path) {
+function readLedgerFileBytes(rawPath, opts = {}) {
+  const flags = constants4.O_RDONLY | constants4.O_NONBLOCK;
+  const r = resolvePath(rawPath);
+  if (r.kind === "uninspectable") throw r.error;
+  if (r.kind === "resolved") {
+    if (r.dirMissing) throw r.dirError ?? Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+    return readLedgerFileBytesExact(r.path, flags | constants4.O_NOFOLLOW, rawPath);
+  }
+  if (opts.unresolvable !== "as-given") throw new UnresolvablePathError(r.cause);
+  try {
+    return readLedgerFileBytesExact(rawPath, flags);
+  } catch (e) {
+    const code = e.code;
+    if (code === "ELOOP" || code === "ENAMETOOLONG") {
+      throw Object.assign(new Error("ENOENT: the global memory file cannot be opened by its path as given"), { code: "ENOENT" });
+    }
+    throw e;
+  }
+}
+function parseLedger(path, opts) {
   let text;
   try {
-    text = readLedgerFileBytes(path).toString("utf8");
+    text = readLedgerFileBytes(path, opts).toString("utf8");
   } catch (err) {
     if (err.code === "ENOENT") return [];
     throw err;
   }
   return parseLedgerText(text);
 }
-function readLedgerBytes(path) {
+function readLedgerBytes(path, opts) {
   try {
-    return readLedgerFileBytes(path);
+    return readLedgerFileBytes(path, opts);
   } catch (err) {
     if (err.code === "ENOENT") return Buffer.alloc(0);
     throw err;
   }
 }
-function readLedgerRaw(path) {
+function readLedgerBytesExactly(at) {
+  try {
+    return readLedgerFileBytesExact(at, constants4.O_RDONLY | constants4.O_NONBLOCK | constants4.O_NOFOLLOW);
+  } catch (err) {
+    const code = err.code;
+    if (code === "ENOENT") return Buffer.alloc(0);
+    if (code === "ELOOP") throw new LedgerDestinationChangedError();
+    throw err;
+  }
+}
+function readLedgerRaw(path, opts) {
   let bytes;
   try {
-    bytes = readLedgerFileBytes(path);
+    bytes = readLedgerFileBytes(path, opts);
   } catch (err) {
     if (err.code === "ENOENT") return { bytes: Buffer.alloc(0), records: [], skippedNonBlank: 0 };
     throw err;
@@ -15337,23 +15820,31 @@ function serializedBytes(records) {
 }
 function fileSize(path) {
   try {
-    return statSync2(path).size;
+    return statSync4(path).size;
   } catch {
     return 0;
   }
 }
 var LANDED_STATS = /* @__PURE__ */ Symbol("compactLedger.landedStats");
+var REWRITE_LANDED_THEN_CHANGED = "compactLedger: the rewrite landed, but the memory file changed before the rollback witness was updated";
 function landedCompactionStats(e) {
   if (e === null || typeof e !== "object") return void 0;
   return e[LANDED_STATS];
 }
-function compactLedger(rawPath, opts) {
+function compactLedgerUnlocked(rawPath, opts, ctx, judged) {
   const fsOps = opts.fsOps ?? realFsOps;
-  return withFileLock(rawPath, (ctx) => {
-    const path = canonical(rawPath);
-    assertSingleLink(path);
-    const tmp = `${path}.c-${randomBytes5(16).toString("hex")}.tmp`;
-    sweepOrphanTmps(path, { fsOps, keep: tmp });
+  const path = resolvedPathOrThrow(rawPath);
+  if (judged !== void 0 && judged.path !== path) throw new LedgerDestinationChangedError();
+  const dirSample = judged !== void 0 && judged.dir !== void 0 ? judged.dir : sampleDirIdentity(dirname7(path));
+  const opened = openJudgedDir(dirname7(path), dirSample, fsOps);
+  if (opened.kind === "changed") throw new LedgerDestinationChangedError();
+  if (opened.kind === "proc-lost") throw new LedgerProcLostError();
+  const held = opened.dir;
+  try {
+    const at = boundPath(held, basename4(path));
+    const tmp = boundPath(held, `${basename4(path)}.c-${randomBytes4(16).toString("hex")}.tmp`);
+    assertSingleLink(at);
+    sweepOrphanTmps(at, { fsOps, keep: tmp });
     const fd = fsOps.openSync(tmp, "wx");
     let closed = false;
     const w = opts.witness;
@@ -15363,18 +15854,18 @@ function compactLedger(rawPath, opts) {
     let landedStats = null;
     try {
       if (!ctx.stillOwned()) throw new Error("compactLedger: lock lost after tmp creation");
-      const mode = modeOf(path) ?? 384;
+      const mode = modeOf(at) ?? 384;
       fsOps.fchmodSync(fd, mode);
-      const beforeBytes = fileSize(path);
-      const records = parseLedger(path);
+      const beforeBytes = fileSize(at);
+      const records = parseLedgerText(readLedgerBytesExactly(at).toString("utf8"));
       const { kept, droppedForgedVerifies } = planCompaction(records, opts);
       let rows = kept;
       let transition = null;
       if (w) {
         const kind = w.kind ?? "compaction";
-        const verdict = classifyState(readScopeWitness(w.home, w.scopeKey), readLedgerBytes(path));
+        const op = kind === "erase" ? "permanent-erase" : "compaction";
+        const verdict = classifyState(readScopeWitness(w.home, w.scopeKey, { op }), readLedgerBytesExactly(at));
         if (verdict.kind === "mismatch") {
-          const op = kind === "erase" ? "permanent-erase" : "compaction";
           throw new WitnessBlockedError(
             op,
             `${op}: scope '${w.scopeKey}' is in a MISMATCH (rollback-alarm) state \u2014 refusing the rewrite; advancing the witness over forked/rolled-back content would launder the alarm (spec \xA74.2). Re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry.`
@@ -15394,8 +15885,9 @@ function compactLedger(rawPath, opts) {
       closed = true;
       if (w && transition !== null && fenceTx !== null) {
         const { kind, plan, expected } = transition;
-        preRewriteHash = sha256Hex(readLedgerBytes(path));
-        const journal = openTransition(w.home, w.scopeKey, {
+        preRewriteHash = sha256Hex(readLedgerBytesExactly(at));
+        retractNonce = plan.nonce;
+        openTransition(w.home, w.scopeKey, {
           kind,
           epoch: plan.epoch,
           nonce: plan.nonce,
@@ -15404,17 +15896,23 @@ function compactLedger(rawPath, opts) {
           expected,
           tx: fenceTx
         });
-        retractNonce = journal.nonce;
       }
-      assertSingleLink(path);
+      assertSingleLink(at);
       if (!ctx.stillOwned()) throw new Error("compactLedger: lock lost before rename");
-      fsOps.renameSync(tmp, path);
-      landedStats = { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
-      fsOps.fsyncDir(dirname7(path));
+      fsOps.renameSync(tmp, at);
+      landedStats = { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(at), droppedForgedVerifies };
+      fsyncDir2(held, fsOps);
       if (w && fenceTx !== null) {
-        completeTransition(w.home, w.scopeKey, readLedgerBytes(path), fenceTx);
+        let finalBytes;
+        try {
+          finalBytes = readLedgerBytesExactly(at);
+        } catch (e) {
+          if (isLedgerDestinationChangedError(e)) throw new Error(REWRITE_LANDED_THEN_CHANGED, { cause: e });
+          throw e;
+        }
+        completeTransition(w.home, w.scopeKey, finalBytes, fenceTx);
       }
-      return { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
+      return { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(at), droppedForgedVerifies };
     } catch (e) {
       if (!closed) {
         try {
@@ -15428,7 +15926,9 @@ function compactLedger(rawPath, opts) {
       }
       if (w && retractNonce !== null && preRewriteHash !== null) {
         try {
-          if (sha256Hex(readLedgerBytes(path)) === preRewriteHash) discardTransition(w.home, w.scopeKey, retractNonce);
+          if (journalPublished(w.home, w.scopeKey, retractNonce) && sha256Hex(readLedgerBytesExactly(at)) === preRewriteHash) {
+            discardTransition(w.home, w.scopeKey, retractNonce);
+          }
         } catch {
         }
       }
@@ -15441,12 +15941,19 @@ function compactLedger(rawPath, opts) {
       }
       throw e;
     }
-  });
+  } catch (e) {
+    throw unbindError(e, held);
+  } finally {
+    try {
+      closeHeldDir(held, fsOps);
+    } catch {
+    }
+  }
 }
 function assertSingleLink(path) {
   let nlink;
   try {
-    nlink = statSync2(path).nlink;
+    nlink = statSync4(path).nlink;
   } catch {
     return;
   }
@@ -15454,20 +15961,19 @@ function assertSingleLink(path) {
 }
 function modeOf(path) {
   try {
-    return statSync2(path).mode & 511;
+    return statSync4(path).mode & 511;
   } catch {
     return null;
   }
 }
 
 // src/memory/witness-write.ts
-import { dirname as dirname8 } from "node:path";
-import { mkdirSync as mkdirSync6 } from "node:fs";
-function appendWitnessedUnlocked(ledger, record2, home2, projectRoot, op) {
+function appendWitnessedUnlocked(ledger, record2, home2, projectRoot, op, refusalOp = op, judged) {
+  assertWitnessWritable(home2, refusalOp, { homeUnchecked: true });
   ensureHelixDir(home2);
   const key = scopeKeyOf(home2, projectRoot);
   const bytes = readLedgerBytes(ledger);
-  const preVerdict = classifyState(readScopeWitness(home2, key), bytes);
+  const preVerdict = classifyState(readScopeWitness(home2, key, { op: refusalOp }), bytes);
   if (preVerdict.kind === "transition-interrupted") {
     throw new WitnessBlockedError(
       op,
@@ -15477,7 +15983,7 @@ function appendWitnessedUnlocked(ledger, record2, home2, projectRoot, op) {
   let gateVerdict = preVerdict;
   if (preVerdict.kind === "transition-heal") {
     completeTransition(home2, key, bytes, preVerdict.journal.tx);
-    gateVerdict = classifyState(readScopeWitness(home2, key), bytes);
+    gateVerdict = classifyState(readScopeWitness(home2, key, { op: refusalOp }), bytes);
   }
   const shouldAdvance = advanceAllowed(gateVerdict);
   const elevatedVerify = record2.type === "verify" && (record2.state === "Verified" || record2.state === "Corroborated");
@@ -15487,21 +15993,20 @@ function appendWitnessedUnlocked(ledger, record2, home2, projectRoot, op) {
       `${op}: scope '${key}' is in a MISMATCH (rollback-alarm) state \u2014 refusing to mint an elevated grade over a ledger that does not descend from its witnessed head; establish that the current bytes are yours, then re-baseline the scope (helix-rebaseline) before retrying`
     );
   }
-  appendRecordUnlocked(ledger, record2);
-  const after = readLedgerBytes(ledger);
-  if (shouldAdvance) {
-    try {
-      advanceWitness(home2, key, after, record2.tx);
-    } catch (e) {
-      if (isWitnessAdvanceError(e)) e.landedState = record2.state;
-      throw e;
+  appendRecordUnlocked(ledger, record2, void 0, judged);
+  try {
+    const after = readLedgerBytes(ledger);
+    if (shouldAdvance) {
+      try {
+        advanceWitness(home2, key, after, record2.tx);
+      } catch (e) {
+        if (isWitnessAdvanceError(e)) e.landedState = record2.state;
+        throw e;
+      }
     }
+  } catch (e) {
+    throw markRecordStored(e, record2.state);
   }
-}
-function appendWitnessed(ledger, record2, home2, projectRoot, op) {
-  ensureHelixDir(home2);
-  mkdirSync6(dirname8(ledger), { recursive: true });
-  withFileLock(ledger, () => appendWitnessedUnlocked(ledger, record2, home2, projectRoot, op));
 }
 
 // src/memory/compaction-trigger.ts
@@ -15551,7 +16056,7 @@ function buildAsOfEvidence(records, t, opts) {
 }
 
 // src/memory/content-frame.ts
-import { randomBytes as randomBytes6 } from "node:crypto";
+import { randomBytes as randomBytes5 } from "node:crypto";
 
 // src/memory/state-machine.ts
 var LOW_BLAST = /* @__PURE__ */ new Set(["read-only", "local-reversible"]);
@@ -15564,7 +16069,7 @@ function requiresReverifyBeforeUse(item) {
 
 // src/memory/content-frame.ts
 function newNonce() {
-  return randomBytes6(16).toString("hex");
+  return randomBytes5(16).toString("hex");
 }
 var FENCE_RUN = /[=\-~`*_‐‑‒–—―−─-╿]{3,}/gu;
 function breakFenceRuns(s) {
@@ -15587,12 +16092,16 @@ function normalizeRecordContent(s, maxChars) {
   return out;
 }
 var UNADOPTED_LEDGER_NOTE = "(an unadopted project memory file is present and excluded from results; adoption requires explicit user approval)";
-var ALIASED_LEDGER_NOTE = "(this project's memory file resolves to another adopted project's memory file, or through a path Helix cannot resolve, and is excluded from results)";
+var ALIASED_LEDGER_NOTE = "(this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, or through a path Helix cannot resolve, and is excluded from results)";
+var UNUSABLE_LEDGER_NOTE = "(this project's memory file cannot be used as it is: it is not a regular file or cannot be opened, a folder on its way cannot be read or is not a directory, its .helix folder is a link or is not a directory, it is a link into a folder that does not exist, or it is a link to a file that does not hold Helix memory records; project memory is off here)";
 var ANCESTOR_UNADOPTED_NOTE = "(a parent directory holds a Helix project that is not adopted; project memory is off for this session and that project's contents are excluded from results; adoption requires explicit user approval; storing a fact in global memory makes it visible in every project, and that choice belongs to the user)";
 var WITNESS_MISMATCH_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; elevated grades are clamped to Fresh until an authorized re-baseline)";
 var WITNESS_MISMATCH_ASOF_NOTE = "(rollback witness mismatch: this ledger does not descend from its witnessed head; this as-of view preserves the reconstructed historical grades present in the available bytes, which may omit later corrections and are not a current-authority verdict)";
 var WITNESS_TRANSITION_NOTE = "(a ledger rewrite for this scope was interrupted; its records are excluded until the transition is re-driven or re-baselined)";
 var WITNESS_INIT_NOTE = "(rollback witness: this memory scope has no verified baseline, so a rollback of its current contents would go undetected; the next write records them as the baseline)";
+var WITNESS_FILE_UNUSABLE_NOTE = "(the rollback-witness file exists but cannot be read or parsed, or a link stands at its name, so grades cannot be checked against it: elevated grades are shown as Fresh and nothing can be stored until the user restores or resets that file)";
+var WITNESS_PATH_UNRESOLVABLE_NOTE = "(the rollback-witness file's path cannot be resolved, so nothing can be stored, erased or re-graded until that path is repaired: existing records are shown, and their grades are checked against that file as it stands)";
+var GLOBAL_LEDGER_READ_ONLY_NOTE = "(the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), so global memory is read-only: records that can be read through that path are shown, and nothing can be stored, erased or re-graded there until the path is repaired; while the path is broken, a rollback witness mismatch note for global memory can come from the broken path and not from a rollback)";
 function witnessNoteFor(verdict) {
   switch (verdict.kind) {
     case "mismatch":
@@ -15608,15 +16117,25 @@ function witnessNoteFor(verdict) {
 function asOfWitnessNotes(notes) {
   return notes.map((n) => n === WITNESS_MISMATCH_NOTE ? WITNESS_MISMATCH_ASOF_NOTE : n);
 }
-function collectWitnessNotes(verdicts) {
+function collectWitnessReadNotes(reads, opts = {}) {
   const seen = /* @__PURE__ */ new Set();
   const out = [];
-  for (const v of verdicts) {
-    const note = witnessNoteFor(v);
+  const add = (note) => {
     if (note !== null && !seen.has(note)) {
       seen.add(note);
       out.push(note);
     }
+  };
+  for (const r of reads) {
+    if (r.witnessFile === "unusable") {
+      if (!opts.asOf) add(WITNESS_FILE_UNUSABLE_NOTE);
+      continue;
+    }
+    if (r.witnessFile === "as-given") {
+      if (!opts.asOf) add(WITNESS_PATH_UNRESOLVABLE_NOTE);
+      if (r.verdict.kind === "first-contact") continue;
+    }
+    add(witnessNoteFor(r.verdict));
   }
   return out;
 }
@@ -15881,21 +16400,21 @@ function selectWriteRedactions(content, spans) {
 }
 
 // src/memory/reality-check.ts
-import { existsSync as existsSync3, openSync as openSync5, fstatSync as fstatSync3, readSync as readSync3, closeSync as closeSync5, constants as constants2 } from "node:fs";
+import { existsSync as existsSync3, openSync as openSync6, fstatSync as fstatSync5, readSync as readSync4, closeSync as closeSync6, constants as constants5 } from "node:fs";
 var INDETERMINATE = { ran: false, indeterminate: true, passed: false };
 var MAX_FILE_BYTES = 5e6;
 function containsBounded(path, pattern) {
   let fd = null;
   try {
-    fd = openSync5(path, constants2.O_RDONLY | constants2.O_NONBLOCK);
-    const st = fstatSync3(fd);
+    fd = openSync6(path, constants5.O_RDONLY | constants5.O_NONBLOCK);
+    const st = fstatSync5(fd);
     if (!st.isFile()) return INDETERMINATE;
     if (st.size > MAX_FILE_BYTES) return INDETERMINATE;
     const cap = Math.min(st.size, MAX_FILE_BYTES) + 1;
     const buf = Buffer.alloc(cap);
     let len = 0;
     for (; ; ) {
-      const n = readSync3(fd, buf, len, cap - len, null);
+      const n = readSync4(fd, buf, len, cap - len, null);
       if (n === 0) break;
       len += n;
       if (len === cap) return INDETERMINATE;
@@ -15904,7 +16423,7 @@ function containsBounded(path, pattern) {
   } finally {
     if (fd !== null) {
       try {
-        closeSync5(fd);
+        closeSync6(fd);
       } catch {
       }
     }
@@ -15947,7 +16466,7 @@ function checkBinding(content, check2, classification) {
 }
 
 // src/memory/expansion.ts
-import { readFileSync as readFileSync6 } from "node:fs";
+import { readFileSync as readFileSync4 } from "node:fs";
 import { fileURLToPath } from "node:url";
 var EXP_THETA = 0.5;
 var EXP_K = 8;
@@ -15979,7 +16498,7 @@ function defaultExpansion() {
   let txt;
   for (const u of candidates) {
     try {
-      txt = readFileSync6(fileURLToPath(u), "utf8");
+      txt = readFileSync4(fileURLToPath(u), "utf8");
       break;
     } catch {
     }
@@ -15994,6 +16513,442 @@ function defaultExpansion() {
     cached2 = void 0;
   }
   return cached2 ?? void 0;
+}
+
+// src/memory/ownership.ts
+import { randomBytes as randomBytes6 } from "node:crypto";
+import { mkdirSync as mkdirSync4, readFileSync as readFileSync5, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync6, fstatSync as fstatSync6, fchmodSync as fchmodSync2, openSync as openSync7, readSync as readSync5, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync7, constants as constants6 } from "node:fs";
+import { join as join8, resolve as resolve2, dirname as dirname8, basename as basename5, isAbsolute as isAbsolute2 } from "node:path";
+function isReviewableRoot(projectRoot) {
+  return isAbsolute2(projectRoot);
+}
+function projectLedgerPath(projectRoot) {
+  return join8(projectRoot, ".helix", "memory.jsonl");
+}
+var GLOBAL_KEY = "@global";
+function registryPath(home2) {
+  return join8(home2, "projects.json");
+}
+function ownerFile(projectRoot) {
+  return join8(projectRoot, ".helix", ".owner");
+}
+function isPlainObject2(x) {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+function isValidRegistry(x) {
+  if (!isPlainObject2(x)) return false;
+  for (const v of Object.values(x)) {
+    if (!isPlainObject2(v)) return false;
+    if (typeof v.stamp !== "string" || typeof v.adoptedAt !== "string" || typeof v.macNonce !== "string") return false;
+    if (v.trustState !== void 0 && v.trustState !== "active" && v.trustState !== "pending") return false;
+  }
+  return true;
+}
+function loadRegistry(home2) {
+  const path = registryPath(home2);
+  let st;
+  try {
+    st = lstatSync6(path);
+  } catch (e) {
+    return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
+  }
+  if (st.isSymbolicLink()) return { kind: "corrupt" };
+  let text;
+  try {
+    text = readFileSync5(path, "utf8");
+  } catch {
+    return { kind: "corrupt" };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { kind: "corrupt" };
+  }
+  if (!isValidRegistry(parsed)) return { kind: "corrupt" };
+  return { kind: "ok", reg: parsed };
+}
+function readRegistry(home2) {
+  const r = loadRegistry(home2);
+  return r.kind === "ok" ? r.reg : {};
+}
+function assertNotSymlink(path, what) {
+  let st;
+  try {
+    st = lstatSync6(path);
+  } catch {
+    return;
+  }
+  if (st.isSymbolicLink()) throw new Error(`refusing to write through a symlinked ${what}: ${path}`);
+}
+function writeAll2(fd, data) {
+  const buf = typeof data === "string" ? Buffer.from(data, "utf8") : data;
+  for (let off = 0; off < buf.length; ) off += writeSync2(fd, buf, off, buf.length - off);
+}
+function atomicWriteFile(path, data, mode, exactMode = false, onReplaced) {
+  const tmp = `${path}.${randomBytes6(8).toString("hex")}.tmp`;
+  const fd = openSync7(tmp, "wx", mode);
+  try {
+    if (exactMode) fchmodSync2(fd, mode);
+    writeAll2(fd, data);
+    fsyncSync3(fd);
+  } catch (e) {
+    try {
+      unlinkSync4(tmp);
+    } catch {
+    }
+    throw e;
+  } finally {
+    closeSync7(fd);
+  }
+  try {
+    renameSync2(tmp, path);
+  } catch (e) {
+    try {
+      unlinkSync4(tmp);
+    } catch {
+    }
+    throw e;
+  }
+  onReplaced?.();
+  fsyncDir(dirname8(path));
+}
+function atomicWriteRegistry(home2, reg) {
+  const path = registryPath(home2);
+  assertNotSymlink(path, "registry");
+  atomicWriteFile(path, JSON.stringify(reg, null, 2), 384);
+}
+function atomicWriteOwner(projectRoot, stamp, ownerDir, onReplaced) {
+  try {
+    atomicWriteFile(ownerPlace(projectRoot, ownerDir), stamp, 384, false, onReplaced);
+  } catch (e) {
+    throw ownerDir === void 0 ? e : unbindError(e, ownerDir);
+  }
+}
+function readOwner(projectRoot, ownerDir) {
+  const path = ownerPlace(projectRoot, ownerDir);
+  try {
+    if (!viaDescriptor(ownerDir) && lstatSync6(dirname8(path)).isSymbolicLink()) return null;
+    const st = lstatSync6(path);
+    if (!st.isFile()) return null;
+    if (st.nlink > 1) return null;
+    return readFileSync5(path, "utf8").trim();
+  } catch {
+    return null;
+  }
+}
+function isOwned(projectRoot, home2) {
+  const entry = readRegistry(home2)[canonicalRoot(projectRoot)];
+  if (!entry) return false;
+  const stamp = readOwner(projectRoot);
+  return stamp !== null && stamp === entry.stamp;
+}
+function isHelixDirLinked(projectRoot) {
+  try {
+    return lstatSync6(join8(projectRoot, ".helix")).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+function ownerPlace(projectRoot, ownerDir) {
+  return ownerDir === void 0 ? ownerFile(projectRoot) : boundPath(ownerDir, ".owner");
+}
+function viaDescriptor(ownerDir) {
+  return ownerDir !== void 0 && ownerDir.fd !== null;
+}
+function openOwnerDir(projectRoot, judged, fsOps = realFsOps) {
+  if (isHelixDirLinked(projectRoot)) return { kind: "changed" };
+  const r = resolvePath(join8(projectRoot, ".helix"));
+  if (r.kind !== "resolved" || r.dirMissing) return { kind: "changed" };
+  const identity = judged.destination !== void 0 && judged.dirIdentity !== void 0 && dirname8(judged.destination) === r.path ? judged.dirIdentity : sampleDirIdentity(r.path);
+  return openJudgedDir(r.path, identity, fsOps);
+}
+function ownerBeforeOf(projectRoot, ownerDir) {
+  let fd;
+  try {
+    fd = openSync7(ownerPlace(projectRoot, ownerDir), constants6.O_RDONLY | constants6.O_NOFOLLOW | constants6.O_NONBLOCK);
+  } catch {
+    return null;
+  }
+  try {
+    const st = fstatSync6(fd);
+    if (!st.isFile() || st.nlink !== 1) return null;
+    const buf = Buffer.alloc(st.size);
+    let len = 0;
+    while (len < buf.length) {
+      const n = readSync5(fd, buf, len, buf.length - len, len);
+      if (n === 0) break;
+      len += n;
+    }
+    return { bytes: len === buf.length ? buf : buf.subarray(0, len), mode: st.mode & 511 };
+  } catch {
+    return null;
+  } finally {
+    closeSync7(fd);
+  }
+}
+var OWNER_UNREACHABLE = /* @__PURE__ */ new Set(["ENOENT", "ENOTDIR", "ELOOP", "EACCES"]);
+var sameEntry = (a, b) => a !== void 0 && a.stamp === b.stamp && a.adoptedAt === b.adoptedAt && a.macNonce === b.macNonce && a.trustState === b.trustState;
+function restoreOwnership(projectRoot, home2, snap, ownerDir) {
+  try {
+    putOwnershipBack(projectRoot, home2, snap, ownerDir);
+  } catch (e) {
+    throw ownerDir === void 0 ? e : unbindError(e, ownerDir);
+  }
+}
+function putOwnershipBack(projectRoot, home2, snap, ownerDir) {
+  withFileLock(registryPath(home2), () => {
+    const loaded = loadRegistry(home2);
+    if (loaded.kind === "corrupt") throw new Error("restoreOwnership: the registry cannot be read");
+    const reg = loaded.kind === "ok" ? loaded.reg : {};
+    const now = reg[snap.key];
+    const entryIsCalls = sameEntry(now, snap.entryWritten);
+    const entryIsBefore = snap.entryBefore === null ? now === void 0 : sameEntry(now, snap.entryBefore);
+    if (!entryIsCalls && !entryIsBefore) throw new Error("restoreOwnership: the registry entry is not the one this call recorded");
+    const path = ownerPlace(projectRoot, ownerDir);
+    let st = null;
+    try {
+      st = lstatSync6(path);
+    } catch (e) {
+      if (!OWNER_UNREACHABLE.has(e.code ?? "")) throw e;
+    }
+    const beforeIsCalls = snap.ownerBefore !== null && snap.ownerBefore.bytes.toString("utf8") === snap.entryWritten.stamp;
+    const callsOwnerStands = st !== null && st.isFile() && st.nlink === 1 && readFileSync5(path, "utf8") === snap.entryWritten.stamp;
+    if (callsOwnerStands && !beforeIsCalls) {
+      if (snap.ownerBefore !== null) atomicWriteFile(path, snap.ownerBefore.bytes, snap.ownerBefore.mode, true);
+      else {
+        unlinkSync4(path);
+        fsyncDir(dirname8(path));
+      }
+    } else if (snap.ownerWritten && !beforeIsCalls && snap.entryBefore !== null) {
+      throw new Error("restoreOwnership: the .owner this call wrote is not what stands at its name");
+    }
+    if (entryIsCalls && !entryIsBefore) {
+      if (snap.entryBefore === null) delete reg[snap.key];
+      else reg[snap.key] = snap.entryBefore;
+      if (snap.registryFile === "absent" && Object.keys(reg).length === 0) {
+        assertNotSymlink(registryPath(home2), "registry");
+        unlinkSync4(registryPath(home2));
+        fsyncDir(home2);
+      } else {
+        atomicWriteRegistry(home2, reg);
+      }
+    }
+  });
+}
+var under2 = (dir, name) => dir === "/" ? `/${name}` : `${dir}/${name}`;
+function withinDir(dir, path) {
+  return path === dir || path.startsWith(dir === "/" ? "/" : `${dir}/`);
+}
+function standingAt(path) {
+  try {
+    const st = lstatSync6(path, { bigint: true });
+    return { dev: st.dev, ino: st.ino, regular: st.isFile(), nlink: st.nlink };
+  } catch (e) {
+    return e.code === "ENOENT" ? null : "error";
+  }
+}
+function compareWith(dest, targetPath) {
+  const t = resolvePath(targetPath);
+  const named = t.kind === "resolved";
+  if (t.kind === "resolved" && t.path === dest.path) return { same: true, named };
+  if (dest.id === null) return { same: false, named };
+  try {
+    return { same: sameFile(dest.id, fileIdentityAt(t.kind === "resolved" ? t.path : targetPath, { follow: t.kind !== "resolved" })), named };
+  } catch {
+    return { same: false, named };
+  }
+}
+var CONTENT_KIND_CACHE_MAX = 64;
+var CONTENT_KIND_SETTLED_NS = 2000000000n;
+var contentKindCache = /* @__PURE__ */ new Map();
+function contentKindOfOpenFile(fd, fresh) {
+  if (fresh) return ledgerContentKindOfFd(fd);
+  const before = fstatSync6(fd, { bigint: true });
+  if (before.ino === 0n) return ledgerContentKindOfFd(fd);
+  const key = `${before.dev}:${before.ino}`;
+  const hit = contentKindCache.get(key);
+  if (hit !== void 0 && hit.size === before.size && hit.mtimeNs === before.mtimeNs && hit.ctimeNs === before.ctimeNs) return hit.kind;
+  contentKindCache.delete(key);
+  const kind = ledgerContentKindOfFd(fd);
+  const after = fstatSync6(fd, { bigint: true });
+  const newest = after.mtimeNs > after.ctimeNs ? after.mtimeNs : after.ctimeNs;
+  const unchanged = after.size === before.size && after.mtimeNs === before.mtimeNs && after.ctimeNs === before.ctimeNs;
+  if (unchanged && BigInt(Date.now()) * 1000000n - newest > CONTENT_KIND_SETTLED_NS) {
+    if (contentKindCache.size >= CONTENT_KIND_CACHE_MAX) contentKindCache.clear();
+    contentKindCache.set(key, { size: after.size, mtimeNs: after.mtimeNs, ctimeNs: after.ctimeNs, kind });
+  }
+  return kind;
+}
+function openedVerdict(path, readContent, fresh) {
+  let fd;
+  try {
+    fd = openSync7(path, constants6.O_RDONLY | constants6.O_NOFOLLOW | constants6.O_NONBLOCK);
+  } catch {
+    return "unreadable";
+  }
+  try {
+    if (!fstatSync6(fd).isFile()) return "not-regular";
+    if (!readContent) return "ok";
+    try {
+      return contentKindOfOpenFile(fd, fresh) === "other" ? "not-ledger-content" : "ok";
+    } catch {
+      return "unreadable";
+    }
+  } finally {
+    closeSync7(fd);
+  }
+}
+function isGlobalLedgerEntry(projectLedger, globalLedger2) {
+  if (basename5(projectLedger) !== basename5(globalLedger2)) return false;
+  if (projectLedger !== globalLedger2) {
+    const da = resolvePath(dirname8(projectLedger)), db = resolvePath(dirname8(globalLedger2));
+    if (da.kind !== "resolved" || db.kind !== "resolved" || da.path !== db.path) return false;
+  }
+  try {
+    return !lstatSync6(projectLedger).isSymbolicLink();
+  } catch {
+    return true;
+  }
+}
+function judgeProjectLayer(project2, opts = {}) {
+  try {
+    return judge(project2, opts.forAdopt === true, opts.freshContent === true);
+  } catch {
+    return { state: "unusable", row: "5", cause: "uninspectable" };
+  }
+}
+function judge(project2, forAdopt, freshContent) {
+  if (!project2) return { state: "inactive", row: "1" };
+  const owned = isOwned(project2.root, project2.home);
+  if (project2.origin === "ancestor" && !owned && !forAdopt) return { state: "ancestor-unadopted", row: "2" };
+  let helix = null;
+  try {
+    helix = lstatSync6(join8(project2.root, ".helix"));
+  } catch {
+  }
+  if (helix !== null && !helix.isDirectory()) return { state: "unusable", row: "3", cause: "helix-not-directory" };
+  const dest = resolvePath(project2.ledger);
+  const root = resolvePath(resolve2(project2.root));
+  if (dest.kind === "unresolvable" || root.kind === "unresolvable") return { state: "aliased", row: "4", cause: "unresolvable" };
+  if (dest.kind === "uninspectable" || root.kind === "uninspectable") return { state: "unusable", row: "5", cause: "uninspectable" };
+  const destination = dest.path;
+  if (!withinDir(root.path, destination)) return { state: "aliased", row: "6", cause: "outside-root", destination };
+  const id = standingAt(destination);
+  if (id === "error") return { state: "unusable", row: "9", cause: "unreadable", destination };
+  let memoryPathIsLink = false;
+  try {
+    memoryPathIsLink = lstatSync6(project2.ledger).isSymbolicLink();
+  } catch {
+  }
+  const isOwnPath = destination === under2(root.path, ".helix/memory.jsonl");
+  const g = compareWith({ path: destination, id }, project2.globalLedger);
+  if (g.same) return { state: "aliased", row: "7", cause: "global-ledger", destination };
+  if (!isOwnPath) {
+    if (!g.named && memoryPathIsLink) return { state: "aliased", row: "7", cause: "unjudgeable-target", destination };
+    const home2 = resolvePath(project2.home);
+    if (home2.kind === "resolved" && withinDir(home2.path, destination)) return { state: "aliased", row: "7", cause: "home-directory", destination };
+    const ownKey = canonicalRoot(project2.root);
+    for (const key of Object.keys(readRegistry(project2.home))) {
+      if (key === GLOBAL_KEY || key === ownKey) continue;
+      const ledgerOfKey = projectLedgerPath(key);
+      const c = compareWith({ path: destination, id }, ledgerOfKey);
+      if (c.same) return { state: "aliased", row: "7", cause: "other-project", destination };
+      if (!c.named) {
+        const r = resolvePath(key);
+        if (withinDir(r.kind === "resolved" ? r.path : key, destination)) return { state: "aliased", row: "7", cause: "unjudgeable-target", destination };
+      }
+    }
+  }
+  if (id !== null) {
+    if (id.regular && id.nlink !== 1n) return { state: "aliased", row: "8", cause: "hard-link", destination };
+    if (!id.regular) return { state: "unusable", row: "9", cause: "not-regular", destination };
+    const opened = openedVerdict(destination, memoryPathIsLink, freshContent);
+    if (opened === "not-ledger-content") return { state: "unusable", row: "9a", cause: opened, destination };
+    if (opened !== "ok") return { state: "unusable", row: "9", cause: opened, destination };
+  } else if (memoryPathIsLink && dest.dirMissing) {
+    return { state: "unusable", row: "10", cause: "target-directory-missing", destination };
+  }
+  const identity = id === null ? null : { dev: id.dev, ino: id.ino };
+  const dirIdentity = sampleDirIdentity(dirname8(destination));
+  if (owned) return { state: "owned", row: "11", destination, identity, dirIdentity };
+  if (id !== null) return { state: "unadopted-present", row: "12", destination, identity, dirIdentity };
+  return { state: "inactive", row: "13", destination, identity, dirIdentity };
+}
+function startupScanDecision(project2, home2, globalLedger2) {
+  const j = judgeProjectLayer({ root: project2.root, ledger: project2.ledger, home: home2, globalLedger: globalLedger2, origin: project2.origin });
+  return {
+    read: j.state === "owned" || j.state === "unadopted-present" || j.state === "inactive",
+    notRegular: j.state === "unusable" && j.cause === "not-regular"
+  };
+}
+function stampOwnership(projectRoot, home2, opts = {}) {
+  const gen = opts.genStamp ?? (() => randomBytes6(16).toString("hex"));
+  const key = canonicalRoot(projectRoot);
+  ensureHelixDir(home2);
+  withFileLock(registryPath(home2), () => {
+    const loaded = loadRegistry(home2);
+    if (loaded.kind === "corrupt")
+      throw new Error(`stampOwnership: registry at ${registryPath(home2)} is present but unparseable \u2014 restore it before adopting (refusing to overwrite and lose other projects)`);
+    const reg = loaded.kind === "ok" ? loaded.reg : {};
+    const existing = reg[key];
+    const priorOwner = readOwner(projectRoot, opts.ownerDir);
+    const ambiguousReadopt = existing !== void 0 && priorOwner !== existing.stamp;
+    const trustState = ambiguousReadopt ? "pending" : existing?.trustState ?? "active";
+    const stamp = existing?.stamp ?? gen();
+    const macNonce = existing?.macNonce ?? gen();
+    const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
+    if (!viaDescriptor(opts.ownerDir)) {
+      const helixDir = join8(projectRoot, ".helix");
+      assertNotSymlink(helixDir, ".helix directory");
+      mkdirSync4(helixDir, { recursive: true });
+    }
+    const written = { stamp, adoptedAt, macNonce, trustState };
+    const snap = {
+      key,
+      registryFile: loaded.kind === "ok" ? "present" : "absent",
+      entryBefore: existing === void 0 ? null : { ...existing },
+      ownerBefore: ownerBeforeOf(projectRoot, opts.ownerDir),
+      entryWritten: written,
+      ownerWritten: false
+    };
+    opts.capture?.(snap);
+    reg[key] = written;
+    atomicWriteRegistry(home2, reg);
+    atomicWriteOwner(projectRoot, stamp, opts.ownerDir, () => {
+      snap.ownerWritten = true;
+    });
+  });
+}
+function trustStateOf(projectRoot, home2) {
+  const entry = readRegistry(home2)[canonicalRoot(projectRoot)];
+  return entry?.trustState ?? "active";
+}
+function scopeNonce(projectRoot, home2) {
+  const entry = readRegistry(home2)[canonicalRoot(projectRoot)];
+  return entry?.macNonce ?? null;
+}
+function globalScopeNonce(home2) {
+  const r = loadRegistry(home2);
+  if (r.kind === "corrupt") return null;
+  const fast = r.kind === "ok" ? r.reg[GLOBAL_KEY]?.macNonce : void 0;
+  if (fast) return fast;
+  ensureHelixDir(home2);
+  try {
+    return withFileLock(registryPath(home2), () => {
+      const r2 = loadRegistry(home2);
+      if (r2.kind === "corrupt") return null;
+      const reg = r2.kind === "ok" ? r2.reg : {};
+      const existing = reg[GLOBAL_KEY]?.macNonce;
+      if (existing) return existing;
+      const macNonce = randomBytes6(16).toString("hex");
+      reg[GLOBAL_KEY] = { stamp: "", adoptedAt: (/* @__PURE__ */ new Date()).toISOString(), macNonce };
+      atomicWriteRegistry(home2, reg);
+      return macNonce;
+    });
+  } catch {
+    return null;
+  }
 }
 
 // src/memory/witness-read.ts
@@ -16025,10 +16980,10 @@ function witnessedRead(readWitness, readLedger, awaitRewriter) {
 function readLedgerWitnessed(path, home2, projectRoot) {
   const scopeKey = scopeKeyOf(home2, projectRoot);
   const { ledger, state, verdict } = witnessedRead(
-    () => readScopeWitness(home2, scopeKey),
+    () => readScopeWitness(home2, scopeKey, WITNESS_READ_AS_GIVEN),
     () => {
       const t0 = performance.now();
-      const r = readLedgerRaw(path);
+      const r = readLedgerRaw(path, projectRoot === void 0 ? GLOBAL_LEDGER_READ : void 0);
       return { ...r, parseMs: performance.now() - t0 };
     },
     () => awaitLedgerRewriter(path)
@@ -16039,25 +16994,27 @@ function readLedgerWitnessed(path, home2, projectRoot) {
     verdict,
     witnessIdentity: state.entry?.mac ?? "witness-absent",
     journalPending: state.journal !== null,
+    ...state.file !== void 0 ? { witnessFile: state.file } : {},
     parseMs: ledger.parseMs
   };
 }
-function readLedgerBytesWitnessed(path, home2, projectRoot) {
+function readLedgerBytesWitnessed(path, home2, projectRoot, opts = {}) {
   const scopeKey = scopeKeyOf(home2, projectRoot);
   const { ledger, state, verdict } = witnessedRead(
-    () => readScopeWitness(home2, scopeKey),
+    () => readScopeWitness(home2, scopeKey, WITNESS_READ_AS_GIVEN),
     () => {
       const t0 = performance.now();
-      const bytes = readLedgerBytes(path);
+      const bytes = readLedgerBytes(path, projectRoot === void 0 ? GLOBAL_LEDGER_READ : void 0);
       return { bytes, readMs: performance.now() - t0 };
     },
-    () => awaitLedgerRewriter(path)
+    opts.rewriterWait === false ? void 0 : () => awaitLedgerRewriter(path)
   );
   return {
     bytes: ledger.bytes,
     verdict,
     witnessIdentity: state.entry?.mac ?? "witness-absent",
     journalPending: state.journal !== null,
+    ...state.file !== void 0 ? { witnessFile: state.file } : {},
     readMs: ledger.readMs
   };
 }
@@ -16081,7 +17038,7 @@ function verifiedLiveOf(records, home2, projectRoot) {
 }
 function verifiedLiveStats(ledger, home2, projectRoot) {
   const t0 = performance.now();
-  const { bytes, records } = readLedgerRaw(ledger);
+  const { bytes, records } = readLedgerRaw(ledger, projectRoot === void 0 ? GLOBAL_LEDGER_READ : void 0);
   const t1 = performance.now();
   const projection = verifiedLiveOf(records, home2, projectRoot);
   const t2 = performance.now();
@@ -16107,6 +17064,7 @@ function verifiedLiveWitnessed(ledger, home2, projectRoot) {
     verdict: w.verdict,
     witnessIdentity: w.witnessIdentity,
     journalPending: w.journalPending,
+    ...w.witnessFile !== void 0 ? { witnessFile: w.witnessFile } : {},
     stats: {
       rows: w.records.length,
       liveRows: projection.live.size,
@@ -16140,11 +17098,72 @@ function keyVectorEqual(a, b) {
   return true;
 }
 
-// src/memory/scope-target.ts
-function aliasesGlobalLedger(projectLedger, globalLedger2) {
-  const project2 = ledgerDestination(projectLedger);
-  return project2 !== null && project2 === ledgerDestination(globalLedger2);
+// src/memory/global-ledger.ts
+import { lstatSync as lstatSync7, statSync as statSync5 } from "node:fs";
+import { dirname as dirname9 } from "node:path";
+var isLink = (p) => {
+  try {
+    return lstatSync7(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
+function danglingFolderLinkAbove(path) {
+  for (let dir = dirname9(path); dirname9(dir) !== dir; dir = dirname9(dir)) {
+    let link;
+    try {
+      link = lstatSync7(dir).isSymbolicLink();
+    } catch {
+      continue;
+    }
+    if (!link) continue;
+    try {
+      statSync5(dir);
+    } catch (e) {
+      return e.code === "ENOENT";
+    }
+  }
+  return false;
 }
+function globalLedgerWriteState(path) {
+  const r = resolvePath(path);
+  if (r.kind === "unresolvable") return { kind: "read-only", cause: "unresolvable" };
+  if (r.kind === "resolved" && r.dirMissing && (isLink(path) || danglingFolderLinkAbove(path))) {
+    return { kind: "read-only", cause: "target-directory-missing" };
+  }
+  return { kind: "writable" };
+}
+var isGlobalLedgerReadOnly = (path) => globalLedgerWriteState(path).kind === "read-only";
+var CAUSE = "the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist)";
+var TAIL = "Tell the user that the global memory path needs repair; do not repair it for them.";
+var refusal = (op) => `${op}: ${CAUSE} \u2014 nothing was written. ${TAIL}`;
+var GLOBAL_WRITE_REFUSAL = {
+  commit: refusal("commit"),
+  erase: refusal("erase"),
+  confirm: refusal("confirm"),
+  recheck: refusal("recheck"),
+  compaction: refusal("compaction")
+};
+var GlobalLedgerReadOnlyError = class extends Error {
+  constructor(op, readOnlyCause) {
+    super(GLOBAL_WRITE_REFUSAL[op]);
+    this.op = op;
+    this.readOnlyCause = readOnlyCause;
+    this.name = "GlobalLedgerReadOnlyError";
+  }
+  op;
+  readOnlyCause;
+  globalLedgerReadOnly = true;
+};
+var isGlobalLedgerReadOnlyError = (e) => e instanceof Error && e.globalLedgerReadOnly === true;
+var GLOBAL_READ_ONLY_STARTUP_LINE = "helix: NOTE - the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), so global memory is read-only: nothing can be stored, erased or re-graded there until the path is repaired";
+var GLOBAL_DESTINATION_CHANGED = {
+  commit: "commit: the global memory file changed while the write was in progress \u2014 nothing was written. Try the commit again; if it happens again, tell the user.",
+  erase: "erase: the global memory file changed while the erase was in progress \u2014 nothing was erased. Try the erase again; if it happens again, tell the user.",
+  confirm: "confirm: the global memory file changed while the confirmation was in progress \u2014 the grade was not changed. Try the confirmation again; if it happens again, tell the user.",
+  recheck: "recheck: the global memory file changed while the recheck was in progress \u2014 the grade was not changed. Try the recheck again; if it happens again, tell the user.",
+  compaction: "compaction: the global memory file changed while the rewrite was in progress \u2014 nothing was rewritten."
+};
 
 // src/limits.ts
 var MAX_COMMIT_CONTENT_CHARS = 16384;
@@ -16165,11 +17184,72 @@ var RECALL_APPENDIX_FUTURE_TOLERANCE_MS = 3e5;
 var RESPONSE_MAX_CHARS = 262144;
 
 // src/memory/store.ts
-var ALIASED_PROJECT_WRITE_REFUSAL = "commit: this project's memory file resolves to another adopted project's memory file, to the global memory file, or through a path Helix cannot resolve, so the project layer is disabled here \u2014 the write is refused rather than written into the other project's memory. Ask the user whether to store this fact in global memory, which every project sees, or to replace the link with the project's own file; do not choose for them.";
+var ALIASED_PROJECT_WRITE_REFUSAL = "commit: this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, or through a path Helix cannot resolve, so the project layer is disabled here \u2014 the write is refused rather than written somewhere else. Ask the user whether to store this fact in global memory, which every project sees, or to replace the link with the project's own file; do not choose for them.";
+var UNUSABLE_PROJECT_WRITE_REFUSAL = "commit: this project's memory file cannot be used as it is (it is not a regular file or cannot be opened, a folder on its way cannot be read or is not a directory, its .helix folder is a link or is not a directory, it is a link into a folder that does not exist, or it is a link to a file that does not hold Helix memory records), so the project layer is disabled here \u2014 nothing was written. Ask the user whether to store this fact in global memory, which every project sees, or to repair the project's memory file; do not choose for them.";
+var ERASE_ALIASED_REFUSAL = "erase: this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, or through a path Helix cannot resolve \u2014 the erase is refused rather than applied somewhere else.";
+var ERASE_UNUSABLE_REFUSAL = "erase: this project's memory file cannot be used as it is (it is not a regular file or cannot be opened, a folder on its way cannot be read or is not a directory, its .helix folder is a link or is not a directory, it is a link into a folder that does not exist, or it is a link to a file that does not hold Helix memory records) \u2014 nothing was erased.";
+var UNWRITABLE_PROJECT_WRITE_REFUSAL = "commit: this project's memory folder cannot be written (a read-only folder or file system), so nothing was written. Ask the user whether to store this fact in global memory, which every project sees, or to make that folder writable; do not choose for them.";
+var FOREIGN_FILE_REFUSAL = "commit: a project memory file exists here that Helix did not create \u2014 ask the user whether to adopt it (helix_memory_adopt) or to move it away; do not choose for them.";
+var FIRST_WRITE_FAILED_UNDONE = "commit: the first write to this project's memory file failed, so the project was not adopted and nothing was written. Ask the user whether to store this fact in global memory, which every project sees, or to look at the project's memory folder first; do not choose for them.";
+var FIRST_WRITE_FAILED_NOT_UNDONE = "commit: the first write to this project's memory file failed and the adoption recorded for it could not be undone, so the project may stay adopted, and a file at its memory path would then be read as its memory \u2014 nothing was written. Tell the user what happened; do not try to repair it for them.";
+var ERASE_NOT_ADOPTED = "erase: this project's memory is not adopted \u2014 ask the user whether to adopt it (helix_memory_adopt); do not choose for them.";
+var ALIASED_CAUSE = "this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, or through a path Helix cannot resolve";
+var UNUSABLE_CAUSE = "this project's memory file cannot be used as it is (it is not a regular file or cannot be opened, a folder on its way cannot be read or is not a directory, its .helix folder is a link or is not a directory, it is a link into a folder that does not exist, or it is a link to a file that does not hold Helix memory records)";
+var UNWRITABLE_CAUSE = "this project's memory folder cannot be written (a read-only folder or file system)";
+var ADOPT_REFUSAL = {
+  aliased: `adopt: ${ALIASED_CAUSE}, so the project layer is disabled here \u2014 nothing was adopted.`,
+  unusable: `adopt: ${UNUSABLE_CAUSE}, so the project layer is disabled here \u2014 nothing was adopted.`,
+  unwritable: `adopt: ${UNWRITABLE_CAUSE}, so nothing was adopted. Ask the user whether to make that folder writable; do not choose for them.`,
+  changed: "adopt: this project's memory file changed while the adoption was in progress \u2014 nothing was adopted. Try the adoption again; if it happens again, tell the user.",
+  notAdopted: `adopt: ${UNUSABLE_CAUSE}, so the project layer is disabled here \u2014 nothing was adopted.`
+};
+var ADOPT_NOT_LEDGER_CONTENT = "adopt: the file this project's memory path leads to holds content that is not Helix memory records \u2014 nothing was adopted. Ask the user which file this project's memory should be; do not choose for them.";
+var ADOPT_LOCK_BUSY_REFUSAL = "adopt: another write to this project's memory file did not finish while the adoption waited for its lock \u2014 nothing was adopted. Try the adoption again; if it happens again, tell the user.";
+var ADOPT_LOCK_UNIDENTIFIED_REFUSAL = "adopt: the lock beside this project's memory file has a holder Helix cannot identify or show to be gone (the lock file cannot be read or does not parse as a lock, its holder cannot be checked, or it is a lock folder left by an older version), so Helix does not remove it \u2014 nothing was adopted. Ask the user to look at that lock; do not remove it for them.";
+var ADOPT_RECORD_FAILED_UNDONE = "adopt: recording the adoption failed, so the project was not adopted and nothing was recorded. Tell the user what happened.";
+var ADOPT_RECORD_FAILED_NOT_UNDONE = "adopt: recording the adoption failed and could not be undone, so the project may be partly adopted. Tell the user what happened; do not try to repair it for them.";
+var PROJECT_WRITE_REFUSAL = {
+  commit: {
+    aliased: ALIASED_PROJECT_WRITE_REFUSAL,
+    unusable: UNUSABLE_PROJECT_WRITE_REFUSAL,
+    unwritable: UNWRITABLE_PROJECT_WRITE_REFUSAL,
+    changed: DESTINATION_CHANGED_REFUSAL,
+    notAdopted: FOREIGN_FILE_REFUSAL
+  },
+  erase: {
+    aliased: ERASE_ALIASED_REFUSAL,
+    unusable: ERASE_UNUSABLE_REFUSAL,
+    unwritable: `erase: ${UNWRITABLE_CAUSE}, so nothing was erased. Ask the user whether to make that folder writable; do not choose for them.`,
+    changed: "erase: this project's memory file changed while the erase was in progress \u2014 nothing was erased. Try the erase again; if it happens again, tell the user.",
+    notAdopted: ERASE_NOT_ADOPTED
+  },
+  confirm: {
+    aliased: `confirm: ${ALIASED_CAUSE} \u2014 the grade was not changed rather than recorded somewhere else.`,
+    unusable: `confirm: ${UNUSABLE_CAUSE} \u2014 the grade was not changed.`,
+    unwritable: `confirm: ${UNWRITABLE_CAUSE}, so the grade was not changed. Ask the user whether to make that folder writable; do not choose for them.`,
+    changed: "confirm: this project's memory file changed while the confirmation was in progress \u2014 the grade was not changed. Try the confirmation again; if it happens again, tell the user.",
+    notAdopted: "confirm: this project's memory is not adopted \u2014 the grade was not changed. Ask the user whether to adopt it (helix_memory_adopt); do not choose for them."
+  },
+  recheck: {
+    aliased: `recheck: ${ALIASED_CAUSE} \u2014 the grade was not changed rather than recorded somewhere else.`,
+    unusable: `recheck: ${UNUSABLE_CAUSE} \u2014 the grade was not changed.`,
+    unwritable: `recheck: ${UNWRITABLE_CAUSE}, so the grade was not changed. Ask the user whether to make that folder writable; do not choose for them.`,
+    changed: "recheck: this project's memory file changed while the recheck was in progress \u2014 the grade was not changed. Try the recheck again; if it happens again, tell the user.",
+    notAdopted: "recheck: this project's memory is not adopted \u2014 the grade was not changed. Ask the user whether to adopt it (helix_memory_adopt); do not choose for them."
+  },
+  compaction: {
+    aliased: `compaction: ${ALIASED_CAUSE} \u2014 nothing was rewritten.`,
+    unusable: `compaction: ${UNUSABLE_CAUSE} \u2014 nothing was rewritten.`,
+    unwritable: `compaction: ${UNWRITABLE_CAUSE}, so nothing was rewritten.`,
+    changed: "compaction: this project's memory file changed while the rewrite was in progress \u2014 nothing was rewritten.",
+    notAdopted: "compaction: this project's memory is not adopted \u2014 nothing was rewritten."
+  },
+  adopt: ADOPT_REFUSAL
+};
 var EraseRefusedError = class extends Error {
   eraseRefused = true;
-  constructor(message) {
-    super(message);
+  constructor(message, options) {
+    super(message, options);
     this.name = "EraseRefusedError";
   }
 };
@@ -16292,30 +17372,21 @@ var MemoryStore = class {
     if (!canCommit({ provenance: { source, sessionId: this.session() } })) {
       throw new Error("commit: missing provenance");
     }
+    if (input.scope === "global" || input.scope === void 0 && !this.opts.project) this.refuseReadOnlyGlobal("commit");
+    let first = null;
     if (input.scope !== "global" && this.opts.project) {
-      this.refuseAliasedProjectWrite(this.opts.project);
-      this.refuseUnadoptedParentWrite(this.opts.project);
+      first = this.judgeLayer({ freshContent: true });
+      this.refuseExcludedProjectWrite("commit", this.opts.project, first);
     }
     if (input.supersedes) {
       const targetLedger = this.ledgerOf(input.supersedes);
-      const target = this.verifiedOf(targetLedger).live.get(input.supersedes);
-      if (!target) throw new Error("commit: supersedes target not found (dead or unknown id)");
+      const target2 = this.verifiedOf(targetLedger).live.get(input.supersedes);
+      if (!target2) throw new Error("commit: supersedes target not found (dead or unknown id)");
       const writeLedger = input.scope === "global" || !this.opts.project ? this.global : this.opts.project.ledger;
       if (targetLedger !== writeLedger) {
         throw new Error("commit: cannot supersede across scopes (target lives in a different ledger)");
       }
-      const claimsHumanAuthor = isVerifyingSource(target.provenance.source);
-      const isVerified = target.state === "Verified";
-      if ((claimsHumanAuthor || isVerified) && !isVerifyingSource(source)) {
-        throw new Error(
-          "commit: refusing to supersede a human-authored or verified fact from a source that claims neither (user-relayed / agent-inference). This is an accident guard, not an authorization check \u2014 no field a commit carries is authenticated. Commit as source=user if you are authoring this, or reconcile via recall."
-        );
-      }
-      if (isVerified && input.supersedesDigest !== digestContent(target.content)) {
-        throw new Error(
-          "commit: supersedesDigest missing or stale. A verified fact may only be superseded by a caller that has read it \u2014 recall or inspect the target and echo its `contentDigest` back as `supersedesDigest`. Proof of read, not authorization: no field a commit carries is authenticated."
-        );
-      }
+      this.assertSupersedeAllowed(target2, input, source);
     }
     const ts = this.now();
     let content = input.content;
@@ -16346,53 +17417,95 @@ var MemoryStore = class {
       reverifyTrigger: null,
       classification
     };
-    const ledger = this.targetLedger(input.scope);
-    appendWitnessed(ledger, record2, this.homeDir(), this.scopeRootOf(ledger), "commit");
-    const out = { record: record2, scope: ledger === this.global ? "global" : "project" };
+    const target = this.targetLedger(input.scope);
+    if (target.project) {
+      if (first === null) throw new Error("commit: internal error \u2014 a project write without its judgement");
+      this.commitToProject(target.project, first, record2, input, source);
+    } else {
+      this.underGlobalLedgerLock("commit", ({ judged }) => {
+        if (input.supersedes) this.assertSupersedeTargetUnderLock(target.ledger, input, source);
+        appendWitnessedUnlocked(target.ledger, record2, this.homeDir(), void 0, "commit", "commit", judged);
+      });
+    }
+    const out = { record: record2, scope: target.ledger === this.global ? "global" : "project" };
     if (redactions) out.redactions = redactions;
     if (input.scope === "global" && this.opts.project) {
       const d = this.projectDisposition();
-      if (d === "ancestor-unadopted" || d === "aliased" || d === "unadopted-present") out.bypassedProject = d;
-      else if (d === "inactive" && this.preAdoptAliased(this.opts.project)) out.bypassedProject = "aliased";
+      if (d === "ancestor-unadopted" || d === "aliased" || d === "unusable" || d === "unadopted-present") out.bypassedProject = d;
     }
     return out;
   }
-  /** ALIAS-P2P (item 7, fix round 1): the single condition + message for refusing a project-routed
-   *  write on an owned layer whose ledger leads to ANOTHER adopted project's file — shared by
-   *  commit()'s early pre-check (fired before the supersede block ever calls ledgerOf, which used to
-   *  read through the alias) and by targetLedger()'s own routing below, so the two call sites can
-   *  never carry different wording or drift out of sync. Side-effect free: only isOwned /
-   *  aliasesAdoptedLedger reads, no ownership stamping — a write about to be refused must never first
-   *  claim or create a ledger. Throws iff aliased; otherwise returns without side effect. */
-  refuseAliasedProjectWrite(p) {
-    if (isOwned(p.root, this.homeDir()) && aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger })) {
-      throw new Error(ALIASED_PROJECT_WRITE_REFUSAL);
+  /** The source guard and the digest of a Verified target: two of the three checks a supersede commit makes on its target
+   *  (the first, that the target is live, is the caller's lookup). ONE function for the lock-free pre-check in
+   *  commitScoped and for the check made again under the ledger lock (design 4.3 step 6, D10), so the two can never carry
+   *  different rules or different texts. */
+  assertSupersedeAllowed(target, input, source) {
+    const claimsHumanAuthor = isVerifyingSource(target.provenance.source);
+    const isVerified = target.state === "Verified";
+    if ((claimsHumanAuthor || isVerified) && !isVerifyingSource(source)) {
+      throw new Error(
+        "commit: refusing to supersede a human-authored or verified fact from a source that claims neither (user-relayed / agent-inference). This is an accident guard, not an authorization check \u2014 no field a commit carries is authenticated. Commit as source=user if you are authoring this, or reconcile via recall."
+      );
+    }
+    if (isVerified && input.supersedesDigest !== digestContent(target.content)) {
+      throw new Error(
+        "commit: supersedesDigest missing or stale. A verified fact may only be superseded by a caller that has read it \u2014 recall or inspect the target and echo its `contentDigest` back as `supersedesDigest`. Proof of read, not authorization: no field a commit carries is authenticated."
+      );
     }
   }
-  /** Issue #1: a project layer found in a PARENT directory is used only once adopted, and nothing
-   *  claims it automatically — so a project-routed commit (omitted or explicit 'project' scope) below an
-   *  unadopted one is refused: never widened to the global ledger, never auto-adopted. Shared by
-   *  commitScoped()'s early check (before the supersede pre-check can read another ledger) and
-   *  targetLedger(), so no path reaches stampOwnership for a parent directory. Side-effect free. The
-   *  root is JSON-quoted so a newline or quote in a directory name cannot reshape the message. */
-  refuseUnadoptedParentWrite(p) {
-    if (p.origin === "ancestor" && !isOwned(p.root, this.homeDir())) {
+  /** Design 4.3 step 6 (D10, FN-24): the target of a supersede commit, checked AGAIN under the lock of the ledger the
+   *  commit is written to, in the place where step 3 judges again. The same three checks as lock-free and the same texts:
+   *  the target is live in this ledger, the source guard, the digest of a Verified target. Two supersede commits of one id
+   *  used to pass the lock-free look together and both were stored; the late one now finds its target dead here. Holds for
+   *  the global scope too. The read is the verified projection the pre-check uses, without the replay metric (one commit,
+   *  one metric). */
+  assertSupersedeTargetUnderLock(ledger, input, source) {
+    const target = verifiedLiveStats(ledger, this.homeDir(), this.scopeRootOf(ledger)).projection.live.get(input.supersedes);
+    if (!target) throw new Error("commit: supersedes target not found (dead or unknown id)");
+    this.assertSupersedeAllowed(target, input, source);
+  }
+  /** A fresh judgement of this store's project layer (ownership.ts judgeProjectLayer, the one rule). No project layer
+   *  gives row 1. `freshContent` is for a write: it reads the link target's content and never consults the memory. */
+  judgeLayer(opts = {}) {
+    const p = this.opts.project;
+    return judgeProjectLayer(p && { root: p.root, ledger: p.ledger, home: this.homeDir(), globalLedger: this.global, origin: p.origin }, opts);
+  }
+  /** The single condition + message for refusing a project-routed write on a layer the judgement excludes, shared by
+   *  commitScoped()'s early check (fired before the supersede block ever calls ledgerOf, which used to read through an
+   *  alias) and by commitToProject()'s critical section, so the two call sites can never carry different wording or drift
+   *  out of sync. 'aliased' and 'unusable' hold whether or not the project is adopted.
+   *
+   *  Issue #1: a project layer found in a PARENT directory is used only once adopted, and nothing claims it
+   *  automatically, so a project-routed commit (omitted or explicit 'project' scope) below an unadopted one is refused:
+   *  never widened to the global ledger, never auto-adopted, so no path reaches stampOwnership for a parent directory.
+   *  The root is JSON-quoted so a newline or quote in a directory name cannot reshape the message.
+   *
+   *  Side-effect free, no ownership stamping: a write about to be refused must never first claim or create a ledger.
+   *  Returns for every other state. `op` picks the text: 'aliased' and 'unusable' carry the operation's fixed text;
+   *  'ancestor-unadopted' keeps the issue-#1 text for a commit and is the not-adopted text of any other operation. */
+  refuseExcludedProjectWrite(op, p, j) {
+    if (j.state === "aliased") throw this.projectWriteRefusal(op, "aliased");
+    if (j.state === "unusable") throw this.projectWriteRefusal(op, "unusable");
+    if (j.state === "ancestor-unadopted") {
+      if (op !== "commit") throw this.projectWriteRefusal(op, "notAdopted");
       throw new Error(
         `commit: this session started below a Helix project at ${JSON.stringify(p.root)} that is not adopted, so project memory is off here \u2014 the write is refused rather than widened to the global ledger. Ask the user whether to adopt that project (helix_memory_adopt, projectRoot: that absolute path) or to store this fact in global memory, which every project sees; do not choose for them.`
       );
     }
   }
-  /** Δ4-37: the two alias rules as they apply to a project that is NOT adopted yet — its ledger leads
-   *  to the global ledger, to another registered project's ledger, or through a path Helix cannot
-   *  resolve. ONE predicate for targetLedger's pre-adopt refusal and for commitScoped's
-   *  bypassed-project disclosure (IT-M4), so the refusal and the notice cannot disagree about that
-   *  state. Side-effect free: registry and link reads only. */
-  preAdoptAliased(p) {
-    return aliasesGlobalLedger(p.ledger, this.global) || aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger });
+  /** A refusal of a project write, as the operation raises it. An erase refusal is the typed pre-write refusal the erase
+   *  handler audits as 'rejected' (nothing was written). A changed destination is the ledger layer's typed error for every
+   *  other operation, so the commit's catch in firstProjectWrite keeps recognising it. */
+  projectWriteRefusal(op, kind, cause) {
+    const text = PROJECT_WRITE_REFUSAL[op][kind];
+    const options = cause === void 0 ? void 0 : { cause };
+    if (op === "erase") return new EraseRefusedError(text, options);
+    if (kind === "changed") return new LedgerDestinationChangedError(text);
+    return new Error(text, options);
   }
-  /** Resolve the ledger to write to. Project scope claims ownership on first use and refuses a
-   *  pre-existing unowned (foreign) ledger. With no project layer active, an OMITTED scope falls
-   *  back to global — the contextual default — while an EXPLICIT 'project' is REFUSED rather than
+  /** Resolve the ledger to write to, and the project layer when it is a project's. The routing only: the judgement, the
+   *  ownership claim and the foreign-file refusal moved into commitToProject. With no project layer active, an OMITTED
+   *  scope falls back to global — the contextual default — while an EXPLICIT 'project' is REFUSED rather than
    *  silently widened; see the argument on that branch below. */
   targetLedger(scope) {
     const p = this.opts.project;
@@ -16401,50 +17514,261 @@ var MemoryStore = class {
         "commit: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started in or below a directory holding a .helix folder). Omit `scope` to use the contextual default, or create a .helix folder at the project root and start a new session there to turn project memory on \u2014 the write is refused rather than silently widened to the global ledger."
       );
     }
-    if (scope === "global" || !p) return this.global;
-    this.refuseAliasedProjectWrite(p);
-    this.refuseUnadoptedParentWrite(p);
-    if (!isOwned(p.root, this.homeDir())) {
-      if (existsSync4(p.ledger)) {
-        throw new Error(
-          "commit: a project memory file exists here that Helix did not create \u2014 adopt it explicitly (helix_memory_adopt) or remove it"
-        );
+    if (scope === "global" || !p) return { ledger: this.global };
+    return { ledger: p.ledger, project: p };
+  }
+  /** THE critical section of a write to a project (design 4.3 steps 1 to 3), for every operation of `ProjectWriteOp`, adopt
+   *  included (design 4.4). `first` is the caller's lock-free judgement (step 1); it is refused here again, so no
+   *  caller can come in with an excluded layer.
+   *
+   *  What the operation changes: the texts (`projectWriteRefusal`), the name in the witness refusal (`op` is the tool's
+   *  name: commit, erase, confirm, recheck, adopt), whether the layer must be owned (every operation but the commit and the
+   *  adopt; FW-R13: asked in front of the lock and again under it, so a project that stopped being owned is refused with the
+   *  operation's not-adopted text), whether the memory folder is created when it is missing (the commit and the adopt), and
+   *  whether the judgement skips row 2 for a project found in a parent directory (the adopt). The compaction asks
+   *  no witness question in front of the lock: it is best effort and its own gate refuses an unusable file.
+   *
+   *  In front of the lock: the witness file must be usable (design 4.8 item 2; asked before the home is validated or
+   *  tightened and before a lock file is published in the project: FW-R10); the home is validated; a `.helix` that
+   *  became a link is refused (row 3's condition, row 3's fixed text); and a memory folder that is missing is created
+   *  when the memory path is no link (design 4.2, line 110: row 10 refuses a link whose folder is missing, so only a plain
+   *  `.helix/memory.jsonl` reaches the mkdir). The judgement used for the append is taken after the folder exists:
+   *  row 13 with no folder has `dirIdentity === null`, which the held-directory append refuses (A6).
+   *
+   *  Step 2: the ledger lock of the resolved destination. A lock file that cannot be PUBLISHED because the folder refuses
+   *  the write gets the operation's `unwritable` text (13.3 decision 5); an error raised inside the held section (the
+   *  registry's or the key's lock, a home that cannot be written) is never converted: `held` tells the two apart.
+   *  Step 3: under the lock the layer is judged again with the content read afresh; 'aliased', 'unusable' and
+   *  'ancestor-unadopted' get their refusal; a judgement that passes with another destination than step 1's, or than the
+   *  one the lock stands beside (ctx.path), is the changed-destination refusal: the path that was locked is not the path
+   *  that would be written. A lock timeout, a foreign lock object, a lost `/proc` and an unusable witness file pass through
+   *  unconverted: each keeps its own text. One exception: the adopt's wait for this lock that ran out of its budget gets a
+   *  fixed text without the lock path, chosen by the timeout's cause (14 decision 8, t-07; 14 item 19): another writer
+   *  ('payload', 'vanished', or a mark with no cause) the busy text, a folder that went away ('no-directory') the adopt
+   *  row's `changed` text (a retry creates the folder again), a lock Helix cannot identify ('unreadable', 'unparseable',
+   *  'legacy-dir') the unidentified-lock text.
+   *
+   *  A folder this call created is removed again when the call is refused (FW-R6): the lock-free look found none, the
+   *  call made it, and a refused call must not leave an empty `.helix` that the next start would find as a project layer.
+   *  It stays when something was put in it (a lock file of a release that could not be proved, an `.owner` the restore
+   *  could not take away) and when the row is stored.
+   *
+   *  Lock order: this ledger lock first; the body takes the registry lock, the key lock (a first mint) and the witness lock
+   *  under it and never another ledger lock. */
+  underProjectLedgerLock(p, op, first, body) {
+    const home2 = this.homeDir();
+    this.refuseExcludedProjectWrite(op, p, first);
+    if (first.destination === void 0) throw this.projectWriteRefusal(op, "unusable");
+    if (op !== "commit" && op !== "adopt" && first.state !== "owned") throw this.projectWriteRefusal(op, "notAdopted");
+    if (op !== "compaction") assertWitnessWritable(home2, op, { homeUnchecked: true });
+    ensureHelixDir(home2);
+    if (isHelixDirLinked(p.root)) throw this.projectWriteRefusal(op, "unusable");
+    const folder = dirname10(p.ledger);
+    let madeFolder = false;
+    if (op === "commit" || op === "adopt") {
+      let folderThere = true;
+      try {
+        lstatSync8(folder);
+      } catch (e) {
+        folderThere = e.code !== "ENOENT";
       }
-      if (this.preAdoptAliased(p)) throw new Error(ALIASED_PROJECT_WRITE_REFUSAL);
-      stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });
+      if (!folderThere) {
+        mkdirSync5(folder, { recursive: true });
+        madeFolder = true;
+      }
     }
-    return p.ledger;
+    let held = false;
+    try {
+      return withFileLock(p.ledger, (ctx) => {
+        held = true;
+        const j = this.judgeLayer(op === "adopt" ? { forAdopt: true, freshContent: true } : { freshContent: true });
+        this.refuseExcludedProjectWrite(op, p, j);
+        if (j.destination === void 0 || j.destination !== first.destination || ctx.path !== j.destination) throw this.projectWriteRefusal(op, "changed");
+        if (op !== "commit" && op !== "adopt" && j.state !== "owned") throw this.projectWriteRefusal(op, "notAdopted");
+        return body({ ctx, judgement: j, judged: { path: j.destination, identity: j.identity ?? null, dir: j.dirIdentity } });
+      });
+    } catch (e) {
+      if (madeFolder && !isRecordStoredError(e)) {
+        try {
+          rmdirSync(folder);
+        } catch {
+        }
+      }
+      if (!held && op === "adopt" && isLockTimeoutError(e)) {
+        const cause = lockTimeoutCauseOf(e);
+        if (cause === "no-directory") throw this.projectWriteRefusal("adopt", "changed", e);
+        if (cause === "unreadable" || cause === "unparseable" || cause === "legacy-dir") throw new Error(ADOPT_LOCK_UNIDENTIFIED_REFUSAL, { cause: e });
+        throw new Error(ADOPT_LOCK_BUSY_REFUSAL, { cause: e });
+      }
+      if (!held && isLockPublishRefusedError(e)) throw this.projectWriteRefusal(op, "unwritable", e);
+      if (op !== "commit" && isLedgerDestinationChangedError(e) && !isRecordStoredError(e) && e.message !== PROJECT_WRITE_REFUSAL[op].changed) throw this.projectWriteRefusal(op, "changed", e);
+      throw e;
+    }
+  }
+  /** Is the global ledger read-only (design 4.7: its path cannot be resolved, or it reaches a missing folder through a
+   *  link)? Asked afresh on every call: the state is the path's, and a path repaired in the middle of a session is
+   *  writable again at the next call. Side-effect free. */
+  globalReadOnly() {
+    return globalLedgerWriteState(this.global).kind === "read-only";
+  }
+  /** The typed pre-refusal of a write to a read-only global ledger, or nothing. It stands in front of every lock and of
+   *  everything the store writes to the home. */
+  refuseReadOnlyGlobal(op) {
+    const w = globalLedgerWriteState(this.global);
+    if (w.kind === "read-only") throw new GlobalLedgerReadOnlyError(op, w.cause);
+  }
+  /** Order item 3 (4.7, second table, "거부의 위치"): a confirm or recheck whose id names a row of the GLOBAL ledger is
+   *  refused while that ledger is read-only, before the target is looked up (the lookup reads the verified projection, and
+   *  the first read with a key present mints the global scope nonce into projects.json) and before the recheck's check
+   *  runs. The test is key-free: any row of the ledger, read through the path as given, that carries the id. An id that
+   *  is nowhere, or only in the project, goes on to the ordinary path. */
+  refuseReadOnlyGlobalTarget(id, op) {
+    if (!this.globalReadOnly()) return;
+    let carried = false;
+    try {
+      carried = parseLedger(this.global, GLOBAL_LEDGER_READ).some((r) => r.id === id);
+    } catch {
+    }
+    if (carried) this.refuseReadOnlyGlobal(op);
+  }
+  /** A read's out-of-frame notes with the read-only note in FRONT when it applies (design 4.7: recall, every inspect view,
+   *  and the SessionStart block). */
+  withGlobalNote(notes) {
+    return this.globalReadOnly() ? [GLOBAL_LEDGER_READ_ONLY_NOTE, ...notes] : notes;
+  }
+  /** THE inner function of every write to the GLOBAL ledger (design 4.7, the first table's first two rows and the second
+   *  table's row "거부의 위치"): the commit, the erase's tombstone, the two grade changes, the auto-compaction and the
+   *  permanent erase's rewrite. Five entry points used to reach the global ledger by four routes, each with its own steps
+   *  in front of the lock.
+   *    1. A read-only global ledger is refused with the operation's fixed text (GlobalLedgerReadOnlyError): before the
+   *       witness check, before ensureHelixDir may create the home or tighten its mode, before the ledger's folder is
+   *       created and before a lock is tried.
+   *    2. The witness file must be usable (4.8 item 2), asked in front of the home's validation (G-R3). Not for the
+   *       auto-compaction, whose gate is the rewrite's own.
+   *    3. ensureHelixDir and the folder of a plain path (today's creation, unchanged).
+   *    4. The ledger lock at the resolved destination. Under it the path is resolved again: it must be the path the lock
+   *       stands beside, and the destination's identity is sampled HERE, where the append's check after the open compares
+   *       the descriptor with it (G-R7). A path that became read-only while the call waited is refused with step 1's text;
+   *       one that resolves elsewhere gets the global changed-destination text.
+   *  Lock order: the global ledger lock first; the body takes the registry lock (the global scope nonce), the key lock (a
+   *  first mint) and the witness lock under it and never another ledger lock. */
+  underGlobalLedgerLock(op, body) {
+    this.refuseReadOnlyGlobal(op);
+    const home2 = this.homeDir();
+    if (op !== "compaction") assertWitnessWritable(home2, op, { homeUnchecked: true });
+    ensureHelixDir(home2);
+    mkdirSync5(dirname10(this.global), { recursive: true });
+    try {
+      return withFileLock(this.global, (ctx) => {
+        const r = resolvePath(this.global);
+        if (r.kind === "unresolvable") throw new GlobalLedgerReadOnlyError(op, "unresolvable");
+        if (r.kind === "uninspectable") throw r.error;
+        if (r.dirMissing || r.path !== ctx.path) throw this.globalChanged(op);
+        return body({ ctx, judged: { path: r.path, identity: fileIdentityAt(r.path) } });
+      });
+    } catch (e) {
+      if (isLedgerDestinationChangedError(e) && !isRecordStoredError(e) && e.message !== GLOBAL_DESTINATION_CHANGED[op]) throw this.globalChanged(op, e);
+      throw e;
+    }
+  }
+  /** The changed-destination refusal of a global write. An erase's is the typed pre-write refusal the erase handler audits
+   *  as 'rejected' (nothing was written), as for a project erase. */
+  globalChanged(op, cause) {
+    const text = GLOBAL_DESTINATION_CHANGED[op];
+    if (op === "erase") return new EraseRefusedError(text, cause === void 0 ? void 0 : { cause });
+    return new LedgerDestinationChangedError(text);
+  }
+  /** A commit to a project: the body of the critical section (design 4.3 steps 4 and 6). Step 6 first, in the place where
+   *  step 3 judged again: a supersede commit checks its target again. A project that is not owned under the lock has no live
+   *  target in its scope, so a supersede there is the target-not-found refusal (and never reaches the foreign-file or the
+   *  first-write branch below). Then step 4, on the ownership the judgement read under the lock. owned: the row is appended.
+   *  Nobody owns it and a file stands at the destination: the foreign-file refusal, made HERE only (FW-R1: a lock-free copy
+   *  could refuse a late racer for a file Helix itself had just created; under the lock that commit is finished and the
+   *  project reads owned). Nobody owns it and nothing stands there: firstProjectWrite. */
+  commitToProject(p, first, record2, input, source) {
+    this.underProjectLedgerLock(p, "commit", first, ({ judgement, judged }) => {
+      if (input.supersedes) {
+        if (judgement.state !== "owned") throw new Error("commit: supersedes target not found (dead or unknown id)");
+        this.assertSupersedeTargetUnderLock(p.ledger, input, source);
+      }
+      if (judgement.state === "owned") {
+        appendWitnessedUnlocked(p.ledger, record2, this.homeDir(), p.root, "commit", "commit", judged);
+      } else if (judgement.state === "unadopted-present") {
+        throw new Error(FOREIGN_FILE_REFUSAL);
+      } else {
+        this.firstProjectWrite(p, judgement, record2, judged);
+      }
+    });
+  }
+  /** The first write to a project nobody adopted, under its ledger lock (design 4.3 step 4, second case, and step 5 with
+   *  its seven items). The checks that do not concern the project's file stand in front of the ownership record (item 6).
+   *  The held `.helix` descriptor is opened BEFORE anything is recorded (a folder that is not the judged one is the
+   *  changed-destination refusal, nothing to restore), and `.owner` is written and removed through it (14 decision 4).
+   *
+   *  A failure that STORED NO ROW puts the ownership records back, `.owner` first (items 2 and 3; the created file is
+   *  taken away by the append itself while it is still this call's, item 4). An error that carries the stored mark
+   *  (the row is in the ledger, a later step failed: the witness advance, and, since decision 10, the file's close, the
+   *  directory fsync and the held directory's close) keeps the ownership. The answer (item 7): the foreign-file text for
+   *  the EEXIST or ELOOP of the creation; the changed-destination text when the check after the open refused; the
+   *  cancel-failed text whenever the restore failed, whatever the cause. A refusal with a type and a text of its own that
+   *  is not about the project's file (the witness file, a lock object, a path that cannot be resolved, a lost /proc) is
+   *  thrown as it is, after the restore (FW-R3; a WitnessAdvanceError here is the heal's, before the row;
+   *  the lost /proc has a dedicated text). Everything else is the
+   *  first-write-failed text with the fs error as its cause. An error raised before anything was recorded is thrown as it is. */
+  firstProjectWrite(p, judgement, record2, judged) {
+    const home2 = this.homeDir();
+    assertWitnessWritable(home2, "commit");
+    ensureMaster(home2);
+    const opened = openOwnerDir(p.root, judgement, realFsOps);
+    if (opened.kind === "changed") throw new LedgerDestinationChangedError();
+    if (opened.kind === "proc-lost") throw new LedgerProcLostError();
+    const owner = opened.dir;
+    try {
+      let snapshot = null;
+      try {
+        stampOwnership(p.root, home2, { now: this.opts.now, genStamp: this.opts.genStamp, capture: (s) => {
+          snapshot = s;
+        }, ownerDir: owner });
+        appendWitnessedUnlocked(p.ledger, record2, home2, p.root, "commit", "commit", { ...judged, createExclusive: true });
+      } catch (e) {
+        if (isRecordStoredError(e)) throw e;
+        const taken = snapshot;
+        if (taken === null) throw e;
+        try {
+          restoreOwnership(p.root, home2, taken, owner);
+        } catch {
+          throw new Error(FIRST_WRITE_FAILED_NOT_UNDONE, { cause: e });
+        }
+        if (isLedgerCreateRefusedError(e)) throw new Error(FOREIGN_FILE_REFUSAL, { cause: e });
+        if (isLedgerDestinationChangedError(e)) throw e;
+        if (isWitnessBlockedError(e) || isWitnessUnusableError(e) || isWitnessAdvanceError(e) || isLockForeignObjectError(e) || isUnresolvablePathError(e) || isLedgerProcLostError(e)) throw e;
+        throw new Error(FIRST_WRITE_FAILED_UNDONE, { cause: e });
+      }
+    } finally {
+      try {
+        closeHeldDir(owner, realFsOps);
+      } catch {
+      }
+    }
   }
   /** Snapshot the project layer's disposition, for the READ side (recall/inspect/history/asOf — see
    *  each call site below). Computed once per public read call and reused for every project-inclusion
    *  decision that call makes, so a single call can never disagree with itself about whether the
-   *  project layer participates (Codex R2 #7). isOwned reads two files (the home registry + the
-   *  repo-side .owner file), so this is a SNAPSHOT, not a lock: a concurrent adopt() between two
+   *  project layer participates (Codex R2 #7). The judgement reads the home registry, the repo-side
+   *  .owner file and the path, so this is a SNAPSHOT, not a lock: a concurrent adopt() between two
    *  SEPARATE calls — or mid-read within this one — can still change the answer. That race is accepted,
    *  not solved, here: each NEW call re-invokes this method (nothing is memoized on the instance), so
    *  the next call still sees a fresh, current answer (I4) — only a single call's internal
    *  self-consistency is what this method buys.
    *
-   *  - 'owned': isOwned(p.root, home) — true regardless of whether the ledger FILE exists yet (an
-   *    owned project with no ledger file still participates, matching pre-existing behavior).
-   *  - 'aliased' (item 7): owned, but its ledger leads to another adopted project's ledger file
-   *    (ownership.ts's aliasesAdoptedLedger). Excluded from every read like 'unadopted-present', with
-   *    its own constant note; targetLedger() (commit) and resolveEraseTarget() (erase) both refuse to
-   *    write through it.
-   *  - 'unadopted-present': project configured, NOT owned, and a ledger file exists at p.ledger — the
-   *    exact condition targetLedger() (above) already throws on for commit. The write side keeps its
-   *    OWN independent, fresh isOwned/existsSync check — targetLedger's auto-stamp claim-on-first-use
-   *    and fail-loud-on-foreign-ledger behavior is unaffected by this method or its caller.
-   *  - 'inactive': no project layer configured, OR configured but neither owned nor a ledger file
-   *    present — nothing to read, nothing to disclose.
-   *
-   *  B2: the four-state RULES above now live in the shared, pure projectDispositionOf (ownership.ts) —
-   *  this method is a one-line delegate. What stays HERE is the call-site contract: invoke it ONCE per
-   *  public read call (recall/currentView/historyView/asOfView each do so, then thread the snapshot as
-   *  a parameter into every private helper that needs it, never re-invoking this within that call). */
+   *  The states and their rows are the judgement's (ownership.ts ProjectDisposition, judgeProjectLayer).
+   *  This read answers row 9a from the per-process memory; the write side judges again with
+   *  `freshContent` (commitToProject, commitScoped, resolveEraseTarget). What stays HERE is the call-site
+   *  contract: invoke it ONCE per public read call (recall/currentView/historyView/asOfView each do so,
+   *  then thread the snapshot as a parameter into every private helper that needs it, never
+   *  re-invoking this within that call). */
   projectDisposition() {
-    const p = this.opts.project;
-    return projectDispositionOf(p && { root: p.root, ledger: p.ledger, home: this.homeDir(), origin: p.origin });
+    return this.judgeLayer().state;
   }
   /** Verified live records from global + (project iff `disposition === 'owned'`), each tagged with
    *  scope + integrity, plus whether a master key was available for EVERY scope read
@@ -16490,13 +17814,14 @@ var MemoryStore = class {
     const key = [];
     const verdicts = [];
     const reads = [];
+    const globalReadOnly = this.globalReadOnly();
     for (const s of scopes) {
       const w = readLedgerBytesWitnessed(s.ledger, home2, s.root);
       const bytes = w.bytes;
       const subkey = this.subkeyForLedger(s.ledger);
       key.push({ scopeId: s.ledger, digest: ledgerDigest(bytes), fingerprint: subkeyFingerprint(subkey), witness: w.witnessIdentity });
-      verdicts.push({ scope: s.scope, verdict: w.verdict });
-      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs: w.readMs, journalPending: w.journalPending, mismatch: w.verdict.kind === "mismatch" });
+      verdicts.push({ scope: s.scope, verdict: w.verdict, witnessFile: w.witnessFile });
+      reads.push({ ledger: s.ledger, scope: s.scope, root: s.root, bytes, subkey, readMs: w.readMs, journalPending: w.journalPending, mismatch: w.verdict.kind === "mismatch" || w.witnessFile !== void 0 || s.scope === "global" && globalReadOnly });
     }
     const anyPending = reads.some((r) => r.journalPending);
     if (!anyPending && this.rankCache && keyVectorEqual(this.rankCache.key, key)) {
@@ -16573,7 +17898,7 @@ var MemoryStore = class {
       let mtimeMs = 0;
       let totalBytes = 0;
       try {
-        const st = statSync3(r.ledger);
+        const st = statSync6(r.ledger);
         mtimeMs = st.mtimeMs;
         totalBytes = st.size;
       } catch {
@@ -16594,7 +17919,7 @@ var MemoryStore = class {
       let stats = null;
       let landedStats = null;
       try {
-        stats = compactLedger(r.ledger, {
+        stats = this.rewriteLedger(r.ledger, "compaction", null, {
           erasedIds: /* @__PURE__ */ new Set(),
           keepValidVerify,
           provesKey,
@@ -16625,9 +17950,9 @@ var MemoryStore = class {
     const { scoped, available, artifacts, verdicts } = this.recallInput(disposition);
     const excluded = /* @__PURE__ */ new Set();
     const clamped = /* @__PURE__ */ new Set();
-    for (const { scope, verdict } of verdicts) {
+    for (const { scope, verdict, witnessFile } of verdicts) {
       if (verdict.kind === "transition-interrupted") excluded.add(scope);
-      else if (verdict.kind === "mismatch") clamped.add(scope);
+      else if (verdict.kind === "mismatch" || witnessFile === "unusable") clamped.add(scope);
     }
     const enforcedScoped = excluded.size === 0 && clamped.size === 0 ? scoped : scoped.reduce((acc, s) => {
       if (excluded.has(s.scope)) return acc;
@@ -16664,7 +17989,7 @@ var MemoryStore = class {
       // I7: fresh nonce per call
       integrityAvailable: available,
       projectDisposition: disposition,
-      witnessNotes: collectWitnessNotes(verdicts.map((v) => v.verdict))
+      witnessNotes: this.withGlobalNote(collectWitnessReadNotes(verdicts))
     };
   }
   /** Which ledger currently holds `id` (project iff the per-call disposition snapshot is 'owned' —
@@ -16691,48 +18016,69 @@ var MemoryStore = class {
   }
   /** Append a SIGNED verify event conferring `state` on `targetId` (routed to the target's ledger).
    *  Reads the verified projection, computes the next per-target generation and the content digest,
-   *  signs, and appends — all under ONE ledger lock so a concurrent writer can't race the gen. */
-  writeVerify(targetId, state, source) {
+   *  signs, and appends — all under ONE ledger lock so a concurrent writer can't race the gen. A project ledger runs in
+   *  the critical section of design 4.3 (the lock at the resolved destination, the layer judged again under it, and a
+   *  project that is not owned there refused with the operation's text); the global ledger runs in `underGlobalLedgerLock`. */
+  writeVerify(targetId, state, source, op) {
     const ledger = this.ledgerOf(targetId);
-    return withFileLock(ledger, () => {
-      ensureMaster(this.homeDir());
-      const root = this.scopeRootOf(ledger);
-      if (root && trustStateOf(root, this.homeDir()) === "pending")
-        throw new Error("writeVerify: scope is trust-pending (an ambiguous re-adoption) \u2014 resolve it (repair or fresh) before minting a verify");
-      const subkey = this.subkeyForLedger(ledger);
-      if (!subkey) throw new Error("writeVerify: cannot resolve signing subkey (project not owned?)");
-      const records = parseLedger(ledger);
-      const v = buildVerifiedProjection(records, { verify: (r) => verifyVerify(r, subkey), keyAvailable: true });
-      const target = v.live.get(targetId);
-      if (!target) throw new Error("writeVerify: target not live");
-      const maxGen = records.reduce(
-        (m, r) => r.type === "verify" && r.supersedes === targetId && verifyVerify(r, subkey) ? Math.max(m, r.gen ?? 0) : m,
-        0
-      );
-      const ts = this.now();
-      const unsigned = {
-        id: this.id(),
-        tx: ts,
-        validFrom: ts,
-        validTo: null,
-        type: "verify",
-        state,
-        content: "",
-        provenance: { source, sessionId: this.session() },
-        supersedes: targetId,
-        blastRadius: null,
-        reverifyTrigger: null,
-        classification: "normal",
-        gen: maxGen + 1,
-        targetDigest: digestContent(target.content)
-      };
-      const signed = signVerify(unsigned, subkey);
-      appendWitnessedUnlocked(ledger, signed, this.homeDir(), this.scopeRootOf(ledger), "verify");
-      return signed;
-    });
+    const p = this.opts.project;
+    if (p && ledger === p.ledger) {
+      return this.underProjectLedgerLock(p, op, this.judgeLayer({ freshContent: true }), ({ judged }) => this.writeVerifyLocked(ledger, targetId, state, source, op, judged));
+    }
+    return this.underGlobalLedgerLock(op, ({ judged }) => this.writeVerifyLocked(ledger, targetId, state, source, op, judged));
+  }
+  /** writeVerify's body, for a caller that holds the ledger lock. `op` is the tool's name in a witness refusal; `judged` is
+   *  the destination judged under that lock (the project's critical section or `underGlobalLedgerLock`). */
+  writeVerifyLocked(ledger, targetId, state, source, op, judged) {
+    ensureMaster(this.homeDir());
+    const root = this.scopeRootOf(ledger);
+    if (root && trustStateOf(root, this.homeDir()) === "pending")
+      throw new Error("writeVerify: scope is trust-pending (an ambiguous re-adoption) \u2014 resolve it (repair or fresh) before minting a verify");
+    const subkey = this.subkeyForLedger(ledger);
+    if (!subkey) throw new Error("writeVerify: cannot resolve signing subkey (project not owned?)");
+    const records = parseLedger(ledger);
+    const v = buildVerifiedProjection(records, { verify: (r) => verifyVerify(r, subkey), keyAvailable: true });
+    const target = v.live.get(targetId);
+    if (!target) throw new Error("writeVerify: target not live");
+    const maxGen = records.reduce(
+      (m, r) => r.type === "verify" && r.supersedes === targetId && verifyVerify(r, subkey) ? Math.max(m, r.gen ?? 0) : m,
+      0
+    );
+    const ts = this.now();
+    const unsigned = {
+      id: this.id(),
+      tx: ts,
+      validFrom: ts,
+      validTo: null,
+      type: "verify",
+      state,
+      content: "",
+      provenance: { source, sessionId: this.session() },
+      supersedes: targetId,
+      blastRadius: null,
+      reverifyTrigger: null,
+      classification: "normal",
+      gen: maxGen + 1,
+      targetDigest: digestContent(target.content)
+    };
+    const signed = signVerify(unsigned, subkey);
+    appendWitnessedUnlocked(ledger, signed, this.homeDir(), this.scopeRootOf(ledger), "verify", op, judged);
+    return signed;
+  }
+  /** A ledger rewrite (the auto-compaction, the permanent erase) through the same order as every project write: for a
+   *  project ledger the critical section, then the rewrite under the lock it holds and through the directory it judged;
+   *  for the global ledger `underGlobalLedgerLock`. `first` is the caller's lock-free
+   *  judgement, or null to make it here. */
+  rewriteLedger(ledger, op, first, opts) {
+    const p = this.opts.project;
+    if (p && ledger === p.ledger) {
+      return this.underProjectLedgerLock(p, op, first ?? this.judgeLayer({ freshContent: true }), ({ ctx, judged }) => compactLedgerUnlocked(ledger, opts, ctx, judged));
+    }
+    return this.underGlobalLedgerLock(op, ({ ctx, judged }) => compactLedgerUnlocked(ledger, opts, ctx, judged));
   }
   /** Content-bound mechanical reality-check. Mints at most Corroborated; never Verified. */
   recheck(id, check2) {
+    this.refuseReadOnlyGlobalTarget(id, "recheck");
     const target = this.liveTarget(id);
     const binding = checkBinding(target.content, check2, target.classification);
     if (!binding.bound) throw new Error(`recheck: ${binding.reason}`);
@@ -16742,11 +18088,12 @@ var MemoryStore = class {
       evidenceSource: "reality-check",
       outcome
     });
-    const record2 = result.kind === "state" ? this.writeVerify(id, result.state, "reality-check") : null;
+    const record2 = result.kind === "state" ? this.writeVerify(id, result.state, "reality-check", "recheck") : null;
     return { outcome, result, record: record2 };
   }
   /** Human out-of-band vouch → Verified. Target-gated: only a source=user item is eligible. */
   confirm(id) {
+    this.refuseReadOnlyGlobalTarget(id, "confirm");
     const target = this.liveTarget(id);
     if (target.provenance.source !== "user") {
       throw new Error("confirm: only a source=user item is eligible (re-commit as source=user to take authorship first)");
@@ -16757,7 +18104,7 @@ var MemoryStore = class {
       outcome: { ran: true, indeterminate: false, passed: true }
     });
     const state = result.kind === "state" ? result.state : "Verified";
-    return { record: this.writeVerify(id, state, "user") };
+    return { record: this.writeVerify(id, state, "user", "confirm") };
   }
   inspect() {
     return this.currentView().records;
@@ -16789,7 +18136,7 @@ var MemoryStore = class {
         projectMs: w.stats.projectMs,
         keyAvailable: w.stats.keyAvailable
       });
-      const proj = enforceWitnessProjection(w.projection, w.verdict);
+      const proj = enforceWitnessProjection(w.projection, w.verdict, w.witnessFile);
       for (const r of proj.live.values()) {
         records.push({
           record: r,
@@ -16799,12 +18146,12 @@ var MemoryStore = class {
           // proof-of-read token for a guarded supersede
         });
       }
-      verdicts.push(w.verdict);
+      verdicts.push({ verdict: w.verdict, witnessFile: w.witnessFile });
     };
     addScope(this.global, "global", void 0);
     const p = this.opts.project;
     if (p && disposition === "owned") addScope(p.ledger, "project", p.root);
-    return { records, projectDisposition: disposition, witnessNotes: collectWitnessNotes(verdicts) };
+    return { records, projectDisposition: disposition, witnessNotes: this.withGlobalNote(collectWitnessReadNotes(verdicts)) };
   }
   /** Live + closed rows across scopes for the bitemporal history view. Live rows come WHOLESALE from
    *  the verified path (graded, total — an unverified live row defaults to Fresh and is never
@@ -16831,11 +18178,11 @@ var MemoryStore = class {
     const addScope = (ledger, scope) => {
       const root = this.scopeRootOf(ledger);
       const w = readLedgerWitnessed(ledger, home2, root);
-      verdicts.push(w.verdict);
+      verdicts.push({ verdict: w.verdict, witnessFile: w.witnessFile });
       if (w.verdict.kind === "transition-interrupted") return;
       const rawV = verifiedLiveOf(w.records, home2, root);
       if (!rawV.keyAvailable) integrityAvailable = false;
-      const v = enforceWitnessProjection(rawV, w.verdict);
+      const v = enforceWitnessProjection(rawV, w.verdict, w.witnessFile);
       for (const r of v.live.values()) {
         rows.push({
           record: r,
@@ -16858,7 +18205,7 @@ var MemoryStore = class {
     addScope(this.global, "global");
     const p = this.opts.project;
     if (p && disposition === "owned") addScope(p.ledger, "project");
-    return { rows, anomalies, truncated, integrityAvailable, projectDisposition: disposition, witnessNotes: collectWitnessNotes(verdicts) };
+    return { rows, anomalies, truncated, integrityAvailable, projectDisposition: disposition, witnessNotes: this.withGlobalNote(collectWitnessReadNotes(verdicts)) };
   }
   /** Point-in-time forensic snapshot at system-time `t` (spec C §5). Mirrors historyView's ATOMIC
    *  single-parse-per-scope: each scope's ledger is parsed ONCE and the single array feeds
@@ -16874,7 +18221,7 @@ var MemoryStore = class {
     const addScope = (ledger, scope) => {
       const root = this.scopeRootOf(ledger);
       const w = readLedgerWitnessed(ledger, home2, root);
-      verdicts.push(w.verdict);
+      verdicts.push({ verdict: w.verdict, witnessFile: w.witnessFile });
       if (w.verdict.kind === "transition-interrupted") return;
       const subkey = this.subkeyForLedger(ledger);
       const out = buildAsOfEvidence(w.records, t, {
@@ -16888,7 +18235,7 @@ var MemoryStore = class {
     addScope(this.global, "global");
     const p = this.opts.project;
     if (p && disposition === "owned") addScope(p.ledger, "project");
-    return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: asOfWitnessNotes(collectWitnessNotes(verdicts)) };
+    return { facts, keyAvailable, truncated, projectDisposition: disposition, witnessNotes: this.withGlobalNote(asOfWitnessNotes(collectWitnessReadNotes(verdicts, { asOf: true }))) };
   }
   /** Explicitly adopt the active project ledger (trust its current contents): a pre-existing ledger
    *  Helix did not create, or a parent project. Throws if no project layer is active, or if
@@ -16909,9 +18256,57 @@ var MemoryStore = class {
     const active = canonicalRoot(p.root);
     if (canonicalRoot(expectedRoot) !== active)
       throw new Error(`adopt: the named project root is not the active project scope (${active})`);
-    stampOwnership(p.root, this.homeDir(), { now: this.opts.now, genStamp: this.opts.genStamp });
-    ensureMaster(this.homeDir());
+    this.underProjectLedgerLock(p, "adopt", this.judgeLayer({ forAdopt: true, freshContent: true }), ({ judgement, judged }) => this.adoptUnderLock(p, judgement, judged));
     return active;
+  }
+  /** adopt's body, under the project ledger lock (design 4.4). In order: the content check (a destination that exists holds
+   *  nothing or parses as ledger rows by the first-1-MiB definition; for a memory path that is a link row 9a of the judgement has
+   *  just answered the same question, so this is what answers it for a memory path that is NOT a link); the witness file again
+   *  (the wait behind the lock can be 5 s; the first commit's order, 4.3 step 5 item 6); the key (FN-23: a damaged
+   *  signing key used to surface AFTER the adoption was recorded; it makes signing possible going forward but signs nothing that
+   *  exists: adoption must never launder an unsigned, pre-seeded elevated assert into a Verified one); the held `.helix`
+   *  descriptor; then the ownership record with the hold of 4.3 step 5, and its restore when the record fails halfway. */
+  adoptUnderLock(p, judgement, judged) {
+    if (judged.identity !== null) {
+      let kind;
+      try {
+        kind = ledgerContentKindAt(judged.path);
+      } catch (e) {
+        const code = e.code;
+        if (code === "ELOOP" || code === "ENOENT" || code === "EISDIR") throw this.projectWriteRefusal("adopt", "changed", e);
+        throw e;
+      }
+      if (kind === "other") throw new Error(ADOPT_NOT_LEDGER_CONTENT);
+    }
+    const home2 = this.homeDir();
+    assertWitnessWritable(home2, "adopt");
+    ensureMaster(home2);
+    const opened = openOwnerDir(p.root, judgement, realFsOps);
+    if (opened.kind === "changed") throw this.projectWriteRefusal("adopt", "changed");
+    if (opened.kind === "proc-lost") throw new LedgerProcLostError();
+    const owner = opened.dir;
+    try {
+      let snapshot = null;
+      try {
+        stampOwnership(p.root, home2, { now: this.opts.now, genStamp: this.opts.genStamp, capture: (s) => {
+          snapshot = s;
+        }, ownerDir: owner });
+      } catch (e) {
+        const taken = snapshot;
+        if (taken === null) throw e;
+        try {
+          restoreOwnership(p.root, home2, taken, owner);
+        } catch {
+          throw new Error(ADOPT_RECORD_FAILED_NOT_UNDONE, { cause: e });
+        }
+        throw new Error(ADOPT_RECORD_FAILED_UNDONE, { cause: e });
+      }
+    } finally {
+      try {
+        closeHeldDir(owner, realFsOps);
+      } catch {
+      }
+    }
   }
   /** C1.4-③: the active project scope's trust disposition (`active`/`pending`), or 'active' when no
    *  project layer is configured. Lets the adopt handler DISCLOSE a trust-pending re-adoption rather
@@ -16965,7 +18360,7 @@ var MemoryStore = class {
    *  Snapshot-relative: computed before the mutation lock, exactly like the presence check it
    *  replaces; a concurrent writer can create the ambiguity after this returns. */
   findEraseTarget(ledger, id, permanent) {
-    const records = parseLedger(ledger);
+    const records = parseLedger(ledger, ledger === this.global ? GLOBAL_LEDGER_READ : void 0);
     const isRecordRow = (r) => !isMarkerShape(r) && (permanent || r.type === "assert" || r.type === "supersede");
     const fam = permanent ? this.familyPrefixOf(id) : null;
     const recordHit = records.some((r) => isRecordRow(r) && r.id === id);
@@ -16985,9 +18380,9 @@ var MemoryStore = class {
    *  must never brick it (finding 2). */
   resolveEraseTarget(id, scope, permanent) {
     const p = this.opts.project;
-    const owned = !!p && isOwned(p.root, this.homeDir());
-    const aliased = owned && aliasesAdoptedLedger({ root: p.root, home: this.homeDir(), ledger: p.ledger });
-    const projectActive = owned && !aliased;
+    const judged = this.judgeLayer({ freshContent: true });
+    const layer = judged.state;
+    const projectActive = layer === "owned";
     const classify = (ledger) => {
       const kind = this.findEraseTarget(ledger, id, permanent);
       if (kind === "ambiguous") {
@@ -17001,22 +18396,19 @@ var MemoryStore = class {
           "erase: scope 'project' was requested but no project memory layer is active here (Helix configures one only when started in or below a directory holding a .helix folder). Omit `scope`, or start a new session inside the project whose memory holds the record \u2014 the erase is refused rather than silently widened to the global ledger."
         );
       }
-      if (scope === "project" && aliased) {
-        throw new EraseRefusedError(
-          "erase: this project's memory file resolves to another adopted project's memory file, to the global memory file, or through a path Helix cannot resolve \u2014 the erase is refused rather than applied to the other project's memory."
-        );
-      }
+      if (scope === "project" && layer === "aliased") throw new EraseRefusedError(ERASE_ALIASED_REFUSAL);
+      if (scope === "project" && layer === "unusable") throw new EraseRefusedError(ERASE_UNUSABLE_REFUSAL);
       const ledger = scope === "global" || !p ? this.global : projectActive ? p.ledger : (() => {
-        throw new EraseRefusedError("erase: project ledger not owned \u2014 adopt it (helix_memory_adopt) then erase, or remove it");
+        throw new EraseRefusedError(ERASE_NOT_ADOPTED);
       })();
       const kind = classify(ledger);
       if (kind === null) throw new EraseRefusedError(`erase: id not found in scope ${scope}`);
-      return { ledger, kind };
+      return { ledger, kind, layer: judged };
     }
     const candidates = [this.global, ...projectActive ? [p.ledger] : []];
     if (permanent) {
       for (const c of candidates) {
-        const text = readLedgerBytes(c).toString("utf8");
+        const text = readLedgerBytes(c, c === this.global ? GLOBAL_LEDGER_READ : void 0).toString("utf8");
         if (parseLedgerHealth(text).skippedNonBlank > 0) {
           throw new EraseRefusedError("erase: a ledger has skipped (corrupt/torn) lines \u2014 pass an explicit scope");
         }
@@ -17025,7 +18417,7 @@ var MemoryStore = class {
     const hits = [];
     for (const c of candidates) {
       const kind = classify(c);
-      if (kind !== null) hits.push({ ledger: c, kind });
+      if (kind !== null) hits.push({ ledger: c, kind, layer: judged });
     }
     if (!permanent) {
       const recs = hits.filter((h) => h.kind === "record");
@@ -17059,8 +18451,11 @@ var MemoryStore = class {
       this.rankCache = null;
       return "absent";
     }
-    const { ledger, kind } = target;
-    if (opts.permanent && readLedgerBytesWitnessed(ledger, this.homeDir(), this.scopeRootOf(ledger)).verdict.kind === "mismatch") {
+    const { ledger, kind, layer } = target;
+    const p = this.opts.project;
+    const inProject = !!p && ledger === p.ledger;
+    if (!inProject) this.refuseReadOnlyGlobal("erase");
+    if (opts.permanent && readLedgerBytesWitnessed(ledger, this.homeDir(), this.scopeRootOf(ledger), { rewriterWait: false }).verdict.kind === "mismatch") {
       throw new WitnessBlockedError(
         "permanent-erase",
         `permanent-erase: scope for id '${id}' is in a MISMATCH (rollback-alarm) state \u2014 refusing a permanent erase that would launder the alarm; re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry (spec \xA74.2)`
@@ -17073,7 +18468,7 @@ var MemoryStore = class {
       outcome = isMarker || alreadyDead ? "not-live" : "erased";
       if (!isMarker && !alreadyDead) {
         const ts = this.now();
-        appendWitnessed(ledger, {
+        const tombstone = {
           id: this.id(),
           tx: ts,
           validFrom: ts,
@@ -17086,11 +18481,13 @@ var MemoryStore = class {
           blastRadius: null,
           reverifyTrigger: null,
           classification: "normal"
-        }, this.homeDir(), this.scopeRootOf(ledger), "erase");
+        };
+        if (inProject) this.underProjectLedgerLock(p, "erase", layer, ({ judged }) => appendWitnessedUnlocked(ledger, tombstone, this.homeDir(), p.root, "erase", "erase", judged));
+        else this.underGlobalLedgerLock("erase", ({ judged }) => appendWitnessedUnlocked(ledger, tombstone, this.homeDir(), void 0, "erase", "erase", judged));
       }
       if (opts.permanent) {
         const sk = this.subkeyForLedger(ledger);
-        compactLedger(ledger, {
+        this.rewriteLedger(ledger, "compaction", layer, {
           erasedIds: /* @__PURE__ */ new Set([id]),
           keepValidVerify: this.keepValidVerifyFor(sk),
           provesKey: this.provesKeyFor(sk),
@@ -17106,22 +18503,30 @@ var MemoryStore = class {
    *  before a crash (crash window B — verdict transition-heal) for every scope this store owns, so a
    *  half-finished rewrite is resolved before the first read rather than lingering as a pending
    *  journal. Global always; project only when its disposition is 'owned' (the same gate every read
-   *  path uses, so an aliased layer — whose ledger leads to another project's file — is left alone).
+   *  path uses, so an excluded layer is left alone).
    *  Each scope's heal runs under that scope's LEDGER lock; completeTransition then nests the witness
    *  lock (a different path — legal). BEST-EFFORT: a scope that is interrupted, stale, or mismatched is
    *  LEFT as-is (it re-surfaces as transition-interrupted / blocked on the next witnessed write, Task
    *  5) — healing must never block server startup, so per-scope failures are swallowed. Wired ONCE in
    *  src/server/index.ts after construction, NEVER from a hook (a read-only surface must not advance
-   *  the witness). */
+   *  the witness). The lock is taken only after a lock-free look at the scope, one bare read pair
+   *  (witness, then ledger) that finds a heal to do (design 4.6, p-8). A holder that dies in a
+   *  transition right after that look leaves its scope to be healed by the next start. A start with
+   *  nothing to heal is not delayed by a held lock. */
   healWitness() {
     const p = this.opts.project;
-    const scopes = [{ ledger: this.global, root: void 0 }];
+    const scopes = this.globalReadOnly() ? [] : [{ ledger: this.global, root: void 0 }];
     if (p && this.projectDisposition() === "owned") scopes.push({ ledger: p.ledger, root: p.root });
     const home2 = this.homeDir();
     for (const s of scopes) {
-      if (!existsSync4(dirname9(s.ledger))) continue;
+      if (!existsSync4(dirname10(s.ledger))) continue;
       const scopeKey = scopeKeyOf(home2, s.root);
       try {
+        const stateBefore = readScopeWitness(home2, scopeKey);
+        const bytesBefore = readLedgerBytes(s.ledger);
+        const verdictBefore = classifyState(stateBefore, bytesBefore);
+        const needsHeal = verdictBefore.kind === "transition-heal" || verdictBefore.kind === "transition-interrupted" && interruptedAtPredecessor(bytesBefore, verdictBefore.journal);
+        if (!needsHeal) continue;
         withFileLock(s.ledger, () => {
           const bytes = readLedgerBytes(s.ledger);
           const verdict = classifyState(readScopeWitness(home2, scopeKey), bytes);
@@ -17192,58 +18597,66 @@ function classifyLegacyOffenders(records, offenders, keyResolved, subkey) {
 }
 
 // src/memory/project-root.ts
-import { existsSync as existsSync5, readdirSync as readdirSync4, statSync as statSync4 } from "node:fs";
-import { dirname as dirname10, isAbsolute as isAbsolute2, join as join7, relative, sep as sep2 } from "node:path";
+import { lstatSync as lstatSync9, readdirSync as readdirSync4, statSync as statSync7 } from "node:fs";
+import { dirname as dirname11, isAbsolute as isAbsolute3, join as join9, relative, sep as sep2 } from "node:path";
 function samePath(a, b) {
   return relative(a, b) === "";
 }
 function within(parent, child) {
   const rel = relative(parent, child);
-  return !isAbsolute2(rel) && rel !== ".." && !rel.startsWith(`..${sep2}`);
+  return !isAbsolute3(rel) && rel !== ".." && !rel.startsWith(`..${sep2}`);
 }
 function holdsHelixMemory(dir) {
   try {
-    if (!statSync4(dir).isDirectory()) return false;
+    if (!statSync7(dir).isDirectory()) return false;
     const names = readdirSync4(dir);
     return names.length === 0 || names.includes("memory.jsonl") || names.includes(".owner");
   } catch {
     return false;
   }
 }
+function hasOwnHelixEntry(dir) {
+  try {
+    lstatSync9(join9(dir, ".helix"));
+    return true;
+  } catch {
+    return false;
+  }
+}
 function resolveProjectLayer(opts) {
   const { cwd, userHome, globalLedger: globalLedger2 } = opts;
-  if (existsSync5(join7(cwd, ".helix"))) {
+  if (hasOwnHelixEntry(cwd)) {
     const ledger = projectLedgerPath(cwd);
-    return aliasesGlobalLedger(ledger, globalLedger2) ? void 0 : { root: cwd, ledger, origin: "cwd" };
+    return isGlobalLedgerEntry(ledger, globalLedger2) ? void 0 : { root: cwd, ledger, origin: "cwd" };
   }
-  if (!isAbsolute2(userHome)) return void 0;
+  if (!isAbsolute3(userHome)) return void 0;
   const home2 = canonicalRoot(userHome);
   let dir = canonicalRoot(cwd);
   const insideHome = within(home2, dir);
   for (; ; ) {
-    const parent = dirname10(dir);
+    const parent = dirname11(dir);
     if (parent === dir) return void 0;
     if (insideHome && (samePath(home2, parent) || !within(home2, parent))) return void 0;
     dir = parent;
-    if (holdsHelixMemory(join7(dir, ".helix"))) {
+    if (holdsHelixMemory(join9(dir, ".helix"))) {
       const ledger = projectLedgerPath(dir);
-      return aliasesGlobalLedger(ledger, globalLedger2) ? void 0 : { root: dir, ledger, origin: "ancestor" };
+      return isGlobalLedgerEntry(ledger, globalLedger2) ? void 0 : { root: dir, ledger, origin: "ancestor" };
     }
   }
 }
 
 // src/memory/trust-store-layout.ts
-import { existsSync as existsSync6, readFileSync as readFileSync7, lstatSync as lstatSync4 } from "node:fs";
-import { dirname as dirname11, join as join8 } from "node:path";
+import { existsSync as existsSync5, readFileSync as readFileSync6, lstatSync as lstatSync10 } from "node:fs";
+import { dirname as dirname12, join as join10 } from "node:path";
 var TRUST_FILE_NAMES = ["ledger-mac-master.key", "projects.json", "witness.json", "witness-log.jsonl"];
 var MASTER_KEY_LEN = 32;
 function looksLikeOurs(name, path) {
   try {
-    const st = lstatSync4(path);
+    const st = lstatSync10(path);
     if (!st.isFile()) return false;
     if (name === "ledger-mac-master.key") return st.size === MASTER_KEY_LEN;
     if (name === "witness-log.jsonl") {
-      return readFileSync7(path, "utf8").split("\n").some((l) => {
+      return readFileSync6(path, "utf8").split("\n").some((l) => {
         if (!l.trim()) return false;
         try {
           JSON.parse(l);
@@ -17253,7 +18666,7 @@ function looksLikeOurs(name, path) {
         }
       });
     }
-    const parsed = JSON.parse(readFileSync7(path, "utf8"));
+    const parsed = JSON.parse(readFileSync6(path, "utf8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
     const obj = parsed;
     if (name === "projects.json") {
@@ -17268,7 +18681,7 @@ function looksLikeOurs(name, path) {
 function collidingTrustFiles(home2, stray2) {
   return stray2.filter((name) => {
     try {
-      lstatSync4(join8(home2, name));
+      lstatSync10(join10(home2, name));
       return true;
     } catch {
       return false;
@@ -17276,18 +18689,18 @@ function collidingTrustFiles(home2, stray2) {
   });
 }
 function strayTrustFiles(home2, globalLedger2) {
-  const ledgerDir = dirname11(globalLedger2);
+  const ledgerDir = dirname12(globalLedger2);
   if (canonicalRoot(ledgerDir) === canonicalRoot(home2)) return [];
   return TRUST_FILE_NAMES.filter((name) => {
-    const p = join8(ledgerDir, name);
-    return existsSync6(p) && looksLikeOurs(name, p);
+    const p = join10(ledgerDir, name);
+    return existsSync5(p) && looksLikeOurs(name, p);
   });
 }
 function globalNonceAlreadyEstablished(home2) {
   try {
-    const path = join8(home2, "projects.json");
-    if (!lstatSync4(path).isFile()) return false;
-    const parsed = JSON.parse(readFileSync7(path, "utf8"));
+    const path = join10(home2, "projects.json");
+    if (!lstatSync10(path).isFile()) return false;
+    const parsed = JSON.parse(readFileSync6(path, "utf8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
     const entry = parsed["@global"];
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
@@ -17317,11 +18730,11 @@ function assessGradeLoss(home2, ledger) {
 function measureGradeLoss(home2, ledger) {
   const { records, verdict } = readLedgerWitnessed(ledger, home2);
   const subkey = readOnlyGlobalSubkey(home2);
-  const scan = scanLegacyElevated(records, (r) => subkey ? verifyVerify(r, subkey) : false);
+  const scan2 = scanLegacyElevated(records, (r) => subkey ? verifyVerify(r, subkey) : false);
   const clampedRecordIds = verdict.kind === "mismatch" ? [...verifiedProjectionWithSubkey(records, subkey).live.values()].filter((r) => clampElevatedState(r.state) !== r.state).map((r) => r.id) : [];
   return {
-    loses: scan.offenders.length > 0 || clampedRecordIds.length > 0,
-    unverifiableRecordIds: scan.offenders,
+    loses: scan2.offenders.length > 0 || clampedRecordIds.length > 0,
+    unverifiableRecordIds: scan2.offenders,
     witnessMismatch: verdict.kind === "mismatch",
     clampedRecordIds,
     undecidable: null
@@ -17329,7 +18742,7 @@ function measureGradeLoss(home2, ledger) {
 }
 
 // src/server/helix-server.ts
-import { join as join12 } from "node:path";
+import { join as join14 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // node_modules/zod/v3/external.js
@@ -23410,7 +24823,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
+        await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -23427,7 +24840,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -23505,7 +24918,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve2(parseResult.data);
+            resolve3(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -23766,12 +25179,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve2, interval);
+      const timeoutId = setTimeout(resolve3, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -24862,7 +26275,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
+      await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -25431,9 +26844,9 @@ var EMPTY_COMPLETION_RESULT = {
 };
 
 // src/config.ts
-import { openSync as openSync6, fstatSync as fstatSync4, readSync as readSync4, closeSync as closeSync6, constants as constants3 } from "node:fs";
+import { openSync as openSync8, fstatSync as fstatSync7, readSync as readSync6, closeSync as closeSync8, constants as constants7 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join9 } from "node:path";
+import { join as join11 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy", "secretEntropyExempt"];
 var DEFAULT_COMPACTION = {
   auto: false,
@@ -25489,22 +26902,22 @@ var DEFAULT_CONFIG = {
 };
 var MAX_CONFIG_BYTES = 1048576;
 function readConfigText(path) {
-  const fd = openSync6(path, constants3.O_RDONLY | constants3.O_NONBLOCK);
+  const fd = openSync8(path, constants7.O_RDONLY | constants7.O_NONBLOCK);
   try {
-    const st = fstatSync4(fd);
+    const st = fstatSync7(fd);
     if (!st.isFile()) throw new Error("not a regular file");
     if (st.size > MAX_CONFIG_BYTES) throw new Error(`larger than ${MAX_CONFIG_BYTES} bytes`);
     const buf = Buffer.alloc(st.size);
     let len = 0;
     while (len < buf.length) {
-      const n = readSync4(fd, buf, len, buf.length - len, null);
+      const n = readSync6(fd, buf, len, buf.length - len, null);
       if (n === 0) break;
       len += n;
     }
     return buf.subarray(0, len).toString("utf8");
   } finally {
     try {
-      closeSync6(fd);
+      closeSync8(fd);
     } catch {
     }
   }
@@ -25526,7 +26939,7 @@ function readJson(path, onUnusable) {
   }
 }
 function loadConfig(opts = {}) {
-  const globalPath = opts.globalPath ?? join9(homedir(), ".helix", "config.json");
+  const globalPath = opts.globalPath ?? join11(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
   const seen = /* @__PURE__ */ new Set();
   const warn = (msg) => {
@@ -25643,7 +27056,7 @@ function mergeCompaction(raw) {
   return c;
 }
 function compactionConfigFromGlobal(home2) {
-  return mergeCompaction(readJson(join9(home2, "config.json"), () => {
+  return mergeCompaction(readJson(join11(home2, "config.json"), () => {
   })?.compaction);
 }
 
@@ -26366,40 +27779,40 @@ function spansFor(verdict, input, ledger) {
 }
 
 // src/audit.ts
-import { openSync as openSync7, fsyncSync as fsyncSync4, closeSync as closeSync7 } from "node:fs";
-import { dirname as dirname12 } from "node:path";
+import { openSync as openSync9, fsyncSync as fsyncSync4, closeSync as closeSync9 } from "node:fs";
+import { dirname as dirname13 } from "node:path";
 function appendAudit(path, event, io = { fsyncDir }) {
-  ensureHelixDir(dirname12(path));
-  const fd = openSync7(path, "a", 384);
+  ensureHelixDir(dirname13(path));
+  const fd = openSync9(path, "a", 384);
   try {
     writeAll(realFsOps, fd, JSON.stringify(event) + "\n");
     fsyncSync4(fd);
   } finally {
-    closeSync7(fd);
+    closeSync9(fd);
   }
   try {
-    io.fsyncDir(dirname12(path));
+    io.fsyncDir(dirname13(path));
   } catch {
   }
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync9 } from "node:fs";
+import { readFileSync as readFileSync8 } from "node:fs";
 
 // src/codex-log.ts
-import { readFileSync as readFileSync8, writeFileSync as writeFileSync2, openSync as openSync8, writeSync as writeSync3, closeSync as closeSync8 } from "node:fs";
-import { dirname as dirname13 } from "node:path";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync2, openSync as openSync10, writeSync as writeSync3, closeSync as closeSync10 } from "node:fs";
+import { dirname as dirname14 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
   try {
-    ensureHelixDir(dirname13(path));
-    const fd = openSync8(path, "a", 384);
+    ensureHelixDir(dirname14(path));
+    const fd = openSync10(path, "a", 384);
     try {
       writeSync3(fd, JSON.stringify(entry) + "\n");
     } finally {
-      closeSync8(fd);
+      closeSync10(fd);
     }
-    const lines = readFileSync8(path, "utf8").split("\n").filter((l) => l !== "");
+    const lines = readFileSync7(path, "utf8").split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
       writeFileSync2(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
@@ -26421,7 +27834,9 @@ function projectLayerNote(disposition) {
 
 ${UNADOPTED_LEDGER_NOTE}` : disposition === "aliased" ? `
 
-${ALIASED_LEDGER_NOTE}` : disposition === "ancestor-unadopted" ? `
+${ALIASED_LEDGER_NOTE}` : disposition === "unusable" ? `
+
+${UNUSABLE_LEDGER_NOTE}` : disposition === "ancestor-unadopted" ? `
 
 ${ANCESTOR_UNADOPTED_NOTE}` : "";
 }
@@ -26450,8 +27865,30 @@ function capRendered(total, render, budget) {
 }
 var REDACTION_NOTICE = "part of this fact was replaced with [redacted:<kind>] markers before storage; a recheck cannot bind a path or pattern that fell inside a redacted span";
 var GLOBAL_WHILE_PROJECT_OFF_NOTICE = "written to global memory, which every project sees, while this session's project memory is off";
+var STORED_THEN_FAILED_RESPONSE = {
+  commit: "commit: the record was stored, but a step after the write failed (the rollback witness may not have been updated). Do not commit it again; tell the user what happened.",
+  erase: "erase: the erase was stored, but a step after the write failed (the rollback witness may not have been updated). Do not erase it again; tell the user what happened.",
+  confirm: "confirm: the confirmation was stored, but a step after the write failed (the rollback witness may not have been updated). Do not confirm it again; tell the user what happened.",
+  recheck: "recheck: the check's result was stored, but a step after the write failed (the rollback witness may not have been updated). Do not run the recheck again; tell the user what happened."
+};
+var StoredThenFailedError = class extends Error {
+  recordStored = true;
+  constructor(op, cause) {
+    super(STORED_THEN_FAILED_RESPONSE[op], { cause });
+    this.name = "StoredThenFailedError";
+  }
+};
+function surfaced(op, e) {
+  return isRecordStoredError(e) ? new StoredThenFailedError(op, e) : e;
+}
 function handleCommit(store2, args) {
-  const { record: rec, scope, redactions, bypassedProject } = store2.commitScoped(args);
+  let committed;
+  try {
+    committed = store2.commitScoped(args);
+  } catch (e) {
+    throw surfaced("commit", e);
+  }
+  const { record: rec, scope, redactions, bypassedProject } = committed;
   const result = { id: rec.id, scope, state: rec.state, classification: rec.classification };
   const notices = [];
   if (redactions) {
@@ -26602,9 +28039,9 @@ function handleErase(store2, args, deps) {
     }
     outcome = found;
   } catch (e) {
-    const row = landedStateOf(e) !== null ? { kind: "erase", ts, id: args.id, soft: true, witnessAdvance: "failed" } : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e) ? { kind: "erase", ts, id: args.id, soft: true, outcome: "rejected" } : { kind: "erase", ts, id: args.id, soft: true, outcome: "indeterminate" };
+    const row = landedStateOf(e) !== null ? { kind: "erase", ts, id: args.id, soft: true, witnessAdvance: "failed" } : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e) || isWitnessUnusableError(e) && !isRecordStoredError(e) || (isLockForeignObjectError(e) || isLedgerProcLostError(e)) && !isRecordStoredError(e) || isGlobalLedgerReadOnlyError(e) ? { kind: "erase", ts, id: args.id, soft: true, outcome: "rejected" } : { kind: "erase", ts, id: args.id, soft: true, outcome: "indeterminate" };
     appendAudit(deps.auditPath, row);
-    throw e;
+    throw surfaced("erase", e);
   }
   appendAudit(deps.auditPath, { kind: "erase", ts, id: args.id, soft: true });
   return ok(`${outcome === "erased" ? "erased" : "unchanged"} ${JSON.stringify({ id: args.id })}`);
@@ -26639,7 +28076,7 @@ function handleRecheck(store2, args, deps) {
     const base = { kind: "verify", ts, id: args.id, source: "reality-check", checkKind: args.check.kind };
     const row = landed === null ? { ...base, resultState: "rejected", bound: false } : { ...base, resultState: landed, bound: true, witnessAdvance: "failed" };
     appendAudit(deps.auditPath, row);
-    throw e;
+    throw surfaced("recheck", e);
   }
 }
 function handleConfirm(store2, args, deps) {
@@ -26651,14 +28088,14 @@ function handleConfirm(store2, args, deps) {
     const landed = landedVerifyState(e);
     const row = landed === null ? { kind: "verify", ts, id: args.id, source: "user", resultState: "rejected" } : { kind: "verify", ts, id: args.id, source: "user", resultState: landed, witnessAdvance: "failed" };
     appendAudit(deps.auditPath, row);
-    throw e;
+    throw surfaced("confirm", e);
   }
   appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "user", resultState: "Verified" });
   return ok(`confirmed ${JSON.stringify({ id: args.id, state: "Verified" })}`);
 }
 function codexLogCount(path) {
   try {
-    return readFileSync9(path, "utf8").split("\n").filter((l) => l !== "").length;
+    return readFileSync8(path, "utf8").split("\n").filter((l) => l !== "").length;
   } catch {
     return 0;
   }
@@ -26935,15 +28372,15 @@ function serverInstructionsFor(config3) {
 
 // src/verify/codex.ts
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync as existsSync8, mkdtempSync, readFileSync as readFileSync10, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync7, mkdtempSync, readFileSync as readFileSync9, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join11, win32 as winPath } from "node:path";
+import { join as join13, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync7, readdirSync as readdirSync5, lstatSync as lstatSync5, statSync as statSync5, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync9, chmodSync as chmodSync3 } from "node:fs";
+import { existsSync as existsSync6, readdirSync as readdirSync5, lstatSync as lstatSync11, statSync as statSync8, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync3 } from "node:fs";
 import { randomBytes as randomBytes7 } from "node:crypto";
-import { join as join10 } from "node:path";
+import { join as join12 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
 var SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
@@ -26958,11 +28395,11 @@ function shouldSweep(stampMtimeMs, nowMs, intervalMs) {
 }
 function ensureScratchRoot(root) {
   try {
-    mkdirSync9(root, { recursive: true, mode: 448 });
+    mkdirSync8(root, { recursive: true, mode: 448 });
   } catch {
   }
   try {
-    const st = lstatSync5(root);
+    const st = lstatSync11(root);
     if (!st.isDirectory()) return null;
     if (typeof process.getuid === "function" && st.uid !== process.getuid()) return null;
     if ((st.mode & 63) !== 0) chmodSync3(root, 448);
@@ -26985,11 +28422,11 @@ function publishStamp(stampPath) {
 }
 function sweepScratchRoot(root, nowMs = Date.now()) {
   try {
-    if (!existsSync7(root)) return;
-    const stampPath = join10(root, STAMP_NAME);
+    if (!existsSync6(root)) return;
+    const stampPath = join12(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
-      stampMtimeMs = statSync5(stampPath).mtimeMs;
+      stampMtimeMs = statSync8(stampPath).mtimeMs;
     } catch {
       stampMtimeMs = null;
     }
@@ -26998,14 +28435,14 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     for (const d of readdirSync5(root, { withFileTypes: true })) {
       if (!d.name.startsWith(SCRATCH_PREFIX)) continue;
       try {
-        const st = lstatSync5(join10(root, d.name));
+        const st = lstatSync11(join12(root, d.name));
         entries.push({ name: d.name, isDir: st.isDirectory(), mtimeMs: st.mtimeMs });
       } catch {
       }
     }
     for (const name of selectStaleScratch(entries, nowMs, FLOOR_MS)) {
       try {
-        rmSync2(join10(root, name), { recursive: true, force: true });
+        rmSync2(join12(root, name), { recursive: true, force: true });
       } catch {
       }
     }
@@ -27060,7 +28497,7 @@ async function resolveCodexInvocation() {
   let inv = null;
   try {
     const { stdout } = await execFileAsync("where", ["codex"], { timeout: 1e4 });
-    inv = interpretWhereOutput("win32", stdout ?? "", existsSync8);
+    inv = interpretWhereOutput("win32", stdout ?? "", existsSync7);
   } catch {
     inv = null;
   }
@@ -27116,7 +28553,7 @@ function childEnv(parent = process.env) {
 }
 function runCodex(inv, args, input, timeoutMs, cwd, signal) {
   if (signal?.aborted) return Promise.reject(new Error("codex run aborted"));
-  return new Promise((resolve2, reject) => {
+  return new Promise((resolve3, reject) => {
     const child = spawn(inv.file, [...inv.argsPrefix, ...args], {
       stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"],
       cwd,
@@ -27169,7 +28606,7 @@ function runCodex(inv, args, input, timeoutMs, cwd, signal) {
     });
     child.on("close", (code) => {
       cleanup();
-      resolve2({ code, stdout, stderr });
+      resolve3({ code, stdout, stderr });
     });
     if (input !== null && child.stdin) {
       child.stdin.on("error", () => {
@@ -27261,10 +28698,10 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
-    const scratchRoot = ensureScratchRoot(join11(tmpdir(), "helix"));
+    const scratchRoot = ensureScratchRoot(join13(tmpdir(), "helix"));
     if (scratchRoot !== null) sweepScratchRoot(scratchRoot);
-    const dir = mkdtempSync(scratchRoot !== null ? join11(scratchRoot, "codex-") : join11(tmpdir(), "helix-codex-"));
-    const outFile = join11(dir, "out.txt");
+    const dir = mkdtempSync(scratchRoot !== null ? join13(scratchRoot, "codex-") : join13(tmpdir(), "helix-codex-"));
+    const outFile = join13(dir, "out.txt");
     try {
       const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
       const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir, opts.signal);
@@ -27277,7 +28714,7 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
       }
       let answer = "";
       try {
-        answer = readFileSync10(outFile, "utf8").trim();
+        answer = readFileSync9(outFile, "utf8").trim();
       } catch {
       }
       return answer ? { ok: true, answer } : { ok: false, error: "codex produced no output" };
@@ -27295,7 +28732,7 @@ var realCodexRunner = createCodexRunner();
 
 // src/metrics.ts
 import { appendFileSync } from "node:fs";
-import { dirname as dirname14 } from "node:path";
+import { dirname as dirname15 } from "node:path";
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 var noopMetricsSink = {
@@ -27308,7 +28745,7 @@ var noopMetricsSink = {
 function createMetricsSink(path, enabled, deps = {}) {
   if (!enabled) return noopMetricsSink;
   const append = deps.append ?? ((p, line) => {
-    ensureHelixDir(dirname14(p));
+    ensureHelixDir(dirname15(p));
     appendFileSync(p, line, { mode: 384 });
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
@@ -27412,11 +28849,11 @@ var PROJECT_ROOT_SCHEMA = external_exports.string().refine(isReviewableRoot, {
 });
 function buildServer(store2, dualDeps, metrics2) {
   const m = metrics2 ?? noopMetricsSink;
-  const home2 = process.env.HELIX_HOME ?? join12(homedir2(), ".helix");
+  const home2 = process.env.HELIX_HOME ?? join14(homedir2(), ".helix");
   const dv = dualDeps ?? {
-    config: loadConfig({ globalPath: join12(home2, "config.json") }),
+    config: loadConfig({ globalPath: join14(home2, "config.json") }),
     // Issue #11: read again on each call; only what narrows the outbound path applies (see index.ts).
-    currentConfig: () => loadConfig({ globalPath: join12(home2, "config.json"), warn: () => {
+    currentConfig: () => loadConfig({ globalPath: join14(home2, "config.json"), warn: () => {
     } }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
@@ -27425,8 +28862,8 @@ function buildServer(store2, dualDeps, metrics2) {
     // same pure function `inspect()` already applies rather than fabricating a value, so a record that
     // ever arrives without one is still matchable instead of silently unquotable.
     echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map(({ record: record2, contentDigest }) => ({ id: record2.id, content: record2.content, contentDigest: contentDigest ?? digestContent(record2.content) })) },
-    auditPath: join12(home2, "audit.jsonl"),
-    codexLogPath: join12(home2, "codex-log.jsonl")
+    auditPath: join14(home2, "audit.jsonl"),
+    codexLogPath: join14(home2, "codex-log.jsonl")
   };
   const instructions = serverInstructionsFor(dv.config);
   const server2 = new McpServer({ name: "helix", version: "0.1.0" }, instructions === void 0 ? void 0 : { instructions });
@@ -27568,8 +29005,8 @@ function buildServer(store2, dualDeps, metrics2) {
     async drainInFlight(budgetMs) {
       if (dualVerifyInFlight.size === 0) return;
       let timer;
-      const timedOut = new Promise((resolve2) => {
-        timer = setTimeout(resolve2, budgetMs);
+      const timedOut = new Promise((resolve3) => {
+        timer = setTimeout(resolve3, budgetMs);
       });
       try {
         await Promise.race([Promise.allSettled([...dualVerifyInFlight]), timedOut]);
@@ -27611,21 +29048,21 @@ function installSelfTermination(deps) {
 }
 
 // src/server/index.ts
-var home = process.env.HELIX_HOME ?? join13(homedir3(), ".helix");
-var globalLedger = process.env.HELIX_LEDGER ?? join13(home, "memory.jsonl");
+var home = process.env.HELIX_HOME ?? join15(homedir3(), ".helix");
+var globalLedger = process.env.HELIX_LEDGER ?? join15(home, "memory.jsonl");
 var project = resolveProjectLayer({ cwd: process.cwd(), userHome: homedir3(), globalLedger });
 hardenHomePermissions(home, { warn: (m) => process.stderr.write(`${m}
 `) });
-var config2 = loadConfig({ globalPath: join13(home, "config.json") });
+var config2 = loadConfig({ globalPath: join15(home, "config.json") });
 var configRoot = project?.root ?? process.cwd();
-if (existsSync9(join13(configRoot, ".helix", "config.json"))) {
-  process.stderr.write(`helix: NOTE - ${join13(configRoot, ".helix", "config.json")} is not read; dual-verify, egress and logging settings come only from ${join13(home, "config.json")}
+if (existsSync8(join15(configRoot, ".helix", "config.json"))) {
+  process.stderr.write(`helix: NOTE - ${join15(configRoot, ".helix", "config.json")} is not read; dual-verify, egress and logging settings come only from ${join15(home, "config.json")}
 `);
 }
-var metrics = createMetricsSink(join13(home, "metrics.jsonl"), config2.metrics.enabled);
+var metrics = createMetricsSink(join15(home, "metrics.jsonl"), config2.metrics.enabled);
 var stray = strayTrustFiles(home, globalLedger);
 if (stray.length > 0) {
-  const ledgerDir = dirname15(globalLedger);
+  const ledgerDir = dirname16(globalLedger);
   const collide = collidingTrustFiles(home, stray);
   const wouldOverwrite = `     HELIX_HOME ALREADY HAS ${collide.join(", ")} - moving the stray copies
      over ${collide.length === 1 ? "it" : "them"} REPLACES this install's own trust store, and every elevated grade
@@ -27700,9 +29137,14 @@ ${causes.join("")}Two ways out, both deliberate:
     process.exit(78);
   }
 }
+if (isGlobalLedgerReadOnly(globalLedger)) process.stderr.write(`${GLOBAL_READ_ONLY_STARTUP_LINE}
+`);
 var store = new MemoryStore(globalLedger, { home, sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home), releaseWordChains: config2.persistence.releaseWordChains });
 store.healWitness();
-var scanProject = !!project && startupScanReadsProject(project, home);
+var scan = project ? startupScanDecision(project, home, globalLedger) : { read: false, notRegular: false };
+var scanProject = !!project && scan.read;
+if (project && scan.notRegular) process.stderr.write(`helix: WARNING - ${project.ledger} is not a regular file; skipped its integrity scan
+`);
 var scanScopes = [
   { ledger: globalLedger },
   // A parent directory's project is scanned only once adopted: until then nothing of it is read.
@@ -27711,9 +29153,9 @@ var scanScopes = [
 for (const { ledger, root } of scanScopes) {
   try {
     const subkey = subkeyForScope(home, root);
-    const records = parseLedger(ledger);
-    const scan = scanLegacyElevated(records, (r) => subkey ? verifyVerify(r, subkey) : false);
-    const { forged, tampered, otherKey, newerVersion, unverifiable } = classifyLegacyOffenders(records, scan.offenders, !!subkey, subkey);
+    const records = parseLedger(ledger, root === void 0 ? GLOBAL_LEDGER_READ : void 0);
+    const scan2 = scanLegacyElevated(records, (r) => subkey ? verifyVerify(r, subkey) : false);
+    const { forged, tampered, otherKey, newerVersion, unverifiable } = classifyLegacyOffenders(records, scan2.offenders, !!subkey, subkey);
     if (forged.length > 0) process.stderr.write(`helix: WARNING - ${forged.length} forged/legacy elevated record(s) in ${ledger}; trust states there are not tool-minted
 `);
     if (tampered.length > 0) process.stderr.write(`helix: WARNING - ${tampered.length} verify record(s) in ${ledger} carry this scope's current key id but fail its MAC; they were altered after signing and their grades are not applied
@@ -27735,7 +29177,7 @@ var server = buildServer(store, {
   // only what narrows the outbound path (narrowDualVerify); a widening change waits for a restart.
   // Silent: the start's load above already reported this file once, and helix_codex_status names an
   // unreadable file and every waiting key on the surface an operator reads.
-  currentConfig: () => loadConfig({ globalPath: join13(home, "config.json"), warn: () => {
+  currentConfig: () => loadConfig({ globalPath: join15(home, "config.json"), warn: () => {
   } }),
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
@@ -27744,8 +29186,8 @@ var server = buildServer(store, {
   // same pure function `inspect()` already applies rather than fabricating a value, so a record that
   // ever arrives without one is still matchable instead of silently unquotable.
   echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2, contentDigest }) => ({ id: record2.id, content: record2.content, contentDigest: contentDigest ?? digestContent(record2.content) })) },
-  auditPath: join13(home, "audit.jsonl"),
-  codexLogPath: join13(home, "codex-log.jsonl")
+  auditPath: join15(home, "audit.jsonl"),
+  codexLogPath: join15(home, "codex-log.jsonl")
 }, metrics);
 var transport = new StdioServerTransport();
 await server.connect(transport);

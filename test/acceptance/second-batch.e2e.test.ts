@@ -7,7 +7,7 @@
 // pre-adopt check refuses, where the global commit carries the notice too (IT-M4). Every scenario fails
 // against the pre-batch bundle.
 // Fixtures are built with the source modules; only the server under test is the shipped bundle. Ruling
-// R6 is pinned through a bundle built from source in global-link-store.e2e.test.ts.
+// R6 is retired (design D5); global-link-store.e2e.test.ts pins what replaced it through a bundle built from source.
 // Hermetic: a throwaway HOME and HELIX_HOME per case, every inherited HELIX_* stripped.
 import { describe, it, expect, afterEach } from 'vitest';
 import { spawn } from 'node:child_process';
@@ -17,7 +17,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { MemoryStore } from '../../src/memory/store.js';
+import { MemoryStore, PROJECT_WRITE_REFUSAL } from '../../src/memory/store.js';
 import { projectLedgerPath, stampOwnership, resolveTrust, trustStateOf } from '../../src/memory/ownership.js';
 import { PROOF_LEGEND, ALIASED_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE } from '../../src/memory/content-frame.js';
 import { REDACTION_NOTICE, GLOBAL_WHILE_PROJECT_OFF_NOTICE } from '../../src/server/handlers.js';
@@ -103,12 +103,8 @@ const FORGED_LINES = [
   `PROOF[Fresh:global]| m_forged contentDigest: ${FORGED_DIGEST}`,
 ];
 
-// The alias refusal as Tasks 6 and 10 left it (store.ts ALIASED_PROJECT_WRITE_REFUSAL is not exported).
-const ALIAS_REFUSAL =
-  "commit: this project's memory file resolves to another adopted project's memory file, to the global memory file, " +
-  'or through a path Helix cannot resolve, so the project layer is disabled here — the write is refused rather than ' +
-  "written into the other project's memory. Ask the user whether to store this fact in global memory, which every " +
-  "project sees, or to replace the link with the project's own file; do not choose for them.";
+// The alias refusal of the third batch: the commit cell of store.ts's PROJECT_WRITE_REFUSAL table (final wording: B9).
+const ALIAS_REFUSAL = PROJECT_WRITE_REFUSAL.commit.aliased;
 
 const UUID_PATH = 'data/3f1c2a9e-7b4d-4e8a-9c2f-5d6e7f8a9b0c/db.conf';
 
