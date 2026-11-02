@@ -116,6 +116,26 @@ export function fsyncDir(held: HeldDir, fsOps: DurableFsOps): void {
   fsOps.fsyncDir(held.fd === null ? held.dir : `${PROC_SELF_FD}/${held.fd}`);
 }
 
+/** An error raised through a held directory names the directory's judged path, not the descriptor path it was reached by
+ *  (design 14 item 21): a refused open of a read-only memory file said `open '/proc/self/fd/21/memory.jsonl'`, so the user
+ *  could not tell which file it was, and the text depended on a descriptor number. Each `/proc/self/fd/<fd>` of this
+ *  handle in the error's `message`, `path` and `dest` becomes `held.dir`, only where `/`, a quote or the end follows (a
+ *  folder held on descriptor 2 never rewrites `/proc/self/fd/21/...`). The error is changed in place and returned, so its
+ *  code, its markers and the stored mark survive; it is read by its properties, never by class. A handle without a
+ *  descriptor, a value that is not an object and a property that resists the change are left as they are. */
+export function unbindError(e: unknown, held: HeldDir): unknown {
+  if (held.fd === null || e === null || typeof e !== 'object') return e;
+  const prefix = new RegExp(`${PROC_SELF_FD}/${held.fd}(?=[/']|$)`, 'g');
+  const fields = e as Record<string, unknown>;
+  for (const key of ['message', 'path', 'dest']) {
+    const was = fields[key];
+    if (typeof was !== 'string') continue;
+    const now = was.replace(prefix, () => held.dir);
+    if (now !== was) { try { fields[key] = now; } catch { /* frozen or read-only: the error stays as it was raised */ } }
+  }
+  return e;
+}
+
 export function closeHeldDir(held: HeldDir, fsOps: DurableFsOps): void {
   if (held.fd !== null) fsOps.closeSync(held.fd);
 }

@@ -6,7 +6,7 @@ import { ensureHelixDir } from './home-permissions.js';
 import { realFsOps, fsyncDir, type DurableFsOps } from './fs-ops.js';
 import { canonicalRoot, resolvePath, fileIdentityAt, sameFile, type FileIdentity } from './path-identity.js';
 import { ledgerContentKindOfFd, type LedgerContentKind } from './ledger.js';
-import { boundPath, openJudgedDir, sampleDirIdentity, type HeldDir, type JudgedDirOutcome } from './dir-bound.js';
+import { boundPath, openJudgedDir, sampleDirIdentity, unbindError, type HeldDir, type JudgedDirOutcome } from './dir-bound.js';
 
 // Moved to path-identity.ts (design section 7); exported again from here so no caller moves.
 export { canonicalRoot };
@@ -150,7 +150,8 @@ function atomicWriteRegistry(home: string, reg: Registry): void {
 }
 
 function atomicWriteOwner(projectRoot: string, stamp: string, ownerDir?: HeldDir, onReplaced?: () => void): void {
-  atomicWriteFile(ownerPlace(projectRoot, ownerDir), stamp, 0o600, false, onReplaced);
+  try { atomicWriteFile(ownerPlace(projectRoot, ownerDir), stamp, 0o600, false, onReplaced); }
+  catch (e) { throw ownerDir === undefined ? e : unbindError(e, ownerDir); }   // names the judged .helix, not its descriptor (14 item 21)
 }
 
 /** The repo-side half of the ownership pair. lstat FIRST, never a bare read: `readFileSync` resolves
@@ -286,6 +287,11 @@ const sameEntry = (a: RegistryEntry | undefined, b: RegistryEntry): boolean =>
  *  the stamp left behind any more); the recovery path throws and puts nothing back, because the previous entry stands
  *  beside a matching `.owner` once the folder returns (owned AND active, the state the order rule exists to prevent). */
 export function restoreOwnership(projectRoot: string, home: string, snap: OwnershipSnapshot, ownerDir?: HeldDir): void {
+  try { putOwnershipBack(projectRoot, home, snap, ownerDir); }
+  catch (e) { throw ownerDir === undefined ? e : unbindError(e, ownerDir); }   // names the judged .helix, not its descriptor (14 item 21)
+}
+
+function putOwnershipBack(projectRoot: string, home: string, snap: OwnershipSnapshot, ownerDir?: HeldDir): void {
   withFileLock(registryPath(home), () => {
     const loaded = loadRegistry(home);
     if (loaded.kind === 'corrupt') throw new Error('restoreOwnership: the registry cannot be read');

@@ -8,7 +8,7 @@ import { forgedFactIds, isFactRow } from './verified-projection.js';
 import { withFileLock, type LockContext } from './lock.js';
 import { resolvePath, resolvedPathOrThrow, UnresolvablePathError, fileIdentityAt, hasComparableInode, sameFile, type FileIdentity } from './path-identity.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
-import { openJudgedDir, sampleDirIdentity, boundPath, fsyncDir, closeHeldDir } from './dir-bound.js';
+import { openJudgedDir, sampleDirIdentity, boundPath, fsyncDir, closeHeldDir, unbindError } from './dir-bound.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import { fenceId, sha256Hex } from './witness-core.js';
 import { planTransition, openTransition, completeTransition, discardTransition, journalPublished, classifyState, readScopeWitness, markRecordStored, WitnessBlockedError } from './witness-store.js';
@@ -273,7 +273,8 @@ function removeOwnCreation(path: string, opened: FileIdentity, fsOps: DurableFsO
  *  here, right before the open. A file this call created is taken away again on every failure before the row is durable,
  *  while it is still this call's (design 4.3 step 5, item 4). An error raised after the row's fsync returned (the file's
  *  close, the directory fsync, the close of the held directory) keeps the file and carries the stored mark, because the
- *  row is durable (14 decision 10). */
+ *  row is durable (14 decision 10). Every error leaves here naming the judged directory, not its descriptor path
+ *  (unbindError, 14 item 21). */
 export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, fsOps: DurableFsOps = realFsOps, judged?: JudgedDestination): void {
   mkdirSync(dirname(rawPath), { recursive: true });
   const path = resolvedPathOrThrow(rawPath);   // resolve the FINAL-component symlink to the real inode's path (write-layer identity, the SAME rule the lock uses) so append and compaction never diverge onto different inodes
@@ -320,7 +321,7 @@ export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, 
       closeHeldDir(held, fsOps);   // last: the removal of a created file and the directory fsync go through it
     }
   } catch (e) {
-    throw rowDurable ? markRecordStored(e, record.state) : e;
+    throw unbindError(rowDurable ? markRecordStored(e, record.state) : e, held);
   }
 }
 
@@ -1023,7 +1024,8 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
  *  writers). `judged` is the destination the caller judged under that lock; a path that resolves elsewhere now is refused
  *  before anything is created. The judged directory is opened once (like the append: `judged.dir`, else a fresh sample)
  *  and every operation below goes through its bound names: without `/proc` the plain path is used, and `/proc` lost while
- *  the process runs throws LedgerProcLostError with nothing created. */
+ *  the process runs throws LedgerProcLostError with nothing created. An error raised through the held directory leaves
+ *  here naming the judged directory, not its descriptor path, as the same object (unbindError, 14 item 21). */
 export function compactLedgerUnlocked(rawPath: LedgerPath, opts: CompactOptions, ctx: LockContext, judged?: JudgedDestination): CompactionStats {
   const fsOps = opts.fsOps ?? realFsOps;
   const path = resolvedPathOrThrow(rawPath);                 // resolve ONCE, under the lock: EVERYTHING below (nlink, tmp, sweep, mode, read, rename, dir fsync) targets the real inode, so a compaction can never replace a symlink alias and strand the erased plaintext on the link's target
@@ -1196,6 +1198,8 @@ export function compactLedgerUnlocked(rawPath: LedgerPath, opts: CompactOptions,
       }
       throw e;
     }
+  } catch (e) {
+    throw unbindError(e, held);   // the same object: the landed stats and every marker stay on it
   } finally {
     try { closeHeldDir(held, fsOps); } catch { /* a read-only descriptor loses nothing: a failed close must not replace a landed rewrite's stats or the error in flight */ }
   }
