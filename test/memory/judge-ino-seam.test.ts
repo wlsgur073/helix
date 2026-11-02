@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
 const overrides = vi.hoisted(() => new Map<string, { dev: bigint; ino: bigint }>());
+const zeroInoFstat = vi.hoisted(() => ({ on: false }));
 vi.mock('node:fs', async (importOriginal) => {
   const real = await importOriginal<typeof import('node:fs')>();
   return {
@@ -11,6 +12,11 @@ vi.mock('node:fs', async (importOriginal) => {
       if (hit === undefined) return st;
       return new Proxy(st, { get: (t, k) => (k === 'dev' ? hit.dev : k === 'ino' ? hit.ino : typeof t[k] === 'function' ? t[k].bind(t) : t[k]) });
     },
+    fstatSync: (fd: number, o?: { bigint?: boolean }) => {
+      const st = (real.fstatSync as (...a: unknown[]) => any)(fd, o);
+      if (o?.bigint !== true || !zeroInoFstat.on) return st;
+      return new Proxy(st, { get: (t, k) => (k === 'ino' ? 0n : typeof t[k] === 'function' ? t[k].bind(t) : t[k]) });
+    },
   };
 });
 
@@ -18,8 +24,9 @@ import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { judgeProjectLayer } from '../../src/memory/ownership.js';
+import * as ledgerMod from '../../src/memory/ledger.js';
 
-afterEach(() => overrides.clear());
+afterEach(() => { overrides.clear(); zeroInoFstat.on = false; vi.restoreAllMocks(); });
 
 /** A project whose memory path links to data/mine.jsonl (inside the root) and a DIFFERENT file data/g.jsonl as the global ledger. */
 function world() {
@@ -52,5 +59,19 @@ describe('row 7 compares device and inode as bigints and never calls inode 0 the
     const w = world();
     overrides.set(w.mine, { dev: 7n, ino: 42n }); overrides.set(w.g, { dev: 8n, ino: 42n });
     expect(w.judge()).toMatchObject({ state: 'unadopted-present', row: '12' });
+  });
+});
+
+describe('the per-process memory of row 9a (decision 9: an inode of 0 is never the same file)', () => {
+  const twoJudgements = (): number => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60_000);                   // the file counts as settled
+    const spy = vi.spyOn(ledgerMod, 'ledgerContentKindOfFd');
+    const w = world(); w.judge(); w.judge();
+    return spy.mock.calls.length;
+  };
+  it('control: a file with an inode is read once', () => { expect(twoJudgements()).toBe(1); });
+  it('a file with no inode is read every time: the memory key would be one for every file of that file system', () => {
+    zeroInoFstat.on = true;
+    expect(twoJudgements()).toBe(2);
   });
 });

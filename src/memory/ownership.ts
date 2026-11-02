@@ -5,7 +5,7 @@ import { withFileLock } from './lock.js';
 import { ensureHelixDir } from './home-permissions.js';
 import { fsyncDir } from './fs-ops.js';
 import { canonicalRoot, resolvePath, fileIdentityAt, sameFile, type FileIdentity } from './path-identity.js';
-import { ledgerContentKindOfFd } from './ledger.js';
+import { ledgerContentKindOfFd, type LedgerContentKind } from './ledger.js';
 import { sampleDirIdentity } from './dir-bound.js';
 
 // Moved to path-identity.ts (design section 7); exported again from here so no caller moves.
@@ -285,13 +285,48 @@ function compareWith(dest: { path: string; id: Standing | null }, targetPath: st
   catch { return { same: false, named }; }
 }
 
-function openedVerdict(path: string, readContent: boolean): 'ok' | 'not-regular' | 'unreadable' | 'not-ledger-content' {
+/** Row 9a's answer for one file, remembered per process while the file does not change. The judgement runs on every recall,
+ *  commit, inspect and erase; a link target that holds no record line within the bound would otherwise be read each time.
+ *  The key is the open file's device and inode; an entry answers only while size, mtime and ctime (nanoseconds, bigint) are what
+ *  they were when the content was read. Every write moves ctime, and nothing but the system clock sets it back. Never remembered:
+ *  a file with an inode of 0 (no identity to key on, decision 9); a file whose size or times moved while it was read; a file changed within the last two seconds (a later write inside one
+ *  timestamp tick would leave size and times as they are, the rule git applies to its index); a time in the future. Residual,
+ *  for SECURITY.md (B11): a change made through a shared writable mapping reaches the content before it reaches the times. At
+ *  most 64 files are remembered; the map is emptied when it is full. The SessionStart hook and the two CLIs are fresh processes
+ *  and never have a remembered answer. */
+const CONTENT_KIND_CACHE_MAX = 64;
+const CONTENT_KIND_SETTLED_NS = 2_000_000_000n;
+const contentKindCache = new Map<string, { size: bigint; mtimeNs: bigint; ctimeNs: bigint; kind: LedgerContentKind }>();
+
+function contentKindOfOpenFile(fd: number, fresh: boolean): LedgerContentKind {
+  // A WRITE reads the content and never consults the memory (design 4.2 row 9a: "the write confirms again with the content
+  // under the lock"; finding v2-judgement-03: a write that answered from memory appended a row to a file that no longer held
+  // ledger rows). Nothing is remembered from such a read either.
+  if (fresh) return ledgerContentKindOfFd(fd);
+  const before = fstatSync(fd, { bigint: true });
+  if (before.ino === 0n) return ledgerContentKindOfFd(fd);
+  const key = `${before.dev}:${before.ino}`;
+  const hit = contentKindCache.get(key);
+  if (hit !== undefined && hit.size === before.size && hit.mtimeNs === before.mtimeNs && hit.ctimeNs === before.ctimeNs) return hit.kind;
+  contentKindCache.delete(key);
+  const kind = ledgerContentKindOfFd(fd);
+  const after = fstatSync(fd, { bigint: true });
+  const newest = after.mtimeNs > after.ctimeNs ? after.mtimeNs : after.ctimeNs;
+  const unchanged = after.size === before.size && after.mtimeNs === before.mtimeNs && after.ctimeNs === before.ctimeNs;
+  if (unchanged && BigInt(Date.now()) * 1_000_000n - newest > CONTENT_KIND_SETTLED_NS) {
+    if (contentKindCache.size >= CONTENT_KIND_CACHE_MAX) contentKindCache.clear();
+    contentKindCache.set(key, { size: after.size, mtimeNs: after.mtimeNs, ctimeNs: after.ctimeNs, kind });
+  }
+  return kind;
+}
+
+function openedVerdict(path: string, readContent: boolean, fresh: boolean): 'ok' | 'not-regular' | 'unreadable' | 'not-ledger-content' {
   let fd: number;
   try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); } catch { return 'unreadable'; }
   try {
     if (!fstatSync(fd).isFile()) return 'not-regular';          // replaced between the lstat and the open
     if (!readContent) return 'ok';
-    try { return ledgerContentKindOfFd(fd) === 'other' ? 'not-ledger-content' : 'ok'; } catch { return 'unreadable'; }
+    try { return contentKindOfOpenFile(fd, fresh) === 'other' ? 'not-ledger-content' : 'ok'; } catch { return 'unreadable'; }
   } finally { closeSync(fd); }
 }
 
@@ -308,12 +343,12 @@ export function isGlobalLedgerEntry(projectLedger: string, globalLedger: string)
   catch { return true; }   // nothing there yet, or it cannot be looked at: one entry all the same, and no link is known
 }
 
-export function judgeProjectLayer(project: JudgedLayer | undefined, opts: { forAdopt?: boolean } = {}): LayerJudgement {
-  try { return judge(project, opts.forAdopt === true); }
+export function judgeProjectLayer(project: JudgedLayer | undefined, opts: { forAdopt?: boolean; freshContent?: boolean } = {}): LayerJudgement {
+  try { return judge(project, opts.forAdopt === true, opts.freshContent === true); }
   catch { return { state: 'unusable', row: '5', cause: 'uninspectable' }; }
 }
 
-function judge(project: JudgedLayer | undefined, forAdopt: boolean): LayerJudgement {
+function judge(project: JudgedLayer | undefined, forAdopt: boolean, freshContent: boolean): LayerJudgement {
   if (!project) return { state: 'inactive', row: '1' };                                             // row 1
   const owned = isOwned(project.root, project.home);
   if (project.origin === 'ancestor' && !owned && !forAdopt) return { state: 'ancestor-unadopted', row: '2' };   // row 2: its files are not inspected
@@ -358,7 +393,7 @@ function judge(project: JudgedLayer | undefined, forAdopt: boolean): LayerJudgem
   if (id !== null) {
     if (id.regular && id.nlink !== 1n) return { state: 'aliased', row: '8', cause: 'hard-link', destination };   // row 8 (D6), regular files only
     if (!id.regular) return { state: 'unusable', row: '9', cause: 'not-regular', destination };                 // row 9: never opened
-    const opened = openedVerdict(destination, memoryPathIsLink);                                                 // row 9, row 9a (a link only)
+    const opened = openedVerdict(destination, memoryPathIsLink, freshContent);                                   // row 9, row 9a (a link only)
     if (opened === 'not-ledger-content') return { state: 'unusable', row: '9a', cause: opened, destination };
     if (opened !== 'ok') return { state: 'unusable', row: '9', cause: opened, destination };
   } else if (memoryPathIsLink && dest.dirMissing) {

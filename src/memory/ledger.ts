@@ -1,6 +1,7 @@
-import { mkdirSync, statSync, openSync, fstatSync, readFileSync, readSync, closeSync, constants, type Stats } from 'node:fs';
+import { mkdirSync, statSync, openSync, fstatSync, readSync, closeSync, constants, type Stats } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
 import { forgedFactIds, isFactRow } from './verified-projection.js';
@@ -367,11 +368,99 @@ export function parseLedgerHealth(text: string): { records: MemoryRecord[]; skip
  *  `empty` when no line is non-blank, `other` for everything else. */
 export type LedgerContentKind = 'empty' | 'rows' | 'other';
 
-/** The content kind of an OPEN regular file, read from its start to its end. A12 replaces this body with the
- *  bounded reader (first 1 MiB, design 14 decision 1); the name and the answers stay. Throws what readFileSync throws. */
+/** Design 4.2 row 9a and 4.4, decision 1 (2026-10-28): the content question is decided on the first 1 MiB. */
+export const LEDGER_CONTENT_READ_BOUND_BYTES = 1024 * 1024;
+
+/** A test that passes over a candidate line which cannot be a record before JSON.parse is tried. Exact for the
+ *  definition: JSON allows only space, tab, CR (and LF) after a value and an object ends with '}', so a line whose last
+ *  other byte is not '}' does not parse to an object; without a backslash every key is spelled literally, so a line that
+ *  lacks one of the four key names isWellFormedRecord requires cannot pass it. A line with a backslash is parsed. */
+const RECORD_KEY_NAMES = ['"id"', '"content"', '"tx"', '"provenance"'].map((k) => Buffer.from(k));
+function mayBeRecordLine(line: Buffer): boolean {
+  let e = line.length - 1;
+  while (e >= 0 && (line[e] === 0x20 || line[e] === 0x09 || line[e] === 0x0d)) e--;
+  if (e < 0 || line[e] !== 0x7d) return false;
+  if (line.indexOf(0x5c) !== -1) return true;
+  for (const k of RECORD_KEY_NAMES) if (line.indexOf(k) === -1) return false;
+  return true;
+}
+
+/** The content kind of an OPEN regular file, read from its start in chunks, decided on the complete lines inside the first
+ *  LEDGER_CONTENT_READ_BOUND_BYTES: `rows` at the first record line; `other` when the file goes on past the bound and no record
+ *  line was found (a blank-only first MiB of a longer file is not empty); a file of at most the bound is judged whole. Lines are
+ *  cut at 0x0a on the raw bytes, which splits exactly where parseLedgerHealth's `text.split('\n')` does. A line that CAN be a
+ *  record (its first byte other than space, tab, CR is `{`) is held and tested; every other line is passed over without being
+ *  decoded, only told from a blank one, and blank is `String.prototype.trim`'s notion (VT, FF, NBSP, U+3000, a BOM count), so a
+ *  line that opens with a byte that may begin such a character is decoded piece by piece until a piece holds something else.
+ *  Throws what readSync throws. */
 export function ledgerContentKindOfFd(fd: number): LedgerContentKind {
-  const { records, skippedNonBlank } = parseLedgerHealth(readFileSync(fd, 'utf8'));
-  return records.length > 0 ? 'rows' : skippedNonBlank > 0 ? 'other' : 'empty';
+  const LEAD = 0, MAYBE_BLANK = 1, CANDIDATE = 2, SKIP = 3;
+  const chunk = Buffer.allocUnsafe(65536);
+  let state = LEAD;              // of the line being read; LEAD: only space, tab and CR so far
+  let sawNonBlank = false;
+  let pending: Buffer[] = [];    // CANDIDATE: the line from its `{` on
+  let decoder: StringDecoder | null = null;   // MAYBE_BLANK
+  /** The line just ended: was it a record line? Resets the line state. */
+  const endLine = (): boolean => {
+    let record = false;
+    if (state === CANDIDATE) {
+      const line = pending.length === 1 ? pending[0]! : Buffer.concat(pending);
+      if (mayBeRecordLine(line)) {
+        try { record = isWellFormedRecord(JSON.parse(line.toString('utf8'))); }
+        catch { /* not JSON */ }
+      }
+      pending = [];
+    } else if (state === MAYBE_BLANK) {
+      if (decoder!.end().trim() !== '') sawNonBlank = true;   // a sequence cut off by the line's end decodes to U+FFFD
+      decoder = null;
+    }
+    state = LEAD;
+    return record;
+  };
+  for (let pos = 0; ; ) {
+    if (pos >= LEDGER_CONTENT_READ_BOUND_BYTES) {
+      if (readSync(fd, chunk, 0, 1, pos) === 0) break;   // the file ends exactly at the bound: judged whole
+      return 'other';                                    // it goes on, and no complete line inside the bound was a record
+    }
+    const n = readSync(fd, chunk, 0, Math.min(chunk.length, LEDGER_CONTENT_READ_BOUND_BYTES - pos), pos);
+    if (n === 0) break;
+    pos += n;
+    const buf = chunk.subarray(0, n);
+    for (let i = 0; i < n; ) {
+      const nl = buf.indexOf(0x0a, i);
+      const end = nl === -1 ? n : nl;
+      let j = i;
+      if (state === LEAD) {
+        while (j < end && (buf[j] === 0x20 || buf[j] === 0x09 || buf[j] === 0x0d)) j++;
+        if (j < end) {
+          const b = buf[j]!;
+          if (b === 0x7b) { state = CANDIDATE; sawNonBlank = true; }
+          else if (sawNonBlank || (b < 0x80 && b !== 0x0b && b !== 0x0c)) { state = SKIP; sawNonBlank = true; }
+          else { state = MAYBE_BLANK; decoder = new StringDecoder('utf8'); }
+        }
+      }
+      if (j < end) {
+        if (state === CANDIDATE) pending.push(nl !== -1 && pending.length === 0 ? buf.subarray(j, end) : Buffer.from(buf.subarray(j, end)));
+        else if (state === MAYBE_BLANK && decoder!.write(buf.subarray(j, end)).trim() !== '') { sawNonBlank = true; state = SKIP; decoder = null; }
+      }
+      if (nl === -1) break;
+      if (endLine()) return 'rows';
+      i = nl + 1;
+    }
+  }
+  if (endLine()) return 'rows';
+  return sawNonBlank ? 'other' : 'empty';
+}
+
+/** The content kind of what stands at a RESOLVED path, for adopt's content check (design 4.4, second bullet), which holds for
+ *  a memory path that is not a link too. Opened read-only, never followed and never blocking; an object that is not a regular
+ *  file is not ledger rows. Always read afresh. Throws what the open or the read throws. */
+export function ledgerContentKindAt(path: string): LedgerContentKind {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    if (!fstatSync(fd).isFile()) return 'other';
+    return ledgerContentKindOfFd(fd);
+  } finally { closeSync(fd); }
 }
 
 /** Parse already-read ledger TEXT into records (parseLedger's body minus the file read). Lets a
