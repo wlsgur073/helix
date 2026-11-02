@@ -78,14 +78,58 @@ First release.
   count ≠ 1) is refused outright.
 - Ledger reads open the file non-blocking and read it only when it is a regular file, up to the size
   its descriptor reports: a FIFO, a device or a directory at a ledger path — reached directly or
-  through a symlink, which a repository can carry — is refused with an error instead of stalling the
-  server or reading without bound, and the startup integrity scan skips such a ledger with a warning.
+  through a symlink that stays inside the project, which a repository can carry — is refused with an
+  error instead of stalling the server or reading without bound, and the startup integrity scan
+  skips such a ledger with a warning. A symlink that leaves the project is excluded before the scan,
+  so a FIFO behind one prints no line.
 - The startup integrity scan says why a `verify` row fails: a different key id (what
   `helix-trust-resolve --fresh` or a re-minted key leaves behind) and a newer MAC format are NOTE
   lines, the current key id with a failing MAC is a tampered WARNING, and a row with no MAC or key
-  id stays a forged/legacy WARNING; no class's grade is applied. The scan skips an aliased project
-  layer, and an unadopted working-directory project whose memory file leads to another registered
-  project's ledger or cannot be resolved.
+  id stays a forged/legacy WARNING; no class's grade is applied. The scan reads a project ledger
+  only after the layer judgement passes it: an `aliased` or `unusable` project layer is skipped, and
+  so is an unadopted working-directory project whose memory file is a link out of the project, a
+  link to another project's ledger or to a file that holds no Helix record, has more than one hard
+  link, or cannot be resolved.
+- One judgement of a project's memory file for every read, write, erase, adoption, startup scan and
+  ceremony, and for the `helix-trigger` evaluation (which records the new classes as `unowned`): a
+  memory file that resolves outside the project, to the global ledger, to another project's ledger
+  or into the Helix home, that has more than one hard link, or whose path cannot be resolved is
+  excluded (`aliased`); a `.helix` that is a link or not a directory, a memory file or a folder on
+  its way that cannot be read, a file that is not regular, a link into a missing folder, or a link
+  to a file whose first 1 MiB holds no Helix record is excluded with its own note (`unusable`).
+  Reads leave the layer out; commits, erases, confirms and adoptions are refused with a message that
+  names the cause. Upgrading changes projects whose memory file is a link out of the tree, a link to
+  a file that is not a ledger, hard-linked, or on a path Helix cannot resolve: their writes are
+  refused after the upgrade. A `.helix` whose memory file is a link to the global ledger used to be
+  read as the global store, with no project layer, so a commit without a scope went to the global
+  ledger; it is now an excluded project layer (`aliased`), and that commit is refused.
+- A project's first commit is one critical section: it judges the layer, takes the ledger lock,
+  judges again under it, records the ownership and creates the ledger exclusively. A ledger that
+  appears in between is refused rather than appended to, and a first write that stores no row puts
+  the registry entry and `.owner` back and removes the file it created. `helix_memory_adopt` takes
+  the same lock, refuses an excluded layer, a file that holds content other than Helix records
+  (decided on its first 1 MiB) and a home whose rollback-witness file cannot be used, and puts its
+  records back if recording them fails.
+- An unresolvable global ledger path (a name that is not valid UTF-8, a path past the system limit,
+  too many links, or a link into a folder that does not exist) makes global memory read-only: writes
+  are refused before any lock or home write, reads are served with a constant note, the server
+  prints one line at start, and `helix-rebaseline --scope global` refuses with exit status 2. Before
+  this change such a ledger was locked beside the link, and a rewrite replaced the link with a
+  regular file.
+- A rollback-witness file that cannot be used (a link at its name, a directory, unreadable, not a
+  store) refuses writes before anything is appended and clamps reads to `Fresh` with a note; a
+  corrupt file is no longer read as an empty store and replaced, and a symlink at `witness.json` is
+  not followed, except in a narrow window SECURITY.md names.
+- Lock files are read without following links: a link, FIFO, socket or device at a lock name is
+  refused at once; an unreadable or unparseable lock is waited on within the 5 s budget and refused
+  with a text that names the cause; the startup heal takes the lock only when there is something to
+  heal; a refused permanent erase takes the lock budget (5 s), not 7 s.
+- A failure after a record is stored (the rollback-witness update, the file close, the directory
+  fsync) is answered with a fixed message that says the record was stored and must not be repeated,
+  for commit, erase, confirm and recheck.
+- `helix-rebaseline` and `helix-trust-resolve` refuse an excluded project layer with a fixed text
+  that names the cause, and `helix-rebaseline` prints the resolved destination;
+  `helix-trust-resolve` follows `HELIX_LEDGER` for the global ledger.
 - A read that meets a compaction or erase rewrite still in flight waits for the writing process, up
   to two seconds per scope, and reads once more, instead of leaving that scope out at once.
 - Untrusted-content quarantine: NFKC / control / bidi normalization, per-line datamarking, and a
