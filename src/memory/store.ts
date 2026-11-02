@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, rmdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, LedgerDestinationChangedError, isLedgerCreateRefusedError, type CompactionStats, type JudgedDestination, type LedgerPath } from './ledger.js';
+import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, LedgerDestinationChangedError, LedgerProcLostError, isLedgerCreateRefusedError, isLedgerDestinationChangedError, isLedgerProcLostError, type CompactionStats, type JudgedDestination, type LedgerPath } from './ledger.js';
 import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
-import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, discardTransition, assertWitnessWritable, isRecordStoredError, WitnessBlockedError } from './witness-store.js';
+import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, discardTransition, assertWitnessWritable, isRecordStoredError, isWitnessAdvanceError, isWitnessBlockedError, isWitnessUnusableError, WitnessBlockedError } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
 import type { CompactionConfig } from '../config.js';
 import { buildHistory, ledgerTruncated, isIsoInstant } from './history.js';
@@ -17,7 +17,7 @@ import { rankWithArtifacts, buildRankArtifacts, assertQueryWithinBounds, type Ex
 import { defaultExpansion, SEM_DISCOUNT, SEM_GATE } from './expansion.js';
 import { requiresReverifyBeforeUse } from './state-machine.js';
 import { frameAsData, newNonce, collectWitnessReadNotes, asOfWitnessNotes } from './content-frame.js';
-import { stampOwnership, judgeProjectLayer, canonicalRoot, isReviewableRoot, isHelixDirLinked, trustStateOf, type LayerJudgement, type ProjectDisposition, type ProjectOrigin, type TrustState } from './ownership.js';
+import { stampOwnership, restoreOwnership, openOwnerDir, judgeProjectLayer, canonicalRoot, isReviewableRoot, isHelixDirLinked, trustStateOf, type LayerJudgement, type OwnershipSnapshot, type ProjectDisposition, type ProjectOrigin, type TrustState } from './ownership.js';
 import { ensureMaster, signVerify, verifyVerify, digestContent, isFutureMacVersion } from './ledger-mac.js';
 import { buildVerifiedProjection, isKnownState, enforceWitnessProjection, clampElevatedState, type VerifiedProjection } from './verified-projection.js';
 import { subkeyForScope, verifiedLiveOf, verifiedLiveStats, verifiedLiveWitnessed, verifiedProjectionWithSubkey } from './verified-read.js';
@@ -25,7 +25,10 @@ import { readLedgerWitnessed, readLedgerBytesWitnessed } from './witness-read.js
 import { interruptedAtPredecessor, type WitnessFileMark, type WitnessVerdict } from './witness-core.js';
 import { ledgerDigest, subkeyFingerprint, keyVectorEqual, type ScopeKeyComponent, type RecallCacheEntry } from './recall-cache.js';
 import type { MetricsSink } from '../metrics.js';
-import { withFileLock, isLockPublishRefusedError, type LockContext } from './lock.js';
+import { withFileLock, isLockForeignObjectError, isLockPublishRefusedError, type LockContext } from './lock.js';
+import { closeHeldDir } from './dir-bound.js';
+import { realFsOps } from './fs-ops.js';
+import { isUnresolvablePathError } from './path-identity.js';
 import { ensureHelixDir } from './home-permissions.js';
 import { MAX_COMMIT_CONTENT_CHARS, RECALL_RECENCY_APPENDIX_COUNT, RECALL_APPENDIX_FUTURE_TOLERANCE_MS } from '../limits.js';
 
@@ -183,6 +186,16 @@ const UNWRITABLE_PROJECT_WRITE_REFUSAL =
 const FOREIGN_FILE_REFUSAL =
   'commit: a project memory file exists here that Helix did not create — ask the user whether to adopt it ' +
   '(helix_memory_adopt) or to move it away; do not choose for them.';
+
+/** The first write to a project stored no row and the ownership it had recorded was put back (design 4.3 step 5). */
+const FIRST_WRITE_FAILED_UNDONE =
+  "commit: the first write to this project's memory file failed, so the project was not adopted and nothing was written. " +
+  'Ask the user whether to store this fact in global memory, which every project sees, or to look at the project\'s memory folder first; do not choose for them.';
+
+/** The same failure when the restore itself failed, whatever the first cause (step 5, the item on the texts). */
+const FIRST_WRITE_FAILED_NOT_UNDONE =
+  "commit: the first write to this project's memory file failed and the adoption recorded for it could not be undone, so the project is adopted with no memory file — nothing was written. " +
+  'Tell the user what happened; do not try to repair it for them.';
 
 /** The states in which an explicit 'global' commit bypassed a project layer that is off here (IT-M4). */
 export type BypassedProjectDisposition = 'ancestor-unadopted' | 'aliased' | 'unusable' | 'unadopted-present';
@@ -556,6 +569,11 @@ export class MemoryStore {
    *  one the lock stands beside (ctx.path), is the changed-destination refusal: the path that was locked is not the path
    *  that would be written.
    *
+   *  A folder this call created is removed again when the call is refused (FW-R6): the lock-free look found none, the
+   *  call made it, and a refused call must not leave an empty `.helix` that the next start would find as a project layer.
+   *  It stays when something was put in it (a lock file of a release that could not be proved, an `.owner` the restore
+   *  could not take away) and when the row is stored.
+   *
    *  Lock order: this ledger lock first; the body takes the registry lock, the key lock (a first mint) and the witness lock
    *  under it and never another ledger lock. */
   private underProjectLedgerLock<T>(p: { root: string; ledger: string }, first: LayerJudgement, body: (held: HeldProjectLedger) => T): T {
@@ -568,7 +586,8 @@ export class MemoryStore {
     const folder = dirname(p.ledger);
     let folderThere = true;
     try { lstatSync(folder); } catch (e) { folderThere = (e as NodeJS.ErrnoException).code !== 'ENOENT'; }
-    if (!folderThere) mkdirSync(folder, { recursive: true });
+    let madeFolder = false;
+    if (!folderThere) { mkdirSync(folder, { recursive: true }); madeFolder = true; }
     let held = false;   // true once THIS lock is published
     try {
       return withFileLock(p.ledger, (ctx) => {
@@ -579,6 +598,7 @@ export class MemoryStore {
         return body({ ctx, judgement: j, judged: { path: j.destination, identity: j.identity ?? null, dir: j.dirIdentity } });
       });
     } catch (e) {
+      if (madeFolder && !isRecordStoredError(e)) { try { rmdirSync(folder); } catch { /* not empty, or gone: leave it */ } }
       if (!held && isLockPublishRefusedError(e)) throw new Error(UNWRITABLE_PROJECT_WRITE_REFUSAL, { cause: e });
       throw e;
     }
@@ -596,31 +616,52 @@ export class MemoryStore {
       } else if (judgement.state === 'unadopted-present') {
         throw new Error(FOREIGN_FILE_REFUSAL);
       } else {
-        this.firstProjectWrite(p, record, judged);
+        this.firstProjectWrite(p, judgement, record, judged);
       }
     });
   }
 
-  /** The first write to a project nobody adopted, under its ledger lock (design 4.3 step 4, second case). The checks that
-   *  do not concern the project's file stand in front of the ownership record: the witness file must be usable and the
-   *  signing key must exist or be mintable (a damaged key, or a foreign object at the key's lock on a fresh home, refuses
-   *  here with nothing recorded: 14 decision 3). Then ownership is recorded (registry, then `.owner`) and the memory file
-   *  is created exclusively and the row written through that descriptor by the entry point that does not take the lock
-   *  again. A refused creation (EEXIST, ELOOP) answers the foreign-file text.
+  /** The first write to a project nobody adopted, under its ledger lock (design 4.3 step 4, second case, and step 5 with
+   *  its seven items). The checks that do not concern the project's file stand in front of the ownership record (item 6).
+   *  The held `.helix` descriptor is opened BEFORE anything is recorded (a folder that is not the judged one is the
+   *  changed-destination refusal, nothing to restore), and `.owner` is written and removed through it (14 decision 4).
    *
-   *  B1 has no restore: a failure that stored no row leaves the ownership records, as every append failure did at HEAD; B2
-   *  puts them back. An error that carries the stored mark is thrown as it is. */
-  private firstProjectWrite(p: { root: string; ledger: string }, record: MemoryRecord, judged: JudgedDestination): void {
+   *  A failure that STORED NO ROW puts the ownership records back, `.owner` first (items 2 and 3; the created file is
+   *  taken away by the append itself while it is still this call's, item 4). An error that carries the stored mark
+   *  (the row is in the ledger, a later step failed: the witness advance, and, since decision 10, the file's close, the
+   *  directory fsync and the held directory's close) keeps the ownership. The answer (item 7): the foreign-file text for
+   *  the EEXIST or ELOOP of the creation; the changed-destination text when the check after the open refused; the
+   *  cancel-failed text whenever the restore failed, whatever the cause. A refusal with a type and a text of its own that
+   *  is not about the project's file (the witness file, a lock object, a path that cannot be resolved, a lost /proc) is
+   *  thrown as it is, after the restore (FW-R3; a WitnessAdvanceError here is the heal's, before the row;
+   *  the lost /proc has a dedicated text). Everything else is the
+   *  first-write-failed text with the fs error as its cause. An error raised before anything was recorded is thrown as it is. */
+  private firstProjectWrite(p: { root: string; ledger: string }, judgement: LayerJudgement, record: MemoryRecord, judged: JudgedDestination): void {
     const home = this.homeDir();
     assertWitnessWritable(home, 'commit');
     ensureMaster(home);
+    const opened = openOwnerDir(p.root, judgement, realFsOps);
+    if (opened.kind === 'changed') throw new LedgerDestinationChangedError();
+    if (opened.kind === 'proc-lost') throw new LedgerProcLostError();
+    const owner = opened.dir;
     try {
-      stampOwnership(p.root, home, { now: this.opts.now, genStamp: this.opts.genStamp, autoAdoptLedger: p.ledger });
-      appendWitnessedUnlocked(p.ledger, record, home, p.root, 'commit', 'commit', { ...judged, createExclusive: true });
-    } catch (e) {
-      if (isRecordStoredError(e)) throw e;   // the row is in the ledger: the ownership stays (B2's restore keys on the same test)
-      if (isLedgerCreateRefusedError(e)) throw new Error(FOREIGN_FILE_REFUSAL, { cause: e });
-      throw e;
+      let snapshot: OwnershipSnapshot | null = null;
+      try {
+        stampOwnership(p.root, home, { now: this.opts.now, genStamp: this.opts.genStamp, capture: (s) => { snapshot = s; }, ownerDir: owner });
+        appendWitnessedUnlocked(p.ledger, record, home, p.root, 'commit', 'commit', { ...judged, createExclusive: true });
+      } catch (e) {
+        if (isRecordStoredError(e)) throw e;
+        const taken = snapshot as OwnershipSnapshot | null;   // assigned in the callback above
+        if (taken === null) throw e;
+        try { restoreOwnership(p.root, home, taken, owner); }
+        catch { throw new Error(FIRST_WRITE_FAILED_NOT_UNDONE, { cause: e }); }
+        if (isLedgerCreateRefusedError(e)) throw new Error(FOREIGN_FILE_REFUSAL, { cause: e });
+        if (isLedgerDestinationChangedError(e)) throw e;
+        if (isWitnessBlockedError(e) || isWitnessUnusableError(e) || isWitnessAdvanceError(e) || isLockForeignObjectError(e) || isUnresolvablePathError(e) || isLedgerProcLostError(e)) throw e;
+        throw new Error(FIRST_WRITE_FAILED_UNDONE, { cause: e });
+      }
+    } finally {
+      try { closeHeldDir(owner, realFsOps); } catch { /* a read-only descriptor loses nothing: a failed close must not replace a stored row's success or the refusal in flight */ }
     }
   }
 

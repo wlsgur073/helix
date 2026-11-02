@@ -2,11 +2,13 @@
 // a project nobody adopted creates the memory file with O_CREAT | O_EXCL | O_NOFOLLOW and writes through that
 // descriptor. Anything at the name is LedgerCreateRefusedError; there is no fallback to a plain open.
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, symlinkSync, realpathSync, statSync, rmSync, constants } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, symlinkSync, realpathSync, statSync, rmSync, unlinkSync, existsSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { appendRecordUnlocked, isLedgerCreateRefusedError, type LedgerCreateRefusedError } from '../../src/memory/ledger.js';
 import { realFsOps, type DurableFsOps } from '../../src/memory/fs-ops.js';
+import { isRecordStoredError } from '../../src/memory/witness-store.js';
+import { fileIdentityAt } from '../../src/memory/path-identity.js';
 import type { MemoryRecord } from '../../src/types.js';
 
 const NOW = '2026-11-01T00:00:00.000Z';
@@ -79,5 +81,55 @@ describe('createExclusive', () => {
     writeFileSync(f, 'X\n');
     appendRecordUnlocked(f, rec('m_1'), undefined, { path: f, identity: null });
     expect(readFileSync(f, 'utf8')).toMatch(/^X\n\{.*"id":"m_1"/);
+  });
+});
+
+describe('the file an exclusive creation made is taken away again when no row was stored (design 4.3 step 5, item 4)', () => {
+  const J = (f: string) => ({ path: f, identity: null, createExclusive: true } as const);
+  const boom = (code: string): Error => Object.assign(new Error(`${code}: injected`), { code });
+
+  it('a write that fails leaves no file', () => {
+    const f = join(dir(), 'm.jsonl');
+    const ops: DurableFsOps = { ...realFsOps, writeSync: () => { throw boom('ENOSPC'); } };
+    expect(caught(() => appendRecordUnlocked(f, rec('m_1'), ops, J(f)))).toBeInstanceOf(Error);
+    expect(existsSync(f)).toBe(false);
+  });
+
+  it('an orphan-tmp sweep that fails leaves no file', () => {
+    const f = join(dir(), 'm.jsonl');
+    const ops: DurableFsOps = { ...realFsOps, readdirSync: () => { throw boom('EIO'); } };
+    expect(caught(() => appendRecordUnlocked(f, rec('m_1'), ops, J(f)))).toBeInstanceOf(Error);
+    expect(existsSync(f)).toBe(false);
+  });
+
+  it('a row fsync that fails leaves no file', () => {
+    const f = join(dir(), 'm.jsonl');
+    const ops: DurableFsOps = { ...realFsOps, fsyncSync: () => { throw boom('EIO'); } };
+    const err = caught(() => appendRecordUnlocked(f, rec('m_1'), ops, J(f)));
+    expect(isRecordStoredError(err)).toBe(false);
+    expect(existsSync(f)).toBe(false);
+  });
+
+  it('a file that another party put in its place before the failure is left alone', () => {
+    const f = join(dir(), 'm.jsonl');
+    const ops: DurableFsOps = { ...realFsOps, writeSync: () => { unlinkSync(f); writeFileSync(f, 'OTHER\n'); throw boom('ENOSPC'); } };
+    caught(() => appendRecordUnlocked(f, rec('m_1'), ops, J(f)));
+    expect(readFileSync(f, 'utf8')).toBe('OTHER\n');
+  });
+
+  it('a file that existed (a plain open) is never removed, whatever fails', () => {
+    const f = join(dir(), 'm.jsonl');
+    writeFileSync(f, 'X\n');
+    const ops: DurableFsOps = { ...realFsOps, writeSync: () => { throw boom('ENOSPC'); } };
+    caught(() => appendRecordUnlocked(f, rec('m_1'), ops, { path: f, identity: fileIdentityAt(f) }));
+    expect(readFileSync(f, 'utf8')).toBe('X\n');
+  });
+
+  it('the row is durable and the directory fsync fails: the file and the row stay, and the error carries the stored mark (14 decision 10)', () => {
+    const f = join(dir(), 'm.jsonl');
+    const ops: DurableFsOps = { ...realFsOps, fsyncDir: () => { throw boom('EIO'); } };
+    const err = caught(() => appendRecordUnlocked(f, rec('m_1'), ops, J(f)));
+    expect(isRecordStoredError(err)).toBe(true);
+    expect(readFileSync(f, 'utf8')).toContain('"id":"m_1"');
   });
 });

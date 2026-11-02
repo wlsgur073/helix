@@ -242,15 +242,15 @@ function destinationUnchanged(rawPath: LedgerPath, path: string, judged: FileIde
   return sameFile(now, opened);
 }
 
-/** Remove the file this call created, when the check after the open refused (design 4.3 step 5): only while the
- *  file at the path is shown to be the descriptor's, so at inode 0 it stays. Every failure is swallowed: the refusal
- *  in flight is what the caller reports. */
+/** Remove the file this call created and stored no row in (design 4.3 step 5, item 4): only while the file at the
+ *  path is shown to be the descriptor's, so at inode 0 it stays. Every failure is swallowed: the error in flight is what
+ *  the caller reports. */
 function removeOwnCreation(path: string, opened: FileIdentity, fsOps: DurableFsOps): void {
   try {
     if (!sameFile(fileIdentityAt(path), opened)) return;
     fsOps.unlinkSync(path);
     fsOps.fsyncDir(dirname(path));
-  } catch { /* the file cannot be shown to be gone or durable; the refusal stands */ }
+  } catch { /* the file cannot be shown to be gone or durable; the error in flight stands */ }
 }
 
 /** Append one record as a single JSONL line WITHOUT taking the ledger lock — for callers that
@@ -264,13 +264,15 @@ function removeOwnCreation(path: string, opened: FileIdentity, fsOps: DurableFsO
  *  fragment is isolated into its own malformed line that parse-health counts), then writes the
  *  whole line, fsyncs the fd, and fsyncs the parent dir so an acknowledged append survives power
  *  loss. The judged directory is held by a descriptor bound to the judged path (dir-bound.ts, design decision 2): the
- *  file is opened and a refused creation removed through it, and the directory fsync goes through it; without `/proc`
+ *  file is opened and removed through it, and the directory fsync goes through it; without `/proc`
  *  the plain path is used, and `/proc` lost while the process runs throws LedgerProcLostError with nothing written. The
  *  file is opened with O_NOFOLLOW and, before the first byte and before the sweep, the descriptor and the path resolved
  *  again are checked (destinationUnchanged): a changed destination throws LedgerDestinationChangedError with nothing
  *  written. `judged` is the destination as a caller judged it under the lock; without it the destination is sampled
- *  here, right before the open. An error raised after the row's fsync returned (the file's close, the directory fsync, the
- *  close of the held directory) carries the stored mark, because the row is durable. */
+ *  here, right before the open. A file this call created is taken away again on every failure before the row is durable,
+ *  while it is still this call's (design 4.3 step 5, item 4). An error raised after the row's fsync returned (the file's
+ *  close, the directory fsync, the close of the held directory) keeps the file and carries the stored mark, because the
+ *  row is durable (14 decision 10). */
 export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, fsOps: DurableFsOps = realFsOps, judged?: JudgedDestination): void {
   mkdirSync(dirname(rawPath), { recursive: true });
   const path = resolvedPathOrThrow(rawPath);   // resolve the FINAL-component symlink to the real inode's path (write-layer identity, the SAME rule the lock uses) so append and compaction never diverge onto different inodes
@@ -286,13 +288,13 @@ export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, 
     try {
       const at = boundPath(held, basename(path));
       const { fd, created } = openForAppend(at, before === null, judged?.createExclusive === true, fsOps);
+      let opened: FileIdentity | null = null;
+      // A file this call created and stored no row in is taken away again, while it is still this call's (item 4).
+      const undoCreation = (): void => { if (created && opened !== null) removeOwnCreation(at, opened, fsOps); };
       try {
         const st = fsOps.fstatSync(fd);
-        const opened = { dev: st.dev, ino: st.ino };
-        if (!destinationUnchanged(rawPath, path, before, opened)) {
-          if (created) removeOwnCreation(at, opened, fsOps);   // the descriptor is still open, so its inode cannot have gone to another file
-          throw new LedgerDestinationChangedError();
-        }
+        opened = { dev: st.dev, ino: st.ino };
+        if (!destinationUnchanged(rawPath, path, before, opened)) throw new LedgerDestinationChangedError();
         if (st.nlink === 0) throw new LedgerDestinationChangedError();   // replaced at the name since the open: a race, not an alias
         if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
         sweepOrphanTmps(path, { fsOps });   // behind the check: a refused append never touches the directory the path came to lead to
@@ -306,12 +308,15 @@ export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, 
         writeAll(fsOps, fd, line);
         fsOps.fsyncSync(fd);
         rowDurable = true;
+      } catch (e) {
+        undoCreation();   // EVERY failure before the row is durable, not only a refused check; the descriptor is still open, so its inode cannot have gone to another file
+        throw e;
       } finally {
         fsOps.closeSync(fd);
       }
-      fsyncDir(held, fsOps);
+      fsyncDir(held, fsOps);   // after the row is durable: a failure here keeps the file and the row (14 decision 10)
     } finally {
-      closeHeldDir(held, fsOps);   // last: the removal of a refused creation and the directory fsync go through it
+      closeHeldDir(held, fsOps);   // last: the removal of a created file and the directory fsync go through it
     }
   } catch (e) {
     throw rowDurable ? markRecordStored(e, record.state) : e;

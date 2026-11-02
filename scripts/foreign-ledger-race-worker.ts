@@ -1,7 +1,7 @@
-// Holds the project-registry lock and plants a foreign ledger INSIDE the hold, so a commit that has
-// already passed its own pre-check blocks on this lock and then meets the file under it. That window
-// is the only way to reach stampOwnership's autoAdoptLedger re-check from the commit path: the
-// pre-check in targetLedger refuses any ledger that is present BEFORE the lock is taken.
+// Holds the project-registry lock and plants a foreign ledger INSIDE the hold, so a first commit that
+// has already passed its judgement under the ledger lock blocks on this lock and then meets the file.
+// That window, between the judgement and the exclusive creation, is reached from the commit path only
+// by holding the registry lock: the judgement refuses any ledger that is present BEFORE it is made.
 //
 // Argv: node worker.mjs <registryPath> <ledgerPath> <barrierDir> <plantAfterMs> <holdMs>
 // Barriers: <barrierDir>/acquired once inside the lock, /planted after the file lands, /released on exit.

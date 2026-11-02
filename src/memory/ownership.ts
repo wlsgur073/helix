@@ -1,12 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, fstatSync, openSync, writeSync, fsyncSync, closeSync, constants } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, fstatSync, fchmodSync, openSync, readSync, writeSync, fsyncSync, closeSync, constants } from 'node:fs';
 import { join, resolve, dirname, basename, isAbsolute } from 'node:path';
 import { withFileLock } from './lock.js';
 import { ensureHelixDir } from './home-permissions.js';
-import { fsyncDir } from './fs-ops.js';
+import { realFsOps, fsyncDir, type DurableFsOps } from './fs-ops.js';
 import { canonicalRoot, resolvePath, fileIdentityAt, sameFile, type FileIdentity } from './path-identity.js';
 import { ledgerContentKindOfFd, type LedgerContentKind } from './ledger.js';
-import { sampleDirIdentity } from './dir-bound.js';
+import { boundPath, openJudgedDir, sampleDirIdentity, type HeldDir, type JudgedDirOutcome } from './dir-bound.js';
 
 // Moved to path-identity.ts (design section 7); exported again from here so no caller moves.
 export { canonicalRoot };
@@ -39,7 +39,7 @@ export function projectLedgerPath(projectRoot: string): string {
   return join(projectRoot, '.helix', 'memory.jsonl');
 }
 
-interface RegistryEntry { stamp: string; adoptedAt: string; macNonce: string; trustState?: TrustState }
+export interface RegistryEntry { stamp: string; adoptedAt: string; macNonce: string; trustState?: TrustState }
 
 /** C1.4-③: a scope's trust disposition. `active` (default; absent field reads as active, so every
  *  pre-existing registry entry is active) grants the nonce-derived subkey full signing/verifying
@@ -114,8 +114,8 @@ function assertNotSymlink(path: string, what: string): void {
 
 /** writeSync may write FEWER bytes than requested (a short write, e.g. at ENOSPC or on a signal).
  *  Loop until every byte lands, or the truncated tmp would be renamed over the live registry. */
-function writeAll(fd: number, data: string): void {
-  const buf = Buffer.from(data, 'utf8');
+function writeAll(fd: number, data: string | Buffer): void {
+  const buf = typeof data === 'string' ? Buffer.from(data, 'utf8') : data;
   for (let off = 0; off < buf.length; ) off += writeSync(fd, buf, off, buf.length - off);
 }
 
@@ -123,16 +123,23 @@ function writeAll(fd: number, data: string): void {
  *  world-readable), write it in FULL, fsync it, rename over the destination — which REPLACES a symlink
  *  at the name rather than following it, so a hostile `.owner -> arbitrary-file` symlink cannot
  *  redirect a write — then fsync the directory so the rename survives power loss. Lock-free readers
- *  therefore see EITHER the old file OR the new one, never a torn or partial write. */
-function atomicWriteFile(path: string, data: string, mode: number): void {
+ *  therefore see EITHER the old file OR the new one, never a torn or partial write. `exactMode` sets `mode` on the
+ *  descriptor whatever the umask left, for a restore that puts a file's own mode back. `onReplaced` runs the moment the
+ *  rename returned, ahead of the directory fsync: a caller that has to know the name now holds the new file learns it
+ *  even when that fsync then throws. */
+function atomicWriteFile(path: string, data: string | Buffer, mode: number, exactMode = false, onReplaced?: () => void): void {
   const tmp = `${path}.${randomBytes(8).toString('hex')}.tmp`;
   const fd = openSync(tmp, 'wx', mode);
-  try { writeAll(fd, data); fsyncSync(fd); } finally { closeSync(fd); }
+  try { if (exactMode) fchmodSync(fd, mode); writeAll(fd, data); fsyncSync(fd); }
+  catch (e) { try { unlinkSync(tmp); } catch { /* orphan tmp — harmless */ } throw e; }
+  finally { closeSync(fd); }
   try { renameSync(tmp, path); }
   catch (e) { try { unlinkSync(tmp); } catch { /* orphan tmp — harmless */ } throw e; }
+  onReplaced?.();
   // D-55: a swallowed directory fsync hid EIO and ENOSPC behind a reported success. fsyncDir keeps
   // the platform tolerance (win32 and unsupported return silently) and propagates everything else,
-  // so a caller learns that the rename it just made may not survive a power loss.
+  // so a caller learns that the rename it just made may not survive a power loss. Given a name under
+  // /proc/self/fd/<n>, dirname is that descriptor's path: the held directory is synced.
   fsyncDir(dirname(path));
 }
 
@@ -142,8 +149,8 @@ function atomicWriteRegistry(home: string, reg: Registry): void {
   atomicWriteFile(path, JSON.stringify(reg, null, 2), 0o600);
 }
 
-function atomicWriteOwner(projectRoot: string, stamp: string): void {
-  atomicWriteFile(ownerFile(projectRoot), stamp, 0o600);
+function atomicWriteOwner(projectRoot: string, stamp: string, ownerDir?: HeldDir, onReplaced?: () => void): void {
+  atomicWriteFile(ownerPlace(projectRoot, ownerDir), stamp, 0o600, false, onReplaced);
 }
 
 /** The repo-side half of the ownership pair. lstat FIRST, never a bare read: `readFileSync` resolves
@@ -160,8 +167,8 @@ function atomicWriteOwner(projectRoot: string, stamp: string): void {
  *  Not a clone-forge on its own: the target's bytes must still equal the home-side registry stamp,
  *  which a foreign checkout cannot read. Defense in depth, applied where the project already applies
  *  it everywhere else. */
-function readOwner(projectRoot: string): string | null {
-  const path = ownerFile(projectRoot);
+function readOwner(projectRoot: string, ownerDir?: HeldDir): string | null {
+  const path = ownerPlace(projectRoot, ownerDir);
   try {
     // The PARENT first. A `.helix -> elsewhere` symlink redirects the whole store out of the repo,
     // and `stampOwnership` already refuses to write through exactly that shape — so it can never
@@ -170,7 +177,8 @@ function readOwner(projectRoot: string): string | null {
     // re-checked the parent, so an owned project could have its store relocated behind a link, and
     // then reads served out-of-repo bytes with no disclosure while commits wrote the user's memory
     // into that directory — invisible to `git status`, which sees only the link.
-    if (lstatSync(dirname(path)).isSymbolicLink()) return null;
+    // A bound descriptor was checked when it was opened; an unbound handle has no descriptor, so its path keeps the check.
+    if (!viaDescriptor(ownerDir) && lstatSync(dirname(path)).isSymbolicLink()) return null;
     const st = lstatSync(path);
     if (!st.isFile()) return null;                // symlink, directory, socket -> not our stamp
     // A hard link is a real file to lstat, so the rule above cannot see it — but a second name means
@@ -196,6 +204,118 @@ export function isOwned(projectRoot: string, home: string): boolean {
  *  the judgement would be created in the folder the link leads to. A name that is absent is not a link. */
 export function isHelixDirLinked(projectRoot: string): boolean {
   try { return lstatSync(join(projectRoot, '.helix')).isSymbolicLink(); } catch { return false; }
+}
+
+/** Where `.owner` is looked at and written: its path, or its name under the held `.helix` descriptor (14 decision 4:
+ *  with it, a folder replaced by a link after the descriptor was checked cannot redirect the write or the removal). */
+function ownerPlace(projectRoot: string, ownerDir?: HeldDir): string {
+  return ownerDir === undefined ? ownerFile(projectRoot) : boundPath(ownerDir, '.owner');
+}
+
+/** Does `ownerDir` hold a descriptor? An unbound handle (no `/proc`: `fd` is null) goes by path, so it keeps the path checks. */
+function viaDescriptor(ownerDir?: HeldDir): boolean { return ownerDir !== undefined && ownerDir.fd !== null; }
+
+/** The held descriptor of a project's `.helix` folder, bound to its resolved path (design 4.1 item 3, applied to
+ *  `.owner`). `judged.dirIdentity` is used when the judged destination lies in this very folder (the usual memory path
+ *  `.helix/memory.jsonl`); otherwise the folder is sampled here (a memory path that is a link out of `.helix`
+ *  judged another directory). A `.helix` that is a link, or does not resolve to a directory, is 'changed'. */
+export function openOwnerDir(projectRoot: string, judged: { destination?: string; dirIdentity?: FileIdentity | null }, fsOps: DurableFsOps = realFsOps): JudgedDirOutcome {
+  if (isHelixDirLinked(projectRoot)) return { kind: 'changed' };
+  const r = resolvePath(join(projectRoot, '.helix'));
+  if (r.kind !== 'resolved' || r.dirMissing) return { kind: 'changed' };
+  const identity = judged.destination !== undefined && judged.dirIdentity !== undefined && dirname(judged.destination) === r.path
+    ? judged.dirIdentity
+    : sampleDirIdentity(r.path);
+  return openJudgedDir(r.path, identity, fsOps);
+}
+
+/** What `.owner` was before a call recorded ownership: the bytes and mode of a readable regular file with link count
+ *  1, looked at directly and never through a link; null for everything else (readOwner's null does not tell those apart,
+ *  and it trims). */
+type OwnerBefore = { bytes: Buffer; mode: number } | null;
+
+export interface OwnershipSnapshot {
+  readonly key: string;
+  readonly registryFile: 'absent' | 'present';
+  readonly entryBefore: RegistryEntry | null;
+  readonly ownerBefore: OwnerBefore;
+  readonly entryWritten: RegistryEntry;
+  /** The rename of `.owner` landed, not that the whole write returned: a directory fsync that fails after it leaves the
+   *  call's stamp at the name, and the restore has to know that. */
+  ownerWritten: boolean;
+}
+
+function ownerBeforeOf(projectRoot: string, ownerDir?: HeldDir): OwnerBefore {
+  let fd: number;
+  try { fd = openSync(ownerPlace(projectRoot, ownerDir), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
+  catch { return null; }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.nlink !== 1) return null;
+    const buf = Buffer.alloc(st.size);
+    let len = 0;
+    while (len < buf.length) {
+      const n = readSync(fd, buf, len, buf.length - len, len);
+      if (n === 0) break;
+      len += n;
+    }
+    return { bytes: len === buf.length ? buf : buf.subarray(0, len), mode: st.mode & 0o777 };
+  } catch { return null; }
+  finally { closeSync(fd); }
+}
+
+/** What lstat answers when the name `.owner` cannot be reached (FW-R15). Any other error (EIO and the like) says nothing
+ *  about what stands there, so it is thrown. */
+const OWNER_UNREACHABLE: ReadonlySet<string> = new Set(['ENOENT', 'ENOTDIR', 'ELOOP', 'EACCES']);
+
+const sameEntry = (a: RegistryEntry | undefined, b: RegistryEntry): boolean =>
+  a !== undefined && a.stamp === b.stamp && a.adoptedAt === b.adoptedAt && a.macNonce === b.macNonce && a.trustState === b.trustState;
+
+/** Put the ownership records back to what they were before the call that took `snap` (design 4.3 step 5; 13.3
+ *  decisions 2 and 4). The caller HOLDS THE LEDGER LOCK of the project; this takes the registry lock under it.
+ *  ORDER IS LOAD-BEARING: `.owner` first, the registry entry second (the other order puts the recovery path's registry
+ *  back to active beside a matching `.owner`, and the evidence of the mismatch is gone if the second step then fails).
+ *  `.owner`: the kept bytes are written back when there were any; otherwise the `.owner` this call wrote is removed.
+ *  The registry entry: the whole previous entry, or none; a registry file that did not exist before and holds nothing
+ *  else is removed again. Acts only on what the call wrote: a registry entry that is neither the call's nor the previous
+ *  one (the trust-resolve ceremony takes the registry lock without the ledger lock) makes it throw and change nothing.
+ *
+ *  An `.owner` the call wrote that cannot be reached (only by path, with no `ownerDir` or with an unbound one: the folder
+ *  was replaced and the name leads elsewhere or nowhere, OWNER_UNREACHABLE; a held descriptor reaches it wherever the
+ *  folder went; FW-R15, finding v-firstwrite-05): a NEW adoption has its entry removed all the same (nothing names
+ *  the stamp left behind any more); the recovery path throws and puts nothing back, because the previous entry stands
+ *  beside a matching `.owner` once the folder returns (owned AND active, the state the order rule exists to prevent). */
+export function restoreOwnership(projectRoot: string, home: string, snap: OwnershipSnapshot, ownerDir?: HeldDir): void {
+  withFileLock(registryPath(home), () => {
+    const loaded = loadRegistry(home);
+    if (loaded.kind === 'corrupt') throw new Error('restoreOwnership: the registry cannot be read');
+    const reg: Record<string, RegistryEntry> = loaded.kind === 'ok' ? loaded.reg : {};
+    const now = reg[snap.key];
+    const entryIsCalls = sameEntry(now, snap.entryWritten);
+    const entryIsBefore = snap.entryBefore === null ? now === undefined : sameEntry(now, snap.entryBefore);
+    if (!entryIsCalls && !entryIsBefore) throw new Error('restoreOwnership: the registry entry is not the one this call recorded');
+    const path = ownerPlace(projectRoot, ownerDir);
+    let st: ReturnType<typeof lstatSync> | null = null;
+    try { st = lstatSync(path); } catch (e) { if (!OWNER_UNREACHABLE.has((e as NodeJS.ErrnoException).code ?? '')) throw e; }
+    const beforeIsCalls = snap.ownerBefore !== null && snap.ownerBefore.bytes.toString('utf8') === snap.entryWritten.stamp;
+    const callsOwnerStands = st !== null && st.isFile() && st.nlink === 1 && readFileSync(path, 'utf8') === snap.entryWritten.stamp;
+    if (callsOwnerStands && !beforeIsCalls) {
+      if (snap.ownerBefore !== null) atomicWriteFile(path, snap.ownerBefore.bytes, snap.ownerBefore.mode, true);
+      else { unlinkSync(path); fsyncDir(dirname(path)); }
+    } else if (snap.ownerWritten && !beforeIsCalls && snap.entryBefore !== null) {
+      throw new Error('restoreOwnership: the .owner this call wrote is not what stands at its name');
+    }
+    if (entryIsCalls && !entryIsBefore) {
+      if (snap.entryBefore === null) delete reg[snap.key]; else reg[snap.key] = snap.entryBefore;
+      if (snap.registryFile === 'absent' && Object.keys(reg).length === 0) {
+        assertNotSymlink(registryPath(home), 'registry');
+        unlinkSync(registryPath(home));
+        fsyncDir(home);
+      } else {
+        atomicWriteRegistry(home, reg);
+      }
+    }
+  });
 }
 
 /** Where a configured project layer was found (src/memory/project-root.ts): the session's own working
@@ -409,11 +529,14 @@ export function startupScanReadsProject(project: { root: string; ledger: string;
   return startupScanDecision(project, home, globalLedger).read;
 }
 
-/** Stamp a project as owned: write the repo-side .owner and the home-side registry entry. */
+/** Stamp a project as owned: write the repo-side .owner and the home-side registry entry. `capture` is handed the state
+ *  before the call, under the registry lock and immediately before the first of the two writes, so a failure of either
+ *  write can be put back (restoreOwnership). `ownerDir` makes every `.owner` step go through the held `.helix` descriptor
+ *  (design 14 decision 4); one with `fd` null is the unbound fallback and keeps the path checks. */
 export function stampOwnership(
   projectRoot: string,
   home: string,
-  opts: { now?: () => string; genStamp?: () => string; autoAdoptLedger?: string } = {},
+  opts: { now?: () => string; genStamp?: () => string; capture?: (snap: OwnershipSnapshot) => void; ownerDir?: HeldDir } = {},
 ): void {
   const gen = opts.genStamp ?? (() => randomBytes(16).toString('hex'));
   const key = canonicalRoot(projectRoot);
@@ -429,14 +552,6 @@ export function stampOwnership(
       throw new Error(`stampOwnership: registry at ${registryPath(home)} is present but unparseable — restore it before adopting (refusing to overwrite and lose other projects)`);
     const reg = loaded.kind === 'ok' ? loaded.reg : {};
     const existing = reg[key];
-    // Auto-adopt TOCTOU guard: targetLedger only auto-adopts when NO ledger exists yet. Re-check that
-    // under the registry lock (as close to the write as possible) so a foreign ledger that appeared in
-    // the caller's check-then-stamp window is refused, not silently adopted past the explicit barrier.
-    // Deliberately NOT gated on `!existing`: a registry entry surviving is not proof this ledger is
-    // ours — a lost/overwritten .owner leaves isOwned() false while the entry lingers (the REPAIR
-    // path), and gating here let a foreign ledger that raced into that window be silently adopted.
-    if (opts.autoAdoptLedger && existsSync(opts.autoAdoptLedger))
-      throw new Error('commit: a project memory file exists here that Helix did not create — ask the user whether to adopt it (helix_memory_adopt) or to move it away; do not choose for them.');
     // Reused-path safety (F6, revised; C1.4-③ closes the conferral half). Earlier this REFUSED when
     // the current .owner did not match the entry — but that bricked a legitimate lost-.owner repair
     // with no recovery ceremony. Deletion safety lives at the compaction chokepoint (a wrong/foreign
@@ -458,7 +573,7 @@ export function stampOwnership(
     // Verified rows cannot launder into reused-path content until a human resolves it. Read the
     // CURRENT `.owner` BEFORE atomicWriteOwner below overwrites it. A first adoption (no entry) and
     // an idempotent re-adoption whose `.owner` still matches stay active.
-    const priorOwner = readOwner(projectRoot);
+    const priorOwner = readOwner(projectRoot, opts.ownerDir);
     const ambiguousReadopt = existing !== undefined && priorOwner !== existing.stamp;
     const trustState: TrustState = ambiguousReadopt ? 'pending' : (existing?.trustState ?? 'active');
     const stamp = existing?.stamp ?? gen();
@@ -467,9 +582,11 @@ export function stampOwnership(
     // record signed for one project cannot be transplanted into another (HKDF salt differs).
     const macNonce = existing?.macNonce ?? gen();
     const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => new Date().toISOString()))();
-    const helixDir = join(projectRoot, '.helix');
-    assertNotSymlink(helixDir, '.helix directory'); // a symlinked .helix parent would redirect the .owner (and ledger) write out of the repo
-    mkdirSync(helixDir, { recursive: true });
+    if (!viaDescriptor(opts.ownerDir)) {   // a bound descriptor is a directory that exists and was checked; without `/proc` the handle is a path
+      const helixDir = join(projectRoot, '.helix');
+      assertNotSymlink(helixDir, '.helix directory'); // a symlinked .helix parent would redirect the .owner (and ledger) write out of the repo
+      mkdirSync(helixDir, { recursive: true });
+    }
     // ORDER IS LOAD-BEARING (2026-09-20). The registry lands FIRST, because `.owner` is the evidence
     // of an ambiguous re-adoption: writing it first overwrites the mismatch with the registry's own
     // stamp, so a failure between the two writes leaves `pending` unrecorded AND the evidence gone,
@@ -477,9 +594,16 @@ export function stampOwnership(
     // C1.4-③ exists to stop. With the registry first, a failure leaves `.owner` still disagreeing,
     // so the retry classifies the scope ambiguous and clamps it to `pending` for a human to resolve.
     // Cost, accepted: an interrupted FIRST adoption also lands pending rather than unowned.
-    reg[key] = { stamp, adoptedAt, macNonce, trustState };
+    const written: RegistryEntry = { stamp, adoptedAt, macNonce, trustState };
+    const snap: OwnershipSnapshot = {
+      key, registryFile: loaded.kind === 'ok' ? 'present' : 'absent',
+      entryBefore: existing === undefined ? null : { ...existing },
+      ownerBefore: ownerBeforeOf(projectRoot, opts.ownerDir), entryWritten: written, ownerWritten: false,
+    };
+    opts.capture?.(snap);                      // under the registry lock, before either write: a failure of the .owner write is restorable too
+    reg[key] = written;
     atomicWriteRegistry(home, reg);
-    atomicWriteOwner(projectRoot, stamp); // rename-based: never follows a symlinked .owner
+    atomicWriteOwner(projectRoot, stamp, opts.ownerDir, () => { snap.ownerWritten = true; });   // rename-based: never follows a link at the name
   });
 }
 

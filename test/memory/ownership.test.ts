@@ -1,10 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, lstatSync, unlinkSync, cpSync, rmSync, linkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, lstatSync, unlinkSync, cpSync, rmSync, linkSync, renameSync, readdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { isOwned, stampOwnership, projectLedgerPath, scopeNonce, globalScopeNonce, trustStateOf, resolveTrust } from '../../src/memory/ownership.js';
+import { isOwned, stampOwnership, projectLedgerPath, scopeNonce, globalScopeNonce, trustStateOf, resolveTrust, restoreOwnership, openOwnerDir, type OwnershipSnapshot } from '../../src/memory/ownership.js';
 import { projectDispositionOf } from '../../src/memory/ownership.js';
 import * as fsOps from '../../src/memory/fs-ops.js';
+import { realFsOps } from '../../src/memory/fs-ops.js';
+import { closeHeldDir, procFdAvailable, type HeldDir } from '../../src/memory/dir-bound.js';
 
 function dirs() {
   const home = mkdtempSync(join(tmpdir(), 'helix-home-'));
@@ -73,38 +75,201 @@ describe('ownership macNonce (project-binding salt)', () => {
   });
 });
 
-describe('auto-adopt TOCTOU guard (targetLedger)', () => {
-  it('refuses auto-adoption when a foreign ledger already exists at stamp time (re-checked under the lock)', () => {
+describe('stampOwnership does not look at the memory file (design 4.3: the exclusive creation of the first write refuses a file that stands there)', () => {
+  it('records ownership although a foreign ledger stands at the memory path, and leaves the file untouched', () => {
     const { home, proj } = dirs();
     const ledger = join(proj, '.helix', 'memory.jsonl');
     mkdirSync(join(proj, '.helix'), { recursive: true });
-    writeFileSync(ledger, '{"foreign":true}\n'); // a ledger Helix did not create
-    // auto-adopt (targetLedger's first-use path) must NOT silently adopt a foreign ledger that
-    // appeared in the check-then-stamp window.
-    expect(() => stampOwnership(proj, home, { autoAdoptLedger: ledger })).toThrow(/did not create|adopt/i);
-  });
-
-  it('auto-adopt still succeeds when no ledger exists (the normal first-use path)', () => {
-    const { home, proj } = dirs();
-    const ledger = join(proj, '.helix', 'memory.jsonl'); // does not exist
-    stampOwnership(proj, home, { autoAdoptLedger: ledger });
+    writeFileSync(ledger, '{"foreign":true}\n');
+    stampOwnership(proj, home, {});
+    expect(readFileSync(ledger, 'utf8')).toBe('{"foreign":true}\n');
     expect(isOwned(proj, home)).toBe(true);
   });
 
-  it('refuses a raced foreign ledger on the REPAIR path (stale registry entry, lost .owner)', () => {
-    const home = mkdtempSync(join(tmpdir(), 'helix-own-'));
-    const proj = mkdtempSync(join(tmpdir(), 'helix-proj-'));
-    // First use registers the project and writes .owner.
+  it('the normal first-use path still succeeds with no ledger', () => {
+    const { home, proj } = dirs();
     stampOwnership(proj, home, {});
-    // The .owner stamp is lost or overwritten — isOwned is now false, but the registry entry
-    // survives, so the guard's `!existing` conjunct stops the re-check from ever running.
-    mkdirSync(join(proj, '.helix'), { recursive: true });
+    expect(isOwned(proj, home)).toBe(true);
+  });
+
+  it('on the REPAIR path (stale registry entry, lost .owner) a foreign file does not stop the stamp: the scope enters trust-pending', () => {
+    const { home, proj } = dirs();
+    stampOwnership(proj, home, {});
     writeFileSync(join(proj, '.helix', '.owner'), 'not-our-stamp');
+    writeFileSync(join(proj, '.helix', 'memory.jsonl'), '{}\n');
+    stampOwnership(proj, home, {});
+    expect(trustStateOf(proj, home)).toBe('pending');
+  });
+});
+
+describe('restoreOwnership (design 4.3 step 5)', () => {
+  const taken = (proj: string, home: string, opts: { ownerDir?: HeldDir } = {}): OwnershipSnapshot => {
+    let s: OwnershipSnapshot | undefined;
+    stampOwnership(proj, home, { capture: (x) => { s = x; }, ownerDir: opts.ownerDir });
+    if (s === undefined) throw new Error('capture was not called');
+    return s;
+  };
+
+  it('puts a new adoption back: no registry file, no .owner, not owned', () => {
+    const { home, proj } = dirs();
+    const s = taken(proj, home);
+    expect(isOwned(proj, home)).toBe(true);
+    restoreOwnership(proj, home, s);
     expect(isOwned(proj, home)).toBe(false);
-    // A foreign ledger races into the window.
-    const ledger = join(proj, '.helix', 'memory.jsonl');
-    writeFileSync(ledger, '{}\n');
-    expect(() => stampOwnership(proj, home, { autoAdoptLedger: ledger })).toThrow(/did not create|adopt/i);
+    expect(existsSync(join(home, 'projects.json'))).toBe(false);
+    expect(existsSync(join(proj, '.helix', '.owner'))).toBe(false);
+  });
+
+  it('puts the recovery path back: the previous entry byte for byte, no .owner, trust active again', () => {
+    const { home, proj } = dirs();
+    stampOwnership(proj, home, {});
+    unlinkSync(join(proj, '.helix', '.owner'));
+    const registryBefore = readFileSync(join(home, 'projects.json'), 'utf8');
+    const s = taken(proj, home);
+    expect(trustStateOf(proj, home)).toBe('pending');
+    restoreOwnership(proj, home, s);
+    expect(readFileSync(join(home, 'projects.json'), 'utf8')).toBe(registryBefore);
+    expect(existsSync(join(proj, '.helix', '.owner'))).toBe(false);
+    expect(trustStateOf(proj, home)).toBe('active');
+  });
+
+  it('keeps no bytes of an .owner that is a link or has a second hard link, and removes what the call wrote (design 4.3 step 5, the first item)', () => {
+    const plants: Array<(other: string, owner: string) => void> = [symlinkSync, linkSync];
+    for (const plant of plants) {
+      const { home, proj } = dirs();
+      mkdirSync(join(proj, '.helix'));
+      const other = join(proj, 'other');
+      writeFileSync(other, 'BYTES-BEHIND-THE-NAME');
+      plant(other, join(proj, '.helix', '.owner'));
+      const s = taken(proj, home);
+      expect(s.ownerBefore).toBeNull();
+      restoreOwnership(proj, home, s);
+      expect(existsSync(join(proj, '.helix', '.owner'))).toBe(false);
+      expect(readFileSync(other, 'utf8')).toBe('BYTES-BEHIND-THE-NAME');
+      expect(isOwned(proj, home)).toBe(false);
+    }
+  });
+
+  it('refuses, changing nothing, when the registry entry is no longer the one the call recorded', () => {
+    const { home, proj } = dirs();
+    const s = taken(proj, home);
+    const reg = JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')) as Record<string, { stamp: string }>;
+    reg[s.key]!.stamp = 'SOMEONE-ELSE';
+    writeFileSync(join(home, 'projects.json'), JSON.stringify(reg, null, 2));
+    expect(() => restoreOwnership(proj, home, s)).toThrow(/not the one this call recorded/);
+    expect(existsSync(join(proj, '.helix', '.owner'))).toBe(true);
+  });
+
+  it('without a held directory, an unreachable .owner removes a new adoption\'s entry (FW-R15)', () => {
+    const { home, proj } = dirs();
+    const s = taken(proj, home);
+    renameSync(join(proj, '.helix'), join(proj, 'helix-real'));
+    symlinkSync(mkdtempSync(join(tmpdir(), 'helix-other-')), join(proj, '.helix'));
+    restoreOwnership(proj, home, s);
+    expect(existsSync(join(home, 'projects.json'))).toBe(false);
+  });
+
+  it('without a held directory, an unreachable .owner on the recovery path refuses and leaves the entry', () => {
+    const { home, proj } = dirs();
+    stampOwnership(proj, home, {});
+    unlinkSync(join(proj, '.helix', '.owner'));
+    const s = taken(proj, home);
+    renameSync(join(proj, '.helix'), join(proj, 'helix-real'));
+    symlinkSync(mkdtempSync(join(tmpdir(), 'helix-other-')), join(proj, '.helix'));
+    expect(() => restoreOwnership(proj, home, s)).toThrow(/not what stands at its name/);
+    expect(Object.keys(JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')))).toHaveLength(1);
+  });
+
+  // FW-R15 on both routes that go by path: no `ownerDir`, and the unbound handle a host without /proc passes.
+  const pathRoutes: Array<[string, (proj: string) => HeldDir | undefined]> = [
+    ['no ownerDir', () => undefined],
+    ['an ownerDir with fd null', (proj) => ({ dir: join(proj, '.helix'), fd: null })],
+  ];
+  /** What can stand at `.helix` so that the name `.owner` cannot be reached, each with the answer lstat gives. */
+  const noWayIn: Array<[string, string, (helix: string) => void]> = [
+    ['a regular file', 'ENOTDIR', (helix) => writeFileSync(helix, 'not a folder')],
+    ['a link to itself', 'ELOOP', (helix) => symlinkSync(helix, helix)],
+    ...(process.getuid?.() === 0 ? [] : [['a folder that cannot be searched', 'EACCES', (helix: string): void => mkdirSync(helix, { mode: 0o000 })] as [string, string, (helix: string) => void]]),
+  ];
+  const unreachableCells = pathRoutes.flatMap(([route, held]) => noWayIn.map(([what, code, plant]) => [route, what, code, held, plant] as const));
+  /** `.helix` moves aside and `plant` stands in its place while `body` runs; the premise is the errno itself. */
+  function withOwnerUnreachable(proj: string, code: string, plant: (helix: string) => void, body: () => void): void {
+    const helix = join(proj, '.helix');
+    renameSync(helix, join(proj, 'helix-real'));
+    plant(helix);
+    try {
+      expect(() => lstatSync(join(helix, '.owner'))).toThrow(code);
+      body();
+    } finally { if (code === 'EACCES') chmodSync(helix, 0o700); }   // the run's temp root must stay removable
+  }
+
+  it.each(unreachableCells)('%s, .helix replaced by %s (%s): a new adoption has its entry removed (FW-R15)', (_route, _what, code, held, plant) => {
+    const { home, proj } = dirs();
+    const s = taken(proj, home);
+    withOwnerUnreachable(proj, code, plant, () => restoreOwnership(proj, home, s, held(proj)));
+    expect(existsSync(join(home, 'projects.json'))).toBe(false);
+  });
+
+  it.each(unreachableCells)('%s, .helix replaced by %s (%s): the recovery path refuses and leaves the entry (FW-R15)', (_route, _what, code, held, plant) => {
+    const { home, proj } = dirs();
+    stampOwnership(proj, home, {});
+    unlinkSync(join(proj, '.helix', '.owner'));
+    const s = taken(proj, home);
+    const registry = readFileSync(join(home, 'projects.json'), 'utf8');
+    withOwnerUnreachable(proj, code, plant, () => {
+      expect(() => restoreOwnership(proj, home, s, held(proj))).toThrow(/not what stands at its name/);
+    });
+    expect(readFileSync(join(home, 'projects.json'), 'utf8')).toBe(registry);
+  });
+
+  it.each(pathRoutes)('%s: an .owner whose rename landed ahead of a failed directory fsync counts as written, so the recovery path refuses, the pending entry stays, and the returned folder is not owned-and-active', (_route, held) => {
+    const { home, proj } = dirs();
+    const helix = join(proj, '.helix');
+    stampOwnership(proj, home, {});
+    unlinkSync(join(helix, '.owner'));
+    const real = fsOps.fsyncDir;
+    const spy = vi.spyOn(fsOps, 'fsyncDir').mockImplementation(((dir: string, ...rest: unknown[]) => {
+      if (dir === helix) throw Object.assign(new Error('EIO: injected'), { code: 'EIO' });
+      return (real as (...a: unknown[]) => void)(dir, ...rest);
+    }) as unknown as typeof fsOps.fsyncDir);
+    let s: OwnershipSnapshot | undefined;
+    try { expect(() => stampOwnership(proj, home, { capture: (x) => { s = x; } })).toThrow(/EIO/); } finally { spy.mockRestore(); }
+    if (s === undefined) throw new Error('capture was not called');
+    expect(existsSync(join(helix, '.owner'))).toBe(true);    // the premise: the rename landed before the fsync failed
+    renameSync(helix, join(proj, 'helix-real'));
+    symlinkSync(mkdtempSync(join(tmpdir(), 'helix-other-')), helix);
+    expect(() => restoreOwnership(proj, home, s!, held(proj))).toThrow(/not what stands at its name/);
+    expect(trustStateOf(proj, home)).toBe('pending');
+    unlinkSync(helix);
+    renameSync(join(proj, 'helix-real'), helix);
+    expect(isOwned(proj, home)).toBe(true);                  // the folder returned with the stamp in it
+    expect(trustStateOf(proj, home)).toBe('pending');        // never owned AND active
+  });
+
+  it('an unbound handle (no /proc) keeps the path checks: a .helix that became a link refuses the stamp, and the folder it leads to gets nothing', () => {
+    const { home, proj } = dirs();
+    mkdirSync(join(proj, '.helix'));
+    const held: HeldDir = { dir: join(proj, '.helix'), fd: null };
+    const other = mkdtempSync(join(tmpdir(), 'helix-other-'));
+    renameSync(join(proj, '.helix'), join(proj, 'helix-real'));
+    symlinkSync(other, join(proj, '.helix'));
+    expect(() => stampOwnership(proj, home, { ownerDir: held })).toThrow(/symlinked \.helix directory/);
+    expect(readdirSync(other)).toEqual([]);
+  });
+
+  it.skipIf(!procFdAvailable(realFsOps))('with a held .helix, the restore reaches the .owner of the folder the stamp wrote to although that folder was replaced by a link', () => {
+    const { home, proj } = dirs();
+    mkdirSync(join(proj, '.helix'));
+    const out = openOwnerDir(proj, {}, realFsOps);
+    if (out.kind !== 'bound') throw new Error('expected a bound descriptor');
+    try {
+      const s = taken(proj, home, { ownerDir: out.dir });
+      renameSync(join(proj, '.helix'), join(proj, 'helix-real'));
+      symlinkSync(mkdtempSync(join(tmpdir(), 'helix-other-')), join(proj, '.helix'));
+      restoreOwnership(proj, home, s, out.dir);
+    } finally { closeHeldDir(out.dir, realFsOps); }
+    expect(existsSync(join(proj, 'helix-real', '.owner'))).toBe(false);
+    expect(existsSync(join(home, 'projects.json'))).toBe(false);
   });
 });
 
