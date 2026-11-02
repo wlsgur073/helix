@@ -1,12 +1,13 @@
 import { mkdirSync, statSync, openSync, fstatSync, readSync, closeSync, constants, type Stats } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { dirname } from 'node:path';
+import { basename, dirname } from 'node:path';
 import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
 import { forgedFactIds, isFactRow } from './verified-projection.js';
 import { withFileLock } from './lock.js';
 import { resolvePath, resolvedPathOrThrow, fileIdentityAt, hasComparableInode, sameFile, type FileIdentity } from './path-identity.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
+import { openJudgedDir, sampleDirIdentity, boundPath, fsyncDir, closeHeldDir } from './dir-bound.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import { fenceId, sha256Hex } from './witness-core.js';
 import { planTransition, openTransition, completeTransition, discardTransition, classifyState, readScopeWitness, WitnessBlockedError } from './witness-store.js';
@@ -145,9 +146,29 @@ export class LedgerDestinationChangedError extends Error {
 export const isLedgerDestinationChangedError = (e: unknown): boolean =>
   e instanceof Error && (e as { ledgerDestinationChanged?: unknown }).ledgerDestinationChanged === true;
 
+/** The refusal when `/proc` was usable and no longer is (design 4.1 item 3): the append can no longer hold the judged
+ *  directory, and the fallback is for a host that never had `/proc`. A constant: no path, no interpolation. */
+export const PROC_LOST_REFUSAL =
+  "commit: Helix can no longer confirm which folder this write goes into, because the system's process file table " +
+  'became unavailable after this session started — nothing was written. Restart the session; if it happens again, tell the user.';
+
+/** `/proc` was lost while the process ran (design 4.1 item 3). Nothing was written. */
+export class LedgerProcLostError extends Error {
+  /** The marker isLedgerProcLostError reads (a property, never class identity). */
+  readonly ledgerProcLost = true;
+  constructor(message: string = PROC_LOST_REFUSAL) {
+    super(message);
+    this.name = 'LedgerProcLostError';
+  }
+}
+
+export const isLedgerProcLostError = (e: unknown): boolean =>
+  e instanceof Error && (e as { ledgerProcLost?: unknown }).ledgerProcLost === true;
+
 /** The destination as a caller judged it, sampled under the ledger lock: the resolved path and the device and
- *  inode that stood there, `identity` null when nothing did. */
-export interface JudgedDestination { path: string; identity: FileIdentity | null }
+ *  inode that stood there, `identity` null when nothing did. `dir` is the identity of the directory that holds it:
+ *  undefined, the append samples the directory itself; null, the judgement found no directory and the append refuses. */
+export interface JudgedDestination { path: string; identity: FileIdentity | null; dir?: FileIdentity | null }
 
 /** O_NOFOLLOW (design 4.1 item 3): the last component of the resolved path is never followed, so a link that
  *  appears there after the resolution ends in ELOOP with nothing written. Where the platform does not define the
@@ -217,39 +238,52 @@ function removeOwnCreation(path: string, opened: FileIdentity, fsOps: DurableFsO
  *  prefixing its own separator (at-least-once: a complete-but-unacked prior record commits; a torn
  *  fragment is isolated into its own malformed line that parse-health counts), then writes the
  *  whole line, fsyncs the fd, and fsyncs the parent dir so an acknowledged append survives power
- *  loss. The resolved path is opened with O_NOFOLLOW and, before the first byte and before the sweep, the descriptor
- *  and the path resolved again are checked (destinationUnchanged): a changed destination throws
- *  LedgerDestinationChangedError with nothing written. `judged` is the destination as a caller judged it under the
- *  lock; without it the destination is sampled here, right before the open. */
+ *  loss. The judged directory is held by a descriptor bound to the judged path (dir-bound.ts, design decision 2): the
+ *  file is opened and a refused creation removed through it, and the directory fsync goes through it; without `/proc`
+ *  the plain path is used, and `/proc` lost while the process runs throws LedgerProcLostError with nothing written. The
+ *  file is opened with O_NOFOLLOW and, before the first byte and before the sweep, the descriptor and the path resolved
+ *  again are checked (destinationUnchanged): a changed destination throws LedgerDestinationChangedError with nothing
+ *  written. `judged` is the destination as a caller judged it under the lock; without it the destination is sampled
+ *  here, right before the open. */
 export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, fsOps: DurableFsOps = realFsOps, judged?: JudgedDestination): void {
   mkdirSync(dirname(rawPath), { recursive: true });
   const path = resolvedPathOrThrow(rawPath);   // resolve the FINAL-component symlink to the real inode's path (write-layer identity, the SAME rule the lock uses) so append and compaction never diverge onto different inodes
   if (judged !== undefined && judged.path !== path) throw new LedgerDestinationChangedError();
   const before = judged !== undefined ? judged.identity : fileIdentityAt(path);
-  const { fd, created } = openForAppend(path, before === null, fsOps);
+  const dirSample = judged !== undefined && judged.dir !== undefined ? judged.dir : sampleDirIdentity(dirname(path));
+  const bound = openJudgedDir(dirname(path), dirSample, fsOps);
+  if (bound.kind === 'changed') throw new LedgerDestinationChangedError();
+  if (bound.kind === 'proc-lost') throw new LedgerProcLostError();
+  const held = bound.dir;
   try {
-    const st = fsOps.fstatSync(fd);
-    const opened = { dev: st.dev, ino: st.ino };
-    if (!destinationUnchanged(rawPath, path, before, opened)) {
-      if (created) removeOwnCreation(path, opened, fsOps);   // the descriptor is still open, so its inode cannot have gone to another file
-      throw new LedgerDestinationChangedError();
+    const at = boundPath(held, basename(path));
+    const { fd, created } = openForAppend(at, before === null, fsOps);
+    try {
+      const st = fsOps.fstatSync(fd);
+      const opened = { dev: st.dev, ino: st.ino };
+      if (!destinationUnchanged(rawPath, path, before, opened)) {
+        if (created) removeOwnCreation(at, opened, fsOps);   // the descriptor is still open, so its inode cannot have gone to another file
+        throw new LedgerDestinationChangedError();
+      }
+      if (st.nlink === 0) throw new LedgerDestinationChangedError();   // replaced at the name since the open: a race, not an alias
+      if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
+      sweepOrphanTmps(path, { fsOps });   // behind the check: a refused append never touches the directory the path came to lead to
+      if (fsOps.fstatSync(fd).nlink === 0) throw new LedgerDestinationChangedError();   // a compactor's rename that landed before the sweep left this descriptor on an unlinked inode; behind the sweep it fails ENOENT, so a descriptor that passes here is a live file
+      let line = JSON.stringify(record) + '\n';
+      if (st.size > 0) {
+        const tail = Buffer.alloc(1);
+        fsOps.readSync(fd, tail, 0, 1, st.size - 1);
+        if (tail[0] !== 0x0a) line = '\n' + line;   // tail repair: separator + record share one write+fsync
+      }
+      writeAll(fsOps, fd, line);
+      fsOps.fsyncSync(fd);
+    } finally {
+      fsOps.closeSync(fd);
     }
-    if (st.nlink === 0) throw new LedgerDestinationChangedError();   // replaced at the name since the open: a race, not an alias
-    if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
-    sweepOrphanTmps(path, { fsOps });   // behind the check: a refused append never touches the directory the path came to lead to
-    if (fsOps.fstatSync(fd).nlink === 0) throw new LedgerDestinationChangedError();   // a compactor's rename that landed before the sweep left this descriptor on an unlinked inode; behind the sweep it fails ENOENT, so a descriptor that passes here is a live file
-    let line = JSON.stringify(record) + '\n';
-    if (st.size > 0) {
-      const tail = Buffer.alloc(1);
-      fsOps.readSync(fd, tail, 0, 1, st.size - 1);
-      if (tail[0] !== 0x0a) line = '\n' + line;   // tail repair: separator + record share one write+fsync
-    }
-    writeAll(fsOps, fd, line);
-    fsOps.fsyncSync(fd);
+    fsyncDir(held, fsOps);
   } finally {
-    fsOps.closeSync(fd);
+    closeHeldDir(held, fsOps);   // last: the removal of a refused creation and the directory fsync go through it
   }
-  fsOps.fsyncDir(dirname(path));
 }
 
 /** Locked append (see appendRecordUnlocked for the write contract). Parent dir is created BEFORE

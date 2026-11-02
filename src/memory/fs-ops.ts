@@ -1,4 +1,4 @@
-import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, renameSync, unlinkSync, linkSync, fchmodSync, readdirSync } from 'node:fs';
+import { openSync, readSync, writeSync, fsyncSync, closeSync, fstatSync, statSync, readlinkSync, renameSync, unlinkSync, linkSync, fchmodSync, readdirSync } from 'node:fs';
 
 /** Injectable seam for the durable-write paths. It exists so tests can assert fsync TARGET AND
  *  ORDER: durability has no behavioral observable (a SIGKILLed process's page cache survives, so
@@ -20,6 +20,9 @@ export interface DurableFsOps {
   fchmodSync(fd: number, mode: number): void;
   readdirSync(dir: string): string[];
   fsyncDir(dir: string): void;
+  /** The `/proc/self/fd` calls of dir-bound.ts; absent means `realProcFdSyscalls`. A test passes a stub to stand for a
+   *  `/proc` that is missing, lost or another process's. */
+  procFd?: ProcFdSyscalls;
 }
 
 /** Thin, test-only seam over the three raw syscalls fsyncDir itself makes. Kept separate from
@@ -85,6 +88,16 @@ export function fsyncDir(
     sys.closeSync(dfd);
   }
 }
+
+/** The two calls dir-bound.ts makes outside the seam above: a stat that follows the magic link, and the readlink. */
+export interface ProcFdSyscalls {
+  statSync(path: string): { dev: bigint; ino: bigint };
+  readlinkSync(path: string): string;
+}
+export const realProcFdSyscalls: ProcFdSyscalls = {
+  statSync: (path) => { const st = statSync(path, { bigint: true }); return { dev: st.dev, ino: st.ino }; },
+  readlinkSync: (path) => readlinkSync(path),
+};
 
 export const realFsOps: DurableFsOps = {
   openSync, readSync, writeSync, fsyncSync, closeSync,
