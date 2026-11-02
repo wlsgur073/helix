@@ -232,14 +232,14 @@ describe.skipIf(process.platform === 'win32')('a home below an unresolvable path
 });
 
 describe('the rebaseline ceremony does not replace a witness file that cannot be used', () => {
-  it('exits non-zero before it prompts or writes (the generic catch of the CLI; its own text is B8/B9)', async () => {
+  it('exits 2 before it prompts or writes (the text is pinned in cli-refusal-matrix.test.ts)', async () => {
     const h = home(); const ledger = join(h, 'memory.jsonl'); writeFileSync(ledger, '{"id":"m_1"}\n');
     writeFileSync(W(h), 'garbage {');
     let prompted = false; let code: number | null = null;
     const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
       const ret = await rebaseline(['--scope', 'global'], { env: { HELIX_HOME: h }, isTTY: true, promptLine: async () => { prompted = true; return 'bless'; }, exit: (c: number) => { code = c; } });
-      expect(ret).not.toBe(0); expect(code).toBe(ret);
+      expect(ret).toBe(2); expect(code).toBe(ret);
     } finally { err.mockRestore(); }
     expect(prompted).toBe(false);
     expect(readFileSync(W(h), 'utf8')).toBe('garbage {');

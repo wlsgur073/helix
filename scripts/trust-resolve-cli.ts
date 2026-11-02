@@ -33,11 +33,12 @@ const USAGE = 'usage: helix-trust-resolve --scope <absoluteProjectRoot> --repair
  *  path. The cause lists are those of the two read notes. */
 const TRUST_RESOLVE_ALIASED_REFUSAL =
   "helix-trust-resolve: REFUSING - this project's memory file resolves outside this project, to another Helix memory file, " +
-  'to a file with more than one hard link, or through a path Helix cannot resolve. Nothing was changed.\n';
+  'to a file with more than one hard link, or through a path Helix cannot resolve. Nothing was changed. ' +
+  "Replace it with the project's own file, then re-run.\n";
 const TRUST_RESOLVE_UNUSABLE_REFUSAL =
   "helix-trust-resolve: REFUSING - this project's memory file cannot be used as it is (it is not a regular file, it or its folder " +
   'cannot be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory records). ' +
-  'Nothing was changed.\n';
+  "Nothing was changed. Repair the project's memory file, then re-run.\n";
 const TRUST_RESOLVE_GLOBAL_STORE_REFUSAL =
   "helix-trust-resolve: REFUSING - this project's memory file is the global memory file itself, so there is no separate project scope to resolve. " +
   'Nothing was changed.\n';

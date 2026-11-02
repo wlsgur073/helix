@@ -21,12 +21,16 @@ import { isAbsolute, dirname, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import type { MemoryRecord } from '../src/types.js';
 import { withFileLockAsync } from '../src/memory/lock.js';
-import { readLedgerBytes, appendRecordUnlocked, witnessFenceRecord, aliasedLedgerRefusal } from '../src/memory/ledger.js';
+import {
+  readLedgerBytes, appendRecordUnlocked, witnessFenceRecord, aliasedLedgerRefusal, isLedgerDestinationChangedError,
+} from '../src/memory/ledger.js';
 import {
   readScopeWitness, classifyState, planTransition, openTransition, completeTransition, discardTransition, journalPublished,
+  isWitnessUnusableError,
 } from '../src/memory/witness-store.js';
 import { sha256Hex } from '../src/memory/witness-core.js';
 import { resolveScopeTarget, type ScopeRefusalCause, type ScopeResolution } from '../src/memory/scope-target.js';
+import { isGlobalLedgerReadOnly } from '../src/memory/global-ledger.js';
 
 export interface RebaselineDeps {
   env?: NodeJS.ProcessEnv;
@@ -87,6 +91,14 @@ const CAUSE_TEXT: Record<Exclude<ScopeRefusalCause, 'global-store' | 'global-led
   'target-directory-missing': "this project's memory file is a link into a folder that does not exist.",
 };
 
+const TAIL_ELSEWHERE =
+  "Re-baselining it would record a file that is not this project's own under this project's witness identity.\n" +
+  "Replace it with the project's own file, then re-run.\n";
+const TAIL_PATH = "Nothing was written. Repair the path (or replace the link with the project's own file), then re-run.\n";
+const TAIL_UNUSABLE = "Nothing was written. Repair the project's memory file, then re-run.\n";
+/** The causes that name no file to blame: the path cannot be followed at all, or the file it leads to cannot be compared. */
+const PATH_CAUSES: ReadonlySet<string> = new Set(['unresolvable', 'unjudgeable-target']);
+
 /** The refusal of a project scope (design 4.10, ASCII only). `resolved ledger:` prints where a write through the memory
  *  path lands, not the link's own path (m-4), and is the one line of the cause texts that carries a path. */
 function scopeRefusalText(globalLedger: string, scope: string, target: Extract<ScopeResolution, { ok: false }>): string {
@@ -104,10 +116,7 @@ function scopeRefusalText(globalLedger: string, scope: string, target: Extract<S
       `Re-baselining it would record one file under two project witness identities.\n` +
       `Replace the link with the project's own file, then re-run.\n`;
   }
-  const tail = target.reason === 'unusable'
-    ? `Nothing was read or written. Repair the project's memory file, then re-run.\n`
-    : `Re-baselining it would record a file that is not this project's own under this project's witness identity.\n` +
-      `Replace it with the project's own file, then re-run.\n`;
+  const tail = target.reason === 'unusable' ? TAIL_UNUSABLE : PATH_CAUSES.has(cause) ? TAIL_PATH : TAIL_ELSEWHERE;
   return `helix-rebaseline: REFUSING - ${CAUSE_TEXT[cause]}\n` +
     (destination !== undefined ? `  resolved ledger: ${destination}\n` : '') + tail;
 }
@@ -134,13 +143,37 @@ const NOTE_APPEND_REFUSED_RETRACTED = 'append refused before any byte landed -- 
  *  first note ("append refused") would be false here. */
 const NOTE_PUBLISH_FAILED_RETRACTED = 'the witness journal was left by a publication that failed -- it was retracted; nothing written\n';
 
+/** `--scope global` over a global ledger that cannot be used (design 4.10, first bullet, last sentence; 4.7 second table):
+ *  refused in front of the scope judgement, the folder creation, the lock, the display and the prompt. Exit 2. */
+const REBASELINE_GLOBAL_READ_ONLY_REFUSAL =
+  "helix-rebaseline: REFUSING - the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist).\n" +
+  'Nothing was written. Repair that path (HELIX_LEDGER, or a link on it), then re-run.\n';
+
+/** A witness file that is there and cannot be used (A15: WitnessUnusableError, reason other than 'transient'). Its first read
+ *  stands before the prompt, so nothing was asked and nothing written; read as an empty store it used to be REPLACED by the
+ *  ceremony's journal, which dropped the baseline of every other scope. The reader is the operator at a terminal, so the
+ *  removal is offered as their own decision. Exit 2. */
+const REBASELINE_WITNESS_UNUSABLE_REFUSAL =
+  'helix-rebaseline: REFUSING - the rollback-witness file cannot be used (its path cannot be resolved, a link stands at its name, it is not a regular file, or it cannot be read or parsed).\n' +
+  'A re-baseline would replace that file and drop the baseline of every other scope. Nothing was written. ' +
+  'Restore the file from a backup, or, if you accept that every scope starts again from first contact, remove it; then re-run.\n';
+
+/** The append's check refused the fence: the destination changed while the ceremony held the lock (rulings H R-6 with C4
+ *  FW-R7). The ledger layer's default text is the commit tool's, so it never reaches the operator. True for both scopes.
+ *  It says "no fence" and not "nothing": a journal whose retraction did not happen stays pending. Exit 2. */
+export const REBASELINE_DESTINATION_CHANGED_REFUSAL =
+  'helix-rebaseline: REFUSING - the memory file changed while the re-baseline was in progress, so no fence was written.\n' +
+  'Check what the memory path leads to now, then re-run.\n';
+
 /** Never throws: every failure path (usage, TTY refusal, or any exception from the locked
  *  ceremony) is caught and turned into a numeric exit code — both returned AND applied via
  *  deps.exit (default: process.exitCode, never the hard process.exit(), matching this repo's
  *  natural-exit convention). Exit 2 = nothing attempted: bad usage, no TTY, a project scope that
  *  resolves to the global ledger, or an already-hard-linked ledger — the last two are refused
  *  before the lock, the display and the prompt, because a target the ceremony cannot honour must
- *  not be one the operator is asked to bless. Exit 1 = confirmation
+ *  not be one the operator is asked to bless. Exit 2 also covers a global scope over a global
+ *  ledger that cannot be used, a witness file that cannot be used, and a destination that changed
+ *  under the ceremony. Exit 1 = confirmation
  *  declined OR an unexpected failure (nothing written in either case); exit 3 = the ledger changed
  *  during the confirmation pause — its content OR its link count (nothing written); exit 0 = a
  *  fresh epoch fence was committed. */
@@ -161,6 +194,7 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
     return 2;
   }
 
+  let fenceAppended = false;
   try {
     const env = deps.env ?? process.env;
     const now = deps.now ?? ((): string => new Date().toISOString());
@@ -173,6 +207,14 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
     // while keying the witness under `canonicalRoot($HOME)`. One file, two witness identities — and
     // the older one is left attesting to a prefix of a file that has since grown.
     const globalLedger = resolveGlobalLedger(env, home);
+    // Design 4.10 and 4.7: `--scope global` over a read-only global ledger is refused HERE, in front of the scope judgement, the
+    // folder creation, the lock, the display and the prompt, after the usage and TTY checks (order item 4). A project scope is not
+    // affected by the state of the global ledger's path.
+    if (scope === 'global' && isGlobalLedgerReadOnly(globalLedger)) {
+      process.stderr.write(REBASELINE_GLOBAL_READ_ONLY_REFUSAL);   // ASCII only
+      exit(2);
+      return 2;
+    }
     const target = resolveScopeTarget(home, globalLedger, scope);
     if (!target.ok) {
       process.stderr.write(scopeRefusalText(globalLedger, scope, target));
@@ -289,6 +331,7 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
         } catch { /* retraction is best-effort hygiene; a pending journal stays the honest state */ }
         throw e;
       }
+      fenceAppended = true;
       const landedBytes = readLedgerBytes(ledger);
       // completeTransition's exact-bytes assert is the serialization-consistency guard: if
       // computeAppendedBytes ever diverges from appendRecordUnlocked's real write path, this throws
@@ -301,6 +344,20 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
     });
     return code;
   } catch (e) {
+    // The append's check refused the fence: B7's catch has retracted the journal or left it pending and printed what it did.
+    // After the fence landed no such error can arise, and the guard keeps that true.
+    if (!fenceAppended && isLedgerDestinationChangedError(e)) {
+      process.stderr.write(REBASELINE_DESTINATION_CHANGED_REFUSAL);   // ASCII only
+      exit(2);
+      return 2;
+    }
+    // A witness file that is there and cannot be used (A15). 'transient' (EMFILE, ENFILE, EINTR) is not that, and neither is a
+    // failure of completeTransition after the fence landed, where "Nothing was written" would be false: both stay in the generic catch.
+    if (!fenceAppended && isWitnessUnusableError(e) && (e as { reason?: unknown }).reason !== 'transient') {
+      process.stderr.write(REBASELINE_WITNESS_UNUSABLE_REFUSAL);   // ASCII only
+      exit(2);
+      return 2;
+    }
     process.stderr.write(`helix-rebaseline: ${e instanceof Error ? e.message : String(e)}\n`);
     exit(1);
     return 1;
