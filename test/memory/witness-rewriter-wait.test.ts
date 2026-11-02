@@ -25,7 +25,7 @@ import {
   type ScopeWitnessState,
 } from '../../src/memory/witness-store.js';
 import {
-  witnessedRead, readLedgerWitnessed, REWRITER_WAIT_MAX_MS, REWRITER_WAIT_POLL_MS,
+  witnessedRead, readLedgerWitnessed, readLedgerBytesWitnessed, REWRITER_WAIT_MAX_MS, REWRITER_WAIT_POLL_MS,
 } from '../../src/memory/witness-read.js';
 import * as lockMod from '../../src/memory/lock.js';
 import { awaitLiveHolder, lockPathOf, writeLockFileForTest, type HolderWaitOptions } from '../../src/memory/lock.js';
@@ -470,4 +470,55 @@ describe('IT-M6 (2): the real read paths over a planted window A', () => {
       expect(readFileSync(witnessPath(home)).equals(witnessBytes)).toBe(true); // no transition opened/advanced/cleared
     } finally { w.restore(); rmSync(home, { recursive: true, force: true }); }
   });
+});
+
+describe('R-3 (third fix batch 4.5): the permanent erase pre-lock read skips the reader wait', () => {
+  function interrupted(): { home: string; s: MemoryStore; ledger: string } {
+    const home = newHome();
+    const { store: s, ledger } = store(home);
+    s.commit({ content: 'alpha deploy fact', source: 'user' });   // m_1
+    s.commit({ content: 'bravo deploy fact', source: 'user' });   // m_2
+    plantWindowA(home, ledger);                                   // journal over the old bytes: transition-interrupted
+    return { home, s, ledger };
+  }
+
+  it('readLedgerBytesWitnessed({ rewriterWait: false }) never consults the ledger lock; the default read still does', () => {
+    const { home, ledger } = interrupted();
+    liveHolderLock(ledger);
+    const w = spyWait({ maxWaitMs: 50 });
+    try {
+      expect(readLedgerBytesWitnessed(ledger, home, undefined, { rewriterWait: false }).verdict.kind).toBe('transition-interrupted');
+      expect(w.calls()).toBe(0);
+      expect(readLedgerBytesWitnessed(ledger, home).verdict.kind).toBe('transition-interrupted');
+      expect(w.calls()).toBe(1);                                  // the reader that serves content keeps its wait
+    } finally { w.restore(); rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('a permanent erase refused at the ledger lock takes the lock budget (5 s), not the reader wait plus the budget (7 s)', () => {
+    const { home, s, ledger } = interrupted();
+    liveHolderLock(ledger);                                       // a live holder that is not rewriting
+    const before = readLedgerBytes(ledger);
+    const w = spyWait({});                                        // the real 2,000 ms wait, if it were reached
+    try {
+      const t0 = performance.now();
+      expect(() => s.erase('m_1', { permanent: true })).toThrow(/timed out after \d+ms acquiring/);
+      const elapsed = performance.now() - t0;
+      expect(w.calls(), 'the advisory pre-read must not wait for the holder').toBe(0);
+      expect(elapsed).toBeGreaterThanOrEqual(4_900);
+      expect(elapsed).toBeLessThan(6_500);                        // BASE: about 7,000
+      expect(readLedgerBytes(ledger).equals(before), 'no tombstone was appended').toBe(true);
+    } finally { w.restore(); rmSync(home, { recursive: true, force: true }); }
+  }, 30_000);
+
+  it('controls: a soft erase and a recall over the same state are unchanged (soft erase 5 s at the lock; recall keeps the reader wait)', () => {
+    const { home, s, ledger } = interrupted();
+    liveHolderLock(ledger);
+    const w = spyWait({ maxWaitMs: 100 });
+    try {
+      expect(() => s.erase('m_2')).toThrow(/timed out after \d+ms acquiring/);
+      expect(w.calls()).toBe(0);                                  // a soft erase never had the pre-read
+      s.recall('deploy fact');
+      expect(w.calls()).toBe(1);                                  // recall waits (100 ms here through the seam)
+    } finally { w.restore(); rmSync(home, { recursive: true, force: true }); }
+  }, 30_000);
 });

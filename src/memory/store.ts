@@ -1369,7 +1369,7 @@ export class MemoryStore {
     // then re-erase. A SOFT erase is unaffected: its tombstone append is availability-correct (it lands
     // without advancing the witness on a mismatch, witness-write.ts). This up-front read is advisory; the
     // authoritative refusal is compactLedger's own under-lock gate, so a race here can never launder.
-    if (opts.permanent && readLedgerBytesWitnessed(ledger, this.homeDir(), this.scopeRootOf(ledger)).verdict.kind === 'mismatch') {
+    if (opts.permanent && readLedgerBytesWitnessed(ledger, this.homeDir(), this.scopeRootOf(ledger), { rewriterWait: false }).verdict.kind === 'mismatch') {
       throw new WitnessBlockedError(
         'permanent-erase',
         `permanent-erase: scope for id '${id}' is in a MISMATCH (rollback-alarm) state — refusing a permanent erase that would launder the alarm; re-baseline the scope (helix-rebaseline) to adopt the current bytes, then retry (spec §4.2)`,

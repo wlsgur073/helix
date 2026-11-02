@@ -162,13 +162,22 @@ export interface LedgerBytesWitnessed {
  * recall's zero-parse cache-HIT invariant (Task 4): the cache key's digest + the witness verdict are
  * computed from raw bytes alone, so a HIT never pays a parse. The caller re-decodes these SAME final
  * bytes only on a MISS. Deliberately NOT built on readLedgerRaw (which parses unconditionally).
+ *
+ * `rewriterWait: false` leaves the IT-M6 lock consultation out. It is for a caller that is about to
+ * take the same ledger lock itself and needs the verdict only as advice: waiting here would add the
+ * reader budget to the lock budget. Every reader that serves content keeps the wait.
  */
-export function readLedgerBytesWitnessed(path: LedgerPath, home: string, projectRoot?: string): LedgerBytesWitnessed {
+export function readLedgerBytesWitnessed(
+  path: LedgerPath,
+  home: string,
+  projectRoot?: string,
+  opts: { rewriterWait?: boolean } = {},
+): LedgerBytesWitnessed {
   const scopeKey = scopeKeyOf(home, projectRoot);
   const { ledger, state, verdict } = witnessedRead(
     () => readScopeWitness(home, scopeKey),
     () => { const t0 = performance.now(); const bytes = readLedgerBytes(path); return { bytes, readMs: performance.now() - t0 }; },
-    () => awaitLedgerRewriter(path),
+    opts.rewriterWait === false ? undefined : () => awaitLedgerRewriter(path),
   );
   return {
     bytes: ledger.bytes,
