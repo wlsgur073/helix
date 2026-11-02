@@ -39,24 +39,24 @@ describe('ancestor-unadopted disposition', () => {
     const home = tmp('helix-ad-home-'), root = tmp('helix-ad-proj-');
     mkdirSync(join(root, '.helix'));
     const ledger = join(root, '.helix', 'memory.jsonl');
-    expect(projectDispositionOf({ root, home, ledger, origin: 'ancestor' })).toBe('ancestor-unadopted');
+    expect(projectDispositionOf({ root, home, ledger, globalLedger: join(home, 'memory.jsonl'), origin: 'ancestor' })).toBe('ancestor-unadopted');
     plantLedger(root, 'parent fact');
-    expect(projectDispositionOf({ root, home, ledger, origin: 'ancestor' })).toBe('ancestor-unadopted');
+    expect(projectDispositionOf({ root, home, ledger, globalLedger: join(home, 'memory.jsonl'), origin: 'ancestor' })).toBe('ancestor-unadopted');
   });
 
   it('an owned parent project is owned, exactly like one found at the working directory', () => {
     const home = tmp('helix-ad-home-'), root = tmp('helix-ad-proj-');
     mkdirSync(join(root, '.helix'));
     stampOwnership(root, home);
-    expect(projectDispositionOf({ root, home, ledger: join(root, '.helix', 'memory.jsonl'), origin: 'ancestor' })).toBe('owned');
+    expect(projectDispositionOf({ root, home, ledger: join(root, '.helix', 'memory.jsonl'), globalLedger: join(home, 'memory.jsonl'), origin: 'ancestor' })).toBe('owned');
   });
 
   it('origin cwd, or no origin, keeps the existing states', () => {
     const home = tmp('helix-ad-home-'), root = tmp('helix-ad-proj-');
     const ledger = join(root, '.helix', 'memory.jsonl');
-    expect(projectDispositionOf({ root, home, ledger })).toBe('inactive');
+    expect(projectDispositionOf({ root, home, ledger, globalLedger: join(home, 'memory.jsonl') })).toBe('inactive');
     plantLedger(root, 'foreign fact');
-    expect(projectDispositionOf({ root, home, ledger, origin: 'cwd' })).toBe('unadopted-present');
+    expect(projectDispositionOf({ root, home, ledger, globalLedger: join(home, 'memory.jsonl'), origin: 'cwd' })).toBe('unadopted-present');
   });
 });
 

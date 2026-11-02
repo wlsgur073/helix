@@ -82,13 +82,13 @@ export const UNADOPTED_LEDGER_NOTE =
   '(an unadopted project memory file is present and excluded from results; adoption requires explicit user approval)';
 
 /** ALIAS-P2P (item 7): the same constraints as UNADOPTED_LEDGER_NOTE — whoever can plant a symlink in
- *  an adopted project controls WHETHER this appears, so it is a constant: informational only, no
- *  imperative, no interpolation, no path. Rendered wherever the unadopted note is, iff the per-call
- *  project-disposition snapshot is 'aliased' — which since the second fix batch (D4) also covers a
- *  ledger Helix cannot resolve the kernel's way (a non-UTF-8 name, a path past PATH_MAX, too many
- *  links), excluded exactly like an alias. */
+ *  a project controls WHETHER this appears, so it is a constant: informational only, no imperative, no
+ *  interpolation, no path. Rendered wherever the unadopted note is, iff the per-call project-disposition
+ *  snapshot is 'aliased': rows 4, 6, 7 and 8 of design 4.2 (a memory file Helix cannot resolve the kernel's
+ *  way, one that resolves outside the project, one that leads to another Helix memory file, and one with
+ *  more than one hard link). */
 export const ALIASED_LEDGER_NOTE =
-  "(this project's memory file resolves to another adopted project's memory file, or through a path Helix cannot resolve, and is excluded from results)";
+  "(this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, or through a path Helix cannot resolve, and is excluded from results)";
 
 /** Third fix batch B1 (design 4.2, 4.9): the same constraints as UNADOPTED_LEDGER_NOTE: informational only, no
  *  imperative, no interpolation, no path. Rendered wherever the unadopted note is, iff the per-call

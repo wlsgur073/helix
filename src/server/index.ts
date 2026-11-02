@@ -9,7 +9,7 @@ import { scanLegacyElevated, classifyLegacyOffenders } from '../memory/legacy-sc
 import { hardenHomePermissions } from '../memory/home-permissions.js';
 import { subkeyForScope } from '../memory/verified-read.js';
 import { resolveProjectLayer } from '../memory/project-root.js';
-import { startupScanReadsProject } from '../memory/ownership.js';
+import { startupScanDecision } from '../memory/ownership.js';
 import { defaultExpansion } from '../memory/expansion.js';
 import { strayTrustFiles, collidingTrustFiles, assessGradeLoss } from '../memory/trust-store-layout.js';
 import { verifyVerify, digestContent } from '../memory/ledger-mac.js';
@@ -183,12 +183,16 @@ store.healWitness();
 // check dispatches on (classifyLegacyOffenders): forged/legacy keeps its WARNING, a failing MAC under the
 // scope's CURRENT key id is a tampered WARNING, and a different key id or a newer MAC format/state is a
 // NOTE — the documented `--fresh` and key re-mint no longer accuse the ledger of forgery at every start.
-// An ALIASED project layer (its ledger leads to another adopted project's file, or through a path Helix
-// cannot resolve) is skipped exactly as every read path skips it: scanning it read the other project's
-// file under this project's subkey. So is an UNADOPTED working-directory project whose ledger leads to
-// another registered project's file or cannot be resolved (ruling R9); its own foreign file is still
-// scanned. The rule lives in ownership.ts startupScanReadsProject.
-const scanProject = !!project && startupScanReadsProject(project, home);
+// Third fix batch B1 (design 4.2, M41): the scan reads only a project file that passed rows 4 to 10 of the
+// judgement. An ALIASED or UNUSABLE project layer is skipped exactly as every read path skips it, adopted
+// or not: a hard link, a link out of the project and a link to a file that holds no memory records used
+// to be read here under this project's path name. An unadopted working-directory project's OWN file is
+// still scanned. The rule lives in ownership.ts startupScanDecision, which also says when the skipped
+// file is a FIFO, a device or a directory: that one stderr line (IT-H4) is kept, printed from the
+// judgement now that the scan no longer opens such a file. No line is added for any other excluded layer.
+const scan = project ? startupScanDecision(project, home, globalLedger) : { read: false, notRegular: false };
+const scanProject = !!project && scan.read;
+if (project && scan.notRegular) process.stderr.write(`helix: WARNING - ${project.ledger} is not a regular file; skipped its integrity scan\n`); // ASCII only
 const scanScopes: Array<{ ledger: string; root?: string }> = [
   { ledger: globalLedger },
   // A parent directory's project is scanned only once adopted: until then nothing of it is read.

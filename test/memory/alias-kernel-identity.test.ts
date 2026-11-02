@@ -20,7 +20,7 @@ import type { MemoryRecord } from '../../src/types.js';
 
 const home = (): string => mkdtempSync(join(tmpdir(), 'helix-d4-home-'));
 const project = (h: string): string => { const r = mkdtempSync(join(tmpdir(), 'helix-d4-proj-')); stampOwnership(r, h, {}); return r; };
-const desc = (root: string, h: string) => ({ root, home: h, ledger: projectLedgerPath(root) });
+const desc = (root: string, h: string) => ({ root, home: h, ledger: projectLedgerPath(root), globalLedger: join(h, 'memory.jsonl') });
 const storeFor = (h: string, root: string) =>
   new MemoryStore(join(h, 'memory.jsonl'), { home: h, sessionId: 's', project: { root, ledger: projectLedgerPath(root) } });
 const rec = (id: string): MemoryRecord => ({
@@ -82,7 +82,7 @@ describe('the global rule compares where both appends land (ALIAS-DOTDOT)', () =
     plantDotdotToGlobal(a, h);
     expect(aliasesGlobalLedger(projectLedgerPath(a), join(h, 'memory.jsonl'))).toBe(true);
     expect(resolveProjectLayer({ cwd: a, userHome: '/nonexistent-home', globalLedger: join(h, 'memory.jsonl') })).toBeUndefined();
-    expect(resolveScopeTarget(h, join(h, 'memory.jsonl'), a)).toMatchObject({ ok: false, reason: 'aliases-global' });
+    expect(resolveScopeTarget(h, join(h, 'memory.jsonl'), a)).toMatchObject({ ok: false, reason: 'aliased', cause: 'outside-root' });
   });
 
   it('a plain DANGLING link into a global ledger that does not exist yet is the global ledger', () => {
@@ -112,8 +112,8 @@ describe('the project-to-project comparison side is read the kernel\'s way (ALIA
       symlinkSync(projectLedgerPath(b), projectLedgerPath(a));
       expect(projectDispositionOf(desc(a, h))).toBe('aliased');
       expect(projectDispositionOf(desc(b, h))).toBe('aliased');
-      expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/resolves to another adopted project/);
-      expect(() => storeFor(h, b).commit({ content: 'a fact for B', source: 'user' })).toThrow(/resolves to another adopted project/);
+      expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/resolves outside this project/);
+      expect(() => storeFor(h, b).commit({ content: 'a fact for B', source: 'user' })).toThrow(/resolves outside this project/);
       expect(existsSync(join(b, '.helix', 'p', 'third.jsonl'))).toBe(existing);
     },
   );
@@ -125,7 +125,7 @@ describe('the project-to-project comparison side is read the kernel\'s way (ALIA
     symlinkSync(third, projectLedgerPath(b));
     expect(projectDispositionOf(desc(a, h))).toBe('aliased');
     expect(projectDispositionOf(desc(b, h))).toBe('aliased');
-    expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/resolves to another adopted project/);
+    expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/resolves outside this project/);
     expect(existsSync(third)).toBe(false);
   });
 });
@@ -143,7 +143,7 @@ describe('a path Helix cannot resolve the kernel\'s way is excluded like an alia
       symlinkSync(ff, projectLedgerPath(a));
       expect(resolvePath(projectLedgerPath(a)).kind).toBe('unresolvable');
       expect(projectDispositionOf(desc(a, h))).toBe('aliased');
-      expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/resolves to another adopted project/);
+      expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/resolves outside this project/);
       expect(existsSync(projectLedgerPath(b))).toBe(existing);
       if (existing) expect(readFileSync(projectLedgerPath(b), 'utf8')).toBe('');
       else expect(readdirSync(join(b, '.helix'))).toEqual(['.owner']);
@@ -194,7 +194,7 @@ describe('a path Helix cannot resolve the kernel\'s way is excluded like an alia
       expect(() => realpathSync.native(join(a, '.helix', 'dk', 'dk2'))).toThrow(/ENAMETOOLONG/);
       expect(resolvePath(projectLedgerPath(a)).kind).toBe('unresolvable');
       expect(projectDispositionOf(desc(a, h))).toBe('aliased');
-      expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/resolves to another adopted project/);
+      expect(() => storeFor(h, a).commit({ content: 'a fact for A', source: 'user' })).toThrow(/resolves outside this project/);
       expect(existsSync(projectLedgerPath(b))).toBe(existing);
       // Non-vacuity: the kernel resolves the same link into B's ledger.
       appendFileSync(projectLedgerPath(a), 'kernel marker\n');
@@ -258,7 +258,8 @@ describe('a path Helix cannot resolve the kernel\'s way is excluded like an alia
 
   it('an unresolvable REGISTERED project is skipped as a comparison side, not matched', () => {
     const h = home(); const a = project(h); const b = project(h);
-    const standalone = join(mkdtempSync(join(tmpdir(), 'helix-d4-solo-')), 'solo.jsonl');
+    mkdirSync(join(a, 'data'));
+    const standalone = join(a, 'data', 'solo.jsonl');              // inside A's tree: a link out of the project is row 6
     writeFileSync(standalone, '');
     symlinkSync(standalone, projectLedgerPath(a));                 // A links to its own standalone file
     symlinkSync(Buffer.from([0xff]), projectLedgerPath(b));         // B is unresolvable
@@ -331,20 +332,20 @@ describe("a link inside the project's own tree is the project's own file", () =>
   });
 });
 
-// Ruling R7 with plan refinement P1 (second fix batch §4.4 item 5): one constant carries every alias
-// write refusal, and its first sentence names every cause — another adopted project's memory file, the
-// global memory file, or a path Helix cannot resolve the kernel's way (a non-UTF-8 name, a path past
+// Ruling R7 with plan refinement P1 (second fix batch §4.4 item 5), revised by third fix batch B1 (design
+// 4.9): one constant carries every alias write refusal, and its first sentence names every cause — a
+// memory file that resolves outside this project, one that leads to another Helix memory file, one with
+// more than one hard link, or a path Helix cannot resolve the kernel's way (a non-UTF-8 name, a path past
 // PATH_MAX, too many links). The erase-side refusal (an explicit `scope: 'project'` erase, reachable
-// from the library only) names the same three.
+// from the library only) names the same four.
 describe('the alias refusals name every cause (R7, P1)', () => {
   const ALIAS_REFUSAL =
-    "commit: this project's memory file resolves to another adopted project's memory file, to the global memory file, " +
-    'or through a path Helix cannot resolve, so the project layer is disabled here — the write is refused rather than ' +
-    "written into the other project's memory. Ask the user whether to store this fact in global memory, which every " +
-    "project sees, or to replace the link with the project's own file; do not choose for them.";
+    "commit: this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, " +
+    'or through a path Helix cannot resolve, so the project layer is disabled here — the write is refused rather than written somewhere else. ' +
+    "Ask the user whether to store this fact in global memory, which every project sees, or to replace the link with the project's own file; do not choose for them.";
   const ERASE_ALIAS_REFUSAL =
-    "erase: this project's memory file resolves to another adopted project's memory file, to the global memory file, " +
-    "or through a path Helix cannot resolve — the erase is refused rather than applied to the other project's memory.";
+    "erase: this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, " +
+    'or through a path Helix cannot resolve — the erase is refused rather than applied somewhere else.';
   const refusalOf = (f: () => unknown): string => {
     try { f(); } catch (e) { return (e as Error).message; }
     return '<no refusal>';
@@ -371,7 +372,7 @@ describe('the alias refusals name every cause (R7, P1)', () => {
 
   // The note recall, inspect and the SessionStart block print for an aliased project layer. Every test
   // that reads it compares it with the constant itself, so a reworded or shortened note passes them all.
-  it('the read-side note names both causes, as constant text', () => {
-    expect(ALIASED_LEDGER_NOTE).toBe("(this project's memory file resolves to another adopted project's memory file, or through a path Helix cannot resolve, and is excluded from results)");
+  it('the read-side note names every cause, as constant text', () => {
+    expect(ALIASED_LEDGER_NOTE).toBe("(this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, or through a path Helix cannot resolve, and is excluded from results)");
   });
 });

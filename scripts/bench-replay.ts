@@ -10,8 +10,7 @@ import type { MemoryRecord } from '../src/types.js';
 import { ensureMaster, signVerify, digestContent } from '../src/memory/ledger-mac.js';
 import { subkeyForScope, verifiedLiveStats } from '../src/memory/verified-read.js';
 import { MemoryStore } from '../src/memory/store.js';
-import { aliasesAdoptedLedger, isOwned, projectLedgerPath } from '../src/memory/ownership.js';
-import { aliasesGlobalLedger } from '../src/memory/scope-target.js';
+import { judgeProjectLayer, projectLedgerPath } from '../src/memory/ownership.js';
 
 // --- deterministic RNG (seedable) — reproducible fixtures, no Math.random ---
 function lcg(seed: number): () => number {
@@ -194,8 +193,8 @@ export function runReal(deps: RealDeps = {}): void {
   process.stdout.write(`bench-replay --real (read-only) home=${home}\n`);
   const scopes: Array<{ label: string; ledger: string; root?: string }> = [{ label: 'global', ledger: globalLedger }];
   // One physical file is never two participants (cwd == $HOME aliases the global ledger in the
-  // default layout) — the same gate the server, hook, and trigger measurement apply. See scope-target.ts.
-  if (existsSync(join(cwd, '.helix')) && !aliasesGlobalLedger(projectLedgerPath(cwd), globalLedger) && isOwned(cwd, home) && !aliasesAdoptedLedger({ root: cwd, home, ledger: projectLedgerPath(cwd) })) {
+  // default layout) — the same judgement the server, hook, and trigger measurement apply.
+  if (existsSync(join(cwd, '.helix')) && judgeProjectLayer({ root: cwd, home, ledger: projectLedgerPath(cwd), globalLedger }).state === 'owned') {
     scopes.push({ label: 'project', ledger: projectLedgerPath(cwd), root: cwd });
   }
   for (const s of scopes) {

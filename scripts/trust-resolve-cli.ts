@@ -18,6 +18,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { MemoryStore } from '../src/memory/store.js';
 import { trustStateOf, resolveTrust, projectLedgerPath } from '../src/memory/ownership.js';
+import { resolveScopeTarget } from '../src/memory/scope-target.js';
 
 export interface TrustResolveDeps {
   env?: NodeJS.ProcessEnv;
@@ -27,6 +28,19 @@ export interface TrustResolveDeps {
 }
 
 const USAGE = 'usage: helix-trust-resolve --scope <absoluteProjectRoot> --repair | --fresh\n';
+
+/** The ceremony's refusals for a project layer the judgement excludes (design 4.10): fixed texts, no
+ *  path. The cause lists are those of the two read notes. */
+const TRUST_RESOLVE_ALIASED_REFUSAL =
+  "helix-trust-resolve: REFUSING - this project's memory file resolves outside this project, to another Helix memory file, " +
+  'to a file with more than one hard link, or through a path Helix cannot resolve. Nothing was changed.\n';
+const TRUST_RESOLVE_UNUSABLE_REFUSAL =
+  "helix-trust-resolve: REFUSING - this project's memory file cannot be used as it is (it is not a regular file, it or its folder " +
+  'cannot be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory records). ' +
+  'Nothing was changed.\n';
+const TRUST_RESOLVE_GLOBAL_STORE_REFUSAL =
+  "helix-trust-resolve: REFUSING - this project's memory file is the global memory file itself, so there is no separate project scope to resolve. " +
+  'Nothing was changed.\n';
 
 /** `--scope <absoluteRoot>` plus exactly one of `--repair` / `--fresh`, in either order, nothing
  *  else. Returns null for any malformed invocation so one usage/exit-2 branch handles them all. */
@@ -56,8 +70,8 @@ async function defaultPromptLine(question: string): Promise<string> {
  *  A conservative upper bound on how many grades a `fresh` rotation would demote: the live read
  *  already clamps a pending scope to Fresh, so the per-row stored grade is not separately available
  *  here without re-deriving the active subkey, and the row count is the honest thing to report. */
-function affectedRowCount(home: string, root: string): number {
-  const store = new MemoryStore(join(home, 'memory.jsonl'), {
+function affectedRowCount(home: string, globalLedger: string, root: string): number {
+  const store = new MemoryStore(globalLedger, {
     home, sessionId: 'trust-resolve', project: { root, ledger: projectLedgerPath(root) },
   });
   return store.inspect().filter((s) => s.scope === 'project').length;
@@ -83,7 +97,23 @@ export async function main(argv: string[], deps: TrustResolveDeps = {}): Promise
       return 2;
     }
 
-    const affected = affectedRowCount(home, scope);
+    // Third fix batch B1 (design 4.10): the SAME judgement the store uses, with the global ledger this
+    // terminal's environment names (read through `env`, as the rebaseline CLI does, so the inventory's
+    // env-var surface is unchanged). The ceremony used to build a layer of its own against
+    // `<home>/memory.jsonl`: over a project ledger that cannot be resolved it showed 0 rows and went on
+    // (regression R-2), and over one that leads to the global ledger it counted global rows as project rows.
+    const globalLedger = env.HELIX_LEDGER ?? join(home, 'memory.jsonl');
+    const target = resolveScopeTarget(home, globalLedger, scope);
+    if (!target.ok) {
+      process.stderr.write(                                                         // ASCII only
+        target.cause === 'global-store' ? TRUST_RESOLVE_GLOBAL_STORE_REFUSAL
+          : target.reason === 'unusable' ? TRUST_RESOLVE_UNUSABLE_REFUSAL : TRUST_RESOLVE_ALIASED_REFUSAL,
+      );
+      exit(2);
+      return 2;
+    }
+
+    const affected = affectedRowCount(home, globalLedger, scope);
     const banner = resolution === 'repair'
       ? `REPAIR ${scope}: keep the existing trust nonce; ${affected} project row(s) return to their stored grades.\n`
       : `FRESH ${scope}: ROTATE the trust nonce; the ${affected} project row(s) signed under the old nonce stay Fresh (not deleted).\n`;

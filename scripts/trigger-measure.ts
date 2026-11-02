@@ -12,8 +12,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { realFsOps, writeAll, type DurableFsOps } from '../src/memory/fs-ops.js';
-import { aliasesAdoptedLedger, isOwned, projectLedgerPath } from '../src/memory/ownership.js';
-import { aliasesGlobalLedger } from '../src/memory/scope-target.js';
+import { judgeProjectLayer, projectLedgerPath } from '../src/memory/ownership.js';
 import { metricsEnabledFromGlobalConfig } from '../src/config.js';
 import { evaluateTrigger, type Leg, type MetricsEvent, type MetricsState, type ParticipantSize } from './trigger-eval.js';
 
@@ -96,16 +95,14 @@ function toParticipant(id: 'global' | 'project', outcome: ReadOutcome): Particip
   return outcome.state === 'read' ? { id, state: 'read', rows: outcome.rows, bytes: outcome.bytes } : { id, state: outcome.state };
 }
 
-/** 'owned' iff a project layer exists, its ledger resolves to a DIFFERENT file than the global ledger
- *  (the cwd==~ collision guard, mirroring src/server/index.ts:26-27), and it is owned
- *  (ownership.ts:31). 'unowned' whenever a project layer exists but that fails; 'absent' when there is
- *  no project layer at all. Only 'owned' ever contributes bytes/rows — see readTwoParticipants. An
- *  aliased project (item 7) does not participate either — its ledger resolves to another adopted
- *  project's ledger file, so it reads 'unowned' here too. */
+/** 'owned' iff a project layer exists and the one judgement (ownership.ts judgeProjectLayer) reads it
+ *  'owned'; its row 7 is the cwd==~ collision guard. 'unowned' whenever a project layer exists but that
+ *  fails, and the sink keeps these three values: an 'aliased' or 'unusable' layer is recorded as 'unowned'
+ *  (design 4.2). 'absent' when there is no project layer at all. Only 'owned' ever contributes bytes/rows
+ *  — see readTwoParticipants. */
 export function resolveProjectDisposition(root: string, home: string, globalLedger: string): 'owned' | 'unowned' | 'absent' {
   if (!existsSync(join(root, '.helix'))) return 'absent';
-  const distinctFromGlobal = !aliasesGlobalLedger(projectLedgerPath(root), globalLedger); // one physical file is never two participants -- see scope-target.ts
-  return distinctFromGlobal && isOwned(root, home) && !aliasesAdoptedLedger({ root, home, ledger: projectLedgerPath(root) }) ? 'owned' : 'unowned';
+  return judgeProjectLayer({ root, ledger: projectLedgerPath(root), home, globalLedger }).state === 'owned' ? 'owned' : 'unowned';
 }
 
 /** Reads BOTH participants, global THEN project, as two INDEPENDENT single-file snapshots — not one

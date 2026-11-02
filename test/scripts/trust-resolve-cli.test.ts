@@ -1,8 +1,8 @@
 // C1.4-③ TTY resolve ceremony CLI. Verifies the orchestration the thin wrapper adds over the
 // already-tested ownership.resolveTrust: argument parsing, the TTY gate, the not-pending refusal,
 // the typed confirmation, and that a confirmed run actually flips the scope to active.
-import { describe, it, expect } from 'vitest';
-import { mkdtempSync, unlinkSync } from 'node:fs';
+import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../../scripts/trust-resolve-cli.js';
@@ -70,5 +70,46 @@ describe('trust-resolve-cli', () => {
     expect(trustStateOf(proj, home)).toBe('active');
     const at = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's3', project: { root: proj, ledger: join(proj, '.helix', 'memory.jsonl') } });
     expect(at.inspect().find((x) => x.record.id === id)?.record.state).toBe('Fresh');
+  });
+
+  it.each([
+    ['a pending scope whose memory file links out of the project', (ledger: string): void => {
+      const outside = join(mkdtempSync(join(tmpdir(), 'helix-outside-')), 'o.jsonl');
+      writeFileSync(outside, '');
+      symlinkSync(outside, ledger);
+    }],
+    ['a pending scope whose memory file cannot be resolved (R-2: it used to show 0 rows and go on)', (ledger: string): void => {
+      symlinkSync(Buffer.from([0xff]), ledger);
+    }],
+  ])('%s is refused (exit 2), still pending', async (_label, swap) => {
+    const { home, proj } = pendingScope();
+    const ledger = join(proj, '.helix', 'memory.jsonl');
+    unlinkSync(ledger);
+    swap(ledger);
+    let err = '';
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => { err += chunk.toString(); return true; });
+    try {
+      const code = await main(['--scope', proj, '--repair'], deps(home, { promptLine: async () => { throw new Error('prompted'); } }));
+      expect(code).toBe(2);
+    } finally { spy.mockRestore(); }
+    expect(err).toContain('REFUSING');
+    expect(err).toContain("this project's memory file resolves outside this project");
+    expect(trustStateOf(proj, home)).toBe('pending');
+  });
+
+  it('the global ledger follows HELIX_LEDGER (design 4.10): a memory file that links to it is refused', async () => {
+    const { home, proj } = pendingScope();
+    const g = join(proj, 'data', 'g.jsonl');
+    mkdirSync(join(proj, 'data'));
+    writeFileSync(g, '');
+    const ledger = join(proj, '.helix', 'memory.jsonl');
+    unlinkSync(ledger);
+    symlinkSync(g, ledger);
+    const code = await main(['--scope', proj, '--repair'], deps(home, {
+      env: { HELIX_HOME: home, HELIX_LEDGER: g } as NodeJS.ProcessEnv,
+      promptLine: async () => { throw new Error('prompted'); },
+    }));
+    expect(code).toBe(2);
+    expect(trustStateOf(proj, home)).toBe('pending');
   });
 });

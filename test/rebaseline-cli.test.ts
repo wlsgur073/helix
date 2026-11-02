@@ -5,7 +5,7 @@
 // (test/rebaseline-smoke.test.ts) and only exercises the argv-parsing / TTY-gate surface (it can
 // never reach the confirmation prompt from a non-interactive spawn).
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, linkSync, chmodSync, mkdirSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, linkSync, chmodSync, mkdirSync, symlinkSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../scripts/rebaseline-cli.js';
@@ -389,6 +389,65 @@ describe('rebaseline-cli main() — refusal paths', () => {
       expect(cap.stderr()).toContain('cannot be inspected');
       expect(cap.stderr()).not.toContain("another adopted project's ledger");
     } finally { cap.restore(); }
+  });
+
+  it('refuses a project scope whose memory file links out of the project, and names where it lands (resolved ledger:)', async () => {
+    const home = tmpHome(); homes.push(home);
+    const r = tmpHome(); homes.push(r);
+    const other = tmpHome(); homes.push(other);
+    mkdirSync(join(r, '.helix'));
+    writeFileSync(join(other, 'o.jsonl'), '');
+    symlinkSync(join(other, 'o.jsonl'), projectLedgerPath(r));
+    const cap = captureStd();
+    try {
+      let prompted = false;
+      const code = await main(['--scope', r], { env: envFor(home), isTTY: true, promptLine: async () => { prompted = true; return 'bless'; } });
+      expect(code).toBe(2);
+      expect(prompted).toBe(false);
+      expect(cap.stderr()).toContain('resolves outside this project');
+      expect(cap.stderr()).toContain(`resolved ledger: ${join(realpathSync(other), 'o.jsonl')}`);
+      expect(cap.stderr()).not.toContain(`resolved ledger: ${projectLedgerPath(r)}`);
+    } finally { cap.restore(); }
+  });
+
+  it('the refusal text says which cause holds (design 4.10)', async () => {
+    const refusalFor = async (plant: (r: string) => void): Promise<{ code: number; err: string; scopePathOutsideLine: boolean }> => {
+      const home = tmpHome(); homes.push(home);
+      const r = tmpHome(); homes.push(r);
+      plant(r);
+      const cap = captureStd();
+      try {
+        const code = await main(['--scope', r], { env: envFor(home), isTTY: true, promptLine: async () => 'bless' });
+        const scopePathOutsideLine = cap.stderr().split('\n').some((l) => !l.startsWith('  resolved ledger: ') && l.includes(r));
+        return { code, err: cap.stderr(), scopePathOutsideLine };
+      } finally { cap.restore(); }
+    };
+
+    const helixFile = await refusalFor((r) => { writeFileSync(join(r, '.helix'), 'x\n'); });
+    expect(helixFile.code).toBe(2);
+    expect(helixFile.err).toContain('is not a real directory');
+    expect(helixFile.err).not.toContain('resolved ledger:');
+    expect(helixFile.scopePathOutsideLine).toBe(false);
+
+    const hardLink = await refusalFor((r) => {
+      mkdirSync(join(r, '.helix'));
+      writeFileSync(projectLedgerPath(r), '');
+      linkSync(projectLedgerPath(r), join(r, '.helix', 'second.jsonl'));
+    });
+    expect(hardLink.code).toBe(2);
+    expect(hardLink.err).toContain('more than one hard link');
+    expect(hardLink.err).toContain('resolved ledger:');
+    expect(hardLink.scopePathOutsideLine).toBe(false);
+
+    const plainText = await refusalFor((r) => {
+      mkdirSync(join(r, '.helix'));
+      writeFileSync(join(r, 'README.md'), '# readme\nsome text\n');
+      symlinkSync(join(r, 'README.md'), projectLedgerPath(r));
+    });
+    expect(plainText.code).toBe(2);
+    expect(plainText.err).toContain('does not hold Helix memory records');
+    expect(plainText.err).toContain('resolved ledger:');
+    expect(plainText.scopePathOutsideLine).toBe(false);
   });
 
   it('an append refusal AFTER the journal opened retracts it — the ceremony fails without stranding the scope', async () => {

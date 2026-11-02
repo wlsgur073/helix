@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readdir
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
-import { stampOwnership, projectLedgerPath, projectDispositionOf, startupScanReadsProject, ledgerPathState } from '../../src/memory/ownership.js';
+import { stampOwnership, projectLedgerPath, projectDispositionOf, startupScanReadsProject, judgeProjectLayer } from '../../src/memory/ownership.js';
 import { resolveScopeTarget } from '../../src/memory/scope-target.js';
 import { UNUSABLE_LEDGER_NOTE } from '../../src/memory/content-frame.js';
 import { formatSessionStartContext } from '../../src/hooks/format-context.js';
@@ -35,25 +35,24 @@ function layer(row: Row, adopted: boolean) {
   if (row === 4) { const t = Buffer.concat([Buffer.from(`${root}/t-`), FF, Buffer.from('.jsonl')]); writeFileSync(t, ''); symlinkSync(t, ledger); }
   else { writeFileSync(join(root, '.helix', 'real.jsonl'), ''); symlinkSync('real.jsonl/', ledger); }
   const store = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's', project: { root, ledger, origin: 'cwd' } });
-  return { home, root, ledger, store, desc: { root, home, ledger } };
+  return { home, root, ledger, store, desc: { root, home, ledger, globalLedger: join(home, 'memory.jsonl') } };
 }
 const EXPECT: Record<Row, 'aliased' | 'unusable'> = { 4: 'aliased', 5: 'unusable' };
 
 describe('rows 4 and 5 decide the disposition, adopted or not', () => {
   it.each([[4, true], [4, false], [5, true], [5, false]] as const)('row %i, adopted %s', (row, adopted) => {
     const l = layer(row, adopted);
-    expect(ledgerPathState(l.ledger)).toBe(EXPECT[row]);
+    expect(judgeProjectLayer(l.desc).row).toBe(String(row));
     expect(projectDispositionOf(l.desc)).toBe(EXPECT[row]);
-    expect(startupScanReadsProject({ root: l.root, ledger: l.ledger }, l.home)).toBe(false);
+    expect(startupScanReadsProject({ root: l.root, ledger: l.ledger }, l.home, join(l.home, 'memory.jsonl'))).toBe(false);
   });
 
   it('controls: a plain adopted project is owned, a plain unadopted one with a file is unadopted-present', () => {
     const home = mkdtempSync(join(tmpdir(), 'helix-r45-home-'));
     const a = realpathSync(mkdtempSync(join(tmpdir(), 'helix-r45-proj-'))); stampOwnership(a, home, {});
-    expect(projectDispositionOf({ root: a, home, ledger: projectLedgerPath(a) })).toBe('owned');
+    expect(projectDispositionOf({ root: a, home, ledger: projectLedgerPath(a), globalLedger: join(home, 'memory.jsonl') })).toBe('owned');
     const u = realpathSync(mkdtempSync(join(tmpdir(), 'helix-r45-proj-'))); mkdirSync(join(u, '.helix')); writeFileSync(projectLedgerPath(u), '');
-    expect(projectDispositionOf({ root: u, home, ledger: projectLedgerPath(u) })).toBe('unadopted-present');
-    expect(ledgerPathState(projectLedgerPath(u))).toBeNull();
+    expect(projectDispositionOf({ root: u, home, ledger: projectLedgerPath(u), globalLedger: join(home, 'memory.jsonl') })).toBe('unadopted-present');
   });
 
   it('an unadopted ANCESTOR project is still ancestor-unadopted first (row 2 precedes rows 4 and 5)', () => {
@@ -91,10 +90,10 @@ describe('row 5 (unusable): reads, writes and notes', () => {
     expect(messageOf(() => l.store.erase('m_1', { scope: 'project' }))).toBe(UNUSABLE_ERASE_REFUSAL);
   });
 
-  it('resolveScopeTarget (the rebaseline CLI) names the cause: unusable for row 5, aliases-project for row 4', () => {
+  it('resolveScopeTarget (the rebaseline CLI) names the cause: unusable for row 5, aliased for row 4', () => {
     const l5 = layer(5, true); const l4 = layer(4, true);
     expect(resolveScopeTarget(l5.home, join(l5.home, 'memory.jsonl'), l5.root)).toMatchObject({ ok: false, reason: 'unusable' });
-    expect(resolveScopeTarget(l4.home, join(l4.home, 'memory.jsonl'), l4.root)).toMatchObject({ ok: false, reason: 'aliases-project' });
+    expect(resolveScopeTarget(l4.home, join(l4.home, 'memory.jsonl'), l4.root)).toMatchObject({ ok: false, reason: 'aliased', cause: 'unresolvable' });
   });
 });
 

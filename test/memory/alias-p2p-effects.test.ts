@@ -26,19 +26,19 @@ function aliasedPair(opts: { dangling?: boolean } = {}) {
 describe('an aliased project layer (ALIAS-P2P, item 7)', () => {
   it('a commit routed to the project (omitted scope) is refused, not written into the other project', () => {
     const { b, store } = aliasedPair();
-    expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves to another adopted project/);
+    expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves outside this project/);
     expect(readFileSync(projectLedgerPath(b), 'utf8')).toBe('');
   });
 
   it('an explicit project scope is refused too; an explicit global scope still writes', () => {
     const { store } = aliasedPair();
-    expect(() => store.commit({ content: 'a fact for project A', source: 'user', scope: 'project' })).toThrow(/resolves to another adopted project/);
+    expect(() => store.commit({ content: 'a fact for project A', source: 'user', scope: 'project' })).toThrow(/resolves outside this project/);
     expect(() => store.commit({ content: 'a global fact', source: 'user', scope: 'global' })).not.toThrow();
   });
 
   it('a DANGLING link: the first write is refused and creates no file in the other project', () => {
     const { b, store } = aliasedPair({ dangling: true });
-    expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves to another adopted project/);
+    expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves outside this project/);
     expect(existsSync(projectLedgerPath(b))).toBe(false);
   });
 
@@ -53,7 +53,7 @@ describe('an aliased project layer (ALIAS-P2P, item 7)', () => {
   it('an explicit project-scope erase is refused; an unscoped erase never touches the other project', () => {
     const { store } = aliasedPair();
     const g = store.commit({ content: 'a global fact to erase', source: 'user', scope: 'global' });
-    expect(() => store.erase(g.id, { scope: 'project' })).toThrow(/resolves to another adopted project/);
+    expect(() => store.erase(g.id, { scope: 'project' })).toThrow(/resolves outside this project/);
     expect(() => store.erase(g.id)).not.toThrow();
   });
 });
@@ -72,7 +72,7 @@ describe('the supersede pre-check and the verify router never read through an al
     // "human-authored or verified"; it must instead be the alias refusal, thrown before ledgerOf(id)
     // (and therefore before the target's provenance is ever read) runs at all.
     expect(() => store.commit({ content: 'x', source: 'agent-inference', supersedes: bFact.id }))
-      .toThrow(/resolves to another adopted project/);
+      .toThrow(/resolves outside this project/);
   });
 
   it("an explicit global-scope supersede of B's id throws the SAME message as superseding an unknown id, and never touches B's file", () => {
@@ -120,7 +120,7 @@ describe('a dangling symlink chain inside the linking project (item 7, final rev
     symlinkSync(projectLedgerPath(b), hop);          // A/.helix/hop -> B/.helix/memory.jsonl (absent)
     symlinkSync(hop, projectLedgerPath(a));          // A/.helix/memory.jsonl -> A/.helix/hop
     const store = new MemoryStore(join(home, 'memory.jsonl'), { home, sessionId: 's1', project: { root: a, ledger: projectLedgerPath(a) } });
-    expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves to another adopted project/);
+    expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves outside this project/);
     expect(existsSync(projectLedgerPath(b))).toBe(false);
     expect(readdirSync(join(b, '.helix'))).toEqual(['.owner']);
   });
@@ -177,7 +177,7 @@ describe("a '..' after a symlinked directory inside the linking project (item 7,
     "B's ledger absent, %s link: the omitted-scope commit is refused with the alias message and B's .helix gains no memory.jsonl",
     (spelling) => {
       const { b, store } = dotdotPair({ spelling });
-      expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves to another adopted project/);
+      expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves outside this project/);
       expect(existsSync(projectLedgerPath(b))).toBe(false);
       expect(readdirSync(join(b, '.helix'))).toEqual(['.owner']);
     },
@@ -188,7 +188,7 @@ describe("a '..' after a symlinked directory inside the linking project (item 7,
     (spelling) => {
       const { b, store } = dotdotPair({ spelling, bFact: true });
       const before = readFileSync(projectLedgerPath(b));
-      expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves to another adopted project/);
+      expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves outside this project/);
       expect(readFileSync(projectLedgerPath(b)).equals(before)).toBe(true);
     },
   );
@@ -237,7 +237,7 @@ describe('a link body padded past PATH_MAX inside the linking project (item 7, r
     (shape) => {
       const { a, b, body, store } = paddedPair(shape);
       expect(realpathSync(join(a, '.helix')).length + 1 + body.length).toBeGreaterThan(4095);   // the hop string is past PATH_MAX
-      expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves to another adopted project/);
+      expect(() => store.commit({ content: 'a fact for project A', source: 'user' })).toThrow(/resolves outside this project/);
       expect(existsSync(projectLedgerPath(b))).toBe(false);
       expect(readdirSync(join(b, '.helix'))).toEqual(['.owner']);
     },

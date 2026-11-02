@@ -103,7 +103,7 @@ describe('IT-M4: an explicit global commit while project memory is off carries t
     const root = tmp('helix-disc-proj-');
     foreignLedger(root);
     const { store: s, home } = store({ root });
-    expect(projectDispositionOf({ root, ledger: projectLedgerPath(root), home, origin: 'cwd' })).toBe('unadopted-present');
+    expect(projectDispositionOf({ root, ledger: projectLedgerPath(root), home, globalLedger: join(home, 'memory.jsonl'), origin: 'cwd' })).toBe('unadopted-present');
     const before = readFileSync(projectLedgerPath(root), 'utf8');
     const out = explicitGlobal(s);
     expect(out.scope).toBe('global');
@@ -130,7 +130,7 @@ describe('IT-M4: an explicit global commit while project memory is off carries t
     stampOwnership(b, home, {});
     stampOwnership(a, home, {});
     symlinkSync(projectLedgerPath(b), projectLedgerPath(a));                     // A's memory file is B's
-    expect(projectDispositionOf({ root: a, ledger: projectLedgerPath(a), home })).toBe('aliased');
+    expect(projectDispositionOf({ root: a, ledger: projectLedgerPath(a), home, globalLedger: join(home, 'memory.jsonl') })).toBe('aliased');
     expect(explicitGlobal(s).notice).toBe(GLOBAL_NOTICE);
   });
 
@@ -156,41 +156,38 @@ describe('IT-M4: an explicit global commit while project memory is off carries t
     expect(globalCommit(store().store)).not.toHaveProperty('bypassedProject');
   });
 
-  // A cwd project nobody adopted whose memory file the pre-adopt check refuses reads 'inactive' while its
-  // link is a dangling link to another adopted project's ledger, and 'aliased' (row 4 of design 4.2, adopted
-  // or not) while the link cannot be resolved; A13 makes the first one 'aliased' too. Either way every project
-  // write there gets the alias refusal, which calls the layer disabled and offers global memory. The global
-  // commit that follows says so too.
-  const refusedLinks: Array<[string, (u: string, home: string) => void, 'inactive' | 'aliased']> = [
+  // A cwd project nobody adopted whose memory file links out of the project (row 6) or cannot be resolved
+  // (row 4) reads 'aliased': rows 4 and 6 decide it, with no pre-adopt predicate. Every project write there
+  // gets the alias refusal, which calls the layer disabled and offers global memory. The global commit
+  // that follows says so too.
+  const refusedLinks: Array<[string, (u: string, home: string) => void]> = [
     ["a dangling link to another adopted project's ledger", (u, home) => {
       const b = tmp('helix-disc-proj-');
       stampOwnership(b, home, {});
       symlinkSync(projectLedgerPath(b), projectLedgerPath(u));
-    }, 'inactive'],
-    ['a link body that is not valid UTF-8', (u) => symlinkSync(Buffer.from([0xff]), projectLedgerPath(u)), 'aliased'],
-    ['a link that leads back to itself', (u) => symlinkSync('memory.jsonl', projectLedgerPath(u)), 'aliased'],
+    }],
+    ['a link body that is not valid UTF-8', (u) => symlinkSync(Buffer.from([0xff]), projectLedgerPath(u))],
+    ['a link that leads back to itself', (u) => symlinkSync('memory.jsonl', projectLedgerPath(u))],
   ];
-  it.each(refusedLinks)('not adopted, and the pre-adopt check refuses its memory file (%s): the notice, and aliased', (_label, plant, disposition) => {
+  it.each(refusedLinks)('not adopted, and the pre-adopt check refuses its memory file (%s): the notice, and aliased', (_label, plant) => {
     const u = tmp('helix-disc-proj-');
     mkdirSync(join(u, '.helix'));
     const { store: s, home } = store({ root: u });
     plant(u, home);
-    expect(projectDispositionOf({ root: u, ledger: projectLedgerPath(u), home, origin: 'cwd' })).toBe(disposition);
+    expect(projectDispositionOf({ root: u, ledger: projectLedgerPath(u), home, globalLedger: join(home, 'memory.jsonl'), origin: 'cwd' })).toBe('aliased');
     expect(() => handleCommit(s, { content: 'a project fact', source: 'user' })).toThrow(/the project layer is disabled here/);
     expect(explicitGlobal(s).notice).toBe(GLOBAL_NOTICE);
     expect(s.commitScoped({ content: 'another fact for every project', source: 'user', scope: 'global' }).bypassedProject).toBe('aliased');
   });
 
-  // The adopted side has no rule against the global ledger yet (such a project reads 'owned' and
-  // writes through the link until the next server start), so the notice is not claimed for it.
-  it('an adopted project whose memory file leads to the global ledger reads owned: no notice', () => {
+  it('an adopted project whose memory file leads to the global ledger reads aliased: the notice is given', () => {
     const a = tmp('helix-disc-proj-');
     const { store: s, home } = store({ root: a });
     stampOwnership(a, home, {});
     writeFileSync(join(home, 'memory.jsonl'), '');
     symlinkSync(join(home, 'memory.jsonl'), projectLedgerPath(a));
-    expect(projectDispositionOf({ root: a, ledger: projectLedgerPath(a), home })).toBe('owned');
-    expect(explicitGlobal(s)).not.toHaveProperty('notice');
+    expect(projectDispositionOf({ root: a, ledger: projectLedgerPath(a), home, globalLedger: join(home, 'memory.jsonl') })).toBe('aliased');
+    expect(explicitGlobal(s).notice).toBe(GLOBAL_NOTICE);
   });
 
   it("no notice when project memory is on ('owned'), when nothing is there ('inactive'), or with no project layer", () => {

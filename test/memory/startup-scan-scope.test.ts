@@ -18,7 +18,7 @@ function fixture(opts: { bLedger: boolean }) {
   if (opts.bLedger) writeFileSync(projectLedgerPath(b), '');
   mkdirSync(join(u, '.helix'));
   const reads = (origin: 'cwd' | 'ancestor' = 'cwd'): boolean =>
-    startupScanReadsProject({ root: u, ledger: projectLedgerPath(u), origin }, home);
+    startupScanReadsProject({ root: u, ledger: projectLedgerPath(u), origin }, home, join(home, 'memory.jsonl'));
   return { home, b, u, reads };
 }
 
@@ -27,7 +27,7 @@ describe('startupScanReadsProject (IT-M15 scope, R9)', () => {
     const f = fixture({ bLedger: true });
     expect(f.reads()).toBe(true);                                                     // inactive: no file yet
     writeFileSync(projectLedgerPath(f.u), '');
-    expect(projectDispositionOf({ root: f.u, ledger: projectLedgerPath(f.u), home: f.home, origin: 'cwd' })).toBe('unadopted-present');
+    expect(projectDispositionOf({ root: f.u, ledger: projectLedgerPath(f.u), home: f.home, globalLedger: join(f.home, 'memory.jsonl'), origin: 'cwd' })).toBe('unadopted-present');
     expect(f.reads()).toBe(true);
   });
 
@@ -48,7 +48,7 @@ describe('startupScanReadsProject (IT-M15 scope, R9)', () => {
   it("R9: an unadopted cwd project whose memory file links to a registered project's existing file is not read", () => {
     const f = fixture({ bLedger: true });
     symlinkSync(projectLedgerPath(f.b), projectLedgerPath(f.u));
-    expect(projectDispositionOf({ root: f.u, ledger: projectLedgerPath(f.u), home: f.home, origin: 'cwd' })).toBe('unadopted-present');
+    expect(projectDispositionOf({ root: f.u, ledger: projectLedgerPath(f.u), home: f.home, globalLedger: join(f.home, 'memory.jsonl'), origin: 'cwd' })).toBe('aliased');
     expect(f.reads()).toBe(false);
   });
 

@@ -173,7 +173,7 @@ export const runPilot = (input: {
   // registry silently degraded every project-scope probe to a global-only recall with both ledger
   // pins still matching. The mirror of prepare-gate's `degraded-run` refusal: rows present but the
   // scope would serve none of them is a gate failure, not a smaller corpus.
-  const projectDisposition = projectDispositionOf({ root: projectRoot, ledger: projectLedger, home });
+  const projectDisposition = projectDispositionOf({ root: projectRoot, ledger: projectLedger, home, globalLedger });
   const projectRows = ledgerTexts.project.split('\n').filter((l) => l.trim().length > 0).length;
   if (projectRows > 0 && projectDisposition !== 'owned') {
     fail('degraded-run', `the project ledger contributes ${projectRows} row(s) but its disposition is ` +

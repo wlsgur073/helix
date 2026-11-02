@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, existsSync, realpathSync, appendFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { stampOwnership, projectLedgerPath, projectDispositionOf, aliasesAdoptedLedger } from '../../src/memory/ownership.js';
+import { stampOwnership, projectLedgerPath, projectDispositionOf, judgeProjectLayer } from '../../src/memory/ownership.js';
 import { resolveScopeTarget } from '../../src/memory/scope-target.js';
 
 // ALIAS-P2P (item 7): an adopted project's ledger that resolves to ANOTHER adopted project's ledger
@@ -11,16 +11,15 @@ import { resolveScopeTarget } from '../../src/memory/scope-target.js';
 
 const home = (): string => mkdtempSync(join(tmpdir(), 'helix-p2p-home-'));
 const project = (h: string): string => { const r = mkdtempSync(join(tmpdir(), 'helix-p2p-proj-')); stampOwnership(r, h, {}); return r; };
-const desc = (root: string, h: string) => ({ root, home: h, ledger: projectLedgerPath(root) });
+const desc = (root: string, h: string) => ({ root, home: h, ledger: projectLedgerPath(root), globalLedger: join(h, 'memory.jsonl') });
 
-describe('aliasesAdoptedLedger / the aliased disposition', () => {
+describe('the aliased disposition', () => {
   it('only the LINKING project is aliased; the project holding the real file stays owned', () => {
     const h = home(); const a = project(h); const b = project(h);
     writeFileSync(projectLedgerPath(b), '');
     symlinkSync(projectLedgerPath(b), projectLedgerPath(a));
-    expect(aliasesAdoptedLedger(desc(a, h))).toBe(true);
     expect(projectDispositionOf(desc(a, h))).toBe('aliased');
-    expect(aliasesAdoptedLedger(desc(b, h))).toBe(false);
+    expect(judgeProjectLayer(desc(b, h))).toMatchObject({ state: 'owned', row: '11' });
     expect(projectDispositionOf(desc(b, h))).toBe('owned');
   });
 
@@ -42,10 +41,12 @@ describe('aliasesAdoptedLedger / the aliased disposition', () => {
   });
 
   it('a registry entry whose project is gone never matches, and never throws', () => {
-    // A's ledger is a link to a standalone file, so the registry loop really runs (a project holding
-    // its own real file returns before the loop) and meets the gone project's key.
+    // A's ledger is a link to a standalone file inside A's tree (a link out of the project is row 6), so
+    // the registry loop really runs (a project holding its own real file skips the loop) and meets the
+    // gone project's key.
     const h = home(); const a = project(h); const gone = project(h);
-    const standalone = join(mkdtempSync(join(tmpdir(), 'helix-p2p-solo-')), 'solo.jsonl');
+    mkdirSync(join(a, 'data'));
+    const standalone = join(a, 'data', 'solo.jsonl');
     writeFileSync(standalone, '');
     symlinkSync(standalone, projectLedgerPath(a));
     rmSync(gone, { recursive: true, force: true });
@@ -70,7 +71,7 @@ describe('aliasesAdoptedLedger / the aliased disposition', () => {
 
 // Final review I-1 (ruling R24): the WHOLE symlink chain is followed by hand, bounded, not one link.
 // Expected values from the final review's probe B (cases 3, 4, 5, 6, 8) plus the loop R24 names.
-describe('aliasesAdoptedLedger follows the whole symlink chain (item 7, final review I-1)', () => {
+describe('the judgement follows the whole symlink chain (item 7, final review I-1)', () => {
   it('a two-hop DANGLING chain inside the linking project is aliased before the first write', () => {
     // A/.helix/memory.jsonl -> A/.helix/hop -> B/.helix/memory.jsonl (absent): both links live in A.
     const h = home(); const a = project(h); const b = project(h);
@@ -78,7 +79,6 @@ describe('aliasesAdoptedLedger follows the whole symlink chain (item 7, final re
     symlinkSync(projectLedgerPath(b), hop);
     symlinkSync(hop, projectLedgerPath(a));
     expect(existsSync(projectLedgerPath(b))).toBe(false);
-    expect(aliasesAdoptedLedger(desc(a, h))).toBe(true);
     expect(projectDispositionOf(desc(a, h))).toBe('aliased');
   });
 
@@ -119,7 +119,6 @@ describe('aliasesAdoptedLedger follows the whole symlink chain (item 7, final re
     const a = join(linkedParent, 'proj');           // A's root spelled THROUGH the linked ancestor
     stampOwnership(a, h, {});
     writeFileSync(projectLedgerPath(a), '');
-    expect(aliasesAdoptedLedger(desc(a, h))).toBe(false);
     expect(projectDispositionOf(desc(a, h))).toBe('owned');
   });
 
@@ -131,8 +130,7 @@ describe('aliasesAdoptedLedger follows the whole symlink chain (item 7, final re
     const x = join(a, '.helix', 'x');
     symlinkSync(x, projectLedgerPath(a));
     symlinkSync(projectLedgerPath(a), x);
-    expect(() => aliasesAdoptedLedger(desc(a, h))).not.toThrow();
-    expect(aliasesAdoptedLedger(desc(a, h))).toBe(true);
+    expect(() => projectDispositionOf(desc(a, h))).not.toThrow();
     expect(projectDispositionOf(desc(a, h))).toBe('aliased');
   });
 
@@ -201,7 +199,7 @@ describe("a '..' after a symlinked directory is resolved the kernel's way (item 
     if (bLedger === 'EXISTING') writeFileSync(projectLedgerPath(b), '');
     plantDotdotLink(a, b, spelling);
     expect(projectDispositionOf(desc(a, h))).toBe('aliased');
-    expect(resolveScopeTarget(h, join(h, 'memory.jsonl'), a)).toMatchObject({ ok: false, reason: 'aliases-project' });
+    expect(resolveScopeTarget(h, join(h, 'memory.jsonl'), a)).toMatchObject({ ok: false, reason: 'aliased', cause: 'outside-root' });
     expect(projectDispositionOf(desc(b, h))).toBe('owned');
   });
 
@@ -251,12 +249,12 @@ describe("a link body padded past PATH_MAX is still followed the kernel's way (i
 });
 
 describe('resolveScopeTarget refuses an aliased project scope (item 7)', () => {
-  it('reports aliases-project for the linking side and resolves the real side', () => {
+  it('reports aliased (outside the project) for the linking side and resolves the real side', () => {
     const h = home(); const a = project(h); const b = project(h);
     writeFileSync(projectLedgerPath(b), '');
     symlinkSync(projectLedgerPath(b), projectLedgerPath(a));
     const globalLedger = join(h, 'memory.jsonl');
-    expect(resolveScopeTarget(h, globalLedger, a)).toMatchObject({ ok: false, reason: 'aliases-project' });
+    expect(resolveScopeTarget(h, globalLedger, a)).toMatchObject({ ok: false, reason: 'aliased', cause: 'outside-root' });
     expect(resolveScopeTarget(h, globalLedger, b)).toMatchObject({ ok: true });
   });
 });

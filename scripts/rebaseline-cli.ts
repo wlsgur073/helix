@@ -26,7 +26,7 @@ import {
   readScopeWitness, classifyState, planTransition, openTransition, completeTransition, discardTransition,
 } from '../src/memory/witness-store.js';
 import { sha256Hex } from '../src/memory/witness-core.js';
-import { resolveScopeTarget } from '../src/memory/scope-target.js';
+import { resolveScopeTarget, type ScopeRefusalCause, type ScopeResolution } from '../src/memory/scope-target.js';
 
 export interface RebaselineDeps {
   env?: NodeJS.ProcessEnv;
@@ -69,6 +69,47 @@ async function defaultPromptLine(question: string): Promise<string> {
   } finally {
     rl.close();
   }
+}
+
+/** One fixed sentence per cause (design 4.10), no scope path: the refusal says which cause holds. `Record` over the
+ *  remaining causes, so a new cause does not compile without a text. */
+const CAUSE_TEXT: Record<Exclude<ScopeRefusalCause, 'global-store' | 'global-ledger' | 'other-project'>, string> = {
+  'outside-root': "this project's memory file resolves outside this project.",
+  'home-directory': "this project's memory file resolves into the Helix home directory.",
+  'unjudgeable-target': "this project's memory file cannot be told from another Helix memory file, because that file's path cannot be resolved.",
+  'hard-link': "this project's memory file has more than one hard link.",
+  unresolvable: "this project's memory file cannot be resolved (a name that is not valid UTF-8, a path past the system limit, or too many links).",
+  uninspectable: "this project's memory file cannot be inspected (a folder on the way cannot be read, or is not a directory).",
+  'helix-not-directory': "this project's .helix is not a real directory (a file, a link or another object stands at that name).",
+  'not-regular': "this project's memory file is not a regular file.",
+  unreadable: "this project's memory file cannot be opened for reading.",
+  'not-ledger-content': "this project's memory file is a link to a file that does not hold Helix memory records.",
+  'target-directory-missing': "this project's memory file is a link into a folder that does not exist.",
+};
+
+/** The refusal of a project scope (design 4.10, ASCII only). `resolved ledger:` prints where a write through the memory
+ *  path lands, not the link's own path (m-4), and is the one line of the cause texts that carries a path. */
+function scopeRefusalText(globalLedger: string, scope: string, target: Extract<ScopeResolution, { ok: false }>): string {
+  const { cause, destination } = target;
+  if (cause === 'global-store' || cause === 'global-ledger') {
+    return `helix-rebaseline: REFUSING - ${scope} resolves to the global ledger, not a separate project ledger.\n` +
+      `  resolved ledger: ${destination ?? target.ledger}\n` +
+      `  global ledger  : ${globalLedger}\n` +
+      `Re-baselining it under a project scope key would record one file under two witness identities.\n` +
+      `Use: --scope global\n`;
+  }
+  if (cause === 'other-project') {
+    return `helix-rebaseline: REFUSING - ${scope}'s ledger resolves to another adopted project's ledger file.\n` +
+      `  resolved ledger: ${destination ?? target.ledger}\n` +
+      `Re-baselining it would record one file under two project witness identities.\n` +
+      `Replace the link with the project's own file, then re-run.\n`;
+  }
+  const tail = target.reason === 'unusable'
+    ? `Nothing was read or written. Repair the project's memory file, then re-run.\n`
+    : `Re-baselining it would record a file that is not this project's own under this project's witness identity.\n` +
+      `Replace it with the project's own file, then re-run.\n`;
+  return `helix-rebaseline: REFUSING - ${CAUSE_TEXT[cause]}\n` +
+    (destination !== undefined ? `  resolved ledger: ${destination}\n` : '') + tail;
 }
 
 /** Mirrors appendRecordUnlocked's EXACT write-path bytes (ledger.ts:77-97) without decoding: the
@@ -128,22 +169,7 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
     const globalLedger = resolveGlobalLedger(env, home);
     const target = resolveScopeTarget(home, globalLedger, scope);
     if (!target.ok) {
-      process.stderr.write(                                                         // ASCII only
-        target.reason === 'aliases-global'
-          ? `helix-rebaseline: REFUSING - ${scope} resolves to the global ledger, not a separate project ledger.\n` +
-            `  resolved ledger: ${target.ledger}\n` +
-            `  global ledger  : ${globalLedger}\n` +
-            `Re-baselining it under a project scope key would record one file under two witness identities.\n` +
-            `Use: --scope global\n`
-          : target.reason === 'unusable'
-            ? `helix-rebaseline: REFUSING - ${scope}'s project ledger path cannot be inspected (a folder on the path cannot be read, or a path component is not a directory).\n` +
-              `  resolved ledger: ${target.ledger}\n` +
-              `Repair the project memory path, then re-run.\n`
-            : `helix-rebaseline: REFUSING - ${scope}'s ledger resolves to another adopted project's ledger file.\n` +
-              `  resolved ledger: ${target.ledger}\n` +
-              `Re-baselining it would record one file under two project witness identities.\n` +
-              `Replace the link with the project's own file, then re-run.\n`,
-      );
+      process.stderr.write(scopeRefusalText(globalLedger, scope, target));
       exit(2);
       return 2;
     }

@@ -201,7 +201,7 @@ describe('adoption is symlink-safe (F5/F7)', () => {
 
     // The consequence the read surfaces actually carry: a project that is not owned but has a ledger
     // file must be disclosed as unadopted, not served.
-    expect(projectDispositionOf({ root: proj, ledger: projectLedgerPath(proj), home }))
+    expect(projectDispositionOf({ root: proj, ledger: projectLedgerPath(proj), home, globalLedger: join(home, 'memory.jsonl') }))
       .toBe('unadopted-present');
   });
 
@@ -333,7 +333,7 @@ describe('ownership is decided by bytes the repo actually contains (F5/F7, read 
     symlinkSync(outside, join(proj, '.helix'));
 
     expect(isOwned(proj, home), 'a project whose store lives outside the repo is still owned').toBe(false);
-    expect(projectDispositionOf({ root: proj, ledger: projectLedgerPath(proj), home }))
+    expect(projectDispositionOf({ root: proj, ledger: projectLedgerPath(proj), home, globalLedger: join(home, 'memory.jsonl') }))
       .not.toBe('owned');
   });
 

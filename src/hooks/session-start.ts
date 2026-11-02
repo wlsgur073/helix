@@ -93,12 +93,12 @@ export function gatherScopedRecords({ home, globalLedger, cwd, userHome }: Gathe
     const layer = resolveProjectLayer({ cwd, userHome: userHome ?? homedir(), globalLedger });
     if (layer) {
       try {
-        // B2 + item 7 + issue #1: the SAME shared predicate the store uses, from the same descriptor
+        // B2 + item 7 + issue #1: the SAME judgement the store uses, from the same descriptor
         // shape — computed ONCE and reused to gate the read immediately below (mirrors store.ts's
-        // projectDisposition()-then-route pattern: one evaluation per call, never a second isOwned
-        // read for the same decision). projectDispositionOf never throws (isOwned/existsSync are
-        // already safe), so an exception here can only come from the read that follows.
-        projectDisposition = projectDispositionOf({ root: layer.root, home, ledger: layer.ledger, origin: layer.origin });
+        // projectDisposition()-then-route pattern: one evaluation per call, never a second judgement
+        // for the same decision). projectDispositionOf never throws, so an exception here can only
+        // come from the read that follows.
+        projectDisposition = projectDispositionOf({ root: layer.root, home, ledger: layer.ledger, globalLedger, origin: layer.origin });
         if (projectDisposition === 'owned') {
           const project = verifiedLiveWitnessed(layer.ledger, home, layer.root);
           replays.push({ scope: 'project', ...project.stats });

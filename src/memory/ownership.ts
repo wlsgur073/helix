@@ -196,55 +196,21 @@ export function isOwned(projectRoot: string, home: string): boolean {
  *  automatically, so an unowned one discloses itself instead of staying silent. */
 export type ProjectOrigin = 'cwd' | 'ancestor';
 
-/** A project layer's state (design 4.2). Only 'owned' participates; 'unadopted-present', 'aliased', 'unusable' and
- *  'ancestor-unadopted' are disclosure states, each excluded from every read with its own constant note. 'aliased'
- *  (rows 4, 6, 7, 8) and 'unusable' (rows 3, 5, 9, 9a, 10) hold whether or not the project is adopted. An in-memory
- *  union that nothing in src/ stores: the trigger sink maps it to `unowned` (A13). */
-export type ProjectDisposition = 'inactive' | 'owned' | 'unadopted-present' | 'aliased' | 'unusable' | 'ancestor-unadopted';
-
-/** Rows 4 and 5 of design 4.2 (third fix batch B1): a memory path the resolver cannot resolve (a name that is not
- *  valid UTF-8, a path past the system limit, too many links) is 'aliased'; one it cannot inspect (EACCES, ENOTDIR,
- *  an I/O error, or the kernel's ENOENT for a spelling it refuses to create through) is 'unusable'; anything else is
- *  null. Applies to a layer whether or not it is adopted. Pure, never throws. */
-export function ledgerPathState(ledger: string): 'aliased' | 'unusable' | null {
-  const r = resolvePath(ledger);
-  return r.kind === 'unresolvable' ? 'aliased' : r.kind === 'uninspectable' ? 'unusable' : null;
-}
-
-/** ALIAS-P2P (item 7): does this project's ledger lead to ANOTHER adopted project's ledger file?
- *  The global rule (scope-target.ts aliasesGlobalLedger) compares a project ledger with the global
- *  ledger only, so project A's `memory.jsonl` symlinked to project B's file was witnessed under two
- *  scope keys against one inode. Hard links are refused at the write layer by link count and are not
- *  this rule's business. BOTH sides are read the kernel's way (resolvePath: the symlink chain
- *  followed by hand, bounded, and a `..` after a symlinked directory applied to that directory's
- *  physical target): this project's side is where the append lands, and each registered project's
- *  ledger is compared at where ITS append lands (second fix batch D4 — the comparison side used to be
- *  canonicalRoot, which collapses that `..` as text and returns a dangling link's own location, so two
- *  projects linked to one not-yet-created third file, or a project whose own ledger reached a third
- *  file through `dl/..`, both read `owned` and both wrote the file). The project whose ledger path IS
- *  the real file is never aliased by this rule — the linking side is, and both sides are when both
- *  lead to a third file.
+/** A project layer's state, the answer of judgeProjectLayer (design 4.2):
  *
- *  UNRESOLVABLE counts as aliased (second fix batch D4): a ledger whose destination cannot be computed
- *  the kernel's way (resolvePath not `resolved`) is excluded exactly like one leading to another project's
- *  file — reads leave it out, writes are refused. An unusable memory path (one the resolver cannot inspect)
- *  counts as excluded too; ledgerPathState tells the two labels apart. A registered project whose OWN ledger
- *  is unresolvable or cannot be inspected is excluded from its own judgement, so it is skipped as a
- *  comparison side. Pure reads, never throws: resolvePath never throws for a string, and the registry comes
- *  through readRegistry (absent/corrupt → no other roots). */
-export function aliasesAdoptedLedger(project: { root: string; home: string; ledger: string }): boolean {
-  const own = resolvePath(project.ledger);
-  if (own.kind !== 'resolved') return true;   // rows 4 and 5: the layer is excluded either way; ledgerPathState tells the label
-  const real = own.path;
-  const ownKey = canonicalRoot(project.root);
-  if (real === projectLedgerPath(ownKey)) return false;
-  for (const key of Object.keys(readRegistry(project.home))) {
-    if (key === GLOBAL_KEY || key === ownKey) continue;
-    const other = resolvePath(projectLedgerPath(key));
-    if (other.kind === 'resolved' && other.path === real) return true;
-  }
-  return false;
-}
+ *  - 'owned' (row 11): adopted, and its memory path passed rows 3 to 10. The only state that participates; an owned
+ *    project with no ledger file yet participates too.
+ *  - 'aliased' (rows 4, 6, 7, 8): the memory file cannot be resolved, resolves outside the project, leads to another Helix
+ *    memory file, or has a second hard link. Adopted or not.
+ *  - 'unusable' (rows 3, 5, 9, 9a, 10): the memory file cannot be used as it is. Adopted or not.
+ *  - 'ancestor-unadopted' (row 2): a project found in a parent directory that nobody adopted; its files are not inspected.
+ *  - 'unadopted-present' (row 12): a working-directory project nobody adopted, with a file at the memory path.
+ *  - 'inactive' (rows 1, 13): no project layer, or one nobody adopted with nothing at the memory path.
+ *
+ *  'aliased', 'unusable', 'ancestor-unadopted' and 'unadopted-present' are disclosure states, each excluded from every read
+ *  with its own constant note. An in-memory union that nothing in src/ stores: the trigger sink records 'aliased' and
+ *  'unusable' as `unowned` (scripts/trigger-measure.ts). */
+export type ProjectDisposition = 'inactive' | 'owned' | 'unadopted-present' | 'aliased' | 'unusable' | 'ancestor-unadopted';
 
 /** The row of design 4.2's table that answered. */
 export type JudgementRow = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '9a' | '10' | '11' | '12' | '13';
@@ -406,65 +372,34 @@ function judge(project: JudgedLayer | undefined, forAdopt: boolean, freshContent
   return { state: 'inactive', row: '13', destination, identity, dirIdentity };
 }
 
-/** Shared, side-effect-free four-state snapshot of a project layer's disposition — the SAME predicate
- *  MemoryStore (read paths) and the SessionStart hook (which does not go through MemoryStore) both
- *  route through, so the two surfaces can never disagree about what 'unadopted-present' or 'aliased'
- *  means. Pure: isOwned's registry+.owner reads, then existsSync, and — for an owned project —
- *  aliasesAdoptedLedger's own registry read and the symlink chain, followed by hand (bounded); no
- *  writes, never throws (isOwned and aliasesAdoptedLedger already swallow their own read errors;
- *  existsSync never throws).
+/** A project layer's state (ProjectDisposition), the judgement's answer alone: the SAME function MemoryStore's read paths
+ *  and the SessionStart hook (which does not go through MemoryStore) ask, so the two surfaces can never disagree. The global
+ *  ledger is a required input, because row 7 compares the destination with it. Pure reads, no writes, never throws.
  *
- *  - 'owned': isOwned(project.root, project.home) — true regardless of whether the ledger FILE exists
- *    yet (an owned project with no ledger file still participates).
- *  - 'aliased' (item 7): owned, but its ledger leads to another adopted project's ledger file
- *    (aliasesAdoptedLedger), or, adopted or not, a memory path resolvePath cannot resolve (row 4 of design
- *    4.2). Excluded from every read like 'unadopted-present', with its own constant note; writes are
- *    refused in store.ts.
- *  - 'unusable' (row 5 of design 4.2): adopted or not, a memory path resolvePath cannot inspect. Excluded
- *    the same way, with its own constant note; writes are refused in store.ts.
- *  - 'ancestor-unadopted' (issue #1): a project found in a PARENT directory (origin 'ancestor') that is
- *    not owned — excluded from every read with its own constant note, and never claimed
- *    automatically; commits there are refused in store.ts.
- *  - 'unadopted-present': a descriptor is given, NOT owned, and a ledger file exists at project.ledger
- *    — the exact condition MemoryStore's targetLedger() throws the adopt-hint error on for commit.
- *  - 'inactive': no descriptor (no project layer configured), OR configured but neither owned nor a
- *    ledger file present — nothing to read, nothing to disclose.
- *
- *  A SNAPSHOT, not a lock: call fresh each time — see MemoryStore.projectDisposition's doc-comment for
- *  the full per-call self-consistency rationale (B1). */
-export function projectDispositionOf(
-  project: { root: string; home: string; ledger: string; origin?: ProjectOrigin } | undefined,
-): ProjectDisposition {
-  if (!project) return 'inactive';
-  const owned = isOwned(project.root, project.home);
-  if (!owned && project.origin === 'ancestor') return 'ancestor-unadopted';   // row 2: an unadopted parent's files are not inspected
-  const state = ledgerPathState(project.ledger);                              // rows 4 and 5, adopted or not
-  if (state !== null) return state;
-  if (owned) return aliasesAdoptedLedger(project) ? 'aliased' : 'owned';
-  return existsSync(project.ledger) ? 'unadopted-present' : 'inactive';
-}
+ *  A SNAPSHOT, not a lock: call fresh each time. See MemoryStore.projectDisposition's doc comment for the per-call
+ *  self-consistency rationale (B1). */
+export function projectDispositionOf(project: JudgedLayer | undefined): ProjectDisposition { return judgeProjectLayer(project).state; }
 
-/** Does the server's startup integrity scan (src/server/index.ts) read this project layer's ledger?
- *  The scan reads the file under this project's subkey, so it may read only what is this project's own:
+/** Does the server's startup integrity scan (src/server/index.ts) read this project layer's ledger, and is the file it skipped
+ *  not a regular file? The scan reads the file under this project's subkey, so it may read only what is this project's own.
  *
- *  - 'owned': yes.
- *  - 'aliased' (owned, but the ledger leads to another adopted project's file, or, adopted or not, it cannot
- *    be resolved the kernel's way) and 'unusable' (it cannot be inspected): no, exactly as every read path
- *    leaves it out (IT-M15, second fix batch §4.3 item 3).
- *  - 'ancestor-unadopted': no — nothing of an unadopted parent project is read.
- *  - an UNADOPTED working-directory project ('unadopted-present' or 'inactive'): yes, its own foreign
- *    file is scanned as before, UNLESS its ledger leads — kernel-resolved, resolvePath — to
- *    another registered project's ledger, or cannot be resolved (ruling R9). aliasesAdoptedLedger is
- *    that predicate: it never needed ownership, and an unadopted project has no registry entry of its
- *    own to skip. Before R9 the scan read the other project's file there and printed it under this
- *    project's ledger path (measured: `unverifiable verify record(s) in <U's ledger>` for B's rows).
+ *  M41 (design 4.2): the scan reads a file only after rows 4 to 10 passed, which leaves 'owned', 'unadopted-present' and
+ *  'inactive': an unadopted working-directory project's own file is still scanned. 'aliased', 'unusable' and
+ *  'ancestor-unadopted' are never read, adopted or not, exactly as every read path leaves them out. `notRegular` keeps the one
+ *  IT-H4 line that src/server/index.ts printed for a FIFO, device or directory, because the scan no longer opens such a file.
  *
  *  A missing `origin` reads as 'cwd', as everywhere else. Pure reads, never throws. */
-export function startupScanReadsProject(project: { root: string; ledger: string; origin?: ProjectOrigin }, home: string): boolean {
-  const d = projectDispositionOf({ root: project.root, ledger: project.ledger, home, origin: project.origin });
-  if (d === 'owned') return true;
-  if (d === 'aliased' || d === 'unusable' || d === 'ancestor-unadopted') return false;
-  return !aliasesAdoptedLedger({ root: project.root, home, ledger: project.ledger });
+export function startupScanDecision(project: { root: string; ledger: string; origin?: ProjectOrigin }, home: string, globalLedger: string): { read: boolean; notRegular: boolean } {
+  const j = judgeProjectLayer({ root: project.root, ledger: project.ledger, home, globalLedger, origin: project.origin });
+  return {
+    read: j.state === 'owned' || j.state === 'unadopted-present' || j.state === 'inactive',
+    notRegular: j.state === 'unusable' && j.cause === 'not-regular',
+  };
+}
+
+/** Whether the startup scan reads this layer: startupScanDecision's `read`. */
+export function startupScanReadsProject(project: { root: string; ledger: string; origin?: ProjectOrigin }, home: string, globalLedger: string): boolean {
+  return startupScanDecision(project, home, globalLedger).read;
 }
 
 /** Stamp a project as owned: write the repo-side .owner and the home-side registry entry. */

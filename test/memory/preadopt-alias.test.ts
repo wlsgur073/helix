@@ -33,7 +33,7 @@ describe('the pre-adopt alias check (Δ4-37)', () => {
     const { home, b, u, store } = fixture();
     symlinkSync(projectLedgerPath(b), projectLedgerPath(u));
     const registryBefore = text(join(home, 'projects.json'));
-    expect(() => store.commit({ content: 'a fact for U', source: 'user' })).toThrow(/resolves to another adopted project/);
+    expect(() => store.commit({ content: 'a fact for U', source: 'user' })).toThrow(/resolves outside this project/);
     expect(existsSync(projectLedgerPath(b))).toBe(false);
     expect(readdirSync(join(b, '.helix'))).toEqual(['.owner']);
     expect(text(join(home, 'projects.json'))).toBe(registryBefore);
@@ -46,7 +46,7 @@ describe('the pre-adopt alias check (Δ4-37)', () => {
     mkdirSync(join(u, 'x'));
     symlinkSync(join(u, 'x'), join(u, '.helix', 'dl'));
     symlinkSync(['dl', '..', '..', basename(b), '.helix', 'memory.jsonl'].join('/'), projectLedgerPath(u));
-    expect(() => store.commit({ content: 'a fact for U', source: 'user' })).toThrow(/resolves to another adopted project/);
+    expect(() => store.commit({ content: 'a fact for U', source: 'user' })).toThrow(/resolves outside this project/);
     expect(existsSync(projectLedgerPath(b))).toBe(false);
     expect(isOwned(u, home)).toBe(false);
   });
@@ -57,17 +57,17 @@ describe('the pre-adopt alias check (Δ4-37)', () => {
   it('a dangling link to the global ledger that does not exist yet: refused, the global ledger not created', () => {
     const { home, u, store } = fixture();
     symlinkSync(join(home, 'memory.jsonl'), projectLedgerPath(u));
-    expect(() => store.commit({ content: 'a fact for U', source: 'user' })).toThrow(/to the global memory file/);
+    expect(() => store.commit({ content: 'a fact for U', source: 'user' })).toThrow(/resolves outside this project/);
     expect(existsSync(join(home, 'memory.jsonl'))).toBe(false);
     expect(isOwned(u, home)).toBe(false);
   });
 
-  it('the same post-start shape with the global ledger EXISTING: refused as a foreign memory file (the link resolves to a file Helix did not create here)', () => {
+  it('the same post-start shape with the global ledger EXISTING: refused as an alias (the link leads to a file outside the project)', () => {
     const { home, u, store } = fixture();
     store.commit({ content: 'a global fact first', source: 'user', scope: 'global' });            // creates the global ledger
     symlinkSync(join(home, 'memory.jsonl'), projectLedgerPath(u));
     const before = readFileSync(join(home, 'memory.jsonl'), 'utf8');
-    expect(() => store.commit({ content: 'a fact for U', source: 'user' })).toThrow(/a project memory file exists here that Helix did not create/);
+    expect(() => store.commit({ content: 'a fact for U', source: 'user' })).toThrow(/resolves outside this project/);
     expect(readFileSync(join(home, 'memory.jsonl'), 'utf8')).toBe(before);
     expect(isOwned(u, home)).toBe(false);
   });
@@ -75,7 +75,7 @@ describe('the pre-adopt alias check (Δ4-37)', () => {
   it('an unresolvable ledger (a non-UTF-8 link body) is refused before adoption too', () => {
     const { home, u, store } = fixture();
     symlinkSync(Buffer.from([0xff]), projectLedgerPath(u));
-    expect(() => store.commit({ content: 'a fact for U', source: 'user' })).toThrow(/resolves to another adopted project/);
+    expect(() => store.commit({ content: 'a fact for U', source: 'user' })).toThrow(/resolves outside this project/);
     expect(isOwned(u, home)).toBe(false);
   });
 
@@ -98,7 +98,7 @@ describe('the pre-adopt alias check (Δ4-37)', () => {
   it("the first shape with an EXPLICIT scope 'project': refused, B's ledger not created, U not adopted", () => {
     const { home, b, u, store } = fixture();
     symlinkSync(projectLedgerPath(b), projectLedgerPath(u));
-    expect(() => store.commit({ content: 'a fact for U', source: 'user', scope: 'project' })).toThrow(/resolves to another adopted project/);
+    expect(() => store.commit({ content: 'a fact for U', source: 'user', scope: 'project' })).toThrow(/resolves outside this project/);
     expect(existsSync(projectLedgerPath(b))).toBe(false);
     expect(isOwned(u, home)).toBe(false);
   });
@@ -124,10 +124,9 @@ describe('the pre-adopt alias check (Δ4-37)', () => {
 // unresolvable ledger met before adoption gets the text that names that cause too.
 describe('the pre-adopt refusal is the alias refusal (R7, P1)', () => {
   const ALIAS_REFUSAL =
-    "commit: this project's memory file resolves to another adopted project's memory file, to the global memory file, " +
-    'or through a path Helix cannot resolve, so the project layer is disabled here — the write is refused rather than ' +
-    "written into the other project's memory. Ask the user whether to store this fact in global memory, which every " +
-    "project sees, or to replace the link with the project's own file; do not choose for them.";
+    "commit: this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, " +
+    'or through a path Helix cannot resolve, so the project layer is disabled here — the write is refused rather than written somewhere else. ' +
+    "Ask the user whether to store this fact in global memory, which every project sees, or to replace the link with the project's own file; do not choose for them.";
 
   it('pre-adopt, unresolvable (a non-UTF-8 link body): the exact text', () => {
     const { u, store } = fixture();

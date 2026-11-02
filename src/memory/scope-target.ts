@@ -1,17 +1,13 @@
-/** One name for the rule that decides whether a project ledger is a SEPARATE participant from the
- *  global one, plus the scope resolution that has to honour it.
+/** The scope resolution of the two ceremonies (helix-rebaseline, helix-trust-resolve): the ledger a
+ *  scope names AND the witness key it is recorded under, derived together, from one argument, in one
+ *  place, and judged by the SAME function every other site uses.
  *
- *  The rule already existed, three times, written out longhand: `src/server/index.ts` gates the
- *  project layer with it, `src/hooks/session-start.ts` repeats it to keep its disposition snapshot
- *  and its read in agreement, and `scripts/trigger-measure.ts` repeats it again with a comment
- *  pointing at the server. The re-baseline ceremony did not have it — that was the defect — and an
- *  invariant nobody could name is exactly the kind that gets copied three times and forgotten
- *  elsewhere (the dev-only replay benchmark had also missed it; `scripts/bench-replay.ts` runReal
- *  reads it from here now). Naming the rule is most of the fix; `resolveScopeTarget` is the rest,
- *  because it stops the ceremony deriving a ledger and a witness key from the same argument by two
- *  independent routes. Since issue #1 the server and the SessionStart hook no longer apply it
- *  separately: `src/memory/project-root.ts` applies it once for both. */
-import { aliasesAdoptedLedger, ledgerPathState, projectLedgerPath } from './ownership.js';
+ *  Third fix batch B1 (design 4.2 and 4.10): the project-to-project rule and the copies of the global
+ *  rule (scripts/trigger-measure.ts, scripts/bench-replay.ts) are now the one judgement in ownership.ts
+ *  (judgeProjectLayer), which takes the global ledger's path as an input. `aliasesGlobalLedger` stays
+ *  here only for src/memory/project-root.ts, which applies it once for the server and the SessionStart
+ *  hook. */
+import { isGlobalLedgerEntry, judgeProjectLayer, projectLedgerPath, type JudgementCause } from './ownership.js';
 import { resolvePath } from './path-identity.js';
 import { scopeKeyOf } from './witness-store.js';
 
@@ -33,7 +29,7 @@ import { scopeKeyOf } from './witness-store.js';
  * ledger linked as `dl/../<path to the global ledger>`, or linked to a global ledger that does not
  * exist yet, read as a separate file while its appends landed in (or created) the global ledger. A
  * side that is not `resolved` is not called the same file here: the project layer then stays
- * configured and the disposition excludes it (ledgerPathState), so its writes are refused rather
+ * configured and the judgement excludes it (rows 4 and 5), so its writes are refused rather
  * than silently routed to the global ledger.
  */
 export function aliasesGlobalLedger(projectLedger: string, globalLedger: string): boolean {
@@ -45,13 +41,28 @@ export function aliasesGlobalLedger(projectLedger: string, globalLedger: string)
 /** `'global'`, or an absolute project root. */
 export type Scope = 'global' | (string & {});
 
+/** Why a project scope is refused. `global-store`: the project memory path IS the global ledger's
+ *  directory entry, so there is no separate project scope (use the global one). Every other value is the
+ *  judgement's cause for an 'aliased' or 'unusable' layer. */
+export type ScopeRefusalCause = 'global-store' | JudgementCause;
+
 export type ScopeResolution =
-  | { ok: true; ledger: string; scopeKey: string }
-  | { ok: false; reason: 'aliases-global' | 'aliases-project' | 'unusable'; ledger: string };
+  | { ok: true; ledger: string; scopeKey: string; destination?: string }
+  | {
+      ok: false;
+      /** The two values this had before the judgement keep their meaning: `aliases-global` (the global
+       *  store itself, or a memory file that leads to the global ledger) and `aliases-project` (it leads
+       *  to another registered project's ledger). The other aliased causes read `aliased`. */
+      reason: 'aliases-global' | 'aliases-project' | 'aliased' | 'unusable';
+      cause: ScopeRefusalCause;
+      /** The project's memory path as the scope names it. */
+      ledger: string;
+      /** Where a write through that path lands, when the resolver named a path (design 4.10, m-4). */
+      destination?: string;
+    };
 
 /**
- * The ledger a scope names AND the witness key it is recorded under — derived together, from one
- * argument, in one place.
+ * The ledger a scope names AND the witness key it is recorded under.
  *
  * Deriving them separately is what made a project scope able to alias the global ledger: the ledger
  * came from `projectLedgerPath(scope)` while the key came from `canonicalRoot(scope)`, and nothing
@@ -64,12 +75,25 @@ export type ScopeResolution =
  * `globalLedger` is passed in rather than derived here, because its own resolution
  * (`HELIX_LEDGER ?? <home>/memory.jsonl`) is itself spelled out at several call sites and is not
  * this module's rule to own.
+ *
+ * A project scope is refused when its layer is 'aliased' or 'unusable' (design 4.10). Every other
+ * state resolves as before: the ceremony of a project nobody adopted, or with no memory file yet, is
+ * not this function's to refuse.
  */
 export function resolveScopeTarget(home: string, globalLedger: string, scope: Scope): ScopeResolution {
   if (scope === 'global') return { ok: true, ledger: globalLedger, scopeKey: scopeKeyOf(home) };
   const ledger = projectLedgerPath(scope);
-  if (aliasesGlobalLedger(ledger, globalLedger)) return { ok: false, reason: 'aliases-global', ledger };
-  if (ledgerPathState(ledger) === 'unusable') return { ok: false, reason: 'unusable', ledger };
-  if (aliasesAdoptedLedger({ root: scope, home, ledger })) return { ok: false, reason: 'aliases-project', ledger };
-  return { ok: true, ledger, scopeKey: scopeKeyOf(home, scope) };
+  if (isGlobalLedgerEntry(ledger, globalLedger)) {
+    const g = resolvePath(globalLedger);   // for `resolved ledger:` only: where the global ledger's own writes land
+    return { ok: false, reason: 'aliases-global', cause: 'global-store', ledger, destination: g.kind === 'resolved' ? g.path : undefined };
+  }
+  const j = judgeProjectLayer({ root: scope, ledger, home, globalLedger });
+  if (j.state === 'aliased' || j.state === 'unusable') {
+    const cause = j.cause ?? 'uninspectable';
+    const reason = j.state === 'unusable' ? 'unusable'
+      : cause === 'global-ledger' ? 'aliases-global'
+      : cause === 'other-project' ? 'aliases-project' : 'aliased';
+    return { ok: false, reason, cause, ledger, destination: j.destination };
+  }
+  return { ok: true, ledger, scopeKey: scopeKeyOf(home, scope), destination: j.destination };
 }
