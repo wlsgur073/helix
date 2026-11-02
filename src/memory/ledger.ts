@@ -5,7 +5,7 @@ import { StringDecoder } from 'node:string_decoder';
 import type { MemoryRecord } from '../types.js';
 import { buildProjection } from './projection.js';
 import { forgedFactIds, isFactRow } from './verified-projection.js';
-import { withFileLock } from './lock.js';
+import { withFileLock, type LockContext } from './lock.js';
 import { resolvePath, resolvedPathOrThrow, fileIdentityAt, hasComparableInode, sameFile, type FileIdentity } from './path-identity.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { openJudgedDir, sampleDirIdentity, boundPath, fsyncDir, closeHeldDir } from './dir-bound.js';
@@ -264,7 +264,7 @@ function removeOwnCreation(path: string, opened: FileIdentity, fsOps: DurableFsO
  *  fragment is isolated into its own malformed line that parse-health counts), then writes the
  *  whole line, fsyncs the fd, and fsyncs the parent dir so an acknowledged append survives power
  *  loss. The judged directory is held by a descriptor bound to the judged path (dir-bound.ts, design decision 2): the
- *  file is opened and removed through it, and the directory fsync goes through it; without `/proc`
+ *  file is opened and removed through it, the orphan sweep lists it, and the directory fsync goes through it; without `/proc`
  *  the plain path is used, and `/proc` lost while the process runs throws LedgerProcLostError with nothing written. The
  *  file is opened with O_NOFOLLOW and, before the first byte and before the sweep, the descriptor and the path resolved
  *  again are checked (destinationUnchanged): a changed destination throws LedgerDestinationChangedError with nothing
@@ -297,7 +297,7 @@ export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, 
         if (!destinationUnchanged(rawPath, path, before, opened)) throw new LedgerDestinationChangedError();
         if (st.nlink === 0) throw new LedgerDestinationChangedError();   // replaced at the name since the open: a race, not an alias
         if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
-        sweepOrphanTmps(path, { fsOps });   // behind the check: a refused append never touches the directory the path came to lead to
+        sweepOrphanTmps(at, { fsOps });   // behind the check: a refused append never touches the directory the path came to lead to; `at`: the sweep lists the held directory
         if (fsOps.fstatSync(fd).nlink === 0) throw new LedgerDestinationChangedError();   // a compactor's rename that landed before the sweep left this descriptor on an unlinked inode; behind the sweep it fails ENOENT, so a descriptor that passes here is a live file
         let line = JSON.stringify(record) + '\n';
         if (st.size > 0) {
@@ -541,17 +541,19 @@ export const MAX_LEDGER_READ_BYTES = 2 ** 31 - 1;
  *  object that cannot be opened at all (a socket, a driverless device) is classified by stat, which
  *  never opens. ENOENT propagates unchanged so each caller keeps its absent-file convention. No size
  *  cap below readFileSync's own (spec decision Q3), so a ledger that grew legitimately stays readable. */
-function readLedgerFileBytes(path: string): Buffer {
+function readLedgerFileBytesExact(path: string, flags: number): Buffer {
   let fd: number;
   try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    fd = openSync(path, flags);
   } catch (e) {
     // An object that cannot even be OPENED — a UNIX socket (ENXIO), a device node with no driver
     // behind it (ENXIO), a device this user may not open (EACCES) — never reaches the fstat below.
     // stat() does not open, so it cannot block: it tells "not a ledger at all" apart from an ordinary
     // failure on a regular file, which propagates unchanged (ENOENT too, so each caller keeps its
-    // absent-file convention).
-    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+    // absent-file convention). ELOOP says a link stands at the name and an O_NOFOLLOW open refused it, or the
+    // links never end: what such a link leads to is no answer to what the name is, and stat would follow it.
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT' && code !== 'ELOOP') {
       let st: Stats | null = null;
       try { st = statSync(path); } catch { /* the stat failed as well: report the open's own error */ }
       if (st !== null && !st.isFile()) throw new LedgerNotRegularError(path);
@@ -580,6 +582,10 @@ function readLedgerFileBytes(path: string): Buffer {
   }
 }
 
+function readLedgerFileBytes(path: string): Buffer {
+  return readLedgerFileBytesExact(path, constants.O_RDONLY | constants.O_NONBLOCK);
+}
+
 /** Read every record from the ledger, in append order. Missing file -> []. */
 export function parseLedger(path: LedgerPath): MemoryRecord[] {
   let text: string;
@@ -604,6 +610,22 @@ export function readLedgerBytes(path: LedgerPath): Buffer {
     return readLedgerFileBytes(path);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0);
+    throw err;
+  }
+}
+
+/** The bytes of the ledger at exactly the name given, which may be a name under a held directory
+ *  (`/proc/self/fd/<n>/memory.jsonl`). It never resolves its argument: `readLedgerFileBytes` will (B6), and resolving a
+ *  bound name follows the magic link back to the directory's path by name, which unbinds the read. `O_NOFOLLOW` as design
+ *  4.1 item 4 asks of every read of a resolved path: a link that took the final name, whatever it leads to, is the changed
+ *  destination. ENOENT is empty. */
+export function readLedgerBytesExactly(at: string): Buffer {
+  try {
+    return readLedgerFileBytesExact(at, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return Buffer.alloc(0);
+    if (code === 'ELOOP') throw new LedgerDestinationChangedError();
     throw err;
   }
 }
@@ -921,9 +943,14 @@ function fileSize(path: LedgerPath): number {
 const LANDED_STATS: unique symbol = Symbol('compactLedger.landedStats');
 interface LandedStatsCarrier { [LANDED_STATS]?: CompactionStats }
 
+/** A changed destination met BEHIND the rename, by the read for completeTransition. The rewrite has landed, so this is no
+ *  refusal of it and must not travel as a LedgerDestinationChangedError, whose readers answer that nothing happened. A
+ *  plain error on purpose: the catch in compactLedgerUnlocked attaches the landed stats as for any later throw. */
+const REWRITE_LANDED_THEN_CHANGED = 'compactLedger: the rewrite landed, but the memory file changed before the rollback witness was updated';
+
 /** Read back the stats compactLedger attached to a rethrown error when its rewrite had already landed
- *  on disk before the failure struck (dir fsync or witness-transition completion, both AFTER the
- *  atomic rename) — undefined for every other throw: a pre-rename failure (nothing landed), or any
+ *  on disk before the failure struck (dir fsync, the read for the witness transition or its
+ *  completion, all AFTER the atomic rename) — undefined for every other throw: a pre-rename failure (nothing landed), or any
  *  error this module never touched. A caller that swallows a compaction's throw (store.ts's
  *  maybeAutoCompact) uses this to report the REAL droppedRows/reclaimedBytes instead of the "nothing
  *  happened" zero a bare swallow would otherwise imply for a rewrite that, in fact, already happened. */
@@ -951,16 +978,32 @@ export function landedCompactionStats(e: unknown): CompactionStats | undefined {
  * it needs a real concurrent appender — so the invariant lives here, in the code that must hold it.
  */
 export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): CompactionStats {
-  const fsOps = opts.fsOps ?? realFsOps;
   // Hold the lock across read -> rewrite -> rename -> dir fsync so a concurrent append can't be
   // lost and a stale snapshot can't resurrect erased content. The tmp is created BEFORE the read
   // (fence sentinel): any successor's sweep unlinks it, so if OUR lock is ever lost, the final
   // rename-by-pathname fails ENOENT instead of overwriting the successor's state.
-  return withFileLock(rawPath, (ctx) => {                   // lock target stays raw — withFileLock resolves it internally to the same lock file
-    const path = resolvedPathOrThrow(rawPath);              // resolve ONCE, under the lock: EVERYTHING below (nlink, tmp, sweep, mode, read, rename, dir fsync) targets the real inode, so a compaction can never replace a symlink alias and strand the erased plaintext on the link's target
-    assertSingleLink(path);
-    const tmp = `${path}.c-${randomBytes(16).toString('hex')}.tmp`;
-    sweepOrphanTmps(path, { fsOps, keep: tmp });
+  return withFileLock(rawPath, (ctx) => compactLedgerUnlocked(rawPath, opts, ctx));   // lock target stays raw — withFileLock resolves it internally to the same lock file
+}
+
+/** The rewrite for a caller that already holds the ledger lock of `rawPath` (design 4.3, the paragraph on the other
+ *  writers). `judged` is the destination the caller judged under that lock; a path that resolves elsewhere now is refused
+ *  before anything is created. The judged directory is opened once (like the append: `judged.dir`, else a fresh sample)
+ *  and every operation below goes through its bound names: without `/proc` the plain path is used, and `/proc` lost while
+ *  the process runs throws LedgerProcLostError with nothing created. */
+export function compactLedgerUnlocked(rawPath: LedgerPath, opts: CompactOptions, ctx: LockContext, judged?: JudgedDestination): CompactionStats {
+  const fsOps = opts.fsOps ?? realFsOps;
+  const path = resolvedPathOrThrow(rawPath);                 // resolve ONCE, under the lock: EVERYTHING below (nlink, tmp, sweep, mode, read, rename, dir fsync) targets the real inode, so a compaction can never replace a symlink alias and strand the erased plaintext on the link's target
+  if (judged !== undefined && judged.path !== path) throw new LedgerDestinationChangedError();
+  const dirSample = judged !== undefined && judged.dir !== undefined ? judged.dir : sampleDirIdentity(dirname(path));
+  const opened = openJudgedDir(dirname(path), dirSample, fsOps);
+  if (opened.kind === 'changed') throw new LedgerDestinationChangedError();
+  if (opened.kind === 'proc-lost') throw new LedgerProcLostError();
+  const held = opened.dir;
+  try {
+    const at = boundPath(held, basename(path));
+    const tmp = boundPath(held, `${basename(path)}.c-${randomBytes(16).toString('hex')}.tmp`);
+    assertSingleLink(at);
+    sweepOrphanTmps(at, { fsOps, keep: tmp });
     const fd = fsOps.openSync(tmp, 'wx');
     let closed = false;
     const w = opts.witness;
@@ -976,10 +1019,10 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       // through to the umask: with no target to copy, 0600 is the only safe default. (A home ledger
       // that is itself over-broad is repaired by hardenHomePermissions at startup, so the mode this
       // reads is already tight; this line must not be the thing that re-widens it.)
-      const mode = modeOf(path) ?? 0o600;
+      const mode = modeOf(at) ?? 0o600;
       fsOps.fchmodSync(fd, mode);                                 // umask-proof: rename replaces the inode
-      const beforeBytes = fileSize(path);                          // inside the lock, BEFORE the read
-      const records = parseLedger(path);
+      const beforeBytes = fileSize(at);                            // inside the lock, BEFORE the read
+      const records = parseLedgerText(readLedgerBytesExactly(at).toString('utf8'));
       const { kept, droppedForgedVerifies } = planCompaction(records, opts);
       // Witness integration (spec §4.9), ALL inside this existing ledger lock — planTransition/
       // openTransition/completeTransition each take the WITNESS lock (a different path, so nesting is
@@ -990,9 +1033,9 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       // rename a lock-free reader classifies this scope 'transition-interrupted' and withholds it, and
       // writing first leaves that window one fsync (the journal publish's own directory fsync), the
       // two pre-rename checks and the rename, where it used to hold the row writes and the tmp fsync
-      // too. The tmp is not the ledger until the rename, so a crash anywhere before it classifies
-      // exactly as it did (no journal: the old bytes as before; journal: interrupted at the
-      // predecessor, which the startup heal retracts).
+      // too. The tmp is not the ledger until the rename, so a crash anywhere before it leaves the old
+      // bytes: with no journal yet the scope classifies by those bytes, and with the journal it reads
+      // interrupted at the predecessor, which the startup heal retracts.
       let rows = kept;
       let transition: { kind: 'compaction' | 'erase'; plan: ReturnType<typeof planTransition>; expected: { byteLength: number; prefixHash: string } } | null = null;
       if (w) {
@@ -1011,7 +1054,7 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
         // throw lands inside the try below, whose catch closes+unlinks the tmp and rethrows, so the
         // ledger is left byte-identical and no journal is opened — the witness is wholly untouched.
         const op = kind === 'erase' ? ('permanent-erase' as const) : ('compaction' as const);
-        const verdict = classifyState(readScopeWitness(w.home, w.scopeKey, { op }), readLedgerBytes(path));
+        const verdict = classifyState(readScopeWitness(w.home, w.scopeKey, { op }), readLedgerBytesExactly(at));
         if (verdict.kind === 'mismatch') {
           throw new WitnessBlockedError(
             op,
@@ -1037,34 +1080,41 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
         // The tmp now holds the complete, durable rewrite; publish the journal only now. A throw above
         // this line opened no journal, so the catch below has nothing to retract (retractNonce null).
         const { kind, plan, expected } = transition;
-        preRewriteHash = sha256Hex(readLedgerBytes(path)); // sampled under the lock the rename needs — nothing can move it but us
+        preRewriteHash = sha256Hex(readLedgerBytesExactly(at)); // sampled under the lock the rename needs — nothing can move it but us
         const journal = openTransition(w.home, w.scopeKey, {
           kind, epoch: plan.epoch, nonce: plan.nonce, predecessor: plan.predecessor,
           supersedes: plan.supersedes, expected, tx: fenceTx,
         });
         retractNonce = journal.nonce;
       }
-      assertSingleLink(path);                                      // re-check immediately before the rename
+      assertSingleLink(at);                                        // re-check immediately before the rename
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost before rename');
-      fsOps.renameSync(tmp, path);                                 // atomic on the same filesystem
+      fsOps.renameSync(tmp, at);                                   // atomic on the same filesystem
       // From here on the rewrite has PHYSICALLY LANDED — the ledger already holds the new bytes, so
       // any later throw in this try (the dir fsync right below, or completeTransition further down)
       // must not be reported by a swallowing caller as "nothing happened". Snapshot the real deltas
       // NOW, with the exact same inputs (records/rows/beforeBytes/droppedForgedVerifies) the success
       // return below would use, so the catch has them ready regardless of which post-rename step fails.
-      landedStats = { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
-      fsOps.fsyncDir(dirname(path));                               // rename gives visibility, not durability
+      landedStats = { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(at), droppedForgedVerifies };
+      fsyncDir(held, fsOps);                                       // rename gives visibility, not durability
       if (w && fenceTx !== null) {
         // New bytes are durable; complete the transition (still under the ledger lock). re-read the
         // exact on-disk bytes and hand them to completeTransition — its expected-equality check is the
         // serialization-drift guard: finalBytes MUST equal the finalText that produced `expected`.
-        completeTransition(w.home, w.scopeKey, readLedgerBytes(path), fenceTx);
+        let finalBytes: Buffer;
+        try {
+          finalBytes = readLedgerBytesExactly(at);
+        } catch (e) {
+          if (isLedgerDestinationChangedError(e)) throw new Error(REWRITE_LANDED_THEN_CHANGED, { cause: e });
+          throw e;
+        }
+        completeTransition(w.home, w.scopeKey, finalBytes, fenceTx);
       }
       // droppedRows/reclaimedBytes are PHYSICAL (rows read minus rows WRITTEN, file size delta): the
       // fence is one of the rows written, so it reduces droppedRows and its bytes count against
       // reclaimedBytes — symmetric with the horizon/integrity markers planCompaction already folds
       // into `kept`, and honoring CompactionStats' "rows read at lock entry minus rows written".
-      return { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(path), droppedForgedVerifies };
+      return { droppedRows: records.length - rows.length, reclaimedBytes: beforeBytes - fileSize(at), droppedForgedVerifies };
     } catch (e) {
       if (!closed) { try { fsOps.closeSync(fd); } catch { /* already closed by a throwing close */ } }
       try { fsOps.unlinkSync(tmp); } catch { /* a successor's sweep may have taken it */ }
@@ -1081,7 +1131,7 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       // retraction — and the original error still reaches the rethrow below.
       if (w && retractNonce !== null && preRewriteHash !== null) {
         try {
-          if (sha256Hex(readLedgerBytes(path)) === preRewriteHash) discardTransition(w.home, w.scopeKey, retractNonce);
+          if (sha256Hex(readLedgerBytesExactly(at)) === preRewriteHash) discardTransition(w.home, w.scopeKey, retractNonce);
         } catch { /* best-effort hygiene; a pending journal stays the honest state */ }
       }
       // landedStats is non-null only when the rename above already succeeded before this failure hit —
@@ -1104,7 +1154,9 @@ export function compactLedger(rawPath: LedgerPath, opts: CompactOptions): Compac
       }
       throw e;
     }
-  });
+  } finally {
+    try { closeHeldDir(held, fsOps); } catch { /* a read-only descriptor loses nothing: a failed close must not replace a landed rewrite's stats or the error in flight */ }
+  }
 }
 
 /** Missing ledger counts as a single link (first-write paths stay legal). */

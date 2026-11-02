@@ -119,7 +119,7 @@ describe('erase routing', () => {
     const { store, root, home } = unownedProjectStore();
     expect(isOwned(root, home)).toBe(false); // sanity: genuinely unowned before the call
     expect(() => store.erase('anything', { scope: 'project' }))
-      .toThrow(/not owned.*helix_memory_adopt/); // erase must never silently adopt to satisfy itself
+      .toThrow(/memory is not adopted.*helix_memory_adopt/); // erase must never silently adopt to satisfy itself
     expect(isOwned(root, home)).toBe(false); // still unowned — the throw did not adopt as a side effect
   });
   it('store.ts:606 — no-scope erase throws when the id is present in more than one scope, and touches neither ledger', () => {

@@ -7,6 +7,8 @@ import { dualVerify, persistedReason, type DualVerifyResult, type EchoSource, ty
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, normalizeRecordContent, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, UNUSABLE_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, recordRows, type FrameLine } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
 import { isWitnessAdvanceError, isWitnessBlockedError, isWitnessUnusableError, isRecordStoredError } from '../memory/witness-store.js';
+import { isLockForeignObjectError } from '../memory/lock.js';
+import { isLedgerProcLostError } from '../memory/ledger.js';
 import { appendAudit, type VerifyAudit, type EraseAudit } from '../audit.js';
 import type { MemoryState, ScopedRecord } from '../types.js';
 import { readFileSync } from 'node:fs';
@@ -442,12 +444,14 @@ export function handleErase(store: MemoryStore, args: { id: string }, deps: Eras
     //     the stored mark, element K), or a WitnessAdvanceError WITHOUT landedState -> nothing was written:
     //     for the soft erase this handler issues, that shape can only come from completeTransition, which
     //     witness-write.ts runs BEFORE the append (the post-append advance always stamps landedState, which
-    //     is why it is tested first above);
+    //     is why it is tested first above). A foreign object at the ledger, registry or key lock and a lost
+    //     /proc stand before the first byte; a foreign object at the witness lock after the append carries the
+    //     stored mark (W-R4) and keeps its row;
     //   anything else -> the append MAY have begun (post-append re-read, fsync), and a WitnessUnusableError
     //     WITH the mark came after it — say so, never 'rejected'.
     const row: EraseAudit = landedStateOf(e) !== null
       ? { kind: 'erase', ts, id: args.id, soft: true, witnessAdvance: 'failed' }
-      : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e) || (isWitnessUnusableError(e) && !isRecordStoredError(e))
+      : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e) || (isWitnessUnusableError(e) && !isRecordStoredError(e)) || ((isLockForeignObjectError(e) || isLedgerProcLostError(e)) && !isRecordStoredError(e))
         ? { kind: 'erase', ts, id: args.id, soft: true, outcome: 'rejected' }
         : { kind: 'erase', ts, id: args.id, soft: true, outcome: 'indeterminate' };
     appendAudit(deps.auditPath, row);

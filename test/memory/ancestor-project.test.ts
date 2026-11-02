@@ -57,7 +57,7 @@ describe('a commit below a parent project that is not adopted', () => {
   it("refuses an explicit 'project' erase", () => {
     const root = tmp('helix-ap-proj-'); const { store } = below(root);
     const g = store.commit({ content: 'echo global fact', source: 'user', scope: 'global' });
-    expect(() => store.erase(g.id, { scope: 'project' })).toThrow(/not owned/);
+    expect(() => store.erase(g.id, { scope: 'project' })).toThrow(/memory is not adopted/);
   });
 
   // Review focus 5.

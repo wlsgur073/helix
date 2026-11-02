@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, rmdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BlastRadius, Classification, MemoryRecord, MemoryScope, MemoryState, ProvenanceSource, ScopedRecord, ScopedHistoricalRecord, ScopedAsOfFact } from '../types.js';
-import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, LedgerDestinationChangedError, LedgerProcLostError, isLedgerCreateRefusedError, isLedgerDestinationChangedError, isLedgerProcLostError, type CompactionStats, type JudgedDestination, type LedgerPath } from './ledger.js';
+import { parseLedger, parseLedgerHealth, readLedgerBytes, compactLedger, compactLedgerUnlocked, planCompaction, serializedBytes, isMarkerShape, isWitnessFence, landedCompactionStats, DESTINATION_CHANGED_REFUSAL, LedgerDestinationChangedError, LedgerProcLostError, isLedgerCreateRefusedError, isLedgerDestinationChangedError, isLedgerProcLostError, type CompactOptions, type CompactionStats, type JudgedDestination, type LedgerPath } from './ledger.js';
 import { appendWitnessed, appendWitnessedUnlocked } from './witness-write.js';
 import { scopeKeyOf, readScopeWitness, classifyState, completeTransition, discardTransition, assertWitnessWritable, isRecordStoredError, isWitnessAdvanceError, isWitnessBlockedError, isWitnessUnusableError, WitnessBlockedError } from './witness-store.js';
 import { cheapGate, dirtyGate } from './compaction-trigger.js';
@@ -197,6 +197,74 @@ const FIRST_WRITE_FAILED_NOT_UNDONE =
   "commit: the first write to this project's memory file failed and the adoption recorded for it could not be undone, so the project is adopted with no memory file — nothing was written. " +
   'Tell the user what happened; do not try to repair it for them.';
 
+/** The project writes the critical section of design 4.3 serves. B5 adds 'adopt'. */
+type ProjectWriteOp = 'commit' | 'erase' | 'confirm' | 'recheck' | 'compaction';
+
+/** erase with scope 'project' (or any erase routed to the project) in a layer that is not owned: the project is not
+ *  adopted, or stopped being adopted under the lock (FW-R13). It names no cause, because the same refusal answers a layer
+ *  with no file and an unadopted parent project. Design 4.9, verbatim. */
+const ERASE_NOT_ADOPTED =
+  "erase: this project's memory is not adopted — ask the user whether to adopt it (helix_memory_adopt); do " +
+  'not choose for them.';
+
+/** The cause clauses of the 4.9 texts, for the cells 4.9 leaves to the implementation. */
+const ALIASED_CAUSE =
+  "this project's memory file resolves outside this project, to another Helix memory file, to a file with " +
+  'more than one hard link, or through a path Helix cannot resolve';
+const UNUSABLE_CAUSE =
+  "this project's memory file cannot be used as it is (it is not a regular file, it or its folder cannot be " +
+  'read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix ' +
+  'memory records)';
+const UNWRITABLE_CAUSE = "this project's memory folder cannot be written (a read-only folder or file system)";
+
+/** The fixed texts of a project write refused by the critical section, by operation. Constants: no path, no id,
+ *  nothing of the call. commit and erase (aliased, unusable, notAdopted) are the 4.9 texts or A13's; every other cell is
+ *  in the 4.9 form (cause clause, then the operation's own result clause). `changed`: the destination under the lock is
+ *  not the one judged before it (step 3), or the check after the open refused (4.1 item 3). `notAdopted`: the layer is not
+ *  owned under the lock (FW-R13); a commit never meets it. */
+const PROJECT_WRITE_REFUSAL: Record<ProjectWriteOp, { aliased: string; unusable: string; unwritable: string; changed: string; notAdopted: string }> = {
+  commit: {
+    aliased: ALIASED_PROJECT_WRITE_REFUSAL,
+    unusable: UNUSABLE_PROJECT_WRITE_REFUSAL,
+    unwritable: UNWRITABLE_PROJECT_WRITE_REFUSAL,
+    changed: DESTINATION_CHANGED_REFUSAL,
+    notAdopted: FOREIGN_FILE_REFUSAL,
+  },
+  erase: {
+    aliased: ERASE_ALIASED_REFUSAL,
+    unusable: ERASE_UNUSABLE_REFUSAL,
+    unwritable: `erase: ${UNWRITABLE_CAUSE}, so nothing was erased. Ask the user whether to make that folder writable; do not choose for them.`,
+    changed: "erase: this project's memory file was replaced while the erase waited for its lock — nothing was erased. " +
+      'Try the erase again; if it happens again, tell the user.',
+    notAdopted: ERASE_NOT_ADOPTED,
+  },
+  confirm: {
+    aliased: `confirm: ${ALIASED_CAUSE} — the grade was not changed rather than recorded somewhere else.`,
+    unusable: `confirm: ${UNUSABLE_CAUSE} — the grade was not changed.`,
+    unwritable: `confirm: ${UNWRITABLE_CAUSE}, so the grade was not changed. Ask the user whether to make that folder writable; do not choose for them.`,
+    changed: "confirm: this project's memory file was replaced while the confirmation waited for its lock — the grade was not changed. " +
+      'Try the confirmation again; if it happens again, tell the user.',
+    notAdopted: "confirm: this project's memory is not adopted — the grade was not changed. " +
+      'Ask the user whether to adopt it (helix_memory_adopt); do not choose for them.',
+  },
+  recheck: {
+    aliased: `recheck: ${ALIASED_CAUSE} — the grade was not changed rather than recorded somewhere else.`,
+    unusable: `recheck: ${UNUSABLE_CAUSE} — the grade was not changed.`,
+    unwritable: `recheck: ${UNWRITABLE_CAUSE}, so the grade was not changed. Ask the user whether to make that folder writable; do not choose for them.`,
+    changed: "recheck: this project's memory file was replaced while the recheck waited for its lock — the grade was not changed. " +
+      'Try the recheck again; if it happens again, tell the user.',
+    notAdopted: "recheck: this project's memory is not adopted — the grade was not changed. " +
+      'Ask the user whether to adopt it (helix_memory_adopt); do not choose for them.',
+  },
+  compaction: {
+    aliased: `compaction: ${ALIASED_CAUSE} — nothing was rewritten.`,
+    unusable: `compaction: ${UNUSABLE_CAUSE} — nothing was rewritten.`,
+    unwritable: `compaction: ${UNWRITABLE_CAUSE}, so nothing was rewritten.`,
+    changed: "compaction: this project's memory file was replaced while the rewrite waited for its lock — nothing was rewritten.",
+    notAdopted: "compaction: this project's memory is not adopted — nothing was rewritten.",
+  },
+};
+
 /** The states in which an explicit 'global' commit bypassed a project layer that is off here (IT-M4). */
 export type BypassedProjectDisposition = 'ancestor-unadopted' | 'aliased' | 'unusable' | 'unadopted-present';
 /** What `commitScoped` reports: the record, the scope it was written to, and two disclosures.
@@ -218,7 +286,7 @@ export interface CommitResult {
  *  for the reason witness-store.ts's `isWitnessAdvanceError` sets out. */
 export class EraseRefusedError extends Error {
   readonly eraseRefused = true;
-  constructor(message: string) { super(message); this.name = 'EraseRefusedError'; }
+  constructor(message: string, options?: { cause?: unknown }) { super(message, options); this.name = 'EraseRefusedError'; }
 }
 export const isEraseRefusedError = (e: unknown): boolean =>
   e instanceof Error && (e as { eraseRefused?: unknown }).eraseRefused === true;
@@ -363,7 +431,7 @@ export class MemoryStore {
     let first: LayerJudgement | null = null;
     if (input.scope !== 'global' && this.opts.project) {
       first = this.judgeLayer({ freshContent: true });
-      this.refuseExcludedProjectWrite(this.opts.project, first);
+      this.refuseExcludedProjectWrite('commit', this.opts.project, first);
     }
     if (input.supersedes) {
       const targetLedger = this.ledgerOf(input.supersedes);
@@ -512,11 +580,13 @@ export class MemoryStore {
    *  The root is JSON-quoted so a newline or quote in a directory name cannot reshape the message.
    *
    *  Side-effect free, no ownership stamping: a write about to be refused must never first claim or create a ledger.
-   *  Returns for every other state. */
-  private refuseExcludedProjectWrite(p: { root: string }, j: LayerJudgement): void {
-    if (j.state === 'aliased') throw new Error(ALIASED_PROJECT_WRITE_REFUSAL);
-    if (j.state === 'unusable') throw new Error(UNUSABLE_PROJECT_WRITE_REFUSAL);
+   *  Returns for every other state. `op` picks the text: 'aliased' and 'unusable' carry the operation's fixed text;
+   *  'ancestor-unadopted' keeps the issue-#1 text for a commit and is the not-adopted text of any other operation. */
+  private refuseExcludedProjectWrite(op: ProjectWriteOp, p: { root: string }, j: LayerJudgement): void {
+    if (j.state === 'aliased') throw this.projectWriteRefusal(op, 'aliased');
+    if (j.state === 'unusable') throw this.projectWriteRefusal(op, 'unusable');
     if (j.state === 'ancestor-unadopted') {
+      if (op !== 'commit') throw this.projectWriteRefusal(op, 'notAdopted');
       throw new Error(
         `commit: this session started below a Helix project at ${JSON.stringify(p.root)} that is not adopted, ` +
         'so project memory is off here — the write is refused rather than widened to the global ledger. ' +
@@ -524,6 +594,17 @@ export class MemoryStore {
         'or to store this fact in global memory, which every project sees; do not choose for them.',
       );
     }
+  }
+
+  /** A refusal of a project write, as the operation raises it. An erase refusal is the typed pre-write refusal the erase
+   *  handler audits as 'rejected' (nothing was written). A changed destination is the ledger layer's typed error for every
+   *  other operation, so the commit's catch in firstProjectWrite keeps recognising it. */
+  private projectWriteRefusal(op: ProjectWriteOp, kind: 'aliased' | 'unusable' | 'unwritable' | 'changed' | 'notAdopted', cause?: unknown): Error {
+    const text = PROJECT_WRITE_REFUSAL[op][kind];
+    const options = cause === undefined ? undefined : { cause };
+    if (op === 'erase') return new EraseRefusedError(text, options);
+    if (kind === 'changed') return new LedgerDestinationChangedError(text);
+    return new Error(text, options);
   }
 
   /** Resolve the ledger to write to, and the project layer when it is a project's. The routing only: the judgement, the
@@ -550,9 +631,15 @@ export class MemoryStore {
     return { ledger: p.ledger, project: p };
   }
 
-  /** THE critical section of a write to a project (design 4.3 steps 1 to 3), for the commit; B3 and B5 give the other
-   *  writers the same function. `first` is the caller's lock-free judgement (step 1); it is refused here again, so no
+  /** THE critical section of a write to a project (design 4.3 steps 1 to 3), for every operation of `ProjectWriteOp`; B5
+   *  gives adopt the same function. `first` is the caller's lock-free judgement (step 1); it is refused here again, so no
    *  caller can come in with an excluded layer.
+   *
+   *  What the operation changes: the texts (`projectWriteRefusal`), the name in the witness refusal (`op` is the tool's
+   *  name: commit, erase, confirm, recheck), whether the layer must be owned (every operation but the commit; FW-R13: asked
+   *  in front of the lock and again under it, so a project that stopped being owned is refused with the operation's
+   *  not-adopted text), and whether the memory folder is created when it is missing (the commit only). The compaction asks
+   *  no witness question in front of the lock: it is best effort and its own gate refuses an unusable file.
    *
    *  In front of the lock: the witness file must be usable (design 4.8 item 2; asked before the home is validated or
    *  tightened and before a lock file is published in the project: FW-R10); the home is validated; a `.helix` that
@@ -562,12 +649,13 @@ export class MemoryStore {
    *  row 13 with no folder has `dirIdentity === null`, which the held-directory append refuses (A6).
    *
    *  Step 2: the ledger lock of the resolved destination. A lock file that cannot be PUBLISHED because the folder refuses
-   *  the write gets UNWRITABLE_PROJECT_WRITE_REFUSAL (13.3 decision 5); an error raised inside the held section (the
+   *  the write gets the operation's `unwritable` text (13.3 decision 5); an error raised inside the held section (the
    *  registry's or the key's lock, a home that cannot be written) is never converted: `held` tells the two apart.
    *  Step 3: under the lock the layer is judged again with the content read afresh; 'aliased', 'unusable' and
    *  'ancestor-unadopted' get their refusal; a judgement that passes with another destination than step 1's, or than the
    *  one the lock stands beside (ctx.path), is the changed-destination refusal: the path that was locked is not the path
-   *  that would be written.
+   *  that would be written. A lock timeout, a foreign lock object, a lost `/proc` and an unusable witness file pass through
+   *  unconverted: each keeps its own text.
    *
    *  A folder this call created is removed again when the call is refused (FW-R6): the lock-free look found none, the
    *  call made it, and a refused call must not leave an empty `.helix` that the next start would find as a project layer.
@@ -576,30 +664,36 @@ export class MemoryStore {
    *
    *  Lock order: this ledger lock first; the body takes the registry lock, the key lock (a first mint) and the witness lock
    *  under it and never another ledger lock. */
-  private underProjectLedgerLock<T>(p: { root: string; ledger: string }, first: LayerJudgement, body: (held: HeldProjectLedger) => T): T {
+  private underProjectLedgerLock<T>(p: { root: string; ledger: string }, op: ProjectWriteOp, first: LayerJudgement, body: (held: HeldProjectLedger) => T): T {
     const home = this.homeDir();
-    this.refuseExcludedProjectWrite(p, first);
-    if (first.destination === undefined) throw new Error(UNUSABLE_PROJECT_WRITE_REFUSAL);   // no state that passes lacks a destination
-    assertWitnessWritable(home, 'commit', { homeUnchecked: true });
+    this.refuseExcludedProjectWrite(op, p, first);
+    if (first.destination === undefined) throw this.projectWriteRefusal(op, 'unusable');   // no state that passes lacks a destination
+    if (op !== 'commit' && first.state !== 'owned') throw this.projectWriteRefusal(op, 'notAdopted');
+    if (op !== 'compaction') assertWitnessWritable(home, op, { homeUnchecked: true });
     ensureHelixDir(home);
-    if (isHelixDirLinked(p.root)) throw new Error(UNUSABLE_PROJECT_WRITE_REFUSAL);
+    if (isHelixDirLinked(p.root)) throw this.projectWriteRefusal(op, 'unusable');
     const folder = dirname(p.ledger);
-    let folderThere = true;
-    try { lstatSync(folder); } catch (e) { folderThere = (e as NodeJS.ErrnoException).code !== 'ENOENT'; }
     let madeFolder = false;
-    if (!folderThere) { mkdirSync(folder, { recursive: true }); madeFolder = true; }
+    if (op === 'commit') {   // only the commit creates the memory folder
+      let folderThere = true;
+      try { lstatSync(folder); } catch (e) { folderThere = (e as NodeJS.ErrnoException).code !== 'ENOENT'; }
+      if (!folderThere) { mkdirSync(folder, { recursive: true }); madeFolder = true; }
+    }
     let held = false;   // true once THIS lock is published
     try {
       return withFileLock(p.ledger, (ctx) => {
         held = true;
         const j = this.judgeLayer({ freshContent: true });
-        this.refuseExcludedProjectWrite(p, j);
-        if (j.destination === undefined || j.destination !== first.destination || ctx.path !== j.destination) throw new LedgerDestinationChangedError();
+        this.refuseExcludedProjectWrite(op, p, j);
+        if (j.destination === undefined || j.destination !== first.destination || ctx.path !== j.destination) throw this.projectWriteRefusal(op, 'changed');
+        if (op !== 'commit' && j.state !== 'owned') throw this.projectWriteRefusal(op, 'notAdopted');   // FW-R13
         return body({ ctx, judgement: j, judged: { path: j.destination, identity: j.identity ?? null, dir: j.dirIdentity } });
       });
     } catch (e) {
       if (madeFolder && !isRecordStoredError(e)) { try { rmdirSync(folder); } catch { /* not empty, or gone: leave it */ } }
-      if (!held && isLockPublishRefusedError(e)) throw new Error(UNWRITABLE_PROJECT_WRITE_REFUSAL, { cause: e });
+      if (!held && isLockPublishRefusedError(e)) throw this.projectWriteRefusal(op, 'unwritable', e);
+      // The check after the open and the rewrite's own look at the path raise the ledger layer's commit text: give the operation's.
+      if (op !== 'commit' && isLedgerDestinationChangedError(e) && !isRecordStoredError(e) && (e as Error).message !== PROJECT_WRITE_REFUSAL[op].changed) throw this.projectWriteRefusal(op, 'changed', e);
       throw e;
     }
   }
@@ -610,7 +704,7 @@ export class MemoryStore {
    *  under the lock that commit is finished and the project reads owned). Nobody owns it and nothing stands there:
    *  firstProjectWrite. B4 adds the supersede re-check (step 6) as the first statement of the callback. */
   private commitToProject(p: { root: string; ledger: string }, first: LayerJudgement, record: MemoryRecord): void {
-    this.underProjectLedgerLock(p, first, ({ judgement, judged }) => {
+    this.underProjectLedgerLock(p, 'commit', first, ({ judgement, judged }) => {
       if (judgement.state === 'owned') {
         appendWitnessedUnlocked(p.ledger, record, this.homeDir(), p.root, 'commit', 'commit', judged);
       } else if (judgement.state === 'unadopted-present') {
@@ -885,7 +979,7 @@ export class MemoryStore {
       let stats: CompactionStats | null = null;        // null <=> the compaction threw <=> did not complete cleanly
       let landedStats: CompactionStats | null = null;   // set only when a THROWN compaction's rewrite had already landed (post-rename failure) — see ledger.ts's landedCompactionStats
       try {
-        stats = compactLedger(r.ledger, {
+        stats = this.rewriteLedger(r.ledger, 'compaction', null, {
           erasedIds: new Set(), keepValidVerify, provesKey,
           // Witnessed rewrite (spec §4.9): the auto-compaction is a prefix-changing rewrite, so it
           // advances the witness (plants a fence) — otherwise the next witnessed read would false-alarm.
@@ -1025,44 +1119,66 @@ export class MemoryStore {
 
   /** Append a SIGNED verify event conferring `state` on `targetId` (routed to the target's ledger).
    *  Reads the verified projection, computes the next per-target generation and the content digest,
-   *  signs, and appends — all under ONE ledger lock so a concurrent writer can't race the gen. */
-  private writeVerify(targetId: string, state: MemoryState, source: ProvenanceSource): MemoryRecord {
+   *  signs, and appends — all under ONE ledger lock so a concurrent writer can't race the gen. A project ledger runs in
+   *  the critical section of design 4.3 (the lock at the resolved destination, the layer judged again under it, and a
+   *  project that is not owned there refused with the operation's text); the global ledger keeps its own lock until B6. */
+  private writeVerify(targetId: string, state: MemoryState, source: ProvenanceSource, op: 'confirm' | 'recheck'): MemoryRecord {
     const ledger = this.ledgerOf(targetId);
-    return withFileLock(ledger, () => {
-      ensureMaster(this.homeDir());                 // mint the master on first sign (different lock)
-      // C1.4-③: a pending scope withholds its subkey (subkeyForScope returns null), which would
-      // otherwise surface below as the misleading "not owned?" message. Name the real cause first:
-      // trust is suspended by an unresolved ambiguous re-adoption, and a new verify must not be
-      // minted until a human resolves it (repair or fresh) — minting now would confer trust the
-      // pending state exists to withhold.
-      const root = this.scopeRootOf(ledger);
-      if (root && trustStateOf(root, this.homeDir()) === 'pending')
-        throw new Error('writeVerify: scope is trust-pending (an ambiguous re-adoption) — resolve it (repair or fresh) before minting a verify');
-      const subkey = this.subkeyForLedger(ledger);
-      if (!subkey) throw new Error('writeVerify: cannot resolve signing subkey (project not owned?)');
-      const records = parseLedger(ledger);
-      // Trust only VALID verifies for the live target + the running generation, so a forged record
-      // (state or gen) can never raise the floor we sign above.
-      const v = buildVerifiedProjection(records, { verify: (r) => verifyVerify(r, subkey), keyAvailable: true });
-      const target = v.live.get(targetId);
-      if (!target) throw new Error('writeVerify: target not live');
-      const maxGen = records.reduce(
-        (m, r) => (r.type === 'verify' && r.supersedes === targetId && verifyVerify(r, subkey) ? Math.max(m, r.gen ?? 0) : m),
-        0,
-      );
-      const ts = this.now();
-      // gen + targetDigest MUST be set before signVerify (it silently signs gen=0/digest=null otherwise).
-      const unsigned: MemoryRecord = {
-        id: this.id(), tx: ts, validFrom: ts, validTo: null,
-        type: 'verify', state, content: '',
-        provenance: { source, sessionId: this.session() },
-        supersedes: targetId, blastRadius: null, reverifyTrigger: null, classification: 'normal',
-        gen: maxGen + 1, targetDigest: digestContent(target.content),
-      };
-      const signed = signVerify(unsigned, subkey);
-      appendWitnessedUnlocked(ledger, signed, this.homeDir(), this.scopeRootOf(ledger), 'verify', source === 'user' ? 'confirm' : 'recheck'); // we already hold the ledger lock — non-locking, witnessed append
-      return signed;
-    });
+    const p = this.opts.project;
+    if (p && ledger === p.ledger) {
+      return this.underProjectLedgerLock(p, op, this.judgeLayer({ freshContent: true }), ({ judged }) => this.writeVerifyLocked(ledger, targetId, state, source, op, judged));
+    }
+    return withFileLock(ledger, () => this.writeVerifyLocked(ledger, targetId, state, source, op, undefined));
+  }
+
+  /** writeVerify's body, for a caller that holds the ledger lock. `op` is the tool's name in a witness refusal; `judged` is
+   *  the destination judged under that lock, undefined on the global ledger. */
+  private writeVerifyLocked(ledger: LedgerPath, targetId: string, state: MemoryState, source: ProvenanceSource, op: 'confirm' | 'recheck', judged: JudgedDestination | undefined): MemoryRecord {
+    ensureMaster(this.homeDir());                 // mint the master on first sign (different lock)
+    // C1.4-③: a pending scope withholds its subkey (subkeyForScope returns null), which would
+    // otherwise surface below as the misleading "not owned?" message. Name the real cause first:
+    // trust is suspended by an unresolved ambiguous re-adoption, and a new verify must not be
+    // minted until a human resolves it (repair or fresh) — minting now would confer trust the
+    // pending state exists to withhold.
+    const root = this.scopeRootOf(ledger);
+    if (root && trustStateOf(root, this.homeDir()) === 'pending')
+      throw new Error('writeVerify: scope is trust-pending (an ambiguous re-adoption) — resolve it (repair or fresh) before minting a verify');
+    const subkey = this.subkeyForLedger(ledger);
+    if (!subkey) throw new Error('writeVerify: cannot resolve signing subkey (project not owned?)');
+    const records = parseLedger(ledger);
+    // Trust only VALID verifies for the live target + the running generation, so a forged record
+    // (state or gen) can never raise the floor we sign above.
+    const v = buildVerifiedProjection(records, { verify: (r) => verifyVerify(r, subkey), keyAvailable: true });
+    const target = v.live.get(targetId);
+    if (!target) throw new Error('writeVerify: target not live');
+    const maxGen = records.reduce(
+      (m, r) => (r.type === 'verify' && r.supersedes === targetId && verifyVerify(r, subkey) ? Math.max(m, r.gen ?? 0) : m),
+      0,
+    );
+    const ts = this.now();
+    // gen + targetDigest MUST be set before signVerify (it silently signs gen=0/digest=null otherwise).
+    const unsigned: MemoryRecord = {
+      id: this.id(), tx: ts, validFrom: ts, validTo: null,
+      type: 'verify', state, content: '',
+      provenance: { source, sessionId: this.session() },
+      supersedes: targetId, blastRadius: null, reverifyTrigger: null, classification: 'normal',
+      gen: maxGen + 1, targetDigest: digestContent(target.content),
+    };
+    const signed = signVerify(unsigned, subkey);
+    appendWitnessedUnlocked(ledger, signed, this.homeDir(), this.scopeRootOf(ledger), 'verify', op, judged); // we already hold the ledger lock — non-locking, witnessed append
+    return signed;
+  }
+
+  /** A ledger rewrite (the auto-compaction, the permanent erase) through the same order as every project write: for a
+   *  project ledger the critical section, then the rewrite under the lock it holds and through the directory it judged;
+   *  for the global ledger `compactLedger` with its own lock, as before (B6). `first` is the caller's lock-free
+   *  judgement, or null to make it here. */
+  private rewriteLedger(ledger: LedgerPath, op: 'compaction' | 'erase', first: LayerJudgement | null, opts: CompactOptions): CompactionStats {
+    const p = this.opts.project;
+    if (p && ledger === p.ledger) {
+      return this.underProjectLedgerLock(p, op, first ?? this.judgeLayer({ freshContent: true }), ({ ctx, judged }) => compactLedgerUnlocked(ledger, opts, ctx, judged));
+    }
+    return compactLedger(ledger, opts);
   }
 
   /** Content-bound mechanical reality-check. Mints at most Corroborated; never Verified. */
@@ -1075,7 +1191,7 @@ export class MemoryStore {
       targetState: target.state,
       evidenceSource: 'reality-check', outcome,
     });
-    const record = result.kind === 'state' ? this.writeVerify(id, result.state, 'reality-check') : null;
+    const record = result.kind === 'state' ? this.writeVerify(id, result.state, 'reality-check', 'recheck') : null;
     return { outcome, result, record };
   }
 
@@ -1091,7 +1207,7 @@ export class MemoryStore {
     });
     // resolveTransition guarantees { kind:'state', state:'Verified' } for evidenceSource 'user'
     const state = result.kind === 'state' ? result.state : 'Verified';
-    return { record: this.writeVerify(id, state, 'user') };
+    return { record: this.writeVerify(id, state, 'user', 'confirm') };
   }
 
   inspect(): ScopedRecord[] {
@@ -1351,9 +1467,10 @@ export class MemoryStore {
    *  physical purge must not silently miss a secret hiding in a skipped line, but a SOFT erase only
    *  tombstones (parseLedger tolerates a torn line as §10 specifies), so an unrelated corrupt line
    *  must never brick it (finding 2). */
-  private resolveEraseTarget(id: string, scope: MemoryScope | undefined, permanent: boolean): { ledger: LedgerPath; kind: 'record' | 'marker' } | null {
+  private resolveEraseTarget(id: string, scope: MemoryScope | undefined, permanent: boolean): { ledger: LedgerPath; kind: 'record' | 'marker'; layer: LayerJudgement } | null {
     const p = this.opts.project;
-    const layer = this.judgeLayer({ freshContent: true }).state;
+    const judged = this.judgeLayer({ freshContent: true });
+    const layer = judged.state;
     const projectActive = layer === 'owned';
     const classify = (ledger: LedgerPath): 'record' | 'marker' | null => {
       const kind = this.findEraseTarget(ledger, id, permanent);
@@ -1385,10 +1502,10 @@ export class MemoryStore {
       if (scope === 'project' && layer === 'aliased') throw new EraseRefusedError(ERASE_ALIASED_REFUSAL);
       if (scope === 'project' && layer === 'unusable') throw new EraseRefusedError(ERASE_UNUSABLE_REFUSAL);
       const ledger = scope === 'global' || !p ? this.global
-        : (projectActive ? p.ledger : (() => { throw new EraseRefusedError('erase: project ledger not owned — adopt it (helix_memory_adopt) then erase, or remove it'); })());
+        : (projectActive ? p.ledger : (() => { throw new EraseRefusedError(ERASE_NOT_ADOPTED); })());
       const kind = classify(ledger);
       if (kind === null) throw new EraseRefusedError(`erase: id not found in scope ${scope}`);
-      return { ledger, kind };
+      return { ledger, kind, layer: judged };
     }
     const candidates: LedgerPath[] = [this.global, ...(projectActive ? [p!.ledger] : [])];
     // Corruption gate — PERMANENT (destructive) erase only. The only production caller (the MCP tool)
@@ -1404,10 +1521,10 @@ export class MemoryStore {
         }
       }
     }
-    const hits: Array<{ ledger: LedgerPath; kind: 'record' | 'marker' }> = [];
+    const hits: Array<{ ledger: LedgerPath; kind: 'record' | 'marker'; layer: LayerJudgement }> = [];
     for (const c of candidates) {
       const kind = classify(c);
-      if (kind !== null) hits.push({ ledger: c, kind });
+      if (kind !== null) hits.push({ ledger: c, kind, layer: judged });
     }
     // SOFT erases (the tool's only shape — it cannot pass a scope) prefer the one candidate holding a
     // RECORD with this exact id over candidates whose matches are marker rows: every ledger that has ever
@@ -1447,7 +1564,9 @@ export class MemoryStore {
   erase(id: string, opts: { permanent?: boolean; scope?: MemoryScope } = {}): EraseOutcome {
     const target = this.resolveEraseTarget(id, opts.scope, opts.permanent ?? false);
     if (target === null) { this.rankCache = null; return 'absent'; }   // clean + absent → no-op, nothing written
-    const { ledger, kind } = target;
+    const { ledger, kind, layer } = target;
+    const p = this.opts.project;
+    const inProject = !!p && ledger === p.ledger;
     // Anti-laundering (spec §4.2 PR-1): a PERMANENT erase ends in a witnessed compactLedger rewrite,
     // which refuses to advance the witness over a MISMATCH. Gate the WHOLE permanent erase up front on
     // the scope's stable (witness-first + retry-once) verdict, so a rolled-back scope is refused BEFORE
@@ -1469,12 +1588,14 @@ export class MemoryStore {
       outcome = isMarker || alreadyDead ? 'not-live' : 'erased';
       if (!isMarker && !alreadyDead) {                          // skip tombstone for markers (T1-g) + already-dead ids (D8)
         const ts = this.now();
-        appendWitnessed(ledger, {
+        const tombstone: MemoryRecord = {
           id: this.id(), tx: ts, validFrom: ts, validTo: null,
           type: 'erase', content: '', state: 'Suspect',
           provenance: { source: 'user', sessionId: this.session() },
           supersedes: id, blastRadius: null, reverifyTrigger: null, classification: 'normal',
-        }, this.homeDir(), this.scopeRootOf(ledger), 'erase');
+        };
+        if (inProject) this.underProjectLedgerLock(p!, 'erase', layer, ({ judged }) => appendWitnessedUnlocked(ledger, tombstone, this.homeDir(), p!.root, 'erase', 'erase', judged));
+        else appendWitnessed(ledger, tombstone, this.homeDir(), this.scopeRootOf(ledger), 'erase');
       }
       if (opts.permanent) {
         // HMAC-aware compaction: preserve genuine signed verifies for this ledger, drop forgeries.
@@ -1483,7 +1604,9 @@ export class MemoryStore {
         // paths can never diverge. A permanent erase is a ledger REWRITE (prefix change), so it drives
         // the witness transition (kind:'erase') — otherwise the next witnessed read would false-alarm.
         const sk = this.subkeyForLedger(ledger);
-        compactLedger(ledger, {
+        // 'compaction', not 'erase': this rewrite stands behind a stored tombstone, where the erase row's "nothing was
+        // erased" is false and the compaction row's "nothing was rewritten" is true. A retried permanent erase re-runs it.
+        this.rewriteLedger(ledger, 'compaction', layer, {
           erasedIds: new Set([id]), keepValidVerify: this.keepValidVerifyFor(sk), provesKey: this.provesKeyFor(sk),
           witness: { home: this.homeDir(), scopeKey: scopeKeyOf(this.homeDir(), this.scopeRootOf(ledger)), now: () => this.now(), kind: 'erase' },
         });
