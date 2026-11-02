@@ -12,9 +12,10 @@ import { main } from '../scripts/rebaseline-cli.js';
 import { MemoryStore } from '../src/memory/store.js';
 import { projectLedgerPath } from '../src/memory/ownership.js';
 import { readLedgerBytes, witnessFenceRecord } from '../src/memory/ledger.js';
-import { withFileLock } from '../src/memory/lock.js';
+import { withFileLock, lockPathOf } from '../src/memory/lock.js';
+import { realFsOps } from '../src/memory/fs-ops.js';
 import {
-  readScopeWitness, classifyState, scopeKeyOf, witnessLogPath, planTransition, openTransition,
+  readScopeWitness, classifyState, scopeKeyOf, witnessLogPath, planTransition, openTransition, journalPublished, witnessPath,
 } from '../src/memory/witness-store.js';
 import { sha256Hex } from '../src/memory/witness-core.js';
 
@@ -544,6 +545,62 @@ describe('rebaseline-cli main() — refusal paths', () => {
     expect(afterState.entry).toEqual(beforeState.entry);
     expect(classifyState(afterState, readLedgerBytes(ledger)).kind).toBe('mismatch'); // still recoverable
   });
+});
+
+describe('rebaseline-cli main() — p-7: a journal whose publication failed (spec 4.6)', () => {
+  const FIXED = '2026-11-01T00:00:00.000Z';
+  /** One EIO on the fsync of `home` that runs while a journal is pending (the one after openTransition's witness rename). */
+  function armFault(home: string): { fired: () => number } {
+    const real = realFsOps.fsyncDir.bind(realFsOps);
+    let armed = true; let fired = 0;
+    vi.spyOn(realFsOps, 'fsyncDir').mockImplementation((dir: string) => {
+      if (armed && dir === home && readScopeWitness(home, '@global').journal !== null) {
+        armed = false; fired += 1;
+        throw Object.assign(new Error('EIO: injected, fsync of the home directory after the witness rename'), { code: 'EIO' });
+      }
+      real(dir);
+    });
+    return { fired: () => fired };
+  }
+  const run = async (home: string) => {
+    const cap = captureStd();
+    try {
+      const code = await main(['--scope', 'global'], { env: envFor(home), isTTY: true, promptLine: async () => 'bless', now: () => FIXED, exit: () => {} });
+      return { code, err: cap.stderr() };
+    } finally { cap.restore(); vi.restoreAllMocks(); }
+  };
+
+  it.each(['a witnessed scope', 'a first-contact scope (no predecessor)'] as const)('%s: the journal the failed publication left is retracted, with the second note, and nothing is written', async (kind) => {
+    const home = realpathSync(tmpHome());
+    homes.push(home);
+    const ledger = join(home, 'memory.jsonl');
+    if (kind === 'a witnessed scope') new MemoryStore(ledger, { home, sessionId: 't' }).commit({ content: 'alpha deploy fact', source: 'user' });
+    else writeFileSync(ledger, '');
+    const before = readLedgerBytes(ledger);
+    const fault = armFault(home);
+    const { code, err } = await run(home);
+    expect(fault.fired()).toBe(1);
+    expect(code).toBe(1);
+    expect(err).toContain('the witness journal was left by a publication that failed -- it was retracted; nothing written');
+    expect(err).not.toContain('append refused before any byte landed');
+    expect(readScopeWitness(home, '@global').journal).toBeNull();           // HEAD: PENDING (and on a first-contact scope the next start does not retract it)
+    expect(readLedgerBytes(ledger).equals(before)).toBe(true);
+  });
+
+  it('a publication that failed BEFORE its rename: no retraction, no note, and one witness-lock budget (about 5 s), not two', async () => {
+    const { home } = mismatchedGlobalHome();
+    homes.push(home);
+    writeFileSync(lockPathOf(witnessPath(home)), 'not a lock payload');
+    const t0 = performance.now();
+    const { code, err } = await run(home);
+    const ms = performance.now() - t0;
+    rmSync(lockPathOf(witnessPath(home)), { force: true });
+    expect(code).toBe(1);
+    expect(err).toMatch(/timed out/);
+    expect(err).not.toContain('retracted');
+    expect(ms).toBeLessThan(8000);
+    expect(readScopeWitness(home, '@global').journal).toBeNull();
+  }, 30_000);
 });
 
 describe('rebaseline-cli main() — lock discipline (spec §6/§7 design invariant)', () => {

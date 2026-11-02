@@ -1834,22 +1834,38 @@ export class MemoryStore {
    *  before a crash (crash window B — verdict transition-heal) for every scope this store owns, so a
    *  half-finished rewrite is resolved before the first read rather than lingering as a pending
    *  journal. Global always; project only when its disposition is 'owned' (the same gate every read
-   *  path uses, so an aliased layer — whose ledger leads to another project's file — is left alone).
+   *  path uses, so an excluded layer is left alone).
    *  Each scope's heal runs under that scope's LEDGER lock; completeTransition then nests the witness
    *  lock (a different path — legal). BEST-EFFORT: a scope that is interrupted, stale, or mismatched is
    *  LEFT as-is (it re-surfaces as transition-interrupted / blocked on the next witnessed write, Task
    *  5) — healing must never block server startup, so per-scope failures are swallowed. Wired ONCE in
    *  src/server/index.ts after construction, NEVER from a hook (a read-only surface must not advance
-   *  the witness). */
+   *  the witness). The lock is taken only after a lock-free look at the scope, one bare read pair
+   *  (witness, then ledger) that finds a heal to do (design 4.6, p-8). A holder that dies in a
+   *  transition right after that look leaves its scope to be healed by the next start. A start with
+   *  nothing to heal is not delayed by a held lock. */
   healWitness(): void {
     const p = this.opts.project;
-    const scopes: Array<{ ledger: LedgerPath; root: string | undefined }> = [{ ledger: this.global, root: undefined }];
+    // 4.6 and 4.7 (G-R6): the scope of a read-only global ledger (an unresolvable path, or a link into a missing folder) is
+    // not healed and its lock is not taken, not even for the lock-free look below. A pending journal there stays pending
+    // until the path is repaired and the server is started again (4.7, the residue paragraph).
+    const scopes: Array<{ ledger: LedgerPath; root: string | undefined }> = this.globalReadOnly() ? [] : [{ ledger: this.global, root: undefined }];
     if (p && this.projectDisposition() === 'owned') scopes.push({ ledger: p.ledger, root: p.root });
     const home = this.homeDir();
     for (const s of scopes) {
       if (!existsSync(dirname(s.ledger))) continue;   // no scope dir => no witness state => nothing to heal
       const scopeKey = scopeKeyOf(home, s.root);
       try {
+        // p-8 (design 4.6): classify WITHOUT the lock first and take the lock only when there is something this step would
+        // act on. The look is ONE bare pair, witness first and ledger second (the order witness-read.ts explains), with no
+        // retry and no reader wait. It sits inside the same per-scope try, so a read that throws skips the scope, and it
+        // decides ONLY whether to take the lock: what the heal does is decided by the classification under the lock.
+        const stateBefore = readScopeWitness(home, scopeKey);
+        const bytesBefore = readLedgerBytes(s.ledger);
+        const verdictBefore = classifyState(stateBefore, bytesBefore);
+        const needsHeal = verdictBefore.kind === 'transition-heal'
+          || (verdictBefore.kind === 'transition-interrupted' && interruptedAtPredecessor(bytesBefore, verdictBefore.journal));
+        if (!needsHeal) continue;
         withFileLock(s.ledger, () => {
           const bytes = readLedgerBytes(s.ledger);
           const verdict = classifyState(readScopeWitness(home, scopeKey), bytes);

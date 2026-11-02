@@ -11,7 +11,7 @@ import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { openJudgedDir, sampleDirIdentity, boundPath, fsyncDir, closeHeldDir } from './dir-bound.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import { fenceId, sha256Hex } from './witness-core.js';
-import { planTransition, openTransition, completeTransition, discardTransition, classifyState, readScopeWitness, markRecordStored, WitnessBlockedError } from './witness-store.js';
+import { planTransition, openTransition, completeTransition, discardTransition, journalPublished, classifyState, readScopeWitness, markRecordStored, WitnessBlockedError } from './witness-store.js';
 
 export type LedgerPath = string;
 
@@ -1042,7 +1042,7 @@ export function compactLedgerUnlocked(rawPath: LedgerPath, opts: CompactOptions,
     const w = opts.witness;
     let fenceTx: string | null = null;
     let preRewriteHash: string | null = null; // ledger content at journal-open time — the catch's nothing-landed proof
-    let retractNonce: string | null = null;   // set from the journal openTransition actually wrote, so a retraction key exists only for OUR landed journal
+    let retractNonce: string | null = null;   // the PLAN's nonce, set just before openTransition is called: a key exists before the journal does, so the catch asks journalPublished before it retracts
     let landedStats: CompactionStats | null = null; // set the instant the rename succeeds (see below) — non-null there means every later throw in this try is a POST-rename failure, so the catch has real numbers to attach instead of reporting "nothing happened"
     try {
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost after tmp creation');
@@ -1114,11 +1114,14 @@ export function compactLedgerUnlocked(rawPath: LedgerPath, opts: CompactOptions,
         // this line opened no journal, so the catch below has nothing to retract (retractNonce null).
         const { kind, plan, expected } = transition;
         preRewriteHash = sha256Hex(readLedgerBytesExactly(at)); // sampled under the lock the rename needs — nothing can move it but us
-        const journal = openTransition(w.home, w.scopeKey, {
+        // p-7 (design 4.6): the retraction key is fixed from the plan BEFORE the journal is published. It used to come from
+        // openTransition's return value, so a publication that failed AFTER its own rename (the directory fsync behind it)
+        // left a journal on disk that this catch had no key for, and the scope stayed transition-interrupted.
+        retractNonce = plan.nonce;
+        openTransition(w.home, w.scopeKey, {
           kind, epoch: plan.epoch, nonce: plan.nonce, predecessor: plan.predecessor,
           supersedes: plan.supersedes, expected, tx: fenceTx,
         });
-        retractNonce = journal.nonce;
       }
       assertSingleLink(at);                                        // re-check immediately before the rename
       if (!ctx.stillOwned()) throw new Error('compactLedger: lock lost before rename');
@@ -1164,7 +1167,12 @@ export function compactLedgerUnlocked(rawPath: LedgerPath, opts: CompactOptions,
       // retraction — and the original error still reaches the rethrow below.
       if (w && retractNonce !== null && preRewriteHash !== null) {
         try {
-          if (sha256Hex(readLedgerBytesExactly(at)) === preRewriteHash) discardTransition(w.home, w.scopeKey, retractNonce);
+          // Asked of the witness file itself, without the witness lock: when openTransition failed before its rename (it could
+          // not take the witness lock inside its budget, or its tmp write failed) nothing was published and nothing is
+          // retracted; discardTransition there would wait for the witness lock a second time and turn a 5 s refusal into 10 s.
+          if (journalPublished(w.home, w.scopeKey, retractNonce) && sha256Hex(readLedgerBytesExactly(at)) === preRewriteHash) {
+            discardTransition(w.home, w.scopeKey, retractNonce);
+          }
         } catch { /* best-effort hygiene; a pending journal stays the honest state */ }
       }
       // landedStats is non-null only when the rename above already succeeded before this failure hit —

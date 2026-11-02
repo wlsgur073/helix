@@ -23,7 +23,7 @@ import type { MemoryRecord } from '../src/types.js';
 import { withFileLockAsync } from '../src/memory/lock.js';
 import { readLedgerBytes, appendRecordUnlocked, witnessFenceRecord, aliasedLedgerRefusal } from '../src/memory/ledger.js';
 import {
-  readScopeWitness, classifyState, planTransition, openTransition, completeTransition, discardTransition,
+  readScopeWitness, classifyState, planTransition, openTransition, completeTransition, discardTransition, journalPublished,
 } from '../src/memory/witness-store.js';
 import { sha256Hex } from '../src/memory/witness-core.js';
 import { resolveScopeTarget, type ScopeRefusalCause, type ScopeResolution } from '../src/memory/scope-target.js';
@@ -127,6 +127,12 @@ function computeAppendedBytes(existing: Buffer, record: MemoryRecord): Buffer {
   const needsSeparator = existing.length > 0 && existing[existing.length - 1] !== 0x0a;
   return needsSeparator ? Buffer.concat([existing, Buffer.from('\n'), line]) : Buffer.concat([existing, line]);
 }
+
+/** Printed after a retraction that really happened (the proof read and the discard both succeeded). */
+const NOTE_APPEND_REFUSED_RETRACTED = 'append refused before any byte landed -- the opened witness journal was retracted; nothing written\n';
+/** p-7, locks-R7: the journal's own publication failed after its rename, so the append was never tried. The words of the
+ *  first note ("append refused") would be false here. */
+const NOTE_PUBLISH_FAILED_RETRACTED = 'the witness journal was left by a publication that failed -- it was retracted; nothing written\n';
 
 /** Never throws: every failure path (usage, TTY refusal, or any exception from the locked
  *  ceremony) is caught and turned into a numeric exit code — both returned AND applied via
@@ -246,13 +252,18 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
       const finalBytes = computeAppendedBytes(currentBytes, fence);
       const expected = { byteLength: finalBytes.length, prefixHash: sha256Hex(finalBytes) };
 
-      const journal = openTransition(home, scopeKey, {
-        kind: 'rebaseline', epoch: plan.epoch, nonce: plan.nonce,
-        predecessor: plan.predecessor, supersedes: plan.supersedes,
-        expected, tx: fence.tx,
-      });
-
+      // p-7 (design 4.6): the journal's publication sits INSIDE the guarded block and the retraction is keyed by the plan's
+      // nonce, fixed before the journal is published. openTransition used to stand in front of the try, so a publication
+      // that failed after its own rename left the journal pending from a ceremony that wrote nothing, and on a
+      // first-contact scope (no predecessor) not even the next start retracts that.
+      let journalOpened = false;
       try {
+        openTransition(home, scopeKey, {
+          kind: 'rebaseline', epoch: plan.epoch, nonce: plan.nonce,
+          predecessor: plan.predecessor, supersedes: plan.supersedes,
+          expected, tx: fence.tx,
+        });
+        journalOpened = true;
         appendRecordUnlocked(ledger, fence); // we hold the ledger lock — the unlocked inner append is correct here
       } catch (e) {
         // Only THIS process can vouch that the failed append wrote nothing: the ledger lock has
@@ -266,11 +277,14 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
         // to see. discardTransition refuses outright when this ceremony SUPERSEDED a pending
         // journal — recovering that scope is the ceremony's job, but only a ceremony that actually
         // lands its fence may retire the alarm, so a failed one leaves it standing. The note is
-        // written only after a retraction that really happened.
+        // written only after a retraction that really happened. When the journal's own publication
+        // failed, the witness file is asked, without its lock, whether a journal with the plan's
+        // nonce is there: not there, nothing was published, nothing is retracted and the witness lock
+        // is not waited for a second time.
         try {
-          if (readLedgerBytes(ledger).equals(currentBytes)) {
-            discardTransition(home, scopeKey, journal.nonce);
-            process.stderr.write('append refused before any byte landed -- the opened witness journal was retracted; nothing written\n');
+          if (journalPublished(home, scopeKey, plan.nonce) && readLedgerBytes(ledger).equals(currentBytes)) {
+            discardTransition(home, scopeKey, plan.nonce);
+            process.stderr.write(journalOpened ? NOTE_APPEND_REFUSED_RETRACTED : NOTE_PUBLISH_FAILED_RETRACTED);
           }
         } catch { /* retraction is best-effort hygiene; a pending journal stays the honest state */ }
         throw e;

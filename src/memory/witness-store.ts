@@ -507,6 +507,17 @@ export function completeTransition(home: string, scopeKey: string, bytes: Buffer
   });
 }
 
+/** p-7 (design 4.6): whether the journal a writer PLANNED with `nonce` is this scope's pending journal, that is, whether
+ *  openTransition got as far as publishing it (its witness.json rename). A lock-free read of witness.json (it is replaced
+ *  by rename, so one read sees one whole version), never a write and never a lock wait. The failing writer asks this from
+ *  its catch before it calls discardTransition: the retraction key is fixed from the plan before publication now, so a key
+ *  no longer proves that a journal landed. May throw what readScopeWitness throws (an unusable witness file): the callers
+ *  ask inside the try of a best-effort retraction, so that means no retraction. */
+export function journalPublished(home: string, scopeKey: string, nonce: string): boolean {
+  const state = readScopeWitness(home, scopeKey);
+  return !state.macInvalid && state.journal !== null && state.journal.nonce === nonce;
+}
+
 /** Under the witness lock; the RETRACT half of the open/complete pair — journal := null, entry
  *  untouched — for a transition whose rewrite provably never touched the ledger (the append/rename
  *  refused before its first byte). Logs the retraction to witness-log BEFORE clearing the slot
@@ -516,8 +527,8 @@ export function completeTransition(home: string, scopeKey: string, bytes: Buffer
  *  Identified by `nonce`, not by tx: the fence's tx is a wall-clock stamp (millisecond resolution,
  *  and a constant under an injected fixed clock), so it cannot prove ownership of a transition. The
  *  journal's nonce is 16 random bytes minted per plan, so equality IS the ownership proof — and the
- *  caller gets it from the JournalEntry openTransition returned, which means a retraction key can
- *  only exist for a journal that actually landed.
+ *  writer fixes it from its plan before the journal is published, and asks `journalPublished` whether
+ *  the journal landed before it retracts.
  *
  *  TWO refusals, both structural:
  *
