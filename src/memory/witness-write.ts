@@ -8,7 +8,8 @@
  *  matching §4.2; the nested witness lock taken by completeTransition/advanceWitness below targets
  *  a DIFFERENT path, `witnessPath(home)`, so nesting is safe — withFileLock is only non-reentrant
  *  PER PATH — enforced by the `reentrant-self` throw in lock.ts's acquireFileLock):
- *    0. validate the home (ensureHelixDir) BEFORE the ledger is read or appended (IT-H2).
+ *    0. look at the witness file (assertWitnessWritable, design 4.8 item 2), then validate the home (ensureHelixDir) BEFORE
+ *       the ledger is read or appended (IT-H2). An unusable file refuses here, with nothing done.
  *    1. read current bytes and classify them against this scope's witness state (PRE-append verdict).
  *    2. transition-heal        -> completeTransition FIRST (resolve-before-any-write), using the
  *       bytes just read (classifyState already proved they match journal.expected exactly) and the
@@ -22,7 +23,9 @@
  *    3b. mismatch AND the record is an elevated verify -> throw WitnessBlockedError; the ledger and
  *       the witness are both NEVER touched, so the alarm survives (F2-WRITE). Narrow on purpose:
  *       commit, soft erase and reality-check DEMOTIONS still land under the same verdict.
- *    4. append the record (unlocked inner write — we already hold the ledger lock).
+ *    4. append the record (unlocked inner write — we already hold the ledger lock). From the row's fsync on, every error
+ *       carries the stored mark (design 4.8 item 3): appendRecordUnlocked marks what follows the fsync inside it, and steps
+ *       5 and 6 are marked below.
  *    5. re-read bytes (tail-repair safe: appendRecordUnlocked may have prefixed a repair newline for
  *       a torn predecessor tail).
  *    6. advance the witness iff the GATING verdict (step 1, or step 2's post-heal reclassification)
@@ -40,15 +43,19 @@ import { withFileLock } from './lock.js';
 import { ensureHelixDir } from './home-permissions.js';
 import { advanceAllowed, type WitnessVerdict } from './witness-core.js';
 import {
-  classifyState, readScopeWitness, scopeKeyOf, advanceWitness, completeTransition,
+  classifyState, readScopeWitness, scopeKeyOf, advanceWitness, completeTransition, assertWitnessWritable, markRecordStored,
   WitnessBlockedError, WitnessAdvanceError, isWitnessAdvanceError,
 } from './witness-store.js';
 
 /** Unlocked inner variant — for a caller that ALREADY holds `withFileLock(ledger)` (store.ts's
  *  signing `writeVerify`; withFileLock is not re-entrant per path). Never takes the ledger lock
  *  itself; the nested witness-lock calls inside (completeTransition/advanceWitness) are a different
- *  path and safe to acquire regardless of who holds the ledger lock. */
-export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined, op: 'commit' | 'erase' | 'verify'): void {
+ *  path and safe to acquire regardless of who holds the ledger lock. `refusalOp` is the name in front of the witness refusal
+ *  (W-R5: the tool's name, `confirm` and `recheck`, not the store's `verify`); `op` stays what WitnessBlockedError carries. */
+export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined, op: 'commit' | 'erase' | 'verify', refusalOp: string = op): void {
+  // The first step. A directory at witness.json stored the row and failed after it, and every retry stored it again (FN-03); an
+  // unreadable or damaged file was read as an empty store and replaced (D9). `homeUnchecked`: ensureHelixDir, next, names a home's fault.
+  assertWitnessWritable(home, refusalOp, { homeUnchecked: true });
   // IT-H2: validate the home BEFORE this function reads or appends the ledger. advanceWitness
   // refuses a symlinked, foreign or non-directory home too, but only after the append had landed,
   // which reported an error for a row that was already written and made every retry write it again.
@@ -62,7 +69,7 @@ export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord
   ensureHelixDir(home);
   const key = scopeKeyOf(home, projectRoot);
   const bytes = readLedgerBytes(ledger);
-  const preVerdict = classifyState(readScopeWitness(home, key), bytes);
+  const preVerdict = classifyState(readScopeWitness(home, key, { op: refusalOp }), bytes);
 
   if (preVerdict.kind === 'transition-interrupted') {
     throw new WitnessBlockedError(
@@ -74,7 +81,7 @@ export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord
   let gateVerdict: WitnessVerdict = preVerdict;
   if (preVerdict.kind === 'transition-heal') {
     completeTransition(home, key, bytes, preVerdict.journal.tx);
-    gateVerdict = classifyState(readScopeWitness(home, key), bytes); // bytes unchanged; state moved
+    gateVerdict = classifyState(readScopeWitness(home, key, { op: refusalOp }), bytes); // bytes unchanged; state moved
   }
   const shouldAdvance = advanceAllowed(gateVerdict);
 
@@ -102,30 +109,35 @@ export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord
     );
   }
 
-  appendRecordUnlocked(ledger, record);
-  const after = readLedgerBytes(ledger); // re-read under the same lock — tail-repair safe
+  appendRecordUnlocked(ledger, record);   // outside the marked try: an error after the row's fsync comes out marked, an earlier failure as it is
+  try {
+    const after = readLedgerBytes(ledger); // re-read under the same lock — tail-repair safe
 
-  if (shouldAdvance) {
-    // Second-layer safety (Task 2 contract): re-classifies from CURRENT disk state under the
-    // witness lock and throws WitnessAdvanceError if a racing writer invalidated our gate between
-    // the read above and now. The append above already landed by this point, so the throw is
-    // annotated with the grade it conferred (the one caller that knows it) before propagating —
-    // it is never swallowed here.
-    try {
-      advanceWitness(home, key, after, record.tx);
-    } catch (e) {
-      if (isWitnessAdvanceError(e)) (e as WitnessAdvanceError).landedState = record.state;
-      throw e;
+    if (shouldAdvance) {
+      // Second-layer safety (Task 2 contract): re-classifies from CURRENT disk state under the
+      // witness lock and throws WitnessAdvanceError if a racing writer invalidated our gate between
+      // the read above and now. The append above already landed by this point, so the throw is
+      // annotated with the grade it conferred (the one caller that knows it) before propagating —
+      // it is never swallowed here.
+      try {
+        advanceWitness(home, key, after, record.tx);
+      } catch (e) {
+        if (isWitnessAdvanceError(e)) (e as WitnessAdvanceError).landedState = record.state;
+        throw e;
+      }
     }
+    // else: the pre-append verdict was 'mismatch' — the append above still landed (availability), but
+    // the witness is untouched. The mismatch signal persists for the next reader (anti-laundering).
+  } catch (e) {
+    throw markRecordStored(e, record.state);   // the row is stored: a retry would store it again (design 4.8 item 3)
   }
-  // else: the pre-append verdict was 'mismatch' — the append above still landed (availability), but
-  // the witness is untouched. The mismatch signal persists for the next reader (anti-laundering).
 }
 
 /** Locked wrapper — for a caller that does NOT already hold the ledger lock (store.ts's `commit`
  *  and `erase` tombstone append). Mirrors `appendRecord`'s own mkdir-before-lock convention
  *  (ledger.ts): the parent directory must exist before `withFileLock` can resolve the lock path. */
 export function appendWitnessed(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined, op: 'commit' | 'erase' | 'verify'): void {
+  assertWitnessWritable(home, op, { homeUnchecked: true });   // a refused write creates no home, no ledger folder and no lock file, and changes no mode (G-R3, W-R9)
   ensureHelixDir(home);   // IT-H2: before the ledger directory or its lock file is created (see appendWitnessedUnlocked)
   mkdirSync(dirname(ledger), { recursive: true });
   withFileLock(ledger, () => appendWitnessedUnlocked(ledger, record, home, projectRoot, op));

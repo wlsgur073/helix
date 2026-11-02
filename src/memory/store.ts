@@ -921,7 +921,7 @@ export class MemoryStore {
         gen: maxGen + 1, targetDigest: digestContent(target.content),
       };
       const signed = signVerify(unsigned, subkey);
-      appendWitnessedUnlocked(ledger, signed, this.homeDir(), this.scopeRootOf(ledger), 'verify'); // we already hold the ledger lock — non-locking, witnessed append
+      appendWitnessedUnlocked(ledger, signed, this.homeDir(), this.scopeRootOf(ledger), 'verify', source === 'user' ? 'confirm' : 'recheck'); // we already hold the ledger lock — non-locking, witnessed append
       return signed;
     });
   }

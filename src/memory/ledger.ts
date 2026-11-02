@@ -11,7 +11,7 @@ import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { openJudgedDir, sampleDirIdentity, boundPath, fsyncDir, closeHeldDir } from './dir-bound.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import { fenceId, sha256Hex } from './witness-core.js';
-import { planTransition, openTransition, completeTransition, discardTransition, classifyState, readScopeWitness, WitnessBlockedError } from './witness-store.js';
+import { planTransition, openTransition, completeTransition, discardTransition, classifyState, readScopeWitness, markRecordStored, WitnessBlockedError } from './witness-store.js';
 
 export type LedgerPath = string;
 
@@ -245,7 +245,8 @@ function removeOwnCreation(path: string, opened: FileIdentity, fsOps: DurableFsO
  *  file is opened with O_NOFOLLOW and, before the first byte and before the sweep, the descriptor and the path resolved
  *  again are checked (destinationUnchanged): a changed destination throws LedgerDestinationChangedError with nothing
  *  written. `judged` is the destination as a caller judged it under the lock; without it the destination is sampled
- *  here, right before the open. */
+ *  here, right before the open. An error raised after the row's fsync returned (the file's close, the directory fsync, the
+ *  close of the held directory) carries the stored mark, because the row is durable. */
 export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, fsOps: DurableFsOps = realFsOps, judged?: JudgedDestination): void {
   mkdirSync(dirname(rawPath), { recursive: true });
   const path = resolvedPathOrThrow(rawPath);   // resolve the FINAL-component symlink to the real inode's path (write-layer identity, the SAME rule the lock uses) so append and compaction never diverge onto different inodes
@@ -256,34 +257,40 @@ export function appendRecordUnlocked(rawPath: LedgerPath, record: MemoryRecord, 
   if (bound.kind === 'changed') throw new LedgerDestinationChangedError();
   if (bound.kind === 'proc-lost') throw new LedgerProcLostError();
   const held = bound.dir;
-  try {
-    const at = boundPath(held, basename(path));
-    const { fd, created } = openForAppend(at, before === null, fsOps);
+  let rowDurable = false;
+  try {                                                 // outside the `finally` blocks on purpose: a close that throws from one replaces the error in flight, and this catch sees the replacement
     try {
-      const st = fsOps.fstatSync(fd);
-      const opened = { dev: st.dev, ino: st.ino };
-      if (!destinationUnchanged(rawPath, path, before, opened)) {
-        if (created) removeOwnCreation(at, opened, fsOps);   // the descriptor is still open, so its inode cannot have gone to another file
-        throw new LedgerDestinationChangedError();
+      const at = boundPath(held, basename(path));
+      const { fd, created } = openForAppend(at, before === null, fsOps);
+      try {
+        const st = fsOps.fstatSync(fd);
+        const opened = { dev: st.dev, ino: st.ino };
+        if (!destinationUnchanged(rawPath, path, before, opened)) {
+          if (created) removeOwnCreation(at, opened, fsOps);   // the descriptor is still open, so its inode cannot have gone to another file
+          throw new LedgerDestinationChangedError();
+        }
+        if (st.nlink === 0) throw new LedgerDestinationChangedError();   // replaced at the name since the open: a race, not an alias
+        if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
+        sweepOrphanTmps(path, { fsOps });   // behind the check: a refused append never touches the directory the path came to lead to
+        if (fsOps.fstatSync(fd).nlink === 0) throw new LedgerDestinationChangedError();   // a compactor's rename that landed before the sweep left this descriptor on an unlinked inode; behind the sweep it fails ENOENT, so a descriptor that passes here is a live file
+        let line = JSON.stringify(record) + '\n';
+        if (st.size > 0) {
+          const tail = Buffer.alloc(1);
+          fsOps.readSync(fd, tail, 0, 1, st.size - 1);
+          if (tail[0] !== 0x0a) line = '\n' + line;   // tail repair: separator + record share one write+fsync
+        }
+        writeAll(fsOps, fd, line);
+        fsOps.fsyncSync(fd);
+        rowDurable = true;
+      } finally {
+        fsOps.closeSync(fd);
       }
-      if (st.nlink === 0) throw new LedgerDestinationChangedError();   // replaced at the name since the open: a race, not an alias
-      if (st.nlink !== 1) throw new Error(`appendRecord: ${aliasedLedgerMessage(st.nlink)}`);
-      sweepOrphanTmps(path, { fsOps });   // behind the check: a refused append never touches the directory the path came to lead to
-      if (fsOps.fstatSync(fd).nlink === 0) throw new LedgerDestinationChangedError();   // a compactor's rename that landed before the sweep left this descriptor on an unlinked inode; behind the sweep it fails ENOENT, so a descriptor that passes here is a live file
-      let line = JSON.stringify(record) + '\n';
-      if (st.size > 0) {
-        const tail = Buffer.alloc(1);
-        fsOps.readSync(fd, tail, 0, 1, st.size - 1);
-        if (tail[0] !== 0x0a) line = '\n' + line;   // tail repair: separator + record share one write+fsync
-      }
-      writeAll(fsOps, fd, line);
-      fsOps.fsyncSync(fd);
+      fsyncDir(held, fsOps);
     } finally {
-      fsOps.closeSync(fd);
+      closeHeldDir(held, fsOps);   // last: the removal of a refused creation and the directory fsync go through it
     }
-    fsyncDir(held, fsOps);
-  } finally {
-    closeHeldDir(held, fsOps);   // last: the removal of a refused creation and the directory fsync go through it
+  } catch (e) {
+    throw rowDurable ? markRecordStored(e, record.state) : e;
   }
 }
 

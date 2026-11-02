@@ -11,7 +11,7 @@ import { canonicalRoot, resolvePath, resolvedPathOrThrow } from './path-identity
 import { ensureMaster, tryReadMaster } from './ledger-mac.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
-import { ensureHelixDir } from './home-permissions.js';
+import { ensureHelixDir, isSymlinkedHome } from './home-permissions.js';
 import {
   classifyWitness, advanceAllowed, cleanupClearAllowed, sha256Hex,
   type WitnessEntry, type JournalEntry, type WitnessVerdict, type WitnessFileMark,
@@ -67,6 +67,22 @@ export class WitnessBlockedError extends Error {
  *  compaction gate), so a handler may audit it as a pre-write refusal. Property read, not instanceof. */
 export const isWitnessBlockedError = (e: unknown): boolean =>
   e instanceof Error && (e as { witnessBlocked?: unknown }).witnessBlocked === true;
+
+/** What an error raised after the row was stored carries (design 4.8 item 3): a retry would store the row again. */
+export interface RecordStoredMark { recordStored: true; storedState: MemoryState }
+/** An Error that accepts a property is marked in place, so its class, message and stack reach the caller unchanged; a frozen
+ *  error or a thrown non-Error is wrapped, so the mark is never lost. */
+export function markRecordStored(e: unknown, state: MemoryState): unknown {
+  const mark: RecordStoredMark = { recordStored: true, storedState: state };
+  if (e instanceof Error) {
+    try { Object.assign(e, mark); if (isRecordStoredError(e)) return e; }
+    catch { /* frozen or non-extensible: wrap below */ }
+  }
+  return Object.assign(new Error('a step after the write failed', { cause: e }), mark);
+}
+/** Property read, not instanceof (see isWitnessAdvanceError). */
+export const isRecordStoredError = (e: unknown): boolean =>
+  e instanceof Error && (e as { recordStored?: unknown }).recordStored === true;
 
 export interface ScopeWitnessState {
   entry: WitnessEntry | null;
@@ -200,6 +216,21 @@ function readWitnessFile(rawPath: string, asGiven: boolean): WitnessFileRead {
   try { parsed = JSON.parse(text); } catch { return { kind: 'unusable', reason: 'unparseable' }; }
   if (!isEnvelope(parsed)) return { kind: 'unusable', reason: 'unparseable' };
   return { kind: 'store', path, store: { v: 1, scopes: parsed.scopes }, asGiven: given };
+}
+
+/** The first step of an append (design 4.8 item 2): the path resolves, no link stands at it, the place is absent or a regular
+ *  file, and a present file can be read and parsed. Lock-free; creates nothing, mints no key. An absent file and a home that
+ *  does not exist yet pass. */
+export function assertWitnessWritable(home: string, op: string, opts: { homeUnchecked?: boolean } = {}): void {
+  // `homeUnchecked`: the caller has not validated the home yet and does so right after (the first step of an append, ahead of
+  // ensureHelixDir). A symlinked home keeps the home's own refusal (IT-H2), whatever a look at the file through the link would
+  // answer, and so does a way to the file that cannot be examined (a home that is a file, say). A foreign home is named by that
+  // refusal only when its file passes this look. The caller's next look, still before the append, raises whatever is left.
+  if (opts.homeUnchecked && isSymlinkedHome(home)) return;
+  const f = readWitnessFile(witnessPath(home), false);
+  if (f.kind === 'uninspectable') { if (opts.homeUnchecked) return; throw f.error; }
+  if (f.kind === 'unusable') throw new WitnessUnusableError(op, f.reason);
+  if (f.kind === 'transient') throw new WitnessUnusableError(op, 'transient');
 }
 
 /** Before the witness LOCK is asked for: the lock file's place comes from the resolver, which follows a link, so a link

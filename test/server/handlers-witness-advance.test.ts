@@ -179,8 +179,8 @@ describe('a failed erase is audited three ways (spec 2.E)', () => {
     const s = store();
     const auditPath = join(mkdtempSync(join(tmpdir(), 'helix-h-audit-')), 'audit.jsonl');
     const rec = s.commit({ content: 'erase me then fail after the write', source: 'user' });
-    // The real append runs and its bytes are durable; THEN a plain Error escapes — the shape of a
-    // post-append re-read or directory-fsync failure. Not a witness error, not a typed refusal.
+    // The real append runs and its bytes are durable; THEN a plain Error escapes that carries no stored mark: an error
+    // nothing classified. A re-read or directory-fsync failure is marked as stored (design 4.8 item 3), so it is not this shape.
     const real = ledgerMod.appendRecordUnlocked;
     const spy = vi.spyOn(ledgerMod, 'appendRecordUnlocked').mockImplementationOnce((...args) => {
       real(...args);

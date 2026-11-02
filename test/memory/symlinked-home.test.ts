@@ -6,7 +6,7 @@
 // ordering makes ensureHelixDir's non-recursive rule apply to a first commit (spec decision D2): a
 // home whose parent is missing is refused, not created as a chain.
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, symlinkSync, readFileSync, readdirSync, existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, symlinkSync, readFileSync, readdirSync, existsSync, rmSync, statSync, lstatSync, writeFileSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -127,6 +127,55 @@ posixOnly('a symlinked HELIX_HOME is refused before any ledger write (IT-H2)', (
       expect(s.inspect()).toEqual([]);
       expect(() => s.commit({ content: 'the queue is sqs', source: 'user' })).toThrow(/symlink/);
       expect(existsSync(target)).toBe(false);
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  // A look at witness.json goes THROUGH the link, so what it answers is not about the home: the home's own refusal comes
+  // first, whatever that look would say (design 4.8 item 2). Each ledger spelling is tried: one inside the home, whose lock
+  // would land at the link's target, and one outside it, whose folder would be created.
+  function refusedAsSymlink(base: string, link: string): void {
+    for (const ledger of [join(link, 'memory.jsonl'), join(base, 'lg', 'memory.jsonl')]) {
+      expect(() => store(link, ledger).commit({ content: 'the queue is sqs', source: 'user' })).toThrow(/symlink/);
+    }
+    expect(existsSync(join(base, 'lg'))).toBe(false);
+  }
+
+  it('a home that is a self-loop link is refused as a symlink, and nothing appears', () => {
+    const base = mkdtempSync(join(tmpdir(), 'helix-loophome-'));
+    const link = join(base, 'link');
+    symlinkSync(link, link);
+    try {
+      expect(() => statSync(link)).toThrow(/ELOOP/);        // the fixture: no resolver can get through it
+      refusedAsSymlink(base, link);
+      expect(readdirSync(base)).toEqual(['link']);
+      expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  it('a home at the end of a chain past the link limit (41 links) is refused as a symlink, and nothing appears at its target', () => {
+    const base = mkdtempSync(join(tmpdir(), 'helix-chainhome-'));
+    const real = join(base, 'real');
+    mkdirSync(real, { mode: 0o700 });
+    let link = real;
+    for (let i = 1; i <= 41; i++) { const next = join(base, `l${i}`); symlinkSync(link, next); link = next; }
+    try {
+      expect(() => statSync(link)).toThrow(/ELOOP/);        // the fixture: 41 links, one past the kernel's limit
+      refusedAsSymlink(base, link);
+      expect(readdirSync(real)).toEqual([]);
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+
+  it('a live link home whose witness.json is damaged is refused as a symlink, and nothing appears at its target', () => {
+    const base = mkdtempSync(join(tmpdir(), 'helix-damagedhome-'));
+    const real = join(base, 'real');
+    mkdirSync(real, { mode: 0o700 });
+    writeFileSync(join(real, 'witness.json'), 'not json {{{');
+    const link = join(base, 'link');
+    symlinkSync(real, link);
+    try {
+      refusedAsSymlink(base, link);
+      expect(readdirSync(real)).toEqual(['witness.json']);
+      expect(readFileSync(join(real, 'witness.json'), 'utf8')).toBe('not json {{{');
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
 });

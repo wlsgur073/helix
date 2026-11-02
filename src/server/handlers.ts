@@ -6,7 +6,7 @@ import type { Availability, CodexRunner, CodexStatus } from '../verify/codex.js'
 import { dualVerify, persistedReason, type DualVerifyResult, type EchoSource, type GateTrace } from '../verify/dual-verify.js';
 import { datamark, frameOpen, frameClose, DATA_SEMANTICS, makeDataFrame, frameAsData, newNonce, safeId, normalizeUntrusted, normalizeRecordContent, UNADOPTED_LEDGER_NOTE, ALIASED_LEDGER_NOTE, UNUSABLE_LEDGER_NOTE, ANCESTOR_UNADOPTED_NOTE, MAX_ID_CHARS, ID_CHARSET_RE, isValidId, presentId, recordRows, type FrameLine } from '../memory/content-frame.js';
 import { isIsoInstant } from '../memory/history.js';
-import { isWitnessAdvanceError, isWitnessBlockedError } from '../memory/witness-store.js';
+import { isWitnessAdvanceError, isWitnessBlockedError, isWitnessUnusableError, isRecordStoredError } from '../memory/witness-store.js';
 import { appendAudit, type VerifyAudit, type EraseAudit } from '../audit.js';
 import type { MemoryState, ScopedRecord } from '../types.js';
 import { readFileSync } from 'node:fs';
@@ -136,12 +136,27 @@ export const REDACTION_NOTICE =
 export const GLOBAL_WHILE_PROJECT_OFF_NOTICE =
   "written to global memory, which every project sees, while this session's project memory is off";
 
+/** Design 4.8 item 3, 4.9 row "저장된 뒤의 실패": a row is stored and a later step failed, so the agent must not store it again. */
+export const STORED_THEN_FAILED_RESPONSE = {
+  commit: 'commit: the record was stored, but a step after the write failed (the rollback witness was not updated). Do not commit it again; tell the user what happened.',   // 4.9, verbatim
+  erase: 'erase: the erase was stored, but a step after the write failed (the rollback witness was not updated). Do not erase it again; tell the user what happened.',
+  confirm: 'confirm: the confirmation was stored, but a step after the write failed (the rollback witness was not updated). Do not confirm it again; tell the user what happened.',
+  recheck: "recheck: the check's result was stored, but a step after the write failed (the rollback witness was not updated). Do not run the recheck again; tell the user what happened.",
+} as const;
+export class StoredThenFailedError extends Error {
+  readonly recordStored = true;
+  constructor(op: keyof typeof STORED_THEN_FAILED_RESPONSE, cause: unknown) { super(STORED_THEN_FAILED_RESPONSE[op], { cause }); this.name = 'StoredThenFailedError'; }
+}
+function surfaced(op: keyof typeof STORED_THEN_FAILED_RESPONSE, e: unknown): unknown { return isRecordStoredError(e) ? new StoredThenFailedError(op, e) : e; }
+
 /** Success stays ONE JSON object after the verb (`<verb> {json}`, CHANGELOG contract; decision E1):
  *  the disclosures are fields INSIDE it, never text after it. `redactions` and `notice` follow
  *  `classification` and appear only when they apply, so an ordinary commit's key list is unchanged.
  *  When both notices apply they are joined in order: the redaction one first. */
 export function handleCommit(store: MemoryStore, args: CommitInput): ToolResult {
-  const { record: rec, scope, redactions, bypassedProject } = store.commitScoped(args);
+  let committed: ReturnType<MemoryStore['commitScoped']>;
+  try { committed = store.commitScoped(args); } catch (e) { throw surfaced('commit', e); }
+  const { record: rec, scope, redactions, bypassedProject } = committed;
   const result: Record<string, unknown> = { id: rec.id, scope, state: rec.state, classification: rec.classification };
   const notices: string[] = [];
   if (redactions) { result.redactions = redactions; notices.push(REDACTION_NOTICE); }
@@ -423,18 +438,20 @@ export function handleErase(store: MemoryStore, args: { id: string }, deps: Eras
   } catch (e) {
     // Three-way, because an erase can fail on either side of the tombstone append (spec 2.E):
     //   landedState carried  -> the tombstone landed and only the witness advance failed;
-    //   a typed pre-write refusal (EraseRefusedError / WitnessBlockedError), or a WitnessAdvanceError
-    //     WITHOUT landedState -> nothing was written: for the soft erase this handler issues, that
-    //     shape can only come from completeTransition, which witness-write.ts runs BEFORE the append
-    //     (the post-append advance always stamps landedState, which is why it is tested first above);
-    //   anything else -> the append MAY have begun (post-append re-read, fsync) — say so, never 'rejected'.
+    //   a typed pre-write refusal (EraseRefusedError / WitnessBlockedError / a WitnessUnusableError WITHOUT
+    //     the stored mark, element K), or a WitnessAdvanceError WITHOUT landedState -> nothing was written:
+    //     for the soft erase this handler issues, that shape can only come from completeTransition, which
+    //     witness-write.ts runs BEFORE the append (the post-append advance always stamps landedState, which
+    //     is why it is tested first above);
+    //   anything else -> the append MAY have begun (post-append re-read, fsync), and a WitnessUnusableError
+    //     WITH the mark came after it — say so, never 'rejected'.
     const row: EraseAudit = landedStateOf(e) !== null
       ? { kind: 'erase', ts, id: args.id, soft: true, witnessAdvance: 'failed' }
-      : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e)
+      : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e) || (isWitnessUnusableError(e) && !isRecordStoredError(e))
         ? { kind: 'erase', ts, id: args.id, soft: true, outcome: 'rejected' }
         : { kind: 'erase', ts, id: args.id, soft: true, outcome: 'indeterminate' };
     appendAudit(deps.auditPath, row);
-    throw e;
+    throw surfaced('erase', e);
   }
   // 'not-live' writes the same row as 'erased' (no result field): the persisted schema is unchanged.
   appendAudit(deps.auditPath, { kind: 'erase', ts, id: args.id, soft: true });
@@ -528,7 +545,7 @@ export function handleRecheck(store: MemoryStore, args: { id: string; check: Rea
       ? { ...base, resultState: 'rejected', bound: false }
       : { ...base, resultState: landed, bound: true, witnessAdvance: 'failed' };
     appendAudit(deps.auditPath, row);
-    throw e; // re-throw — MCP must still surface the error
+    throw surfaced('recheck', e); // re-throw — MCP must still surface the error
   }
 }
 
@@ -553,7 +570,7 @@ export function handleConfirm(store: MemoryStore, args: { id: string }, deps: Re
       ? { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'rejected' }
       : { kind: 'verify', ts, id: args.id, source: 'user', resultState: landed, witnessAdvance: 'failed' };
     appendAudit(deps.auditPath, row);
-    throw e;
+    throw surfaced('confirm', e);
   }
   // Confirm SUCCEEDED. Audit it as Verified AFTER the try, so a failure of the (now fsync'd) audit
   // append is a logging failure — never mis-recorded as a 'rejected' confirm.
