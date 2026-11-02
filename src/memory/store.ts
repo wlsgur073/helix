@@ -160,9 +160,10 @@ const ALIASED_PROJECT_WRITE_REFUSAL =
 /** Row 5 of design 4.2 (third fix batch B1): the refusal of a project-routed write on a layer whose memory path
  *  cannot be inspected, adopted or not (design 4.9). */
 const UNUSABLE_PROJECT_WRITE_REFUSAL =
-  "commit: this project's memory file cannot be used as it is (it is not a regular file, it or its folder cannot " +
-  'be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory ' +
-  "records), so the project layer is disabled here — nothing was written. Ask the user whether to store this fact " +
+  "commit: this project's memory file cannot be used as it is (it is not a regular file or cannot be opened, a folder on " +
+  'its way cannot be read or is not a directory, its .helix folder is a link or is not a directory, it is a link into a ' +
+  'folder that does not exist, or it is a link to a file that does not hold Helix memory records), so the project layer ' +
+  "is disabled here — nothing was written. Ask the user whether to store this fact " +
   "in global memory, which every project sees, or to repair the project's memory file; do not choose for them.";
 
 /** The 'aliased' state on an erase with scope 'project' (design 4.9): the same four causes as the commit refusal. */
@@ -172,9 +173,9 @@ const ERASE_ALIASED_REFUSAL =
 
 /** The 'unusable' state on an erase with scope 'project' (design 4.9). */
 const ERASE_UNUSABLE_REFUSAL =
-  "erase: this project's memory file cannot be used as it is (it is not a regular file, it or its folder cannot " +
-  'be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory ' +
-  'records) — nothing was erased.';
+  "erase: this project's memory file cannot be used as it is (it is not a regular file or cannot be opened, a folder on " +
+  'its way cannot be read or is not a directory, its .helix folder is a link or is not a directory, it is a link into a ' +
+  'folder that does not exist, or it is a link to a file that does not hold Helix memory records) — nothing was erased.';
 
 /** 13.3 decision 5 (design 4.3 step 2): the ledger lock of a project could not be published because the memory folder
  *  refuses the write (EACCES) or stands on a read-only file system (EROFS). */
@@ -189,13 +190,14 @@ const FOREIGN_FILE_REFUSAL =
   '(helix_memory_adopt) or to move it away; do not choose for them.';
 
 /** The first write to a project stored no row and the ownership it had recorded was put back (design 4.3 step 5). */
-const FIRST_WRITE_FAILED_UNDONE =
+export const FIRST_WRITE_FAILED_UNDONE =
   "commit: the first write to this project's memory file failed, so the project was not adopted and nothing was written. " +
   'Ask the user whether to store this fact in global memory, which every project sees, or to look at the project\'s memory folder first; do not choose for them.';
 
 /** The same failure when the restore itself failed, whatever the first cause (step 5, the item on the texts). */
-const FIRST_WRITE_FAILED_NOT_UNDONE =
-  "commit: the first write to this project's memory file failed and the adoption recorded for it could not be undone, so the project is adopted with no memory file — nothing was written. " +
+export const FIRST_WRITE_FAILED_NOT_UNDONE =
+  "commit: the first write to this project's memory file failed and the adoption recorded for it could not be undone, so the project may stay " +
+  'adopted, and a file at its memory path would then be read as its memory — nothing was written. ' +
   'Tell the user what happened; do not try to repair it for them.';
 
 /** The project writes the critical section of design 4.3 serves. */
@@ -213,9 +215,9 @@ const ALIASED_CAUSE =
   "this project's memory file resolves outside this project, to another Helix memory file, to a file with " +
   'more than one hard link, or through a path Helix cannot resolve';
 const UNUSABLE_CAUSE =
-  "this project's memory file cannot be used as it is (it is not a regular file, it or its folder cannot be " +
-  'read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix ' +
-  'memory records)';
+  "this project's memory file cannot be used as it is (it is not a regular file or cannot be opened, a folder on its way cannot be read " +
+  'or is not a directory, its .helix folder is a link or is not a directory, it is a link into a folder that does not exist, or it is a ' +
+  'link to a file that does not hold Helix memory records)';
 const UNWRITABLE_CAUSE = "this project's memory folder cannot be written (a read-only folder or file system)";
 
 /** The `adopt` row of PROJECT_WRITE_REFUSAL. aliased and unusable are 4.9's texts (the first clause of the commit refusal,
@@ -225,36 +227,36 @@ const ADOPT_REFUSAL = {
   aliased: `adopt: ${ALIASED_CAUSE}, so the project layer is disabled here — nothing was adopted.`,
   unusable: `adopt: ${UNUSABLE_CAUSE}, so the project layer is disabled here — nothing was adopted.`,
   unwritable: `adopt: ${UNWRITABLE_CAUSE}, so nothing was adopted. Ask the user whether to make that folder writable; do not choose for them.`,
-  changed: "adopt: this project's memory file was replaced while the adoption waited for its lock — nothing was adopted. " +
+  changed: "adopt: this project's memory file changed while the adoption was in progress — nothing was adopted. " +
     'Try the adoption again; if it happens again, tell the user.',
   notAdopted: `adopt: ${UNUSABLE_CAUSE}, so the project layer is disabled here — nothing was adopted.`,
 };
 
 /** adopt: the destination exists and holds content that is not ledger rows (design 4.4, second bullet). Design 4.9, verbatim. */
-const ADOPT_NOT_LEDGER_CONTENT =
+export const ADOPT_NOT_LEDGER_CONTENT =
   "adopt: the file this project's memory path leads to holds content that is not Helix memory records — " +
   "nothing was adopted. Ask the user which file this project's memory should be; do not choose for them.";
 
 /** adopt waited the lock's budget (5 s) behind another writer of the same ledger (4.4: "예산(5초)까지 기다리고"). 14 decision
  *  8, t-07: the lock layer's own text names the lock path. It answers the timeout causes 'payload' (a holder that parsed)
  *  and 'vanished' (contention: the lock was free at the last look), and a timeout mark that carries no cause (14 item 19). */
-const ADOPT_LOCK_BUSY_REFUSAL =
+export const ADOPT_LOCK_BUSY_REFUSAL =
   "adopt: another write to this project's memory file did not finish while the adoption waited for its lock — nothing was adopted. " +
   'Try the adoption again; if it happens again, tell the user.';
 
 /** adopt waited the lock's budget (5 s) behind a lock whose holder cannot be identified or shown to be gone: the timeout
  *  causes 'unreadable', 'unparseable' and 'legacy-dir', none of which the lock layer reclaims by itself, so a retry would
  *  meet the same lock (14 item 19). The cause 'no-directory' gets the adopt row's `changed` text instead. */
-const ADOPT_LOCK_UNIDENTIFIED_REFUSAL =
+export const ADOPT_LOCK_UNIDENTIFIED_REFUSAL =
   "adopt: the lock beside this project's memory file has a holder Helix cannot identify or show to be gone (the lock file " +
   'cannot be read or does not parse as a lock, its holder cannot be checked, or it is a lock folder left by an older ' +
   'version), so Helix does not remove it — nothing was adopted. Ask the user to look at that lock; do not remove it for them.';
 
 /** adopt's own ownership record failed (FW-R4, 4.4 last paragraph: the first commit's hold and restore) and the restore put
  *  both records back / could not put them back. In the form of the commit's two first-write texts. */
-const ADOPT_RECORD_FAILED_UNDONE =
+export const ADOPT_RECORD_FAILED_UNDONE =
   'adopt: recording the adoption failed, so the project was not adopted and nothing was recorded. Tell the user what happened.';
-const ADOPT_RECORD_FAILED_NOT_UNDONE =
+export const ADOPT_RECORD_FAILED_NOT_UNDONE =
   'adopt: recording the adoption failed and could not be undone, so the project may be partly adopted. ' +
   'Tell the user what happened; do not try to repair it for them.';
 
@@ -263,7 +265,7 @@ const ADOPT_RECORD_FAILED_NOT_UNDONE =
  *  in the 4.9 form (cause clause, then the operation's own result clause). `changed`: the destination under the lock is
  *  not the one judged before it (step 3), or the check after the open refused (4.1 item 3). `notAdopted`: the layer is not
  *  owned under the lock (FW-R13); a commit never meets it. */
-const PROJECT_WRITE_REFUSAL: Record<ProjectWriteOp, { aliased: string; unusable: string; unwritable: string; changed: string; notAdopted: string }> = {
+export const PROJECT_WRITE_REFUSAL: Record<ProjectWriteOp, { aliased: string; unusable: string; unwritable: string; changed: string; notAdopted: string }> = {
   commit: {
     aliased: ALIASED_PROJECT_WRITE_REFUSAL,
     unusable: UNUSABLE_PROJECT_WRITE_REFUSAL,
@@ -275,7 +277,7 @@ const PROJECT_WRITE_REFUSAL: Record<ProjectWriteOp, { aliased: string; unusable:
     aliased: ERASE_ALIASED_REFUSAL,
     unusable: ERASE_UNUSABLE_REFUSAL,
     unwritable: `erase: ${UNWRITABLE_CAUSE}, so nothing was erased. Ask the user whether to make that folder writable; do not choose for them.`,
-    changed: "erase: this project's memory file was replaced while the erase waited for its lock — nothing was erased. " +
+    changed: "erase: this project's memory file changed while the erase was in progress — nothing was erased. " +
       'Try the erase again; if it happens again, tell the user.',
     notAdopted: ERASE_NOT_ADOPTED,
   },
@@ -283,7 +285,7 @@ const PROJECT_WRITE_REFUSAL: Record<ProjectWriteOp, { aliased: string; unusable:
     aliased: `confirm: ${ALIASED_CAUSE} — the grade was not changed rather than recorded somewhere else.`,
     unusable: `confirm: ${UNUSABLE_CAUSE} — the grade was not changed.`,
     unwritable: `confirm: ${UNWRITABLE_CAUSE}, so the grade was not changed. Ask the user whether to make that folder writable; do not choose for them.`,
-    changed: "confirm: this project's memory file was replaced while the confirmation waited for its lock — the grade was not changed. " +
+    changed: "confirm: this project's memory file changed while the confirmation was in progress — the grade was not changed. " +
       'Try the confirmation again; if it happens again, tell the user.',
     notAdopted: "confirm: this project's memory is not adopted — the grade was not changed. " +
       'Ask the user whether to adopt it (helix_memory_adopt); do not choose for them.',
@@ -292,7 +294,7 @@ const PROJECT_WRITE_REFUSAL: Record<ProjectWriteOp, { aliased: string; unusable:
     aliased: `recheck: ${ALIASED_CAUSE} — the grade was not changed rather than recorded somewhere else.`,
     unusable: `recheck: ${UNUSABLE_CAUSE} — the grade was not changed.`,
     unwritable: `recheck: ${UNWRITABLE_CAUSE}, so the grade was not changed. Ask the user whether to make that folder writable; do not choose for them.`,
-    changed: "recheck: this project's memory file was replaced while the recheck waited for its lock — the grade was not changed. " +
+    changed: "recheck: this project's memory file changed while the recheck was in progress — the grade was not changed. " +
       'Try the recheck again; if it happens again, tell the user.',
     notAdopted: "recheck: this project's memory is not adopted — the grade was not changed. " +
       'Ask the user whether to adopt it (helix_memory_adopt); do not choose for them.',
@@ -301,7 +303,7 @@ const PROJECT_WRITE_REFUSAL: Record<ProjectWriteOp, { aliased: string; unusable:
     aliased: `compaction: ${ALIASED_CAUSE} — nothing was rewritten.`,
     unusable: `compaction: ${UNUSABLE_CAUSE} — nothing was rewritten.`,
     unwritable: `compaction: ${UNWRITABLE_CAUSE}, so nothing was rewritten.`,
-    changed: "compaction: this project's memory file was replaced while the rewrite waited for its lock — nothing was rewritten.",
+    changed: "compaction: this project's memory file changed while the rewrite was in progress — nothing was rewritten.",
     notAdopted: "compaction: this project's memory is not adopted — nothing was rewritten.",
   },
   adopt: ADOPT_REFUSAL,

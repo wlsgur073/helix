@@ -96,9 +96,9 @@ export const GLOBAL_READ_ONLY_STARTUP_LINE =
  *  append raised the project commit's text in the global scope). "In progress", not "waited for its lock": the file can
  *  also be replaced while the lock is held (v-global-08). */
 export const GLOBAL_DESTINATION_CHANGED: Record<GlobalWriteOp, string> = {
-  commit: 'commit: the global memory file was replaced while the write was in progress — nothing was written. Try the commit again; if it happens again, tell the user.',
-  erase: 'erase: the global memory file was replaced while the erase was in progress — nothing was erased. Try the erase again; if it happens again, tell the user.',
-  confirm: 'confirm: the global memory file was replaced while the confirmation was in progress — the grade was not changed. Try the confirmation again; if it happens again, tell the user.',
-  recheck: 'recheck: the global memory file was replaced while the recheck was in progress — the grade was not changed. Try the recheck again; if it happens again, tell the user.',
-  compaction: 'compaction: the global memory file was replaced while the rewrite was in progress — nothing was rewritten.',
+  commit: 'commit: the global memory file changed while the write was in progress — nothing was written. Try the commit again; if it happens again, tell the user.',
+  erase: 'erase: the global memory file changed while the erase was in progress — nothing was erased. Try the erase again; if it happens again, tell the user.',
+  confirm: 'confirm: the global memory file changed while the confirmation was in progress — the grade was not changed. Try the confirmation again; if it happens again, tell the user.',
+  recheck: 'recheck: the global memory file changed while the recheck was in progress — the grade was not changed. Try the recheck again; if it happens again, tell the user.',
+  compaction: 'compaction: the global memory file changed while the rewrite was in progress — nothing was rewritten.',
 };

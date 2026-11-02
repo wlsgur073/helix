@@ -141,10 +141,10 @@ export const GLOBAL_WHILE_PROJECT_OFF_NOTICE =
 
 /** Design 4.8 item 3, 4.9 row "저장된 뒤의 실패": a row is stored and a later step failed, so the agent must not store it again. */
 export const STORED_THEN_FAILED_RESPONSE = {
-  commit: 'commit: the record was stored, but a step after the write failed (the rollback witness was not updated). Do not commit it again; tell the user what happened.',   // 4.9, verbatim
-  erase: 'erase: the erase was stored, but a step after the write failed (the rollback witness was not updated). Do not erase it again; tell the user what happened.',
-  confirm: 'confirm: the confirmation was stored, but a step after the write failed (the rollback witness was not updated). Do not confirm it again; tell the user what happened.',
-  recheck: "recheck: the check's result was stored, but a step after the write failed (the rollback witness was not updated). Do not run the recheck again; tell the user what happened.",
+  commit: 'commit: the record was stored, but a step after the write failed (the rollback witness may not have been updated). Do not commit it again; tell the user what happened.',
+  erase: 'erase: the erase was stored, but a step after the write failed (the rollback witness may not have been updated). Do not erase it again; tell the user what happened.',
+  confirm: 'confirm: the confirmation was stored, but a step after the write failed (the rollback witness may not have been updated). Do not confirm it again; tell the user what happened.',
+  recheck: "recheck: the check's result was stored, but a step after the write failed (the rollback witness may not have been updated). Do not run the recheck again; tell the user what happened.",
 } as const;
 export class StoredThenFailedError extends Error {
   readonly recordStored = true;

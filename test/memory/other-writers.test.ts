@@ -21,7 +21,7 @@ const AS_ROOT = process.getuid?.() === 0;
 
 const TEXT = {
   eraseNotAdopted: /^erase: this project's memory is not adopted — ask the user whether to adopt it \(helix_memory_adopt\); do not choose for them\.$/,
-  eraseChanged: /^erase: this project's memory file was replaced while the erase waited for its lock — nothing was erased\./,
+  eraseChanged: /^erase: this project's memory file changed while the erase was in progress — nothing was erased\./,
   eraseUnwritable: /^erase: this project's memory folder cannot be written \(a read-only folder or file system\), so nothing was erased\./,
   eraseAliased: /^erase: this project's memory file resolves outside this project/,
   eraseUnusable: /^erase: this project's memory file cannot be used as it is/,
@@ -32,7 +32,7 @@ const TEXT = {
   witnessConfirm: /^confirm: the rollback-witness file cannot be used/,
   foreignLock: /not a lock Helix wrote/,
   compactionNotAdopted: /^compaction: this project's memory is not adopted — nothing was rewritten\.$/,
-  compactionChanged: /^compaction: this project's memory file was replaced while the rewrite waited for its lock — nothing was rewritten\.$/,
+  compactionChanged: /^compaction: this project's memory file changed while the rewrite was in progress — nothing was rewritten\.$/,
   rewriteLanded: /^compactLedger: the rewrite landed, but the memory file changed before the rollback witness was updated$/,
 } as const;
 

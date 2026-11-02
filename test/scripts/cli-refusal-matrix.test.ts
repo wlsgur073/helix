@@ -239,7 +239,7 @@ describe('rebaseline when the destination changes under the ceremony (rulings H 
 
 describe('trust-resolve: three fixed refusals, exit 2 before the banner and the prompt', () => {
   const ALIASED = "helix-trust-resolve: REFUSING - this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, or through a path Helix cannot resolve. Nothing was changed. Replace it with the project's own file, then re-run.\n";
-  const UNUSABLE = "helix-trust-resolve: REFUSING - this project's memory file cannot be used as it is (it is not a regular file, it or its folder cannot be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory records). Nothing was changed. Repair the project's memory file, then re-run.\n";
+  const UNUSABLE = "helix-trust-resolve: REFUSING - this project's memory file cannot be used as it is (it is not a regular file or cannot be opened, a folder on its way cannot be read or is not a directory, its .helix folder is a link or is not a directory, it is a link into a folder that does not exist, or it is a link to a file that does not hold Helix memory records). Nothing was changed. Repair the project's memory file, then re-run.\n";
   const GLOBAL_STORE = "helix-trust-resolve: REFUSING - this project's memory file is the global memory file itself, so there is no separate project scope to resolve. Nothing was changed.\n";
 
   /** The fixture of trust-resolve-cli.test.ts: an adopted project whose .owner was lost, then re-adopted: trust-pending. */

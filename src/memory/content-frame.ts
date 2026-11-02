@@ -94,7 +94,9 @@ export const ALIASED_LEDGER_NOTE =
  *  imperative, no interpolation, no path. Rendered wherever the unadopted note is, iff the per-call
  *  project-disposition snapshot is 'unusable'. */
 export const UNUSABLE_LEDGER_NOTE =
-  "(this project's memory file cannot be used as it is: it is not a regular file, it or its folder cannot be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory records; project memory is off for this session)";
+  "(this project's memory file cannot be used as it is: it is not a regular file or cannot be opened, a folder on its way cannot be read " +
+  'or is not a directory, its .helix folder is a link or is not a directory, it is a link into a folder that does not exist, or it is a ' +
+  'link to a file that does not hold Helix memory records; project memory is off here)';
 
 /** Issue #1: the same constraints as UNADOPTED_LEDGER_NOTE — whoever can create a `.helix/` in a
  *  directory above the session controls WHETHER this appears, so it is a constant: informational only,
@@ -143,15 +145,17 @@ export const WITNESS_TRANSITION_NOTE =
  *  ends it. Same constraints as every witness note: static, no interpolation, no path, no imperative. */
 export const WITNESS_INIT_NOTE =
   '(rollback witness: this memory scope has no verified baseline, so a rollback of its current contents would go undetected; the next write records them as the baseline)';
-/** D9 and decision 6: the note of a read whose witness FILE is present but cannot be used. The 4.9 row of the unreadable witness file, verbatim. Static: no path, no interpolation, no imperative.
+/** D9 and decision 6: the note of a read whose witness FILE is present but cannot be used. Final wording (B9). Static: no path, no interpolation, no imperative.
  *  It REPLACES the first-contact note of that scope: that one promises a baseline at the next write, and here the next write is refused. */
 export const WITNESS_FILE_UNUSABLE_NOTE =
-  '(the rollback-witness file exists but cannot be read or parsed, or a link stands at its name, so grades cannot be checked against it: elevated grades are shown as Fresh and nothing can be stored until that file is restored or removed)';
+  '(the rollback-witness file exists but cannot be read or parsed, or a link stands at its name, so grades cannot be checked against it: ' +
+  'elevated grades are shown as Fresh and nothing can be stored until the user restores or resets that file)';
 /** D3 for the witness file (W-R1): the home's parent path cannot be resolved, the file was opened as written and the real verdict computed. No 4.9 row.
  *  It stands beside a mismatch or transition note, which stays true, and REPLACES the first-contact note: that one promises a baseline at the next write, and here the next write is refused.
  *  The as-of view limits no grade, so this note, whose last clause says grades are checked against that file, stays out of it. */
 export const WITNESS_PATH_UNRESOLVABLE_NOTE =
-  "(the rollback-witness file's path cannot be resolved, so nothing can be stored or erased in this session: existing records are shown, and their grades are checked against that file as it stands)";
+  "(the rollback-witness file's path cannot be resolved, so nothing can be stored, erased or re-graded until that path is repaired: " +
+  'existing records are shown, and their grades are checked against that file as it stands)';
 /** W-R6 (finding v-witness-05): a transient error (EMFILE, ENFILE, EINTR) on the witness read of the SessionStart hook's PROJECT scope; a block with the global records is still printed, and this says what it lacks. No 4.9 row. Static: no path, no interpolation, no imperative. */
 export const WITNESS_READ_TRANSIENT_NOTE =
   "(the rollback-witness file could not be read at this moment, so this project's memory is left out of this block; the next session reads it again)";
@@ -162,9 +166,13 @@ export const WITNESS_READ_TRANSIENT_NOTE =
  *  are shown (an unresolvable path whose file the kernel can still open as given); none are shown (FN-25, a link loop, a
  *  chain past the link limit); none are shown because the scope is held out by a pending journal (the 4.7 residue).
  *  "Cannot be used for writing" covers FN-25; "records that can be read through that path are shown" is true in all three;
- *  no "in this session": the state is the path's, asked on every call (design section 14 decision 8, table E, order item 1). */
+ *  no "in this session": the state is the path's, asked on every call (design section 14 decision 8, table E, order item 1).
+ *  Its last clause tells a reader that a mismatch note beside it can come from the broken path (v-global-04). */
 export const GLOBAL_LEDGER_READ_ONLY_NOTE =
-  "(the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), so global memory is read-only: records that can be read through that path are shown, and nothing can be stored, erased or re-graded there until the path is repaired)";
+  "(the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), " +
+  'so global memory is read-only: records that can be read through that path are shown, and nothing can be stored, erased or re-graded ' +
+  'there until the path is repaired; while the path is broken, a rollback witness mismatch note for global memory can come from the broken ' +
+  'path and not from a rollback)';
 
 /** The trusted out-of-band note a witness verdict warrants on a READ surface, or null when it needs
  *  none. `in-sync`/`unwitnessed-suffix` are healthy; `transition-heal` is resolved on the next WRITE

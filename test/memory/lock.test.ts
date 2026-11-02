@@ -232,12 +232,11 @@ describe('timeout guidance does not recommend an inference the code itself refus
 });
 
 describe('timeout texts when no holder can be shown (spec 4.5)', () => {
-  it('a lock file that does not parse says so and says it is not reclaimed in the boot it was written in', () => {
+  it('a lock file that does not parse says so and says when such a file is cleared', () => {
     const t = target();
     writeFileSync(lockPathOf(t), '{not json');                       // same boot: alive-unknown
     expect(messageOf(t, { maxWaitMs: 80 })).toBe(TIMEOUT_HEAD +
-      'the lock file does not parse as a lock this version writes (it is empty, holds other content, or is larger than a lock payload), ' +
-      'so its holder cannot be identified and it is not reclaimed in the boot it was written in. Inspect <lock> by hand.');
+      'the lock file does not parse as a lock this version writes (it is empty, holds other content, or is larger than a lock payload), ' + 'so its holder cannot be identified. Such a file is cleared only if it predates the last boot, where the platform reports one, and not while another process holds the clearing step. Inspect <lock> by hand.');
   });
   it('a holder that cannot be read or identified (a liveness check that throws) says that, not "does not parse"', () => {
     const t = target();
@@ -255,20 +254,20 @@ describe('timeout texts when no holder can be shown (spec 4.5)', () => {
       expect(messageOf(t, { maxWaitMs: 80 })).toContain('the lock file exists but its holder could not be read or identified');
     } finally { chmodSync(lockPathOf(t), 0o600); rmSync(lockPathOf(t)); }
   });
-  it('a legacy lock directory whose owner could not be shown dead says it was written by an older version', () => {
+  it('a legacy lock directory says it was written by an older version and when it is cleared', () => {
     const t = target();
     mkdirSync(lockPathOf(t));
     writeFileSync(join(lockPathOf(t), 'owner'), `${process.pid}-cafe`);   // a live legacy holder
     expect(messageOf(t, { maxWaitMs: 80 })).toBe(TIMEOUT_HEAD +
-      'a lock directory written by an older version stands there and its owner could not be shown dead, so it is never auto-reclaimed. Inspect <lock> by hand.');
+      'a lock directory written by an older version stands there. It is cleared only when its owner is shown dead, and not while another process holds the clearing step. Inspect <lock> by hand.');
   });
-  it('a live payload still names its holder (the payload text is unchanged)', () => {
+  it('a live payload still names its holder and says when its lock is cleared', () => {
     const t = target();
     writeLockFileForTest(lockPathOf(t), { ...selfIdentity('c'.repeat(32)), pid: 999_999, startTicks: '4242', threadId: 5 });
     const probe = { ...realProbe, kill0: () => 'alive' as const, startTicksOf: () => '4242', stateOf: () => 'S' };
     const m = messageOf(t, { maxWaitMs: 80, probe });
     expect(m).toContain('held by pid 999999 (recorded start 4242)');
-    expect(m).toContain('The holder classified live on every attempt.');
+    expect(m).toContain('This lock is cleared only when its holder is shown dead, and not while another process holds the clearing step.');
   });
 });
 

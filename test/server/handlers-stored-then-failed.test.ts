@@ -28,10 +28,10 @@ const raced = (): Error => new witnessStoreMod.WitnessAdvanceError('raced');
 
 describe('the four fixed texts (4.9 row "저장된 뒤의 실패": the commit text verbatim; the others are drafts of the same form)', () => {
   it('commit is the 4.9 draft; the other three keep its form with the operation\'s own words', () => {
-    expect(STORED_THEN_FAILED_RESPONSE.commit).toBe('commit: the record was stored, but a step after the write failed (the rollback witness was not updated). Do not commit it again; tell the user what happened.');
-    expect(STORED_THEN_FAILED_RESPONSE.erase).toBe('erase: the erase was stored, but a step after the write failed (the rollback witness was not updated). Do not erase it again; tell the user what happened.');
-    expect(STORED_THEN_FAILED_RESPONSE.confirm).toBe('confirm: the confirmation was stored, but a step after the write failed (the rollback witness was not updated). Do not confirm it again; tell the user what happened.');
-    expect(STORED_THEN_FAILED_RESPONSE.recheck).toBe("recheck: the check's result was stored, but a step after the write failed (the rollback witness was not updated). Do not run the recheck again; tell the user what happened.");
+    expect(STORED_THEN_FAILED_RESPONSE.commit).toBe('commit: the record was stored, but a step after the write failed (the rollback witness may not have been updated). Do not commit it again; tell the user what happened.');
+    expect(STORED_THEN_FAILED_RESPONSE.erase).toBe('erase: the erase was stored, but a step after the write failed (the rollback witness may not have been updated). Do not erase it again; tell the user what happened.');
+    expect(STORED_THEN_FAILED_RESPONSE.confirm).toBe('confirm: the confirmation was stored, but a step after the write failed (the rollback witness may not have been updated). Do not confirm it again; tell the user what happened.');
+    expect(STORED_THEN_FAILED_RESPONSE.recheck).toBe("recheck: the check's result was stored, but a step after the write failed (the rollback witness may not have been updated). Do not run the recheck again; tell the user what happened.");
   });
   it('StoredThenFailedError: the message is the fixed text, the cause is the original, the mark is kept', () => {
     const cause = eio(); const e = new StoredThenFailedError('commit', cause);

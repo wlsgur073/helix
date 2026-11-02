@@ -15,13 +15,13 @@ const FF = Buffer.from([0xff]);
 const text = (res: { content: Array<{ type: string; text?: string }> }): string => res.content.map((c) => c.text ?? '').join('');
 const messageOf = (f: () => unknown): string => { try { f(); } catch (e) { return (e as Error).message; } return '<no refusal>'; };
 
-/** 4.9 drafts, verbatim. */
+/** The final wording (B9). */
 const UNUSABLE_COMMIT_REFUSAL =
-  "commit: this project's memory file cannot be used as it is (it is not a regular file, it or its folder cannot be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory records), so the project layer is disabled here — nothing was written. Ask the user whether to store this fact in global memory, which every project sees, or to repair the project's memory file; do not choose for them.";
+  "commit: this project's memory file cannot be used as it is (it is not a regular file or cannot be opened, a folder on its way cannot be read or is not a directory, its .helix folder is a link or is not a directory, it is a link into a folder that does not exist, or it is a link to a file that does not hold Helix memory records), so the project layer is disabled here — nothing was written. Ask the user whether to store this fact in global memory, which every project sees, or to repair the project's memory file; do not choose for them.";
 const UNUSABLE_ERASE_REFUSAL =
-  "erase: this project's memory file cannot be used as it is (it is not a regular file, it or its folder cannot be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory records) — nothing was erased.";
+  "erase: this project's memory file cannot be used as it is (it is not a regular file or cannot be opened, a folder on its way cannot be read or is not a directory, its .helix folder is a link or is not a directory, it is a link into a folder that does not exist, or it is a link to a file that does not hold Helix memory records) — nothing was erased.";
 const UNUSABLE_NOTE =
-  "(this project's memory file cannot be used as it is: it is not a regular file, it or its folder cannot be read, that folder is missing or not a directory, or it is a link to a file that does not hold Helix memory records; project memory is off for this session)";
+  "(this project's memory file cannot be used as it is: it is not a regular file or cannot be opened, a folder on its way cannot be read or is not a directory, its .helix folder is a link or is not a directory, it is a link into a folder that does not exist, or it is a link to a file that does not hold Helix memory records; project memory is off here)";
 
 type Row = 4 | 5;
 /** A project whose `.helix` exists. Row 4: the memory file is a link whose body is not valid UTF-8 (the target exists).

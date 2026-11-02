@@ -81,8 +81,9 @@ function timeoutMessage(lockPath: string, cause: TimeoutCause, waitedMs: number)
   switch (cause.kind) {
     case 'unparseable':
       return `${head} — the lock file does not parse as a lock this version writes (it is empty, holds other content, ` +
-        `or is larger than a lock payload), so its holder cannot be identified and it is not reclaimed in the boot it ` +
-        `was written in. Inspect ${lockPath} by hand.`;
+        `or is larger than a lock payload), so its holder cannot be identified. Such a file is cleared only if it predates ` +
+        `the last boot, where the platform reports one, and not while another process holds the clearing step. ` +
+        `Inspect ${lockPath} by hand.`;
     case 'unreadable':
       return `${head} — the lock file exists but its holder could not be read or identified (a permission or I/O error, ` +
         `or a failed liveness check), so it is never auto-reclaimed. Inspect ${lockPath} by hand.`;
@@ -90,11 +91,11 @@ function timeoutMessage(lockPath: string, cause: TimeoutCause, waitedMs: number)
       return `${head} — the lock could not be published because its directory does not exist (it was removed, or a path ` +
         `component is missing). Nothing holds this lock; check the folder of ${lockPath}.`;
     case 'legacy-dir':
-      return `${head} — a lock directory written by an older version stands there and its owner could not be shown dead, ` +
-        `so it is never auto-reclaimed. Inspect ${lockPath} by hand.`;
+      return `${head} — a lock directory written by an older version stands there. It is cleared only when its owner is ` +
+        `shown dead, and not while another process holds the clearing step. Inspect ${lockPath} by hand.`;
     case 'vanished':
-      return `${head} — the lock was free at the last look, but another process held it on every earlier attempt inside ` +
-        `the budget (contention, not a stuck holder). Try again.`;
+      return `${head} — the lock was free at the last look, but it could not be taken inside the budget ` +
+        `(contention, not a stuck holder). Try again.`;
     case 'payload': {
       const holder = cause.holder;
       const who = `held by pid ${holder.pid} (recorded start ${holder.startTicks ?? 'NONE — this platform does not expose one'})`;
@@ -102,7 +103,8 @@ function timeoutMessage(lockPath: string, cause: TimeoutCause, waitedMs: number)
         ? `Because no start time was recorded, a waiter cannot tell the original holder from an unrelated ` +
           `process that later reused pid ${holder.pid}; kill -0 cannot separate them either. Identify it: ` +
           `ps -p ${holder.pid} -o pid,lstart,command — and confirm it is a Helix run before acting.`
-        : `The holder classified live on every attempt. Confirm it is the run that took the lock by ` +
+        : `This lock is cleared only when its holder is shown dead, and not while another process holds the clearing step. ` +
+          `Confirm it is the run that took the lock by ` +
           `comparing its start time against the value above (ps -p ${holder.pid} -o pid,lstart,command).`;
       return `${head} — ${who}. ${identify} ` +
         `Removing the lock while its holder is merely SUSPENDED reintroduces the concurrency this lock prevents.`;

@@ -22,7 +22,7 @@ const thrownBy = (f: () => unknown): unknown => { try { f(); } catch (e) { retur
 
 const CAUSE = "the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist)";
 const TAIL = 'Tell the user that the global memory path needs repair; do not repair it for them.';
-const NOTE = "(the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), so global memory is read-only: records that can be read through that path are shown, and nothing can be stored, erased or re-graded there until the path is repaired)";
+const NOTE = "(the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), so global memory is read-only: records that can be read through that path are shown, and nothing can be stored, erased or re-graded there until the path is repaired; while the path is broken, a rollback witness mismatch note for global memory can come from the broken path and not from a rollback)";
 const STARTUP = "helix: NOTE - the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), so global memory is read-only: nothing can be stored, erased or re-graded there until the path is repaired";
 
 const STATE: Array<[GlobalLayoutName, 'writable' | 'unresolvable' | 'target-directory-missing']> = [
@@ -96,7 +96,7 @@ describe('GlobalLedgerReadOnlyError and the fixed texts (4.9; final wording of t
   });
 
   it.each(OPS)('%s: the changed-destination text names the global file, not a project (v-global-08: "in progress")', (op) => {
-    expect(GLOBAL_DESTINATION_CHANGED[op]).toMatch(new RegExp(`^${op}: the global memory file was replaced while the [a-z]+ was in progress — `));
+    expect(GLOBAL_DESTINATION_CHANGED[op]).toMatch(new RegExp(`^${op}: the global memory file changed while the [a-z]+ was in progress — `));
     expect(GLOBAL_DESTINATION_CHANGED[op]).not.toMatch(/project|waited/);
   });
 });

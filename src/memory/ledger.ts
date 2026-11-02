@@ -127,10 +127,10 @@ export function aliasedLedgerRefusal(rawPath: LedgerPath): string | null {
   return st.nlink === 1 ? null : aliasedLedgerMessage(st.nlink);
 }
 
-/** design 4.9, the row for a destination that changed while the write waited. A constant: no path, no
- *  interpolation. */
+/** design 4.9, the row for a destination that changed while the write was in progress (under the lock or before it,
+ *  B9 WP-3). A constant: no path, no interpolation. */
 export const DESTINATION_CHANGED_REFUSAL =
-  "commit: this project's memory file was replaced while the write waited for its lock — nothing was written. " +
+  "commit: this project's memory file changed while the write was in progress — nothing was written. " +
   'Try the commit again; if it happens again, tell the user.';
 
 /** The destination an append was about to write is not the one that was judged (design 4.1 item 3): the open
@@ -162,9 +162,10 @@ export const isLedgerCreateRefusedError = (e: unknown): boolean =>
   e instanceof Error && (e as { ledgerCreateRefused?: unknown }).ledgerCreateRefused === true;
 
 /** The refusal when `/proc` was usable and no longer is (design 4.1 item 3): the append can no longer hold the judged
- *  directory, and the fallback is for a host that never had `/proc`. A constant: no path, no interpolation. */
+ *  directory, and the fallback is for a host that never had `/proc`. A constant: no path, no interpolation. The one
+ *  refusal without an operation prefix: the error is raised for every write, so it names none. */
 export const PROC_LOST_REFUSAL =
-  "commit: Helix can no longer confirm which folder this write goes into, because the system's process file table " +
+  "Helix can no longer confirm which folder this write goes into, because the system's process file table " +
   'became unavailable after this session started — nothing was written. Restart the session; if it happens again, tell the user.';
 
 /** `/proc` was lost while the process ran (design 4.1 item 3). Nothing was written. */

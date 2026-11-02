@@ -22,21 +22,18 @@ const NOW = '2026-10-01T00:00:00.000Z';
 const REC = (id: string): string => JSON.stringify({ id, tx: NOW, validFrom: NOW, validTo: null, type: 'assert', state: 'Fresh', content: `fact ${id}`, provenance: { source: 'user', sessionId: 's' }, supersedes: null, blastRadius: null, reverifyTrigger: null, classification: 'normal' }) + '\n';
 const refusalOf = (f: () => unknown): string => { try { f(); } catch (e) { return (e as Error).message; } return '<no refusal>'; };
 
-// The 4.9 drafts, verbatim (B9 settles the final words once; this task writes them).
+// The final wording (B9).
 const ALIAS_REFUSAL =
   "commit: this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, " +
   'or through a path Helix cannot resolve, so the project layer is disabled here — the write is refused rather than written somewhere else. ' +
   "Ask the user whether to store this fact in global memory, which every project sees, or to replace the link with the project's own file; do not choose for them.";
 const UNUSABLE_REFUSAL =
-  "commit: this project's memory file cannot be used as it is (it is not a regular file, it or its folder cannot be read, that folder is missing or not a directory, " +
-  "or it is a link to a file that does not hold Helix memory records), so the project layer is disabled here — nothing was written. " +
-  "Ask the user whether to store this fact in global memory, which every project sees, or to repair the project's memory file; do not choose for them.";
+  "commit: this project's memory file cannot be used as it is (it is not a regular file or cannot be opened, a folder on its way cannot be read or is not a directory, its .helix folder is a link or is not a directory, it is a link into a folder that does not exist, or it is a link to a file that does not hold Helix memory records), so the project layer is disabled here — nothing was written. Ask the user whether to store this fact in global memory, which every project sees, or to repair the project's memory file; do not choose for them.";
 const ERASE_ALIAS_REFUSAL =
   "erase: this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, " +
   'or through a path Helix cannot resolve — the erase is refused rather than applied somewhere else.';
 const ERASE_UNUSABLE_REFUSAL =
-  "erase: this project's memory file cannot be used as it is (it is not a regular file, it or its folder cannot be read, that folder is missing or not a directory, " +
-  'or it is a link to a file that does not hold Helix memory records) — nothing was erased.';
+  "erase: this project's memory file cannot be used as it is (it is not a regular file or cannot be opened, a folder on its way cannot be read or is not a directory, its .helix folder is a link or is not a directory, it is a link into a folder that does not exist, or it is a link to a file that does not hold Helix memory records) — nothing was erased.";
 const NEW_ALIASED_NOTE =
   "(this project's memory file resolves outside this project, to another Helix memory file, to a file with more than one hard link, " +
   'or through a path Helix cannot resolve, and is excluded from results)';

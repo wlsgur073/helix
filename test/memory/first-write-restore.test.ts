@@ -27,9 +27,9 @@ const errno = (code: string): Error => Object.assign(new Error(`${code}: injecte
 
 const TEXT = {
   foreign: /a project memory file exists here that Helix did not create/,
-  changed: /this project's memory file was replaced while the write waited for its lock — nothing was written/,
+  changed: /this project's memory file changed while the write was in progress — nothing was written/,
   undone: /the first write to this project's memory file failed, so the project was not adopted and nothing was written/,
-  notUndone: /the first write to this project's memory file failed and the adoption recorded for it could not be undone/,
+  notUndone: /the first write to this project's memory file failed and the adoption recorded for it could not be undone, so the project may stay adopted, and a file at its memory path would then be read as its memory/,
 } as const;
 
 type Path = 'new' | 'recovery' | 'recovery-mismatch';

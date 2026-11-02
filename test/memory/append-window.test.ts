@@ -64,7 +64,7 @@ function run(fx: Fx, ops: DurableFsOps, judged?: JudgedDestination): unknown {
 }
 
 const APPEND = constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW;
-const REFUSAL_TEXT = "commit: this project's memory file was replaced while the write waited for its lock — nothing was written. Try the commit again; if it happens again, tell the user.";
+const REFUSAL_TEXT = "commit: this project's memory file changed while the write was in progress — nothing was written. Try the commit again; if it happens again, tell the user.";
 const HAS_PROC = process.platform === 'linux' && existsSync('/proc/self/fd');
 const enoent = (): never => { throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' }); };
 const noProc = (): ProcFdSyscalls => ({ statSync: enoent, readlinkSync: enoent });
@@ -476,7 +476,7 @@ describe('append through the held directory: the pieces the table cannot see', (
     expect(run2.log.fsyncDirs[0]).toMatch(/^\/proc\/self\/fd\/\d+$/);
   });
 
-  it.skipIf(!HAS_PROC)('Review Focus 3: /proc lost after the first append: the next append refuses with the dedicated text, never "replaced while waiting", and writes nothing', () => {
+  it.skipIf(!HAS_PROC)('Review Focus 3: /proc lost after the first append: the next append refuses with the dedicated text, never the changed-destination text, and writes nothing', () => {
     const fx = fixture6(); existing(fx);
     let lost = false;
     const procFd: ProcFdSyscalls = { statSync: (p) => (lost ? enoent() : realProcFdSyscalls.statSync(p)), readlinkSync: (p) => realProcFdSyscalls.readlinkSync(p) };
@@ -488,7 +488,7 @@ describe('append through the held directory: the pieces the table cannot see', (
     expect(isLedgerProcLostError(err)).toBe(true);
     expect(isLedgerDestinationChangedError(err)).toBe(false);
     expect((err as Error).message).toBe(PROC_LOST_REFUSAL);
-    expect((err as Error).message).not.toMatch(/replaced/);
+    expect((err as Error).message).not.toMatch(/changed while/);
     expect(holds(fx.ledger, 'm_a')).toBe(true);
     expect(holds(fx.ledger, 'm_new')).toBe(false);
     expect(log.open.size).toBe(0);

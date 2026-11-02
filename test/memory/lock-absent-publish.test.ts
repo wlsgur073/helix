@@ -98,8 +98,8 @@ describe('the absent row (spec 4.5, decision 8 locks-R3)', () => {
     let message = '';
     try { withFileLock(ledger, () => 'ran', { maxWaitMs: 50 }); } catch (e) { message = (e as Error).message; }
     expect(message.split(lockPath).join('<lock>').replace(/after \d+ms/, 'after <n>ms')).toBe(
-      'withFileLock: timed out after <n>ms acquiring <lock> — the lock was free at the last look, but another process held it on every ' +
-      'earlier attempt inside the budget (contention, not a stuck holder). Try again.');
+      'withFileLock: timed out after <n>ms acquiring <lock> — the lock was free at the last look, but it could not be taken inside the ' +
+      'budget (contention, not a stuck holder). Try again.');
     expect(readings).toBe(2);
     expect(hooks.links.filter((d) => d === lockPath)).toHaveLength(2);
     expect(existsSync(lockPath)).toBe(true);                // the live holder's lock was never touched
@@ -184,8 +184,8 @@ describe('a steal on the last pass of the budget (spec section 14 item 14)', () 
     const message = refusal(() => withFileLock(ledger, () => 'ran', { maxWaitMs: BUDGET_MS, probe }));
     expect(publications, 'the seam fired').toBe(3);
     expect(message.split(lockPath).join('<lock>').replace(/after \d+ms/, 'after <n>ms')).toBe(
-      'withFileLock: timed out after <n>ms acquiring <lock> — the lock was free at the last look, but another process held it on every ' +
-      'earlier attempt inside the budget (contention, not a stuck holder). Try again.');
+      'withFileLock: timed out after <n>ms acquiring <lock> — the lock was free at the last look, but it could not be taken inside the ' +
+      'budget (contention, not a stuck holder). Try again.');
     expect(existsSync(lockPath)).toBe(false);
   });
 
