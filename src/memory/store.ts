@@ -455,61 +455,7 @@ export class MemoryStore {
       if (targetLedger !== writeLedger) {
         throw new Error('commit: cannot supersede across scopes (target lives in a different ledger)');
       }
-      // NOT an authorization boundary, and it never was: nothing a commit carries is authenticated.
-      // Three things used to be collapsed into one word here — `state` is cryptographically protected
-      // assurance, `provenance.source` is an untrusted attribution hint, and "may this be replaced"
-      // is an operation policy. The old test read BOTH sides' provenance, so the credential it
-      // checked was the caller's own claim: declaring source='user' walked past a Verified target,
-      // and stripping a target's claimed source (boundary write) stripped its protection.
-      //
-      // What is enforceable is PROOF OF READ. A caller that retrieved the target can echo the
-      // digest the read path handed it; one acting blind — the prompt-injected case this guard is
-      // really for — cannot. `source` no longer participates in either direction.
-      //
-      // The provenance disjunct stays, reframed: it selects WHICH records are guarded, and dropping
-      // it would leave a Fresh human-authored record with no protection at all. Residual, stated
-      // rather than hidden: an adversary who can guess the target's content byte-exactly can compute
-      // the digest without reading it — narrower than declaring an enum value, and short predictable
-      // facts are the weak case. Superseding a Verified record still costs the grade regardless: the
-      // signed verify binds (id, contentDigest), so replacement content replays as Fresh.
-      // TWO TIERS, because one word was doing two jobs. `state` is cryptographically protected
-      // assurance; `provenance.source` is an untrusted attribution hint; "may this be replaced" is an
-      // operation policy. Collapsing them made the caller's own claim the credential.
-      //
-      // Tier 1 — accident guard, behaviour unchanged and separately tested ("refuses a
-      // non-authoritative supersede of a user fact"). A commit that does not claim a human author may
-      // not displace one that does. Both sides are self-asserted, so this restrains honest callers
-      // only; that is all it was ever doing, and the error now says so.
-      const claimsHumanAuthor = isVerifyingSource(target.provenance.source);
-      const isVerified = target.state === 'Verified';
-      if ((claimsHumanAuthor || isVerified) && !isVerifyingSource(source)) {
-        throw new Error(
-          'commit: refusing to supersede a human-authored or verified fact from a source that claims ' +
-          'neither (user-relayed / agent-inference). This is an accident guard, not an authorization ' +
-          'check — no field a commit carries is authenticated. Commit as source=user if you are ' +
-          'authoring this, or reconcile via recall.',
-        );
-      }
-      // Tier 2 — the actual fix. Tier 1's credential is a model-supplied enum, so declaring
-      // source='user' walked straight past a Verified target: the highest tier was protected by the
-      // cheapest possible claim. What IS enforceable is proof of read — a caller that retrieved the
-      // target can echo the digest the read path handed it; one acting blind, which is the
-      // prompt-injected case this exists for, cannot. Applied only to Verified targets: that is where
-      // `state` is MAC-covered, so the guard sits exactly on the authenticated boundary and does not
-      // tax the ordinary Fresh update path.
-      //
-      // Residual, stated rather than hidden: an adversary who can guess the content byte-exactly can
-      // compute the digest without reading it — far narrower than declaring an enum value, with short
-      // predictable facts the weak case. Superseding a Verified record still costs the grade either
-      // way: the signed verify binds (id, contentDigest), so replacement content replays as Fresh.
-      if (isVerified && input.supersedesDigest !== digestContent(target.content)) {
-        throw new Error(
-          'commit: supersedesDigest missing or stale. A verified fact may only be superseded by a ' +
-          'caller that has read it — recall or inspect the target and echo its `contentDigest` back ' +
-          'as `supersedesDigest`. Proof of read, not authorization: no field a commit carries is ' +
-          'authenticated.',
-        );
-      }
+      this.assertSupersedeAllowed(target, input, source);
     }
     const ts = this.now();
     let content = input.content;
@@ -545,9 +491,10 @@ export class MemoryStore {
     const target = this.targetLedger(input.scope);
     if (target.project) {
       if (first === null) throw new Error('commit: internal error — a project write without its judgement');
-      this.commitToProject(target.project, first, record);
+      this.commitToProject(target.project, first, record, input, source);
     } else {
-      appendWitnessed(target.ledger, record, this.homeDir(), this.scopeRootOf(target.ledger), 'commit');   // the global scope keeps its own path until B6
+      appendWitnessed(target.ledger, record, this.homeDir(), this.scopeRootOf(target.ledger), 'commit',
+        input.supersedes ? () => this.assertSupersedeTargetUnderLock(target.ledger, input, source) : undefined);   // step 6 for the global scope (D10); B6 moves it into the global inner function
     }
     const out: CommitResult = { record, scope: target.ledger === this.global ? 'global' : 'project' };
     if (redactions) out.redactions = redactions;
@@ -560,6 +507,80 @@ export class MemoryStore {
       if (d === 'ancestor-unadopted' || d === 'aliased' || d === 'unusable' || d === 'unadopted-present') out.bypassedProject = d;
     }
     return out;
+  }
+
+  /** The source guard and the digest of a Verified target: two of the three checks a supersede commit makes on its target
+   *  (the first, that the target is live, is the caller's lookup). ONE function for the lock-free pre-check in
+   *  commitScoped and for the check made again under the ledger lock (design 4.3 step 6, D10), so the two can never carry
+   *  different rules or different texts. */
+  private assertSupersedeAllowed(target: MemoryRecord, input: CommitInput, source: ProvenanceSource): void {
+    // NOT an authorization boundary, and it never was: nothing a commit carries is authenticated.
+    // Three things used to be collapsed into one word here — `state` is cryptographically protected
+    // assurance, `provenance.source` is an untrusted attribution hint, and "may this be replaced"
+    // is an operation policy. The old test read BOTH sides' provenance, so the credential it
+    // checked was the caller's own claim: declaring source='user' walked past a Verified target,
+    // and stripping a target's claimed source (boundary write) stripped its protection.
+    //
+    // What is enforceable is PROOF OF READ. A caller that retrieved the target can echo the
+    // digest the read path handed it; one acting blind — the prompt-injected case this guard is
+    // really for — cannot. `source` no longer participates in either direction.
+    //
+    // The provenance disjunct stays, reframed: it selects WHICH records are guarded, and dropping
+    // it would leave a Fresh human-authored record with no protection at all. Residual, stated
+    // rather than hidden: an adversary who can guess the target's content byte-exactly can compute
+    // the digest without reading it — narrower than declaring an enum value, and short predictable
+    // facts are the weak case. Superseding a Verified record still costs the grade regardless: the
+    // signed verify binds (id, contentDigest), so replacement content replays as Fresh.
+    // TWO TIERS, because one word was doing two jobs. `state` is cryptographically protected
+    // assurance; `provenance.source` is an untrusted attribution hint; "may this be replaced" is an
+    // operation policy. Collapsing them made the caller's own claim the credential.
+    //
+    // Tier 1 — accident guard, behaviour unchanged and separately tested ("refuses a
+    // non-authoritative supersede of a user fact"). A commit that does not claim a human author may
+    // not displace one that does. Both sides are self-asserted, so this restrains honest callers
+    // only; that is all it was ever doing, and the error now says so.
+    const claimsHumanAuthor = isVerifyingSource(target.provenance.source);
+    const isVerified = target.state === 'Verified';
+    if ((claimsHumanAuthor || isVerified) && !isVerifyingSource(source)) {
+      throw new Error(
+        'commit: refusing to supersede a human-authored or verified fact from a source that claims ' +
+        'neither (user-relayed / agent-inference). This is an accident guard, not an authorization ' +
+        'check — no field a commit carries is authenticated. Commit as source=user if you are ' +
+        'authoring this, or reconcile via recall.',
+      );
+    }
+    // Tier 2 — the actual fix. Tier 1's credential is a model-supplied enum, so declaring
+    // source='user' walked straight past a Verified target: the highest tier was protected by the
+    // cheapest possible claim. What IS enforceable is proof of read — a caller that retrieved the
+    // target can echo the digest the read path handed it; one acting blind, which is the
+    // prompt-injected case this exists for, cannot. Applied only to Verified targets: that is where
+    // `state` is MAC-covered, so the guard sits exactly on the authenticated boundary and does not
+    // tax the ordinary Fresh update path.
+    //
+    // Residual, stated rather than hidden: an adversary who can guess the content byte-exactly can
+    // compute the digest without reading it — far narrower than declaring an enum value, with short
+    // predictable facts the weak case. Superseding a Verified record still costs the grade either
+    // way: the signed verify binds (id, contentDigest), so replacement content replays as Fresh.
+    if (isVerified && input.supersedesDigest !== digestContent(target.content)) {
+      throw new Error(
+        'commit: supersedesDigest missing or stale. A verified fact may only be superseded by a ' +
+        'caller that has read it — recall or inspect the target and echo its `contentDigest` back ' +
+        'as `supersedesDigest`. Proof of read, not authorization: no field a commit carries is ' +
+        'authenticated.',
+      );
+    }
+  }
+
+  /** Design 4.3 step 6 (D10, FN-24): the target of a supersede commit, checked AGAIN under the lock of the ledger the
+   *  commit is written to, in the place where step 3 judges again. The same three checks as lock-free and the same texts:
+   *  the target is live in this ledger, the source guard, the digest of a Verified target. Two supersede commits of one id
+   *  used to pass the lock-free look together and both were stored; the late one now finds its target dead here. Holds for
+   *  the global scope too. The read is the verified projection the pre-check uses, without the replay metric (one commit,
+   *  one metric). */
+  private assertSupersedeTargetUnderLock(ledger: LedgerPath, input: CommitInput, source: ProvenanceSource): void {
+    const target = verifiedLiveStats(ledger, this.homeDir(), this.scopeRootOf(ledger)).projection.live.get(input.supersedes!);
+    if (!target) throw new Error('commit: supersedes target not found (dead or unknown id)');
+    this.assertSupersedeAllowed(target, input, source);
   }
 
   /** A fresh judgement of this store's project layer (ownership.ts judgeProjectLayer, the one rule). No project layer
@@ -698,13 +719,19 @@ export class MemoryStore {
     }
   }
 
-  /** A commit to a project: the body of the critical section (design 4.3 step 4), on the ownership the judgement read
-   *  under the lock. owned: the row is appended. Nobody owns it and a file stands at the destination: the foreign-file
-   *  refusal, made HERE only (FW-R1: a lock-free copy could refuse a late racer for a file Helix itself had just created;
-   *  under the lock that commit is finished and the project reads owned). Nobody owns it and nothing stands there:
-   *  firstProjectWrite. B4 adds the supersede re-check (step 6) as the first statement of the callback. */
-  private commitToProject(p: { root: string; ledger: string }, first: LayerJudgement, record: MemoryRecord): void {
+  /** A commit to a project: the body of the critical section (design 4.3 steps 4 and 6). Step 6 first, in the place where
+   *  step 3 judged again: a supersede commit checks its target again. A project that is not owned under the lock has no live
+   *  target in its scope, so a supersede there is the target-not-found refusal (and never reaches the foreign-file or the
+   *  first-write branch below). Then step 4, on the ownership the judgement read under the lock. owned: the row is appended.
+   *  Nobody owns it and a file stands at the destination: the foreign-file refusal, made HERE only (FW-R1: a lock-free copy
+   *  could refuse a late racer for a file Helix itself had just created; under the lock that commit is finished and the
+   *  project reads owned). Nobody owns it and nothing stands there: firstProjectWrite. */
+  private commitToProject(p: { root: string; ledger: string }, first: LayerJudgement, record: MemoryRecord, input: CommitInput, source: ProvenanceSource): void {
     this.underProjectLedgerLock(p, 'commit', first, ({ judgement, judged }) => {
+      if (input.supersedes) {
+        if (judgement.state !== 'owned') throw new Error('commit: supersedes target not found (dead or unknown id)');
+        this.assertSupersedeTargetUnderLock(p.ledger, input, source);
+      }
       if (judgement.state === 'owned') {
         appendWitnessedUnlocked(p.ledger, record, this.homeDir(), p.root, 'commit', 'commit', judged);
       } else if (judgement.state === 'unadopted-present') {

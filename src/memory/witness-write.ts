@@ -137,10 +137,13 @@ export function appendWitnessedUnlocked(ledger: LedgerPath, record: MemoryRecord
 
 /** Locked wrapper — for a caller that does NOT already hold the ledger lock (store.ts's `commit`
  *  and `erase` tombstone append). Mirrors `appendRecord`'s own mkdir-before-lock convention
- *  (ledger.ts): the parent directory must exist before `withFileLock` can resolve the lock path. */
-export function appendWitnessed(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined, op: 'commit' | 'erase' | 'verify'): void {
+ *  (ledger.ts): the parent directory must exist before `withFileLock` can resolve the lock path.
+ *  `beforeAppend` runs with the ledger lock held, after the witness look, the home check and the directory creation and
+ *  before anything is read or appended; a throw from it appends nothing (design 4.3 step 6: the global scope's re-check of
+ *  a supersede target). */
+export function appendWitnessed(ledger: LedgerPath, record: MemoryRecord, home: string, projectRoot: string | undefined, op: 'commit' | 'erase' | 'verify', beforeAppend?: () => void): void {
   assertWitnessWritable(home, op, { homeUnchecked: true });   // a refused write creates no home, no ledger folder and no lock file, and changes no mode (G-R3, W-R9)
   ensureHelixDir(home);   // IT-H2: before the ledger directory or its lock file is created (see appendWitnessedUnlocked)
   mkdirSync(dirname(ledger), { recursive: true });
-  withFileLock(ledger, () => appendWitnessedUnlocked(ledger, record, home, projectRoot, op));
+  withFileLock(ledger, () => { beforeAppend?.(); appendWitnessedUnlocked(ledger, record, home, projectRoot, op); });
 }
