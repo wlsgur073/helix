@@ -596,8 +596,10 @@ function readLedgerFileBytesExact(path: string, flags: number, shownAs: string =
 
 /** The read of a ledger by its path (design 4.1 item 4): the read opens the RESOLVED path with `O_NOFOLLOW | O_NONBLOCK`.
  *  Only the read of an unresolvable global ledger opens the path as given (4.7), and only when the caller says so
- *  (`GLOBAL_LEDGER_READ`). A `LedgerNotRegularError` names the path the caller gave, not the resolved one. */
-function readLedgerFileBytes(rawPath: string, opts: LedgerReadOptions = {}): Buffer {
+ *  (`GLOBAL_LEDGER_READ`). A `LedgerNotRegularError` names the path the caller gave, not the resolved one.
+ *  Exported for scripts/trigger-measure.ts, which wants the throwing reader (ENOENT keeps its code, so a caller can tell an absent
+ *  file from an unreadable one) and not readLedgerBytes, which turns ENOENT into an empty buffer. */
+export function readLedgerFileBytes(rawPath: string, opts: LedgerReadOptions = {}): Buffer {
   // 4.1 item 4: the read opens the RESOLVED path and never follows its last component. An unresolvable path is refused
   // unless the caller says it is the global ledger, which is then opened as given (links followed, as before). A
   // missing folder and "cannot be inspected" surface as their fs error (ENOENT keeps each caller's absent-file convention).

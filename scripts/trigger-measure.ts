@@ -8,7 +8,7 @@
 // this module holds every measurement/compose/validate/append step behind an injectable reader seam
 // (deps.readFile) and an injectable env seam (deps.env) so tests run fully hermetically — no real
 // ~/.helix is ever touched by a test that supplies deps.
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { constants, lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { realFsOps, writeAll, type DurableFsOps } from '../src/memory/fs-ops.js';
@@ -16,16 +16,30 @@ import { judgeProjectLayer, projectLedgerPath } from '../src/memory/ownership.js
 import { hasOwnHelixEntry } from '../src/memory/project-root.js';
 import { metricsEnabledFromGlobalConfig } from '../src/config.js';
 import { resolveHelixPaths } from '../src/memory/home-env.js';
+import { ensureHelixDir } from '../src/memory/home-permissions.js';
+import { NotRegularHomeFileError } from '../src/memory/home-files.js';
+import { readLedgerFileBytes } from '../src/memory/ledger.js';
 import { evaluateTrigger, type Leg, type MetricsEvent, type MetricsState, type ParticipantSize } from './trigger-eval.js';
 
 const POLICY = 'T1-2026-07-11';
 const SINK_FILE = 'trigger.jsonl';
 const METRICS_FILE = 'metrics.jsonl';
 
+/** The default whole-file reader of both entry points: readLedgerFileBytes, which opens O_NONBLOCK, asks the descriptor what it is
+ *  and refuses anything but a regular file (LedgerNotRegularError, no errno code), while ENOENT keeps its code. */
+const defaultReadFile = (p: string): Buffer => readLedgerFileBytes(p);
+
+/** The sink is appended to through a descriptor that is read-write (the tail byte is looked at), append-only, never follows a link at
+ *  the name and never blocks in the open: a FIFO opens under O_RDWR and is refused by the descriptor's type, a link ends in ELOOP, a
+ *  directory in EISDIR, a socket or driverless device in ENXIO. Where the platform lacks O_NOFOLLOW the OR drops it (as in ledger.ts). */
+const SINK_OPEN = constants.O_RDWR | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+const SINK_NOT_REGULAR_OPEN_ERRORS: ReadonlySet<string> = new Set(['ENXIO', 'ELOOP', 'EISDIR']);
+
 /** Injectable seams. Production defaults are the real filesystem/env; tests override these to run
  *  hermetically and to pin the non-atomic per-participant read semantics (see readTwoParticipants). */
 export interface MeasureDeps {
-  /** Whole-file read, one call per participant/metrics file. Default: fs.readFileSync. Returns a
+  /** Whole-file read, one call per participant/metrics file. Default: readLedgerFileBytes
+   *  (src/memory/ledger.ts), which refuses what is not a regular file and keeps ENOENT's code. Returns a
    *  Buffer (never a decoded string) because both `bytes` and the unknown-line maxOps estimate are
    *  defined in terms of raw byte length. */
   readFile?: (path: string) => Buffer;
@@ -66,7 +80,8 @@ export interface MeasureInput {
 type ReadOutcome = { state: 'read'; rows: number; bytes: number } | { state: 'expected-absent' } | { state: 'read-error' };
 
 /** ONE whole-file read through the seam. ENOENT -> expected-absent (a clean read of "nothing there
- *  yet"); any other error (incl. EISDIR when a directory is swapped in for the ledger) -> read-error.
+ *  yet"); any other error (a directory, FIFO or device swapped in for the ledger is a
+ *  LedgerNotRegularError, which carries no code) -> read-error.
  *  rows = physical newline count — a torn, unterminated final line contributes 0 rows though its
  *  bytes still count (documented T1 semantics: T1 counts physical rows, not parsed records). */
 function readWholeFile(path: string, readFile: (p: string) => Buffer): ReadOutcome {
@@ -262,25 +277,49 @@ export function validateRecordLine(line: string): EvaluationRecord {
   return parsed as unknown as EvaluationRecord;
 }
 
-/** Append the validated line + fsync (create mode 0600; mode applies only at creation), then fsync
- *  the directory ONLY when this call CREATED the file — an append to an already-existing sink does
- *  not need a directory fsync (the directory entry did not change), unlike the ledger's unconditional
- *  fsyncDir on every append (src/memory/ledger.ts appendRecordUnlocked). Existence is checked BEFORE
- *  opening; a mid-call TOCTOU race with a concurrent creator is an accepted, documented risk (single
- *  writer per record kind, by design — the CLI is the only writer of 'evaluation' and 'acknowledgement'
- *  rows). */
+/** Append the validated line + fsync, then fsync the directory ONLY when this call CREATED the file — an append to an already-existing
+ *  sink does not need a directory fsync (the directory entry did not change), unlike the ledger's unconditional fsyncDir on every
+ *  append (src/memory/ledger.ts appendRecordUnlocked). Existence is checked BEFORE opening, by lstat, so a dangling link counts as
+ *  present and the open refuses it; a mid-call race with a concurrent creator is an accepted, documented risk (single writer per
+ *  record kind, by design — the CLI is the only writer of 'evaluation' and 'acknowledgement' rows).
+ *
+ *  The sink follows the home rule (B2a ruling F): the home goes through ensureHelixDir, so a symlinked home, a home that is not a
+ *  directory, another user's directory and a missing parent are HomeRefusalError and nothing is written, a missing home whose parent
+ *  exists is created 0700 and an existing home's mode is left alone. The sink itself must be a regular file, found out on the
+ *  descriptor (SINK_OPEN): anything else is NotRegularHomeFileError. When the file does not end in a newline (a write cut short by a
+ *  kill or a full disk) the record starts on a line of its own, the separator sharing the record's single write and fsync, as in the
+ *  ledger's append (IT-LOW 11); the fragment stays where it is, one malformed line the readers already skip. */
 export function appendToSink(home: string, line: string, fs: DurableFsOps = realFsOps): void {
   const path = join(home, SINK_FILE);
-  mkdirSync(dirname(path), { recursive: true });
-  const existedBefore = existsSync(path);
-  const fd = fs.openSync(path, 'a', 0o600);
+  ensureHelixDir(home);
+  const existedBefore = sinkPresent(path);
+  let fd: number;
   try {
-    writeAll(fs, fd, line + '\n');
+    fd = fs.openSync(path, SINK_OPEN, 0o600);   // owner-only ON CREATE; the umask can only clear bits
+  } catch (e) {
+    if (SINK_NOT_REGULAR_OPEN_ERRORS.has((e as NodeJS.ErrnoException).code ?? '')) throw new NotRegularHomeFileError();
+    throw e;
+  }
+  try {
+    const st = fs.fstatSync(fd);
+    if ((st.mode & constants.S_IFMT) !== constants.S_IFREG) throw new NotRegularHomeFileError();
+    let data = line + '\n';
+    if (st.size > 0) {
+      const tail = Buffer.alloc(1);
+      fs.readSync(fd, tail, 0, 1, st.size - 1);
+      if (tail[0] !== 0x0a) data = '\n' + data;   // tail repair: separator + record share one write and one fsync
+    }
+    writeAll(fs, fd, data);
     fs.fsyncSync(fd);
   } finally {
     fs.closeSync(fd);
   }
   if (!existedBefore) fs.fsyncDir(dirname(path));
+}
+
+/** lstat, not existsSync: a dangling link at the name is present, and the open then refuses it. */
+function sinkPresent(path: string): boolean {
+  try { lstatSync(path); return true; } catch { return false; }
 }
 
 /** T1-STICKY (item 7): a record that a fire was HANDLED. Written only by `helix-trigger --acknowledge`
@@ -342,7 +381,7 @@ function tsOf(line: string): string {
  *  `{ ok: false }` reason); trigger-cli.ts turns it into exit 3. */
 export function acknowledgeLatest(deps: MeasureDeps = {}): { ok: true; line: string } | { ok: false; reason: string } {
   const env = deps.env ?? process.env;
-  const readFile = deps.readFile ?? ((p: string): Buffer => readFileSync(p));
+  const readFile = deps.readFile ?? defaultReadFile;
   const now = deps.now ?? ((): string => new Date().toISOString());
   const { home } = resolveHelixPaths({ HELIX_HOME: env.HELIX_HOME, HELIX_LEDGER: env.HELIX_LEDGER }, homedir());
   let text: string;
@@ -377,11 +416,13 @@ export function acknowledgeLatest(deps: MeasureDeps = {}): { ok: true; line: str
  *  environment throws the resolver's HomeRefusalError (it is not an `{ ok: false }` reason);
  *  trigger-cli.ts turns it into exit 3. Throws on ANY
  *  failure in that chain (self-validation, append, or print) — the CLI entry (trigger-cli.ts) is the
- *  ONE place that catches this and turns it into an exit code, so a crash never leaves a torn record:
- *  validation happens before the single write, and the write happens before the print. */
+ *  ONE place that catches this and turns it into an exit code. A record that fails validation is never
+ *  written (validation happens before the single write), and a printed record was appended first (the
+ *  write happens before the print). A write cut short by a kill, a full disk or a power loss can still
+ *  leave a torn last line; the next append starts its record on a line of its own (appendToSink). */
 export function measureAndRecord(input: MeasureInput, deps: MeasureDeps = {}): string {
   const env = deps.env ?? process.env;
-  const readFile = deps.readFile ?? ((p: string): Buffer => readFileSync(p));
+  const readFile = deps.readFile ?? defaultReadFile;
   const now = deps.now ?? ((): string => new Date().toISOString());
   const fsOps = deps.fs ?? realFsOps;
 
@@ -402,7 +443,7 @@ export function measureAndRecord(input: MeasureInput, deps: MeasureDeps = {}): s
     project: disposition, metricsState, unknownLines, unknownMaxOps,
   };
   const line = JSON.stringify(record);
-  validateRecordLine(line); // throws on failure — BEFORE the write, so a crash never leaves a torn record
+  validateRecordLine(line); // throws on failure — BEFORE the write, so an invalid record is never written
 
   appendToSink(home, line, fsOps);
   process.stdout.write(line + '\n'); // SAME line, printed after the append (journald echo)
