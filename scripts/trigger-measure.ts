@@ -15,12 +15,12 @@ import { realFsOps, writeAll, type DurableFsOps } from '../src/memory/fs-ops.js'
 import { judgeProjectLayer, projectLedgerPath } from '../src/memory/ownership.js';
 import { hasOwnHelixEntry } from '../src/memory/project-root.js';
 import { metricsEnabledFromGlobalConfig } from '../src/config.js';
+import { resolveHelixPaths } from '../src/memory/home-env.js';
 import { evaluateTrigger, type Leg, type MetricsEvent, type MetricsState, type ParticipantSize } from './trigger-eval.js';
 
 const POLICY = 'T1-2026-07-11';
 const SINK_FILE = 'trigger.jsonl';
 const METRICS_FILE = 'metrics.jsonl';
-const GLOBAL_LEDGER_FILE = 'memory.jsonl';
 
 /** Injectable seams. Production defaults are the real filesystem/env; tests override these to run
  *  hermetically and to pin the non-atomic per-participant read semantics (see readTwoParticipants). */
@@ -61,16 +61,6 @@ export interface MeasureInput {
   serviceResult: string | null;
   exitCode: string | null;
   exitStatus: string | null;
-}
-
-/** home = HELIX_HOME ?? ~/.helix (mirrors src/server/index.ts:19). */
-export function resolveHome(env: NodeJS.ProcessEnv): string {
-  return env.HELIX_HOME ?? join(homedir(), '.helix');
-}
-
-/** global ledger = HELIX_LEDGER ?? <home>/memory.jsonl (mirrors src/server/index.ts:20). */
-export function resolveGlobalLedger(env: NodeJS.ProcessEnv, home: string): string {
-  return env.HELIX_LEDGER ?? join(home, GLOBAL_LEDGER_FILE);
 }
 
 type ReadOutcome = { state: 'read'; rows: number; bytes: number } | { state: 'expected-absent' } | { state: 'read-error' };
@@ -348,12 +338,13 @@ function tsOf(line: string): string {
  *  earlier rule — the latest evaluation itself must read fired — was a dead end: once a leg fell back
  *  under threshold, the summary kept alarming on the fire in its history while this refused (final
  *  review I-2, probe c10). A malformed latest evaluation throws (validateRecordLine), which the CLI
- *  turns into exit 1. */
+ *  turns into exit 1. A refused environment throws the resolver's HomeRefusalError (it is not an
+ *  `{ ok: false }` reason); trigger-cli.ts turns it into exit 3. */
 export function acknowledgeLatest(deps: MeasureDeps = {}): { ok: true; line: string } | { ok: false; reason: string } {
   const env = deps.env ?? process.env;
   const readFile = deps.readFile ?? ((p: string): Buffer => readFileSync(p));
   const now = deps.now ?? ((): string => new Date().toISOString());
-  const home = resolveHome(env);
+  const { home } = resolveHelixPaths({ HELIX_HOME: env.HELIX_HOME, HELIX_LEDGER: env.HELIX_LEDGER }, homedir());
   let text: string;
   try { text = readFile(join(home, SINK_FILE)).toString('utf8'); }
   catch { return { ok: false, reason: 'no trigger sink to acknowledge' }; }
@@ -382,7 +373,9 @@ export function acknowledgeLatest(deps: MeasureDeps = {}): { ok: true; line: str
 }
 
 /** End-to-end: resolve env -> read participants -> resolve metrics -> evaluate -> compose -> validate
- *  -> append+fsync -> print. Returns the exact line that was appended and printed. Throws on ANY
+ *  -> append+fsync -> print. Returns the exact line that was appended and printed. A refused
+ *  environment throws the resolver's HomeRefusalError (it is not an `{ ok: false }` reason);
+ *  trigger-cli.ts turns it into exit 3. Throws on ANY
  *  failure in that chain (self-validation, append, or print) — the CLI entry (trigger-cli.ts) is the
  *  ONE place that catches this and turns it into an exit code, so a crash never leaves a torn record:
  *  validation happens before the single write, and the write happens before the print. */
@@ -392,8 +385,7 @@ export function measureAndRecord(input: MeasureInput, deps: MeasureDeps = {}): s
   const now = deps.now ?? ((): string => new Date().toISOString());
   const fsOps = deps.fs ?? realFsOps;
 
-  const home = resolveHome(env);
-  const globalLedger = resolveGlobalLedger(env, home);
+  const { home, globalLedger } = resolveHelixPaths({ HELIX_HOME: env.HELIX_HOME, HELIX_LEDGER: env.HELIX_LEDGER }, homedir());
   const disposition = resolveProjectDisposition(input.root, home, globalLedger);
   const participants = readTwoParticipants(globalLedger, input.root, home, disposition, readFile);
 

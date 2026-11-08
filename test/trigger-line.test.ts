@@ -5,7 +5,7 @@
 // imports, so both modules must be imported here for `npm run typecheck` to see them at all.
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, statSync, symlinkSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../scripts/trigger-cli.js';
 import {
@@ -13,8 +13,6 @@ import {
   appendToSink,
   validateRecordLine,
   parseMetricsBuffer,
-  resolveHome,
-  resolveGlobalLedger,
   resolveProjectDisposition,
 } from '../scripts/trigger-measure.js';
 import { realFsOps, type DurableFsOps } from '../src/memory/fs-ops.js';
@@ -56,22 +54,6 @@ function captureStderr(run: () => void): string {
   }
   return chunks.join('');
 }
-
-// -------------------------------------------------------------------------------------------------
-// resolveHome / resolveGlobalLedger — the pure env-resolution formula (mirrors src/server/index.ts:19-20)
-// -------------------------------------------------------------------------------------------------
-describe('resolveHome / resolveGlobalLedger (pure formula)', () => {
-  it('HELIX_HOME set -> used verbatim; HELIX_LEDGER unset -> defaults to <home>/memory.jsonl', () => {
-    expect(resolveHome({ HELIX_HOME: '/x/home' })).toBe('/x/home');
-    expect(resolveGlobalLedger({}, '/x/home')).toBe(join('/x/home', 'memory.jsonl'));
-  });
-  it('HELIX_LEDGER set -> overrides the default', () => {
-    expect(resolveGlobalLedger({ HELIX_LEDGER: '/custom/ledger.jsonl' }, '/x/home')).toBe('/custom/ledger.jsonl');
-  });
-  it('HELIX_HOME unset -> defaults to homedir()/.helix', () => {
-    expect(resolveHome({})).toBe(join(homedir(), '.helix'));
-  });
-});
 
 // -------------------------------------------------------------------------------------------------
 // resolveProjectDisposition — owned / unowned / absent, incl. the cwd==~ collision guard

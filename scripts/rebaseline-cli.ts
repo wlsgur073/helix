@@ -17,8 +17,8 @@
 // comment for the empirically-verified rationale, which applies identically here).
 import { createInterface } from 'node:readline/promises';
 import { homedir } from 'node:os';
-import { isAbsolute, dirname, join } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { isAbsolute, dirname } from 'node:path';
+import { lstatSync, mkdirSync } from 'node:fs';
 import type { MemoryRecord } from '../src/types.js';
 import { withFileLockAsync } from '../src/memory/lock.js';
 import {
@@ -31,6 +31,7 @@ import {
 import { sha256Hex } from '../src/memory/witness-core.js';
 import { resolveScopeTarget, type ScopeRefusalCause, type ScopeResolution } from '../src/memory/scope-target.js';
 import { isGlobalLedgerReadOnly } from '../src/memory/global-ledger.js';
+import { resolveHelixPaths, isHomeRefusalError, type HelixPaths } from '../src/memory/home-env.js';
 
 export interface RebaselineDeps {
   env?: NodeJS.ProcessEnv;
@@ -42,7 +43,6 @@ export interface RebaselineDeps {
 
 const USAGE = 'usage: helix-rebaseline --scope global | --scope <absoluteProjectRoot>\n';
 const CONFIRM_PROMPT = 'Type "bless" to re-baseline: ';
-const GLOBAL_LEDGER_FILE = 'memory.jsonl';
 
 /** `--scope global` or `--scope <absoluteProjectRoot>`, and nothing else — no `--scope=value`
  *  form (mirrors trigger-cli.ts's parseArgs: space-separated flag/value pairs only). Returns null
@@ -54,15 +54,6 @@ function parseScope(argv: string[]): string | null {
   if (!scope) return null;
   if (scope !== 'global' && !isAbsolute(scope)) return null;
   return scope;
-}
-
-/** home = HELIX_HOME ?? ~/.helix (trigger-measure.ts:65-67 pattern). */
-function resolveHome(env: NodeJS.ProcessEnv): string {
-  return env.HELIX_HOME ?? join(homedir(), '.helix');
-}
-/** global ledger = HELIX_LEDGER ?? <home>/memory.jsonl (trigger-measure.ts:70-72 pattern). */
-function resolveGlobalLedger(env: NodeJS.ProcessEnv, home: string): string {
-  return env.HELIX_LEDGER ?? join(home, GLOBAL_LEDGER_FILE);
 }
 
 /** node:readline/promises over real stdin/stdout — the first CLI in this repo reading stdin. */
@@ -149,6 +140,22 @@ const REBASELINE_GLOBAL_READ_ONLY_REFUSAL =
   "helix-rebaseline: REFUSING - the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist).\n" +
   'Nothing was written. Repair that path (HELIX_LEDGER, or a link on it), then re-run.\n';
 
+/** The head of the refusal of an environment the resolver does not accept (B2a rulings C and D): the resolver's own constant
+ *  message follows, then a newline. No path. Exit 2, in front of the scope judgement, the folder creation, the lock and the prompt. */
+const REBASELINE_HOME_ENV_HEAD = 'helix-rebaseline: REFUSING - ';
+
+/** `--scope global` over a home that does not exist (B2a ruling N3): there is no global memory file and no witness entry to
+ *  re-baseline, and the ceremony would otherwise create the home at the umask's mode (`IT-LOW` 16). Nothing is created. Exit 2. */
+const REBASELINE_NO_HOME_REFUSAL =
+  'helix-rebaseline: REFUSING - the Helix home directory does not exist, so there is no global memory file or rollback witness to re-baseline.\n' +
+  'Nothing was created.\n';
+
+/** Is nothing at the home's own name? `lstat`, so a link is something; every error but ENOENT answers false and the ceremony
+ *  goes on to fail where it failed before. */
+function homeIsAbsent(home: string): boolean {
+  try { lstatSync(home); return false; } catch (e) { return (e as NodeJS.ErrnoException).code === 'ENOENT'; }
+}
+
 /** A witness file that is there and cannot be used (A15: WitnessUnusableError, reason other than 'transient'). Its first read
  *  stands before the prompt, so nothing was asked and nothing written; read as an empty store it used to be REPLACED by the
  *  ceremony's journal, which dropped the baseline of every other scope. The reader is the operator at a terminal, so the
@@ -172,8 +179,8 @@ export const REBASELINE_DESTINATION_CHANGED_REFUSAL =
  *  resolves to the global ledger, or an already-hard-linked ledger — the last two are refused
  *  before the lock, the display and the prompt, because a target the ceremony cannot honour must
  *  not be one the operator is asked to bless. Exit 2 also covers a global scope over a global
- *  ledger that cannot be used, a witness file that cannot be used, and a destination that changed
- *  under the ceremony. Exit 1 = confirmation
+ *  ledger that cannot be used, a witness file that cannot be used, a destination that changed
+ *  under the ceremony, an environment the resolver refuses, and a global scope whose home does not exist. Exit 1 = confirmation
  *  declined OR an unexpected failure (nothing written in either case); exit 3 = the ledger changed
  *  during the confirmation pause — its content OR its link count (nothing written); exit 0 = a
  *  fresh epoch fence was committed. */
@@ -200,18 +207,31 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
     const now = deps.now ?? ((): string => new Date().toISOString());
     const promptLine = deps.promptLine ?? defaultPromptLine;
 
-    const home = resolveHome(env);
     // ONE resolution for the ledger AND its witness key. They used to be derived from `scope` by two
     // independent routes, which is how a project scope could name the global ledger: in the default
     // layout HELIX_HOME is `$HOME/.helix`, so `--scope $HOME` resolves to the global ledger file
     // while keying the witness under `canonicalRoot($HOME)`. One file, two witness identities — and
     // the older one is left attesting to a prefix of a file that has since grown.
-    const globalLedger = resolveGlobalLedger(env, home);
+    let paths: HelixPaths;
+    try {
+      paths = resolveHelixPaths({ HELIX_HOME: env.HELIX_HOME, HELIX_LEDGER: env.HELIX_LEDGER }, homedir());   // decision S1: only what this CLI reads
+    } catch (e) {
+      if (!isHomeRefusalError(e)) throw e;
+      process.stderr.write(`${REBASELINE_HOME_ENV_HEAD}${(e as Error).message}\n`);   // ASCII only
+      exit(2);
+      return 2;
+    }
+    const { home, globalLedger } = paths;
     // Design 4.10 and 4.7: `--scope global` over a read-only global ledger is refused HERE, in front of the scope judgement, the
     // folder creation, the lock, the display and the prompt, after the usage and TTY checks (order item 4). A project scope is not
     // affected by the state of the global ledger's path.
     if (scope === 'global' && isGlobalLedgerReadOnly(globalLedger)) {
       process.stderr.write(REBASELINE_GLOBAL_READ_ONLY_REFUSAL);   // ASCII only
+      exit(2);
+      return 2;
+    }
+    if (scope === 'global' && homeIsAbsent(home)) {
+      process.stderr.write(REBASELINE_NO_HOME_REFUSAL);   // ASCII only
       exit(2);
       return 2;
     }

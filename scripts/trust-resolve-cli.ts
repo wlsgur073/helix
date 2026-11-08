@@ -11,14 +11,16 @@
 //
 // Follows rebaseline-cli.ts's conventions: `main(argv, deps): Promise<number>`, `deps.exit ??
 // (code => { process.exitCode = code })`, a vitest-import-safe module-level guard that never calls
-// the hard process.exit(). Exit 2 = nothing attempted (bad usage / no TTY / scope not pending);
-// exit 1 = confirmation declined or an unexpected failure (nothing written); exit 0 = resolved.
+// the hard process.exit(). Exit 2 = nothing attempted (bad usage / no TTY / scope not pending /
+// an environment the resolver refuses); exit 1 = confirmation declined or an unexpected failure
+// (nothing written); exit 0 = resolved.
 import { createInterface } from 'node:readline/promises';
 import { homedir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { MemoryStore } from '../src/memory/store.js';
 import { trustStateOf, resolveTrust, projectLedgerPath } from '../src/memory/ownership.js';
 import { resolveScopeTarget } from '../src/memory/scope-target.js';
+import { resolveHelixPaths, isHomeRefusalError, type HelixPaths } from '../src/memory/home-env.js';
 
 export interface TrustResolveDeps {
   env?: NodeJS.ProcessEnv;
@@ -44,6 +46,10 @@ const TRUST_RESOLVE_GLOBAL_STORE_REFUSAL =
   "helix-trust-resolve: REFUSING - this project's memory file is the global memory file itself, so there is no separate project scope to resolve. " +
   'Nothing was changed.\n';
 
+/** The head of the refusal of an environment the resolver does not accept (B2a rulings C and D): the resolver's own constant
+ *  message follows, then a newline. No path. Exit 2, in front of the trust-state check and the prompt. */
+const TRUST_RESOLVE_HOME_ENV_HEAD = 'helix-trust-resolve: REFUSING - ';
+
 /** `--scope <absoluteRoot>` plus exactly one of `--repair` / `--fresh`, in either order, nothing
  *  else. Returns null for any malformed invocation so one usage/exit-2 branch handles them all. */
 function parseArgs(argv: string[]): { scope: string; resolution: 'repair' | 'fresh' } | null {
@@ -57,10 +63,6 @@ function parseArgs(argv: string[]): { scope: string; resolution: 'repair' | 'fre
   if (flags[0] === '--repair') return { scope, resolution: 'repair' };
   if (flags[0] === '--fresh') return { scope, resolution: 'fresh' };
   return null;
-}
-
-function resolveHome(env: NodeJS.ProcessEnv): string {
-  return env.HELIX_HOME ?? join(homedir(), '.helix');
 }
 
 async function defaultPromptLine(question: string): Promise<string> {
@@ -90,7 +92,16 @@ export async function main(argv: string[], deps: TrustResolveDeps = {}): Promise
 
   try {
     const env = deps.env ?? process.env;
-    const home = resolveHome(env);
+    let paths: HelixPaths;
+    try {
+      paths = resolveHelixPaths({ HELIX_HOME: env.HELIX_HOME, HELIX_LEDGER: env.HELIX_LEDGER }, homedir());   // decision S1: only what this CLI reads
+    } catch (e) {
+      if (!isHomeRefusalError(e)) throw e;
+      process.stderr.write(`${TRUST_RESOLVE_HOME_ENV_HEAD}${(e as Error).message}\n`);   // ASCII only
+      exit(2);
+      return 2;
+    }
+    const { home, globalLedger } = paths;
     const { scope, resolution } = parsed;
 
     if (trustStateOf(scope, home) !== 'pending') {
@@ -99,12 +110,12 @@ export async function main(argv: string[], deps: TrustResolveDeps = {}): Promise
       return 2;
     }
 
-    // Third fix batch B1 (design 4.10): the SAME judgement the store uses, with the global ledger this
-    // terminal's environment names (read through `env`, as the rebaseline CLI does, so the inventory's
-    // env-var surface is unchanged). The ceremony used to build a layer of its own against
-    // `<home>/memory.jsonl`: over a project ledger that cannot be resolved it showed 0 rows and went on
-    // (regression R-2), and over one that leads to the global ledger it counted global rows as project rows.
-    const globalLedger = env.HELIX_LEDGER ?? join(home, 'memory.jsonl');
+    // Third fix batch B1 (design 4.10): the SAME judgement the store uses, with the global ledger the resolver
+    // names for the HELIX_HOME and HELIX_LEDGER of this terminal's environment (the variables are read through
+    // `env`, as the rebaseline CLI reads them, so the inventory's env-var surface is unchanged). The ceremony used
+    // to build a layer of its own against `<home>/memory.jsonl`: over a project ledger that cannot be resolved it
+    // showed 0 rows and went on (regression R-2), and over one that leads to the global ledger it counted global
+    // rows as project rows.
     const target = resolveScopeTarget(home, globalLedger, scope);
     if (!target.ok) {
       process.stderr.write(                                                         // ASCII only

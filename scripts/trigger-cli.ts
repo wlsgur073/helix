@@ -12,6 +12,7 @@
 // relying on this) a stray process.exitCode mutation from that call does not leak into `npm test`'s
 // own reported exit code.
 import { measureAndRecord, acknowledgeLatest, type MeasureDeps } from './trigger-measure.js';
+import { isHomeRefusalError } from '../src/memory/home-env.js';
 
 export interface CliDeps extends MeasureDeps {
   exit?: (code: number) => void;
@@ -29,6 +30,11 @@ interface ParsedArgs {
 const USAGE =
   'usage: trigger-cli --root <path> --run <id> [--service-result <s>] [--exit-code <s>] [--exit-status <s>]\n' +
   '       trigger-cli --acknowledge\n';
+
+/** The head of the line printed for a home refusal (B2a plan decision P2): the message of the refusal follows, then a newline. */
+const TRIGGER_HOME_REFUSAL_HEAD = 'trigger-cli: REFUSING - ';
+/** A home refusal exits 3: distinct from a crash (1) and from a usage error or an acknowledgement refusal (2), so the postrun adapter can tell them apart. */
+const EXIT_HOME_REFUSED = 3;
 
 function parseArgs(argv: string[]): ParsedArgs {
   const out: ParsedArgs = {};
@@ -58,7 +64,8 @@ const toNullable = (s: string | undefined): string | null => (s === undefined ||
  *  its own meaning under the same three codes: exit 0 = a validated acknowledgement appended and
  *  printed; exit 2 = refused, with a reason on stderr and nothing appended — no sink, no evaluation,
  *  no evaluation that ever fired, or no evaluation since the latest acknowledgement (ruling R23);
- *  exit 1 = a crash, e.g. a malformed latest evaluation. */
+ *  exit 1 = a crash, e.g. a malformed latest evaluation. On either path, exit 3 = a home refusal (the
+ *  environment, or the home itself), nothing appended. */
 export function main(argv: string[], deps: CliDeps = {}): number {
   const exit = deps.exit ?? ((code: number): void => { process.exitCode = code; });
   const parsed = parseArgs(argv);
@@ -70,6 +77,7 @@ export function main(argv: string[], deps: CliDeps = {}): number {
       exit(0);
       return 0;
     } catch (e) {
+      if (isHomeRefusalError(e)) { process.stderr.write(`${TRIGGER_HOME_REFUSAL_HEAD}${(e as Error).message}\n`); exit(EXIT_HOME_REFUSED); return EXIT_HOME_REFUSED; }
       process.stderr.write(`trigger-cli: ${e instanceof Error ? e.message : String(e)}\n`);
       exit(1);
       return 1;
@@ -94,6 +102,7 @@ export function main(argv: string[], deps: CliDeps = {}): number {
     exit(0);
     return 0;
   } catch (e) {
+    if (isHomeRefusalError(e)) { process.stderr.write(`${TRIGGER_HOME_REFUSAL_HEAD}${(e as Error).message}\n`); exit(EXIT_HOME_REFUSED); return EXIT_HOME_REFUSED; }
     process.stderr.write(`trigger-cli: ${e instanceof Error ? e.message : String(e)}\n`);
     exit(1);
     return 1;

@@ -338,6 +338,7 @@ describe('rebaseline-cli main() — refusal paths', () => {
     const root = tmpHome();                 // stands in for $HOME
     homes.push(root);
     const home = join(root, '.helix');      // == HELIX_HOME
+    mkdirSync(home, { mode: 0o700 });       // B2a N3: --scope global refuses a home that does not exist
     const ledger = join(home, 'memory.jsonl');
     const globalKey = scopeKeyOf(home);
     const projectKey = scopeKeyOf(home, root);
