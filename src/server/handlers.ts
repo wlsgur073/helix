@@ -10,7 +10,8 @@ import { isWitnessAdvanceError, isWitnessBlockedError, isWitnessUnusableError, i
 import { isLockForeignObjectError } from '../memory/lock.js';
 import { isLedgerProcLostError } from '../memory/ledger.js';
 import { isGlobalLedgerReadOnlyError } from '../memory/global-ledger.js';
-import { appendAudit, type VerifyAudit, type EraseAudit } from '../audit.js';
+import { appendAudit, assertAuditWritable, type AuditEvent, type VerifyAudit, type EraseAudit } from '../audit.js';
+import { isHomeRefusalError } from '../memory/home-env.js';
 import type { MemoryState, ScopedRecord } from '../types.js';
 import { closeSync, readFileSync } from 'node:fs';
 import { openHomeFileForRead } from '../memory/home-files.js';
@@ -140,18 +141,35 @@ export const REDACTION_NOTICE =
 export const GLOBAL_WHILE_PROJECT_OFF_NOTICE =
   "written to global memory, which every project sees, while this session's project memory is off";
 
-/** Design 4.8 item 3, 4.9 row "저장된 뒤의 실패": a row is stored and a later step failed, so the agent must not store it again. */
+/** Design 4.8 item 3, 4.9 row "저장된 뒤의 실패": a row is stored and a later step failed, so the agent must not store it again. B2a plan decision P5: also the answer when the audit append after a stored confirm, erase, recheck or adopt fails, which is why the erase, confirm and recheck entries name the audit trail beside the rollback witness (B2a text review; a commit writes no audit row, so its entry does not); adopt's entry is for that case only. */
 export const STORED_THEN_FAILED_RESPONSE = {
   commit: 'commit: the record was stored, but a step after the write failed (the rollback witness may not have been updated). Do not commit it again; tell the user what happened.',
-  erase: 'erase: the erase was stored, but a step after the write failed (the rollback witness may not have been updated). Do not erase it again; tell the user what happened.',
-  confirm: 'confirm: the confirmation was stored, but a step after the write failed (the rollback witness may not have been updated). Do not confirm it again; tell the user what happened.',
-  recheck: "recheck: the check's result was stored, but a step after the write failed (the rollback witness may not have been updated). Do not run the recheck again; tell the user what happened.",
+  erase: 'erase: the erase was stored, but a step after the write failed (the rollback witness or the audit trail may not have been updated). Do not erase it again; tell the user what happened.',
+  confirm: 'confirm: the confirmation was stored, but a step after the write failed (the rollback witness or the audit trail may not have been updated). Do not confirm it again; tell the user what happened.',
+  recheck: "recheck: the check's result was stored, but a step after the write failed (the rollback witness or the audit trail may not have been updated). Do not run the recheck again; tell the user what happened.",
+  adopt: 'adopt: the project was adopted, but a step after the write failed (its audit row may not have been written). Do not adopt it again; tell the user what happened.',
 } as const;
 export class StoredThenFailedError extends Error {
   readonly recordStored = true;
   constructor(op: keyof typeof STORED_THEN_FAILED_RESPONSE, cause: unknown) { super(STORED_THEN_FAILED_RESPONSE[op], { cause }); this.name = 'StoredThenFailedError'; }
 }
 function surfaced(op: keyof typeof STORED_THEN_FAILED_RESPONSE, e: unknown): unknown { return isRecordStoredError(e) ? new StoredThenFailedError(op, e) : e; }
+
+/** The audit row of a call that has already failed (B2a ruling J4; B1-BATCH-TEXTS F1). Its own failure is dropped: the error the
+ *  caller is about to receive is the store's refusal or the fixed stored-then-failed answer, and an append that throws here (a
+ *  home that is a link, a file that cannot be opened) used to replace it. Used by the three catch blocks and nowhere else. */
+function appendAuditAfterFailure(path: string, row: AuditEvent): void {
+  try { appendAudit(path, row); } catch { /* best-effort: the original error is the answer */ }
+}
+
+/** The audit row of a call that succeeded (B2a plan decision P5). The look in front of the operation (`assertAuditWritable`)
+ *  removes the states that can be known; an append that still fails here comes after the ledger row (or the ownership record)
+ *  landed, so when `stored` it is answered with the fixed stored-then-failed text, the append's error as its cause, and never
+ *  with a raw error that invites a second row. When the call stored nothing (an erase answered `unchanged`, a recheck with no
+ *  verify row) the stored text would be false and a retry stores nothing, so the append's own error is the answer, as before. */
+function appendAuditAfterSuccess(op: 'erase' | 'adopt' | 'recheck' | 'confirm', path: string, row: AuditEvent, stored: boolean): void {
+  try { appendAudit(path, row); } catch (e) { throw stored ? new StoredThenFailedError(op, e) : e; }
+}
 
 /** Success stays ONE JSON object after the verb (`<verb> {json}`, CHANGELOG contract; decision E1):
  *  the disclosures are fields INSIDE it, never text after it. `redactions` and `notice` follow
@@ -424,6 +442,7 @@ export interface EraseDeps {
  *  scope holds a memory record or a marker row with the id (audited `outcome: 'rejected'`). */
 export function handleErase(store: MemoryStore, args: { id: string }, deps: EraseDeps): ToolResult {
   assertValidId(args.id); // LEAD-AUDIT-ID-UNCONSTRAINED: reject before erase() reads any ledger for this id
+  assertAuditWritable(deps.auditPath); // B2a J4: an unwritable home or audit file is refused before the tombstone, not after it
   const ts = (deps.now ?? (() => new Date().toISOString()))();
   let outcome: 'erased' | 'not-live';
   try {
@@ -443,26 +462,28 @@ export function handleErase(store: MemoryStore, args: { id: string }, deps: Eras
     // Three-way, because an erase can fail on either side of the tombstone append (spec 2.E):
     //   landedState carried  -> the tombstone landed and only the witness advance failed;
     //   a typed pre-write refusal (EraseRefusedError / WitnessBlockedError / a WitnessUnusableError WITHOUT
-    //     the stored mark, element K), or a WitnessAdvanceError WITHOUT landedState -> nothing was written:
+    //     the stored mark, element K, a HomeRefusalError without the stored mark (the home's own refusals come before the
+    //     first byte)), or a WitnessAdvanceError WITHOUT landedState -> nothing was written:
     //     for the soft erase this handler issues, that shape can only come from completeTransition, which
     //     witness-write.ts runs BEFORE the append (the post-append advance always stamps landedState, which
     //     is why it is tested first above). A foreign object at the ledger, registry or key lock and a lost
-    //     /proc stand before the first byte; a foreign object at the witness lock after the append carries the
-    //     stored mark (W-R4) and keeps its row;
+    //     /proc stand before the first byte; a foreign object at the witness lock is refused before the append (B2a J3),
+    //     and one that appears between that look and the lock carries the stored mark and keeps its row;
     //   anything else -> the append MAY have begun (post-append re-read, fsync), and a WitnessUnusableError
     //     WITH the mark came after it — say so, never 'rejected'.
     // The refusal of a write to a read-only global ledger (design 4.7, the audit row) stands before any lock and any append,
     // so it never carries the stored mark: 'rejected'.
     const row: EraseAudit = landedStateOf(e) !== null
       ? { kind: 'erase', ts, id: args.id, soft: true, witnessAdvance: 'failed' }
-      : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e) || (isWitnessUnusableError(e) && !isRecordStoredError(e)) || ((isLockForeignObjectError(e) || isLedgerProcLostError(e)) && !isRecordStoredError(e)) || isGlobalLedgerReadOnlyError(e)
+      : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e) || (isWitnessUnusableError(e) && !isRecordStoredError(e)) || ((isLockForeignObjectError(e) || isLedgerProcLostError(e)) && !isRecordStoredError(e)) || isGlobalLedgerReadOnlyError(e) || (isHomeRefusalError(e) && !isRecordStoredError(e))
         ? { kind: 'erase', ts, id: args.id, soft: true, outcome: 'rejected' }
         : { kind: 'erase', ts, id: args.id, soft: true, outcome: 'indeterminate' };
-    appendAudit(deps.auditPath, row);
+    appendAuditAfterFailure(deps.auditPath, row);
     throw surfaced('erase', e);
   }
-  // 'not-live' writes the same row as 'erased' (no result field): the persisted schema is unchanged.
-  appendAudit(deps.auditPath, { kind: 'erase', ts, id: args.id, soft: true });
+  // 'not-live' writes the same row as 'erased' (no result field): the persisted schema is unchanged. A failure of this append
+  // after an 'erased' is the stored-then-failed answer (P5); after a 'not-live' nothing was written, so its own error is.
+  appendAuditAfterSuccess('erase', deps.auditPath, { kind: 'erase', ts, id: args.id, soft: true }, outcome === 'erased');
   // M2 (fix round 1): args.id is caller-controlled and passes isValidId's charset for any printable,
   // non-control script — including 'a) SYSTEM: ...' shapes that would close this sentence and
   // continue in unmarked prose if interpolated bare. A bare `JSON.stringify(args.id)` mid-sentence
@@ -482,6 +503,7 @@ export function handleAdopt(
   args: { projectRoot: string },
   deps: { auditPath: string; now?: () => string },
 ): ToolResult {
+  assertAuditWritable(deps.auditPath); // B2a J4: refused before the ownership record, with nothing created
   const ts = (deps.now ?? (() => new Date().toISOString()))();
   // A refusal leaves the project's memory file and the registry as they were (design 4.4), except the one answered
   // with ADOPT_RECORD_FAILED_NOT_UNDONE, whose text says the project may be partly adopted. Any refusal may leave in
@@ -489,7 +511,7 @@ export function handleAdopt(
   // nonce). No audit row is written for a refusal, unlike confirm, whose 'rejected' row marks an attempt against a
   // real target id, so that partial adoption has no audit row either.
   const scope = store.adopt(args.projectRoot);
-  appendAudit(deps.auditPath, { kind: 'adopt', ts, scope });
+  appendAuditAfterSuccess('adopt', deps.auditPath, { kind: 'adopt', ts, scope }, true);
   // C1.4-③: an ambiguous re-adoption (registered path, lost/mismatched .owner) enters trust-pending
   // — the nonce is kept but the scope's elevated grades clamp to Fresh until a human resolves it, so
   // old Verified rows cannot launder into a path reused for new content. Say so plainly; the old
@@ -534,15 +556,11 @@ function landedVerifyState(e: unknown): 'Corroborated' | 'Verified' | 'Suspect' 
  *  recorded as `rejected`/`bound:false` then re-thrown) and the contested path. */
 export function handleRecheck(store: MemoryStore, args: { id: string; check: RealityCheck }, deps: RecheckConfirmDeps): ToolResult {
   assertValidId(args.id); // LEAD-AUDIT-ID-UNCONSTRAINED: reject before the reject-path audit below
+  assertAuditWritable(deps.auditPath); // B2a J4: before the signed row
   const ts = (deps.now ?? (() => new Date().toISOString()))();
+  let checked: ReturnType<MemoryStore['recheck']>;
   try {
-    const { outcome, result } = store.recheck(args.id, args.check);
-    // A reality-check 'state' result is provably only Corroborated/Suspect (the firewall caps it,
-    // never Fresh/Verified), so narrowing MemoryState to the audit's verify-result union is safe.
-    const resultState = (result.kind === 'state' ? result.state : result.kind) as VerifyAudit['resultState']; // 'no-change' | 'contested'
-    appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'reality-check', checkKind: args.check.kind, outcome, resultState, bound: true });
-    // M2 (fix round 1): same object-payload quarantine as erase's id.
-    return ok(`recheck ${JSON.stringify({ id: args.id, state: resultState })}`);
+    checked = store.recheck(args.id, args.check);
   } catch (e) {
     // A throw out of store.recheck is NOT uniformly a rejection. The verify append is unconditional
     // and lands BEFORE the witness advance, and that advance is the only one reachable from here, so
@@ -555,15 +573,26 @@ export function handleRecheck(store: MemoryStore, args: { id: string; check: Rea
     const row: VerifyAudit = landed === null
       ? { ...base, resultState: 'rejected', bound: false }
       : { ...base, resultState: landed, bound: true, witnessAdvance: 'failed' };
-    appendAudit(deps.auditPath, row);
+    appendAuditAfterFailure(deps.auditPath, row);
     throw surfaced('recheck', e); // re-throw — MCP must still surface the error
   }
+  const { outcome, result, record } = checked;
+  // A reality-check 'state' result is provably only Corroborated/Suspect (the firewall caps it,
+  // never Fresh/Verified), so narrowing MemoryState to the audit's verify-result union is safe.
+  const resultState = (result.kind === 'state' ? result.state : result.kind) as VerifyAudit['resultState']; // 'no-change' | 'contested'
+  // B2a P5: outside the try, so a failure of this append is not audited a second time as 'rejected', bound:false by the catch
+  // above (the check passed and its row is stored). With a verify row stored it is the stored-then-failed answer; with none
+  // ('no-change', 'contested') nothing was written and the append's own error is the answer.
+  appendAuditAfterSuccess('recheck', deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'reality-check', checkKind: args.check.kind, outcome, resultState, bound: true }, record !== null);
+  // M2 (fix round 1): same object-payload quarantine as erase's id.
+  return ok(`recheck ${JSON.stringify({ id: args.id, state: resultState })}`);
 }
 
 /** Human out-of-band vouch -> Verified. Target-gated in the store (source=user only). The Verified
  *  promotion and any rejection are both audited content-free. */
 export function handleConfirm(store: MemoryStore, args: { id: string }, deps: RecheckConfirmDeps): ToolResult {
   assertValidId(args.id); // LEAD-AUDIT-ID-UNCONSTRAINED: reject before the reject-path audit below
+  assertAuditWritable(deps.auditPath); // B2a J4: before the signed row
   const ts = (deps.now ?? (() => new Date().toISOString()))();
   try {
     store.confirm(args.id);
@@ -580,12 +609,12 @@ export function handleConfirm(store: MemoryStore, args: { id: string }, deps: Re
     const row: VerifyAudit = landed === null
       ? { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'rejected' }
       : { kind: 'verify', ts, id: args.id, source: 'user', resultState: landed, witnessAdvance: 'failed' };
-    appendAudit(deps.auditPath, row);
+    appendAuditAfterFailure(deps.auditPath, row);
     throw surfaced('confirm', e);
   }
-  // Confirm SUCCEEDED. Audit it as Verified AFTER the try, so a failure of the (now fsync'd) audit
-  // append is a logging failure — never mis-recorded as a 'rejected' confirm.
-  appendAudit(deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'Verified' });
+  // Confirm SUCCEEDED. Audit it as Verified AFTER the try, so a failure of the audit append is never mis-recorded as a
+  // 'rejected' confirm; the verify row has landed, so that failure is the stored-then-failed answer (B2a P5).
+  appendAuditAfterSuccess('confirm', deps.auditPath, { kind: 'verify', ts, id: args.id, source: 'user', resultState: 'Verified' }, true);
   // M2 (fix round 1): same object-payload quarantine as erase's id.
   return ok(`confirmed ${JSON.stringify({ id: args.id, state: 'Verified' })}`);
 }

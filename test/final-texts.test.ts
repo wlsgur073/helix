@@ -103,11 +103,14 @@ describe('the witness refusals and the stored-then-failed responses', () => {
   });
   it.each([
     ['commit', 'commit: the record was stored, but a step after the write failed (the rollback witness may not have been updated). Do not commit it again; tell the user what happened.'],
-    ['erase', 'erase: the erase was stored, but a step after the write failed (the rollback witness may not have been updated). Do not erase it again; tell the user what happened.'],
-    ['confirm', 'confirm: the confirmation was stored, but a step after the write failed (the rollback witness may not have been updated). Do not confirm it again; tell the user what happened.'],
-    ['recheck', "recheck: the check's result was stored, but a step after the write failed (the rollback witness may not have been updated). Do not run the recheck again; tell the user what happened."],
+    ['erase', 'erase: the erase was stored, but a step after the write failed (the rollback witness or the audit trail may not have been updated). Do not erase it again; tell the user what happened.'],
+    ['confirm', 'confirm: the confirmation was stored, but a step after the write failed (the rollback witness or the audit trail may not have been updated). Do not confirm it again; tell the user what happened.'],
+    ['recheck', "recheck: the check's result was stored, but a step after the write failed (the rollback witness or the audit trail may not have been updated). Do not run the recheck again; tell the user what happened."],
   ] as const)('WP-4: %s says "may not have been updated"', (op, text) => {
     expect(STORED_THEN_FAILED_RESPONSE[op]).toBe(text);
+  });
+  it('P5: adopt\'s stored-then-failed text (an audit append that fails after the adoption; fixed at the B2a text review)', () => {
+    expect(STORED_THEN_FAILED_RESPONSE.adopt).toBe('adopt: the project was adopted, but a step after the write failed (its audit row may not have been written). Do not adopt it again; tell the user what happened.');
   });
 });
 

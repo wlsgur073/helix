@@ -1,8 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, symlinkSync, chmodSync, rmSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendAudit, type AuditEvent } from '../src/audit.js';
+import { HomeRefusalError, isHomeRefusalError } from '../src/memory/home-env.js';
+import { appendAudit, assertAuditWritable, type AuditEvent } from '../src/audit.js';
 
 function tmpAudit() { return join(mkdtempSync(join(tmpdir(), 'helix-audit-')), 'audit.jsonl'); }
 
@@ -120,5 +122,80 @@ describe('appendAudit', () => {
     throwOnNextFsyncDir = Object.assign(new Error('EIO fake (audit dir fsync)'), { code: 'EIO' });
     expect(() => appendAudit(p, { kind: 'adopt', ts: '2026-08-07T00:00:00.000Z', scope: '/x' })).not.toThrow();
     expect(JSON.parse(readFileSync(p, 'utf8').trim()).kind).toBe('adopt'); // the row still landed
+  });
+});
+
+// Third fix batch B2a, task B4 (ruling J4; design 4.6): the look that confirm, erase, recheck and adopt take at the audit file
+// BEFORE they write their ledger row. It reads permissions and kinds, opens nothing (an open of a FIFO would block) and creates
+// nothing. A sync call cannot be interrupted by a test timeout, so the FIFO row is the last of its table.
+describe.skipIf(process.platform === 'win32')('assertAuditWritable', () => {
+  const HOME_TEXT = 'the Helix home directory cannot be written, so the operation was refused before anything was changed';
+  const AUDIT_TEXT = 'the Helix audit file cannot be written, so the operation was refused before anything was changed';
+  const AS_ROOT = process.getuid?.() === 0;
+  const made: string[] = [];
+  const dir = (): string => { const d = realpathSync(mkdtempSync(join(tmpdir(), 'aw-'))); made.push(d); return d; };
+  afterEach(() => { for (const d of made.splice(0)) { try { chmodSync(d, 0o700); } catch { /* gone */ } rmSync(d, { recursive: true, force: true }); } });
+  const refusal = (f: () => void): HomeRefusalError => {
+    try { f(); } catch (e) { expect(isHomeRefusalError(e)).toBe(true); return e as HomeRefusalError; }
+    throw new Error('expected a refusal');
+  };
+
+  it('passes a writable directory that holds no audit file, and creates nothing', () => {
+    const d = dir();
+    expect(() => assertAuditWritable(join(d, 'audit.jsonl'))).not.toThrow();
+    expect(readdirSync(d)).toEqual([]);
+  });
+
+  it('passes an existing regular audit file and a link to one (the append follows links)', () => {
+    const d = dir(); const other = dir();
+    writeFileSync(join(d, 'audit.jsonl'), '', { mode: 0o600 });
+    expect(() => assertAuditWritable(join(d, 'audit.jsonl'))).not.toThrow();
+    const real = join(other, 'real.jsonl'); writeFileSync(real, '', { mode: 0o600 });
+    const l = dir(); symlinkSync(real, join(l, 'audit.jsonl'));
+    expect(() => assertAuditWritable(join(l, 'audit.jsonl'))).not.toThrow();
+  });
+
+  const NOT_DECIDED: Array<[string, (b: string) => string]> = [
+    ['a missing directory', (b) => join(b, 'nodir', 'audit.jsonl')],
+    ['a "directory" that is a regular file', (b) => { writeFileSync(join(b, 'f'), ''); return join(b, 'f', 'audit.jsonl'); }],
+    ['a directory that is a link loop', (b) => { symlinkSync('loop', join(b, 'loop')); return join(b, 'loop', 'audit.jsonl'); }],
+  ];
+  it.each(NOT_DECIDED)('leaves %s to the operation, so the store\'s own refusal is the one reported', (_name, plant) => {
+    const b = dir(); const p = plant(b); const before = readdirSync(b);
+    expect(() => assertAuditWritable(p)).not.toThrow();
+    expect(readdirSync(b)).toEqual(before);
+  });
+
+  describe.skipIf(AS_ROOT)('a home without write permission', () => {
+    it.each([['no audit file yet', false], ['an audit file that could itself be appended', true]] as Array<[string, boolean]>)(
+      'is home-unwritable with %s',
+      (_name, present) => {
+        const d = dir();
+        if (present) writeFileSync(join(d, 'audit.jsonl'), '', { mode: 0o600 });
+        chmodSync(d, 0o500);
+        const before = readdirSync(d);
+        const e = refusal(() => assertAuditWritable(join(d, 'audit.jsonl')));
+        expect(e.homeRefusalCause).toBe('home-unwritable');
+        expect(e.message).toBe(HOME_TEXT);
+        expect(e.message).not.toContain(d);
+        chmodSync(d, 0o700);
+        expect(readdirSync(d)).toEqual(before);
+      },
+    );
+  });
+
+  const UNWRITABLE: Array<[string, (d: string) => void, boolean]> = [
+    ['a file without write permission', (d) => writeFileSync(join(d, 'audit.jsonl'), '', { mode: 0o400 }), true],
+    ['a directory', (d) => mkdirSync(join(d, 'audit.jsonl')), false],
+    ['a link loop', (d) => symlinkSync('audit.jsonl', join(d, 'audit.jsonl')), false],
+    ['a FIFO', (d) => { execFileSync('mkfifo', [join(d, 'audit.jsonl')]); }, false],
+  ];
+  it.each(UNWRITABLE)('an audit.jsonl that is %s is audit-unwritable', (_name, plant, needsNonRoot) => {
+    if (needsNonRoot && AS_ROOT) return;   // root passes access(2) for W_OK whatever the mode
+    const d = dir(); plant(d);
+    const e = refusal(() => assertAuditWritable(join(d, 'audit.jsonl')));
+    expect(e.homeRefusalCause).toBe('audit-unwritable');
+    expect(e.message).toBe(AUDIT_TEXT);
+    expect(e.message).not.toContain(d);
   });
 });

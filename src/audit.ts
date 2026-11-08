@@ -1,10 +1,11 @@
-import { mkdirSync, fsyncSync, closeSync } from 'node:fs';
+import { mkdirSync, fsyncSync, closeSync, accessSync, statSync, constants, type Stats } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeAll, realFsOps, fsyncDir } from './memory/fs-ops.js';
 import { openHomeFileForAppend } from './memory/home-files.js';
 import type { EgressLeg } from './config.js';
 import type { GateName } from './verify/dual-verify.js';
 import { ensureHelixDir } from './memory/home-permissions.js';
+import { HomeRefusalError } from './memory/home-env.js';
 
 /** Schema note (append-only history): `decidedLeg` replaces the mis-named `blockedLeg` (an
  *  `allowed_override` used to write its DECIDER into a field literally called `blockedLeg`,
@@ -145,7 +146,14 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit | AdoptAudit
  *  EVERY append fsyncs the directory, not just the first (2026-08-11): an exists-then-decide probe
  *  raced concurrent first creation, so a non-creator's acknowledged row depended on the CREATOR
  *  surviving to its own fsyncDir. Each appender now owns the directory-entry durability of the row
- *  it acknowledges. Audit appends are low-frequency; the extra directory fsync is noise. */
+ *  it acknowledges. Audit appends are low-frequency; the extra directory fsync is noise.
+ *
+ *  B2a (ruling J4, plan decision P5): the paragraph above that says no caller wraps this call is true of one of the eight call
+ *  sites now, handleDualVerify's. The three inside a catch in handlers.ts go through `appendAuditAfterFailure`, which drops this
+ *  function's failure, so the error the caller is about to receive is never replaced by it. The four after a success go through
+ *  `appendAuditAfterSuccess`, which answers this function's failure with the fixed stored-then-failed text when the call stored a
+ *  row. `assertAuditWritable` (below) is the look that confirm, erase, recheck and adopt take before they write their ledger row,
+ *  so an audit file the process cannot append to is refused ahead of the row, not after it. */
 export function appendAudit(path: string, event: AuditEvent, io: { fsyncDir: typeof fsyncDir } = { fsyncDir }): void {
   ensureHelixDir(dirname(path));
   const fd = openHomeFileForAppend(path, 0o600);   // owner-only ON CREATE (the audit trail is unauthenticated; a group writer could rewrite it)
@@ -160,4 +168,40 @@ export function appendAudit(path: string, event: AuditEvent, io: { fsyncDir: typ
   // immediately before re-throwing the caller's real error, so an escaping fsync error would REPLACE
   // that diagnosis rather than add to it.
   try { io.fsyncDir(dirname(path)); } catch { /* best-effort by design — see docstring above */ }
+}
+
+/** The two refusals of `assertAuditWritable`. Constant, ASCII, no path and no interpolation (CLAUDE.md, Code style); both are
+ *  said BEFORE anything was changed, because the look runs ahead of the operation. Fixed at the B2a text review. */
+export const HOME_UNWRITABLE_TEXT = 'the Helix home directory cannot be written, so the operation was refused before anything was changed';
+export const AUDIT_UNWRITABLE_TEXT = 'the Helix audit file cannot be written, so the operation was refused before anything was changed';
+
+const DENIED = new Set(['EACCES', 'EPERM', 'EROFS']);
+
+/** B2a ruling J4 (design 4.6): confirm, erase, recheck and adopt append their audit row AFTER the ledger row, so an audit file the
+ *  process cannot append to used to surface after the row had landed (a confirm then read Verified with no audit row). This is the
+ *  look they take first. It reads permissions and kinds only: it opens nothing (an open of a FIFO would block) and creates nothing
+ *  (a refused adopt must leave no audit file behind). It decides only what a permission or a kind shows; a directory that is
+ *  missing, is not a directory or cannot be reached returns without a refusal, so the operation meets it first and the refusal the
+ *  caller sees is the store's own (WBR-global F1). A directory without write and search permission is refused as the home's even
+ *  when `audit.jsonl` itself could be appended: the witness advance after the row needs the home too. The look is advisory (access(2)
+ *  answers for this process at this instant; root passes it), so a state that changes after it is the append's own failure. */
+export function assertAuditWritable(path: string): void {
+  const dir = dirname(path);
+  let dirStat: Stats;
+  try { dirStat = statSync(dir); } catch { return; }
+  if (!dirStat.isDirectory()) return;
+  try { accessSync(dir, constants.W_OK | constants.X_OK); }
+  catch (e) {
+    if (DENIED.has((e as NodeJS.ErrnoException).code ?? '')) throw new HomeRefusalError('home-unwritable', HOME_UNWRITABLE_TEXT);
+    return;
+  }
+  let st: Stats;
+  try { st = statSync(path); }
+  catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return;   // a new file in a directory that can be written
+    throw new HomeRefusalError('audit-unwritable', AUDIT_UNWRITABLE_TEXT);
+  }
+  if (!st.isFile()) throw new HomeRefusalError('audit-unwritable', AUDIT_UNWRITABLE_TEXT);
+  try { accessSync(path, constants.W_OK); }
+  catch { throw new HomeRefusalError('audit-unwritable', AUDIT_UNWRITABLE_TEXT); }
 }
