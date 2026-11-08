@@ -2,7 +2,7 @@ import { existsSync, readFileSync, lstatSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { canonicalRoot } from './ownership.js';
-import { tryReadMaster, verifyVerify } from './ledger-mac.js';
+import { tryReadMaster, tryReadMasterUntouched, verifyVerify } from './ledger-mac.js';
 import { subkeyForScope, verifiedProjectionWithSubkey } from './verified-read.js';
 import { readLedgerWitnessed } from './witness-read.js';
 import { clampElevatedState } from './verified-projection.js';
@@ -146,17 +146,18 @@ export type StrayKeyOutcome = 'no-home-key' | 'match' | 'mismatch';
  * reused here rather than `existsSync`): a wrong-sized HOME key must not read as "HOME has a key"
  * — that used to downgrade the refusal to a warning and then throw an uncaught `LedgerMacError`
  * once the store actually tried to use it. Both reads are wrapped: a corrupt/wrong-sized key at
- * EITHER path collapses to `null` rather than throwing through this decision. `tryReadMaster`
- * takes a directory and reads `<dir>/ledger-mac-master.key` from it — its parameter is named
- * `home` in ledger-mac.ts because that is its only other caller, but nothing about it is
- * home-specific, so passing `ledgerDir` here reads the stray key with the exact same strictness.
+ * EITHER path collapses to `null` rather than throwing through this decision. HOME's key is read
+ * with `tryReadMaster`, which also repairs an over-broad mode of HOME's own file. The stray key is
+ * read with `tryReadMasterUntouched`: the same strict read of `<dir>/ledger-mac-master.key`,
+ * without the mode repair, because a key beside a relocated ledger is not a file of the home and
+ * its mode is not Helix's to change (B2a ruling J1).
  */
 export function compareStrayMasterKey(home: string, ledgerDir: string): StrayKeyOutcome {
   let homeKey: Buffer | null;
   try { homeKey = tryReadMaster(home); } catch { homeKey = null; }
   if (!homeKey) return 'no-home-key';
   let strayKey: Buffer | null;
-  try { strayKey = tryReadMaster(ledgerDir); } catch { strayKey = null; }
+  try { strayKey = tryReadMasterUntouched(ledgerDir); } catch { strayKey = null; }
   return strayKey !== null && timingSafeEqual(homeKey, strayKey) ? 'match' : 'mismatch';
 }
 

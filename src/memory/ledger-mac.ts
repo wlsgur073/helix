@@ -1,5 +1,5 @@
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
-import { openSync, fsyncSync, closeSync, readFileSync, linkSync, unlinkSync, statSync, chmodSync, mkdirSync } from 'node:fs';
+import { openSync, fsyncSync, closeSync, readFileSync, linkSync, unlinkSync, lstatSync, fstatSync, fchmodSync, mkdirSync, constants } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { withFileLock } from './lock.js';
 import { fsyncDir, writeAll, realFsOps } from './fs-ops.js';
@@ -110,18 +110,45 @@ export function ensureMaster(home: string): Buffer {
   });
 }
 
-/** Strict read: present + exactly MASTER_LEN bytes, else throw (corrupt) or return null (absent). */
-function tryReadMasterStrict(path: string): Buffer | null {
+/** `O_NOFOLLOW`: a link that took the name after the look is refused (`ELOOP`) instead of followed. `O_NONBLOCK`: a FIFO that took
+ *  it opens instead of blocking, and `fstat` then says it is not a regular file. */
+const KEY_REPAIR_OPEN = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+
+/** Defense in depth: tighten an over-broad master key to 0600 (threat model makes the home unreadable; warn-and-fix, not
+ *  fail-closed). KEY-CHMOD-LINK (B2a, ruling J1): only a regular file in a directory that is not itself a link is changed. A key
+ *  that is a symlink, and a key behind a symlinked home, are read by the caller as before and left at their mode, because a mode
+ *  change behind a link is the arbitrary-chmod primitive the startup pass refuses (`home-permissions.ts`,
+ *  `hardenHomePermissions`). The change is made on the descriptor, so a link or a FIFO that takes the name after the look is not
+ *  changed either. Best-effort: any failure leaves the mode as it was. */
+function tightenMasterKey(path: string): void {
+  try {
+    const seen = lstatSync(path);
+    if (!seen.isFile() || (seen.mode & 0o077) === 0) return;    // not a regular file, or already owner-only
+    if (lstatSync(dirname(path)).isSymbolicLink()) return;      // the key sits behind a symlinked home
+    const fd = openSync(path, KEY_REPAIR_OPEN);
+    try {
+      if (fstatSync(fd).isFile()) fchmodSync(fd, 0o600);
+    } finally { closeSync(fd); }
+  } catch { /* best-effort: a failure to repair leaves the mode as it was */ }
+}
+
+/** Strict read: present + exactly MASTER_LEN bytes, else throw (corrupt) or return null (absent).
+ *  `tighten` false reads a key that is not the home's own and never changes its mode (tryReadMasterUntouched). */
+function tryReadMasterStrict(path: string, tighten = true): Buffer | null {
   let buf: Buffer;
   try { buf = readFileSync(path); }
   catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null; throw e; }
   if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
-  // defense-in-depth: tighten over-broad perms (threat model makes home unreadable; warn-and-fix, not fail-closed)
-  try { if ((statSync(path).mode & 0o077) !== 0) chmodSync(path, 0o600); } catch { /* best-effort */ }
+  if (tighten) tightenMasterKey(path);
   return buf;
 }
 
 export function tryReadMaster(home: string): Buffer | null { return tryReadMasterStrict(masterPath(home)); }
+
+/** The strict read of a master key that is not the home's own (the stray key beside a relocated ledger, compareStrayMasterKey):
+ *  the same answer as tryReadMaster (absent null, wrong length LedgerMacError), and no mode repair, because only a regular file
+ *  of the home is tightened (B2a ruling J1). */
+export function tryReadMasterUntouched(dir: string): Buffer | null { return tryReadMasterStrict(masterPath(dir), false); }
 
 export function deriveSubkey(master: Buffer, nonce: string): Buffer {
   return Buffer.from(hkdfSync('sha256', master, Buffer.from(nonce, 'utf8'), Buffer.from('helix-ledger-mac-v1', 'utf8'), 32));
