@@ -10,12 +10,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   openHomeFileForRead, openHomeFileForAppend, NotRegularHomeFileError, isNotRegularHomeFileError, HOME_CONTROL_NAMES, homeControlFileOf,
+  sameDestination,
 } from '../../src/memory/home-files.js';
 import * as homeFiles from '../../src/memory/home-files.js';
 import { assessGradeLoss } from '../../src/memory/trust-store-layout.js';
 import { ensureMaster } from '../../src/memory/ledger-mac.js';
 import { globalScopeNonce } from '../../src/memory/ownership.js';
 import * as pathIdentityMod from '../../src/memory/path-identity.js';
+import type { IdentityProbe } from '../../src/memory/path-identity.js';
 import { OWNED_FILES } from '../../src/memory/home-permissions.js';
 
 const NOT_REGULAR = 'A Helix data file is not a regular file.';   // fixed at the text review
@@ -426,5 +428,53 @@ describe('homeControlFileOf on win32: the path condition after path.win32 normal
       expect(() => homeControlFileOf(H, o, W), `resolved ${o.slice(0, 8)}`).not.toThrow();
       expect(() => homeControlFileOf(o, `${H}\\projects.json`, W), `home ${o.slice(0, 8)}`).not.toThrow();
     }
+  });
+});
+
+describe('sameDestination (task B2): one destination by resolved path, else by device and inode (design 4.3)', () => {
+  const made: string[] = [];
+  const dir = (): string => { const d = realpathSync(mkdtempSync(join(tmpdir(), 'sm-'))); made.push(d); return d; };
+  afterEach(() => { for (const d of made.splice(0)) rmSync(d, { recursive: true, force: true }); });
+
+  it('the same resolved path is one destination even when nothing stands there', () => {
+    const d = dir();
+    expect(sameDestination(join(d, 'a'), join(d, 'a'))).toBe(true);
+  });
+
+  it('two different paths where nothing stands are two destinations', () => {
+    const d = dir();
+    expect(sameDestination(join(d, 'a'), join(d, 'b'))).toBe(false);
+  });
+
+  it('two names of one file (a hard link) are one destination', () => {
+    const d = dir();
+    writeFileSync(join(d, 'a'), 'x\n');
+    linkSync(join(d, 'a'), join(d, 'b'));
+    expect(sameDestination(join(d, 'a'), join(d, 'b'))).toBe(true);
+  });
+
+  it('two different files, and a file against a missing name, are two destinations', () => {
+    const d = dir();
+    writeFileSync(join(d, 'a'), 'x\n');
+    writeFileSync(join(d, 'b'), 'x\n');
+    expect(sameDestination(join(d, 'a'), join(d, 'b'))).toBe(false);
+    expect(sameDestination(join(d, 'a'), join(d, 'missing'))).toBe(false);
+  });
+
+  it('an inode of 0 never makes two different paths one destination (B1 decision 9), the same path still is', () => {
+    const zero: IdentityProbe = () => ({ dev: 1n, ino: 0n });
+    expect(sameDestination('/x/a', '/x/b', zero)).toBe(false);
+    expect(sameDestination('/x/a', '/x/a', zero)).toBe(true);
+  });
+
+  it('inodes past 2^53 are compared as bigints: 2^60 and 2^60+1 are two files', () => {
+    const probe: IdentityProbe = (p) => ({ dev: 1n, ino: p.endsWith('b') ? 2n ** 60n + 1n : 2n ** 60n });
+    expect(sameDestination('/x/a', '/x/b', probe)).toBe(false);
+    expect(sameDestination('/x/a', '/y/c', probe)).toBe(true);
+  });
+
+  it('a path that cannot be inspected is not claimed to be the other: no throw, false', () => {
+    const denied: IdentityProbe = () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); };
+    expect(sameDestination('/x/a', '/x/b', denied)).toBe(false);
   });
 });

@@ -10,7 +10,7 @@
 // are behaviours this module must not change. The decision about WHICH file a destination may be is not made here.
 import { closeSync, constants, fstatSync, openSync } from 'node:fs';
 import { basename, dirname, join, win32 } from 'node:path';
-import { fileIdentityAt, hasComparableInode, resolvePath, sameFile, type FileIdentity } from './path-identity.js';
+import { fileIdentityAt, hasComparableInode, resolvePath, sameFile, type FileIdentity, type IdentityProbe } from './path-identity.js';
 
 /** A file Helix keeps (a key, a registry, a log, the sessions file) is a FIFO, a directory, a device, a socket or
  *  anything else that is not a regular file. Fixed at the text review: constant, no path. */
@@ -143,4 +143,14 @@ export function homeControlFileOf(home: string, resolved: string, opts: { allow?
     if (sameFile(id, identityOrNull(ops.join(homeDir, name), true))) return name;
   }
   return null;
+}
+
+/** Do two RESOLVED paths name one destination (design 4.3: an existing file by device and inode, a file that does not exist
+ *  yet by resolved path)? True for the same string; otherwise both must stand (a link followed) and `sameFile` must say one
+ *  device and inode, which is never true for an inode of 0 (B1 decision 9). A path that cannot be inspected is not claimed to
+ *  be the other: this never throws. */
+export function sameDestination(a: string, b: string, probe?: IdentityProbe): boolean {
+  if (a === b) return true;
+  try { return sameFile(fileIdentityAt(a, { follow: true, probe }), fileIdentityAt(b, { follow: true, probe })); }
+  catch { return false; }
 }

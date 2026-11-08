@@ -1,11 +1,12 @@
 // SessionEnd hook entry: append one session record to ~/.helix/sessions.jsonl.
 // Session metadata is NOT a memory assertion, so it goes to its own ledger — committing
 // auto-generated summaries to memory would bypass the provenance firewall.
-// A hook must never block shutdown: any error -> record nothing, exit 0.
+// A hook must never block shutdown: any error -> record nothing, say so on stderr in one constant line, exit 0.
 import { closeSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname } from 'node:path';
-import { buildSessionEndRecord, readStdinCapped, HOME_REFUSED_END_NOTE } from './session-record.js';
+import { buildSessionEndRecord, readStdinCapped, HOME_REFUSED_END_NOTE, SESSION_RECORD_DROPPED_NOTE } from './session-record.js';
+import { assertSessionsDestination } from './sessions-destination.js';
 import { ensureHelixDir } from '../memory/home-permissions.js';
 import { HOOK_STDIN_MAX_BYTES } from '../limits.js';
 import { resolveHelixPaths, isHomeRefusalError, type HelixPaths } from '../memory/home-env.js';
@@ -35,9 +36,14 @@ try {
   if (record) {
     const paths = resolvedPathsOrNote();
     if (paths !== null) {
-      ensureHelixDir(dirname(paths.sessionsFile));
-      const fd = openHomeFileForAppend(paths.sessionsFile, 0o600);   // owner-only ON CREATE; a FIFO or other non-regular file is refused, not waited on
-      try { writeFileSync(fd, JSON.stringify(record) + '\n'); } finally { closeSync(fd); }
+      try {
+        assertSessionsDestination(paths);                              // ruling N1: not a control file of the home, not a ledger
+        ensureHelixDir(dirname(paths.sessionsFile));
+        const fd = openHomeFileForAppend(paths.sessionsFile, 0o600);   // owner-only ON CREATE; a FIFO or other non-regular file is refused, not waited on
+        try { writeFileSync(fd, JSON.stringify(record) + '\n'); } finally { closeSync(fd); }
+      } catch {
+        writeSync(2, `${SESSION_RECORD_DROPPED_NOTE}\n`);              // ASCII; if this write fails too, the outer catch ends the hook silently
+      }
     }
   }
 } catch {

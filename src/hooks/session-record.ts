@@ -69,3 +69,10 @@ export const HOME_REFUSED_START_NOTE =
 // no imperative) and ASCII only.
 export const HOME_REFUSED_END_NOTE =
   'helix: NOTE - HELIX_HOME, HELIX_LEDGER or HELIX_SESSIONS holds a relative path or a path that cannot be resolved; the session-end hook wrote no record.';
+
+/** Printed on stderr by the SessionEnd hook for a record it had and could not keep (task B2, ruling J item 5): the destination
+ *  is a control file of the home, the global ledger or a project's ledger, or its folder or the file cannot be written, or it
+ *  is not a regular file. Constant, ASCII, no path, no interpolation, no instruction; one line per dropped record. A refused
+ *  environment prints HOME_REFUSED_END_NOTE instead, never both. */
+export const SESSION_RECORD_DROPPED_NOTE =
+  'helix: NOTE - the session-end hook did not write its record because the sessions file cannot be used (its folder or the file cannot be written, it is not a regular file, or it is a file that Helix keeps for another purpose).';
