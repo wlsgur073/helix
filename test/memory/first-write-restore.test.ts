@@ -10,7 +10,7 @@ import * as witnessStoreMod from '../../src/memory/witness-store.js';
 import { isRecordStoredError } from '../../src/memory/witness-store.js';
 import * as ledgerMod from '../../src/memory/ledger.js';
 import { isLedgerProcLostError } from '../../src/memory/ledger.js';
-import { LockForeignObjectError } from '../../src/memory/lock.js';
+import { LockForeignObjectError, isLockForeignObjectError } from '../../src/memory/lock.js';
 import { UnresolvablePathError } from '../../src/memory/path-identity.js';
 import * as ownershipMod from '../../src/memory/ownership.js';
 import { isOwned, trustStateOf, projectLedgerPath, canonicalRoot } from '../../src/memory/ownership.js';
@@ -296,14 +296,17 @@ describe('single cells', () => {
     expect(existsSync(fx.ledger)).toBe(false);
   });
 
-  it('a foreign object at the witness lock: the row is stored, the error carries the stored mark, and the ownership is kept (W-R4)', () => {
+  it('B2a J3 (was W-R4): a foreign object at the witness lock refuses the first commit before the ownership record and the row, unmarked', () => {
     const fx = fixture();
     symlinkSync(join(fx.base, 'nowhere'), join(fx.home, 'witness.json.lock'));
     let error: unknown;
     try { fx.store().commit({ content: 'a fact', source: 'user' }); } catch (e) { error = e; }
-    expect(isRecordStoredError(error)).toBe(true);
-    expect(rowsIn(fx.ledger)).toEqual(['a fact']);
-    expect(isOwned(fx.root, fx.home)).toBe(true);
+    expect(isLockForeignObjectError(error)).toBe(true);
+    expect(isRecordStoredError(error)).toBe(false);
+    expect(existsSync(fx.ledger)).toBe(false);
+    expect(registryKeys(fx.home)).toEqual([]);
+    expect(isOwned(fx.root, fx.home)).toBe(false);
+    expect(existsSync(join(fx.helix, '.owner'))).toBe(false);
   });
 
   it('a .helix folder this call created is removed when the call is refused (FW-R6)', () => {

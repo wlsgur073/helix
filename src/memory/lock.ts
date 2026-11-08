@@ -419,6 +419,15 @@ function readLockObject(path: string): LockObject {
   }
 }
 
+/** Does a foreign object (a link, a FIFO, a socket or a device) stand at `lockPath`? This is the acquirer's own verdict
+ *  (readLockObject's `foreign`, the case withFileLock refuses with LockForeignObjectError), asked without taking or waiting on
+ *  the lock, so a caller can refuse BEFORE an append instead of after it. Everything that is not foreign answers false: no lock,
+ *  a regular file (a payload or not, readable or not) and a legacy lock directory are handled by the acquirer by waiting,
+ *  reclaiming or timing out, and a refusal in front of an append would be wrong for them. Never throws. */
+export function lockPathHoldsForeignObject(lockPath: string): boolean {
+  return readLockObject(lockPath).kind === 'foreign';
+}
+
 /** The token recorded at a lock path, or null: read through readLockObject, so a link, a FIFO, a
  *  directory, an oversized or an unreadable file answers null and is never followed. stillOwned,
  *  release, the orphan reclaim and the reaper gate use it to recognise their OWN lock and leave

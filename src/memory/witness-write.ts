@@ -8,8 +8,9 @@
  *  matching §4.2; the nested witness lock taken by completeTransition/advanceWitness below targets
  *  a DIFFERENT path, `witnessPath(home)`, so nesting is safe — withFileLock is only non-reentrant
  *  PER PATH — enforced by the `reentrant-self` throw in lock.ts's acquireFileLock):
- *    0. look at the witness file (assertWitnessWritable, design 4.8 item 2), then validate the home (ensureHelixDir) BEFORE
- *       the ledger is read or appended (IT-H2). An unusable file refuses here, with nothing done.
+ *    0. look at the witness file and at the object beside it that its lock stands on (assertWitnessWritable, design 4.8
+ *       item 2, B2a J3), then validate the home (ensureHelixDir) BEFORE the ledger is read or appended (IT-H2). An unusable
+ *       file or a foreign lock object refuses here, with nothing done.
  *    1. read current bytes and classify them against this scope's witness state (PRE-append verdict).
  *    2. transition-heal        -> completeTransition FIRST (resolve-before-any-write), using the
  *       bytes just read (classifyState already proved they match journal.expected exactly) and the

@@ -6,7 +6,7 @@
 import { randomBytes, createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
 import { lstatSync, openSync, fstatSync, readFileSync, closeSync, constants, type Stats } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { withFileLock } from './lock.js';
+import { withFileLock, LockForeignObjectError, lockPathHoldsForeignObject } from './lock.js';
 import { canonicalRoot, resolvePath, resolvedPathOrThrow } from './path-identity.js';
 import { ensureMaster, tryReadMaster } from './ledger-mac.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
@@ -221,7 +221,9 @@ function readWitnessFile(rawPath: string, asGiven: boolean): WitnessFileRead {
 
 /** The first step of an append (design 4.8 item 2): the path resolves, no link stands at it, the place is absent or a regular
  *  file, and a present file can be read and parsed. Lock-free; creates nothing, mints no key. An absent file and a home that
- *  does not exist yet pass. */
+ *  does not exist yet pass. The witness lock's name is looked at too (B2a J3): a link, FIFO, socket or device there is a lock
+ *  the acquirer refuses after the row, so it is refused here with the acquirer's own error (LockForeignObjectError, not marked
+ *  as stored); the witness file is judged first. */
 export function assertWitnessWritable(home: string, op: string, opts: { homeUnchecked?: boolean } = {}): void {
   // `homeUnchecked`: the caller has not validated the home yet and does so right after (the first step of an append, ahead of
   // ensureHelixDir). A symlinked home keeps the home's own refusal (IT-H2), whatever a look at the file through the link would
@@ -232,6 +234,9 @@ export function assertWitnessWritable(home: string, op: string, opts: { homeUnch
   if (f.kind === 'uninspectable') { if (opts.homeUnchecked) return; throw f.error; }
   if (f.kind === 'unusable') throw new WitnessUnusableError(op, f.reason);
   if (f.kind === 'transient') throw new WitnessUnusableError(op, 'transient');
+  // `f` is now a store or an absent file. The lock stands beside the RESOLVED witness path, the place withFileLock uses
+  // (lockPathOf). No path: there is no folder yet, so no lock can stand there.
+  if (f.path !== null && lockPathHoldsForeignObject(`${f.path}.lock`)) throw new LockForeignObjectError();
 }
 
 /** Before the witness LOCK is asked for: the lock file's place comes from the resolver, which follows a link, so a link

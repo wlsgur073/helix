@@ -185,12 +185,12 @@ describe('every error after the append carries the mark; none before it does (4.
     } finally { spy.mockRestore(); }
   });
 
-  it('W-R4: a foreign object at the place of the witness lock is met after the append: the lock\'s refusal, marked, the row stored once (the first step does not look there)', () => {
+  it('B2a J3 (was W-R4): a foreign object at the place of the witness lock is met BEFORE the append: the lock\'s refusal, unmarked, no row stored', () => {
     const { h, ledger } = seeded();
     symlinkSync(join(h, 'nowhere'), `${witnessPath(h)}.lock`);
     const e = thrown(() => appendWitnessed(ledger, rec('m_1'), h, undefined, 'commit'));
-    expect(isLockForeignObjectError(e)).toBe(true); expect(isRecordStoredError(e)).toBe(true);
-    expect(rows(ledger)).toBe(1);
+    expect(isLockForeignObjectError(e)).toBe(true); expect(isRecordStoredError(e)).toBe(false);
+    expect(rows(ledger)).toBe(0);
   });
 
   it('a refusal before the append never carries the mark (the witness check)', () => {

@@ -820,13 +820,15 @@ export class MemoryStore {
    *    1. A read-only global ledger is refused with the operation's fixed text (GlobalLedgerReadOnlyError): before the
    *       witness check, before ensureHelixDir may create the home, before the ledger's folder is
    *       created and before a lock is tried.
-   *    2. The witness file must be usable (4.8 item 2), asked in front of the home's validation (G-R3). Not for the
-   *       auto-compaction, whose gate is the rewrite's own.
+   *    2. The witness file must be usable and its lock's name (B2a J3) (4.8 item 2), asked in front of the home's
+   *       validation (G-R3). Not for the auto-compaction, whose gate is the rewrite's own.
    *    3. ensureHelixDir and the folder of a plain path (today's creation, unchanged).
    *    4. The ledger lock at the resolved destination. Under it the path is resolved again: it must be the path the lock
    *       stands beside, and the destination's identity is sampled HERE, where the append's check after the open compares
    *       the descriptor with it (G-R7). A path that became read-only while the call waited is refused with step 1's text;
    *       one that resolves elsewhere gets the global changed-destination text.
+   *    5. The key is read or minted under the ledger lock for a commit and an erase, in front of the row (B2a J3), after the
+   *       destination is checked and before its identity is sampled.
    *  Lock order: the global ledger lock first; the body takes the registry lock (the global scope nonce), the key lock (a
    *  first mint) and the witness lock under it and never another ledger lock. */
   private underGlobalLedgerLock<T>(op: GlobalWriteOp, body: (held: { ctx: LockContext; judged: JudgedDestination }) => T): T {
@@ -844,6 +846,12 @@ export class MemoryStore {
         // B2a ruling E: the early refusal above asked before the lock; a link retargeted at a control file since then resolves,
         // under the lock now held beside THAT file, to a destination the body must not write. Same typed refusal, in front of the body.
         if (homeControlFileOf(home, r.path) !== null) throw new GlobalLedgerReadOnlyError(op, 'home-control-file');
+        // B2a J3 (WBR-locks L-3): the key is read, or minted, in front of the row. A foreign object at the key lock, a damaged key
+        // or a key that cannot be read refuses here with nothing written; before this line advanceWitness minted it after the row,
+        // so a home was left with a row and no key. Under the ledger lock (lock order: ledger, then key). Before the destination's
+        // identity is sampled, so the sample stays the last step before the body. confirm and recheck mint in writeVerifyLocked,
+        // the compaction in openTransition.
+        if (op === 'commit' || op === 'erase') ensureMaster(home);
         return body({ ctx, judged: { path: r.path, identity: fileIdentityAt(r.path) } });
       });
     } catch (e) {
