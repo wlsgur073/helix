@@ -26,6 +26,9 @@ export interface ReporterFailureRecord {
   exit_code: string | null;
   exit_status: string | null;
   reason: ReporterFailureReason;
+  /** Present, and true, only when helix-trigger exited 3 (its refusal of the home, B2a plan decisions P1 and P2);
+   *  `reason` is still "crash" then. */
+  home_refused?: true;
 }
 
 export type TriggerRecord = EvaluationRecord | ReporterFailureRecord;
@@ -35,8 +38,8 @@ function isNullableString(v: unknown): v is string | null {
 }
 
 /** Strict shape check for a `kind:"reporter-failure"` line -- exactly the fields the adapter's FIXED
- *  template composes (see scripts/dogfood-postrun.sh), no more and no less. Mirrors
- *  validateRecordLine's fail()-throws-descriptive-message convention, but is a SEPARATE definition
+ *  template composes (see scripts/dogfood-postrun.sh, `home_refused` included, which is optional), no
+ *  more and no less. Mirrors validateRecordLine's fail()-throws-descriptive-message convention, but is a SEPARATE definition
  *  (not a delegation) because the adapter is bash, not TypeScript -- it has no importable validator of
  *  its own to share. */
 function validateReporterFailureLine(line: string): ReporterFailureRecord {
@@ -53,7 +56,8 @@ function validateReporterFailureLine(line: string): ReporterFailureRecord {
     if (!isNullableString(parsed[field])) fail(field);
   }
   if (typeof parsed.reason !== 'string' || !(REASONS as readonly string[]).includes(parsed.reason)) fail('reason');
-  const allowedKeys = new Set(['v', 'policy', 'kind', 'ts', 'run', 'service_result', 'exit_code', 'exit_status', 'reason']);
+  if ('home_refused' in parsed && parsed.home_refused !== true) fail('home_refused');
+  const allowedKeys = new Set(['v', 'policy', 'kind', 'ts', 'run', 'service_result', 'exit_code', 'exit_status', 'reason', 'home_refused']);
   for (const key of Object.keys(parsed)) {
     if (!allowedKeys.has(key)) fail(`unexpected field ${key}`);
   }

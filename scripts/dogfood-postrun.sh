@@ -39,12 +39,23 @@ run_id="${INVOCATION_ID:-p$$-$(date +%s)}"
 # arbitrary working directory.
 artifact="$(cd "$(dirname "$0")" && pwd)/../bin/helix-trigger.mjs"
 
-# Sink path mirrors the artifact's own resolution (scripts/trigger-measure.ts resolveHome): HELIX_HOME
-# when set, else ~/.helix. HOME is itself nullable-defaulted here too -- if both HELIX_HOME and HOME
-# are unset, this collapses to the literal path "/.helix/trigger.jsonl" (normally unwritable for a
-# non-root user); the mkdir/append below then fail exactly like any other unwritable-sink case, and
-# the stdout echo is the journald-only trace (the already-tested sink-unwritable path).
-sink="${HELIX_HOME:-${HOME:-}/.helix}/trigger.jsonl"
+# Sink path: HELIX_HOME when it is set and not empty, else $HOME/.helix. This is the artifact's own
+# default (resolveHelixPaths in src/memory/home-env.ts): an empty value reads as unset, and a relative
+# value is refused by the artifact with exit 3. The reporter-failure write below applies the same
+# rule (sink_home_usable). HOME is itself nullable-defaulted here too -- if both HELIX_HOME and HOME
+# are unset, the home collapses to the literal path "/.helix", which is normally absent, and the
+# write is then skipped like any other missing home; the stdout echo is the journald-only trace.
+sink_home="${HELIX_HOME:-${HOME:-}/.helix}"
+sink="$sink_home/trigger.jsonl"
+
+# True when the sink path holds nothing or a regular file that is not a symlink (B2a ruling F). The
+# fired-history read below and the reporter-failure append both require it, so a FIFO named
+# trigger.jsonl cannot block this script and a symlinked trigger.jsonl is neither read nor written
+# through. The link test comes first because -e and -f follow a link; a dangling link is a link.
+# No check here closes a swap between the look and the open.
+sink_file_usable() {
+  [ ! -L "$sink" ] && { [ ! -e "$sink" ] || [ -f "$sink" ]; }
+}
 
 # Trigger-1 has no latch and needs none: every evaluation is already a durable line in the sink.
 # What was missing is a reader. Report the DERIVED history rather than the last evaluation alone --
@@ -100,9 +111,11 @@ trigger_fired_summary() {
   printf '%s Acknowledged %s: no new slow recall or size crossing since.\n' "$msg" "$ack_ts"
   return 11
 }
-# Runs unconditionally, before the artifact call below, so it can never be skipped by an early exit
-# (the artifact success path returns right after the call below, with no further stdout of its own).
-trigger_fired_summary "$sink"
+# Runs before the artifact call below, so it can never be skipped by an early exit (the artifact
+# success path returns right after the call below, with no further stdout of its own). It reads the
+# sink only when sink_file_usable holds (above); a FIFO, a directory, a device or a link at the sink
+# path prints no summary.
+if sink_file_usable; then trigger_fired_summary "$sink"; fi
 
 # HELIX_POSTRUN_TIMEOUT / HELIX_POSTRUN_KILL_AFTER override the production 45s/5s budget. They exist
 # ONLY so tests can avoid real 45-second waits -- production always runs with the defaults.
@@ -114,7 +127,11 @@ status=$?
 # Dogfood issue auto-file (issue-tracking decision 2026-07-20): when the RUN ITSELF failed --
 # SERVICE_RESULT is anything but "success", covering the agent-dead / signal / nonzero cases the
 # agent can never self-report -- append one OPEN issue to the project's ISSUES.md so the NEXT
-# run's open-issue-first rule picks it up. Independent of the reporter artifact's own status
+# run's open-issue-first rule picks it up. Two stops are not the run's own failure (B2a ruling H):
+# a usage-limit stop and a host shutdown. Those file no issue; one constant line to stdout (journald)
+# names which, and the sink keeps the evaluation record the artifact wrote with the same lifecycle
+# values (ruling N2: nothing is written to ISSUES.md, so the runner prompt and the agent's memory
+# stay as they are). Independent of the reporter artifact's own status
 # (checked BEFORE the exit-0 early return below: a healthy reporter can coexist with a failed
 # run). Fixed template; lifecycle enums pass the same control/quote/backslash strip as the sink
 # record plus shell-metacharacter strip (defensive -- systemd values are enum-like already); the
@@ -123,7 +140,57 @@ status=$?
 # the trailing exit 0. Next id = HIGHEST existing "## ISSUE-NNNN" + 1 (the file's own convention;
 # a count would collide after gaps). 10# forces decimal -- zero-padded ids would otherwise parse
 # as octal and "0008"/"0009" would abort the arithmetic.
-if [ "${SERVICE_RESULT:-}" != "success" ] && [ -n "${1:-}" ] && [ -f "${1}/ISSUES.md" ]; then
+NOTE_USAGE_LIMIT='dogfood-postrun: no issue filed, the run stopped at a usage limit'
+NOTE_HOST_SHUTDOWN='dogfood-postrun: no issue filed, the host was shutting down'
+RUN_LOG_FRESH_SECONDS=600
+
+# Prints "limit", "shutdown" or nothing for a run that did not succeed. $1 = the dogfood root.
+#  limit    -- the newest run log under "$1/runs" (the runner's own tee target; by mtime, so a retry's
+#              -attemptN log counts) was written within RUN_LOG_FRESH_SECONDS and its FIRST line is the
+#              CLI's usage-limit message ("You've hit your session limit ...", "... weekly limit ...").
+#              A stale log (the run died before writing one) and a limit message further down a log
+#              (the agent quoting it) do not count.
+#  shutdown -- SERVICE_RESULT is "signal" and the system manager or the user manager reports
+#              "stopping" (systemctl is-system-running). A TERM from anyone else stays a failure.
+# Not measured on a real shutdown yet: the stub tests pin the rule, the next boot that ends a
+# catch-up run is the observation.
+classify_run_stop() {
+  local root="${1:-}" f newest="" first="" mt now state
+  if [ -n "$root" ]; then
+    for f in "$root"/runs/20*.log; do
+      [ -f "$f" ] || continue
+      if [ -z "$newest" ] || [ "$f" -nt "$newest" ]; then newest="$f"; fi
+    done
+  fi
+  if [ -n "$newest" ]; then
+    mt=$(stat -c %Y "$newest" 2>/dev/null)
+    now=$(date +%s)
+    if [ -n "$mt" ] && [ $(( now - mt )) -le "$RUN_LOG_FRESH_SECONDS" ]; then
+      IFS= read -r first < "$newest" 2>/dev/null
+      case "$first" in
+        "You've hit your "*" limit"*) printf 'limit'; return 0 ;;
+      esac
+    fi
+  fi
+  if [ "${SERVICE_RESULT:-}" = "signal" ]; then
+    state=$(timeout 5 systemctl is-system-running 2>/dev/null)
+    if [ "$state" = "stopping" ]; then printf 'shutdown'; return 0; fi
+    state=$(timeout 5 systemctl --user is-system-running 2>/dev/null)
+    if [ "$state" = "stopping" ]; then printf 'shutdown'; return 0; fi
+  fi
+  return 0
+}
+
+run_stop=""
+if [ "${SERVICE_RESULT:-}" != "success" ]; then
+  run_stop=$(classify_run_stop "${1:-}")
+fi
+case "$run_stop" in
+  limit) printf '%s\n' "$NOTE_USAGE_LIMIT" ;;
+  shutdown) printf '%s\n' "$NOTE_HOST_SHUTDOWN" ;;
+esac
+
+if [ "${SERVICE_RESULT:-}" != "success" ] && [ -z "$run_stop" ] && [ -n "${1:-}" ] && [ -f "${1}/ISSUES.md" ]; then
   {
     last=$(grep -o '^## ISSUE-[0-9]\{1,\}' "${1}/ISSUES.md" 2>/dev/null | sed 's/.*ISSUE-//' | sort -n | tail -1)
     issue_n=$(( 10#${last:-0} + 1 ))
@@ -146,10 +213,15 @@ fi
 # = `timeout` itself could not exec `node` at all (not found / not executable) -- a launch failure,
 # never reached by the artifact's own logic (a merely-missing artifact FILE still lets `node` launch
 # and then exit 1, which falls through to the crash case below). Anything else nonzero is the artifact
-# exiting under its own logic (a genuine crash).
+# exiting under its own logic (a genuine crash). Exit 3 is helix-trigger's own refusal of a home
+# (B2a plan decisions P1 and P2: a relative or unresolvable HELIX_HOME, a symlinked home, a missing
+# parent, a home owned by someone else). It keeps reason "crash" -- the sink's reasons stay the three
+# above -- and adds one optional field, home_refused, so a reader can tell it from a crash (exit 1).
+home_refused=""
 case "$status" in
   124|137) reason="timeout" ;;
   126|127) reason="launch-failure" ;;
+  3) reason="crash"; home_refused=',"home_refused":true' ;;
   *) reason="crash" ;;
 esac
 
@@ -169,19 +241,40 @@ json_lifecycle() {
 }
 
 ts="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-record=$(printf '{"v":1,"policy":"T1-2026-07-11","kind":"reporter-failure","ts":"%s","run":"%s","service_result":%s,"exit_code":%s,"exit_status":%s,"reason":"%s"}' \
+record=$(printf '{"v":1,"policy":"T1-2026-07-11","kind":"reporter-failure","ts":"%s","run":"%s","service_result":%s,"exit_code":%s,"exit_status":%s,"reason":"%s"%s}' \
   "$ts" "$run_id" \
   "$(json_lifecycle "${SERVICE_RESULT:-}")" "$(json_lifecycle "${EXIT_CODE:-}")" "$(json_lifecycle "${EXIT_STATUS:-}")" \
-  "$reason")
+  "$reason" "$home_refused")
+
+# True when the sink's home may be written to by this adapter (B2a ruling F): an absolute path (the
+# artifact refuses a relative HELIX_HOME, so a relative one never names a home), not a symlink (every
+# Helix write through a symlinked home is refused; the last component is looked at with trailing
+# slashes and a trailing "/." removed, as resolveHelixPaths cuts them in src/memory/home-env.ts,
+# because "link/" and "link/." would otherwise be followed by the look) and an existing directory
+# (this adapter never creates the home or its parents; the artifact creates a missing home through
+# ensureHelixDir, one 0700 directory under an existing parent). A home reached as "<link>/../name" is
+# the kernel's, as for the server. No check here closes a swap between the look and the append.
+sink_home_usable() {
+  local h="$sink_home"
+  while :; do
+    if [ "${#h}" -gt 1 ] && [ "${h%/}" != "$h" ]; then h="${h%/}"; continue; fi
+    if [ "${#h}" -gt 2 ] && [ "${h%/.}" != "$h" ]; then h="${h%/.}"; continue; fi
+    break
+  done
+  case "$h" in /*) ;; *) return 1 ;; esac
+  [ ! -L "$h" ] && [ -d "$h" ]
+}
 
 # Best-effort append: plain `>>`, no fsync -- this IS the failure-reporting path, so it stays as
 # simple and dependency-free as possible (the success path's fsynced write, owned by the artifact
-# itself, is where the durability guarantee actually lives). If the sink is unwritable (missing
-# parent, wrong permissions, or something else occupying the sink path), mkdir/the append below
-# silently fail -- there is no `set -e`, so the script keeps going either way -- and the stdout echo
-# next is the ONLY trace, picked up by journald.
-mkdir -p "$(dirname "$sink")" 2>/dev/null
-printf '%s\n' "$record" >> "$sink" 2>/dev/null
+# itself, is where the durability guarantee actually lives). It is skipped when the home is not
+# usable (above) or the sink path holds something other than a regular file (sink_file_usable); if
+# the sink is unwritable otherwise (wrong permissions), the append below silently fails -- there is
+# no `set -e`, so the script keeps going either way -- and the stdout echo next is the ONLY trace,
+# picked up by journald.
+if sink_home_usable && sink_file_usable; then
+  printf '%s\n' "$record" >> "$sink" 2>/dev/null
+fi
 
 # One echo either way (append succeeded or failed) -- the record always reaches journald via stdout,
 # even when the sink write silently failed.
