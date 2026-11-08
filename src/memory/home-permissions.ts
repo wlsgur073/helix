@@ -7,7 +7,7 @@ import { HomeRefusalError } from './home-env.js';
  *  `config.json` is included even though Helix never creates it: it is authority-bearing — it can
  *  enable the outbound path and release every egress leg — so a group-writable config is a
  *  privilege-escalation surface even when every ledger byte is sound. */
-const OWNED_FILES: readonly string[] = [
+export const OWNED_FILES: readonly string[] = [
   'memory.jsonl',
   'audit.jsonl',
   'sessions.jsonl',

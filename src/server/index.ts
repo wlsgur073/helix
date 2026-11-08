@@ -167,7 +167,7 @@ if (stray.length > 0) {
 }
 
 // Design 4.7: a global ledger whose path cannot be used for writing is said once, at the start.
-if (isGlobalLedgerReadOnly(globalLedger)) process.stderr.write(`${GLOBAL_READ_ONLY_STARTUP_LINE}\n`); // ASCII only
+if (isGlobalLedgerReadOnly(globalLedger, home)) process.stderr.write(`${GLOBAL_READ_ONLY_STARTUP_LINE}\n`); // ASCII only
 
 // Auto-compaction is read GLOBAL-only (never via loadConfig's project layer): it is destructive — it
 // can close the soft-erase undo window — so a foreign checkout's `.helix/config.json` must never be

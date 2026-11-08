@@ -14,10 +14,11 @@ import { readLedgerBytes, LedgerDestinationChangedError } from '../../src/memory
 import { MemoryStore } from '../../src/memory/store.js';
 import { projectLedgerPath, trustStateOf } from '../../src/memory/ownership.js';
 import { buildGlobalLayout, cleanupLayouts, snapshotTree, FF, type GlobalLayoutName } from '../helpers/global-layouts.js';
+import { buildControlHome, homeDigest, cleanupControlLayouts } from '../helpers/home-control-layouts.js';
 
 const AS_ROOT = process.getuid?.() === 0;
 const bases: string[] = [];
-afterEach(() => { vi.restoreAllMocks(); for (const b of bases.splice(0)) rmSync(b, { recursive: true, force: true }); cleanupLayouts(); });
+afterEach(() => { vi.restoreAllMocks(); for (const b of bases.splice(0)) rmSync(b, { recursive: true, force: true }); cleanupLayouts(); cleanupControlLayouts(); });
 
 function captureStderr(): { text: () => string } {
   let err = '';
@@ -139,7 +140,7 @@ describe('rebaseline --scope <project>: one text per cause, exit 2 before the lo
 });
 
 describe('rebaseline --scope global over a global ledger that cannot be used (spec 4.10 and 4.7; exit 2, in front of everything)', () => {
-  const REFUSAL = "helix-rebaseline: REFUSING - the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist).\nNothing was written. Repair that path (HELIX_LEDGER, or a link on it), then re-run.\n";
+  const REFUSAL = "helix-rebaseline: REFUSING - the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist) or leads to another file of the Helix home.\nNothing was written. Repair that path (HELIX_LEDGER, or a link on it), then re-run.\n";
   const LAYOUTS: GlobalLayoutName[] = ['nonutf8-link-body', 'nonutf8-dir-link', 'chain-41', 'loop', 'dangling-target-dir-missing', 'below-dangling-dir-link'];
 
   it.each(LAYOUTS)('%s: the fixed text, no prompt, no lock, no folder, nothing created', async (name) => {
@@ -181,6 +182,30 @@ describe('rebaseline --scope global over a global ledger that cannot be used (sp
     const l = buildGlobalLayout('plain');
     captureStderr();
     expect(await rebaseline(['--scope', 'global'], { env: { HELIX_HOME: l.home, HELIX_LEDGER: l.ledger }, isTTY: true, promptLine: async () => 'bless', exit: () => {} })).toBe(0);
+  });
+
+  it.each(['witness.json', 'projects.json', 'ledger-mac-master.key', 'sessions.jsonl'])('HELIX_LEDGER at the home file %s: the same fixed text, exit 2, no prompt, the home as it was', async (name) => {
+    const c = buildControlHome();
+    const before = homeDigest(c.home);
+    const cap = captureStderr();
+    let prompted = false;
+    const code = await rebaseline(['--scope', 'global'], { env: { HELIX_HOME: c.home, HELIX_LEDGER: join(c.home, name) }, isTTY: true, promptLine: async () => { prompted = true; return ''; }, exit: () => {} });
+    expect(code).toBe(2);
+    expect(cap.text()).toBe("helix-rebaseline: REFUSING - the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist) or leads to another file of the Helix home.\nNothing was written. Repair that path (HELIX_LEDGER, or a link on it), then re-run.\n");
+    expect(prompted).toBe(false);
+    expect(homeDigest(c.home)).toEqual(before);
+  });
+
+  it('control: HELIX_LEDGER relocated outside the home goes on to the prompt', async () => {
+    const c = buildControlHome();
+    const rel = join(c.base, 'elsewhere');
+    mkdirSync(rel);
+    writeFileSync(join(rel, 'g.jsonl'), '');
+    const cap = captureStderr();
+    let prompted = false;
+    await rebaseline(['--scope', 'global'], { env: { HELIX_HOME: c.home, HELIX_LEDGER: join(rel, 'g.jsonl') }, isTTY: true, promptLine: async () => { prompted = true; return ''; }, exit: () => {} });
+    expect(cap.text()).not.toContain('REFUSING');
+    expect(prompted).toBe(true);
   });
 });
 

@@ -167,9 +167,10 @@ export const WITNESS_READ_TRANSIENT_NOTE =
  *  chain past the link limit); none are shown because the scope is held out by a pending journal (the 4.7 residue).
  *  "Cannot be used for writing" covers FN-25; "records that can be read through that path are shown" is true in all three;
  *  no "in this session": the state is the path's, asked on every call (design section 14 decision 8, table E, order item 1).
- *  Its last clause tells a reader that a mismatch note beside it can come from the broken path (v-global-04). */
+ *  Its last clause tells a reader that a mismatch note beside it can come from the broken path (v-global-04).
+ *  The third cause (B2a ruling E): the path leads to another file of the Helix home. */
 export const GLOBAL_LEDGER_READ_ONLY_NOTE =
-  "(the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), " +
+  "(the global memory file's path cannot be used for writing (it cannot be resolved, it is a link into a directory that does not exist, or it leads to another file of the Helix home), " +
   'so global memory is read-only: records that can be read through that path are shown, and nothing can be stored, erased or re-graded ' +
   'there until the path is repaired; while the path is broken, a rollback witness mismatch note for global memory can come from the broken ' +
   'path and not from a rollback)';

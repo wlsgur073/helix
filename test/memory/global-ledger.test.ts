@@ -1,7 +1,7 @@
 // Third fix batch B1, task B6 (design 4.7, 4.1 item 4): the state of the global ledger's path, its typed refusal and fixed
 // texts, and the read of a ledger by the resolved name or, for an unresolvable global ledger, by the path as given.
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, chmodSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, chmodSync, realpathSync, rmSync, lstatSync, linkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -15,15 +15,17 @@ import { isUnresolvablePathError } from '../../src/memory/path-identity.js';
 import { readLedgerWitnessed } from '../../src/memory/witness-read.js';
 import { verifiedLiveStats } from '../../src/memory/verified-read.js';
 import { buildGlobalLayout, cleanupLayouts, snapshotTree, type GlobalLayoutName } from '../helpers/global-layouts.js';
+import { isHomeRefusalError } from '../../src/memory/home-env.js';
+import { buildControlHome, linkOwnerLedgerTo, relocatedLedger, homeDigest, cleanupControlLayouts, CONTROL_FILES, CONTROL_LOCKS } from '../helpers/home-control-layouts.js';
 
-afterEach(() => cleanupLayouts());
+afterEach(() => { vi.restoreAllMocks(); cleanupLayouts(); cleanupControlLayouts(); });
 const AS_ROOT = process.getuid?.() === 0;
 const thrownBy = (f: () => unknown): unknown => { try { f(); } catch (e) { return e; } return undefined; };
 
-const CAUSE = "the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist)";
+const CAUSE = "the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist) or leads to another file of the Helix home";
 const TAIL = 'Tell the user that the global memory path needs repair; do not repair it for them.';
-const NOTE = "(the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), so global memory is read-only: records that can be read through that path are shown, and nothing can be stored, erased or re-graded there until the path is repaired; while the path is broken, a rollback witness mismatch note for global memory can come from the broken path and not from a rollback)";
-const STARTUP = "helix: NOTE - the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), so global memory is read-only: nothing can be stored, erased or re-graded there until the path is repaired";
+const NOTE = "(the global memory file's path cannot be used for writing (it cannot be resolved, it is a link into a directory that does not exist, or it leads to another file of the Helix home), so global memory is read-only: records that can be read through that path are shown, and nothing can be stored, erased or re-graded there until the path is repaired; while the path is broken, a rollback witness mismatch note for global memory can come from the broken path and not from a rollback)";
+const STARTUP = "helix: NOTE - the global memory file's path cannot be used for writing (it cannot be resolved, it is a link into a directory that does not exist, or it leads to another file of the Helix home), so global memory is read-only: nothing can be stored, erased or re-graded there until the path is repaired";
 
 const STATE: Array<[GlobalLayoutName, 'writable' | 'unresolvable' | 'target-directory-missing']> = [
   ['plain', 'writable'], ['link-to-file', 'writable'], ['dangling-target-dir-present', 'writable'],
@@ -38,10 +40,10 @@ describe('globalLedgerWriteState (design 4.7, first table; G-R1: a directory lin
     const l = buildGlobalLayout(name);
     expect(l.cls).toBe(cls);
     const before = snapshotTree(l.base);
-    const s = globalLedgerWriteState(l.ledger);
+    const s = globalLedgerWriteState(l.ledger, l.home);
     expect(s.kind).toBe(cls === 'writable' ? 'writable' : 'read-only');
     if (s.kind === 'read-only') expect(s.cause).toBe(cls);
-    expect(isGlobalLedgerReadOnly(l.ledger)).toBe(cls !== 'writable');
+    expect(isGlobalLedgerReadOnly(l.ledger, l.home)).toBe(cls !== 'writable');
     expect(snapshotTree(l.base)).toEqual(before);        // asking creates nothing and changes no mode
   });
 
@@ -51,7 +53,7 @@ describe('globalLedgerWriteState (design 4.7, first table; G-R1: a directory lin
     writeFileSync(join(d, 'sub', 'g.jsonl'), '');
     chmodSync(join(d, 'sub'), 0o000);
     try {
-      expect(globalLedgerWriteState(join(d, 'sub', 'g.jsonl'))).toEqual({ kind: 'writable' });
+      expect(globalLedgerWriteState(join(d, 'sub', 'g.jsonl'), d)).toEqual({ kind: 'writable' });
       expect((thrownBy(() => readLedgerBytes(join(d, 'sub', 'g.jsonl'))) as NodeJS.ErrnoException).code).toBe('EACCES');
       expect((thrownBy(() => readLedgerBytes(join(d, 'sub', 'g.jsonl'), GLOBAL_LEDGER_READ)) as NodeJS.ErrnoException).code).toBe('EACCES');
     } finally { chmodSync(join(d, 'sub'), 0o700); rmSync(d, { recursive: true, force: true }); }
@@ -60,12 +62,80 @@ describe('globalLedgerWriteState (design 4.7, first table; G-R1: a directory lin
   it('the walk above the file reads the path as given: `live/../dl` answers what `other/dl` answers (ALIAS-DOTDOT class)', () => {
     const l = buildGlobalLayout('below-dangling-dir-link-dotdot');
     const plain = `${l.base}/other/dl/memory.jsonl`;
-    expect(globalLedgerWriteState(l.ledger)).toEqual({ kind: 'read-only', cause: 'target-directory-missing' });
-    expect(globalLedgerWriteState(l.ledger)).toEqual(globalLedgerWriteState(plain));
+    expect(globalLedgerWriteState(l.ledger, l.home)).toEqual({ kind: 'read-only', cause: 'target-directory-missing' });
+    expect(globalLedgerWriteState(l.ledger, l.home)).toEqual(globalLedgerWriteState(plain, l.home));
   });
 
   it('never throws for an odd string', () => {
-    for (const odd of ['', '.', '/', 'a//b/../c', 'x'.repeat(5000)]) expect(() => globalLedgerWriteState(odd)).not.toThrow();
+    for (const odd of ['', '.', '/', 'a//b/../c', 'x'.repeat(5000)]) {
+      expect(() => globalLedgerWriteState(odd, join(tmpdir(), 'no-such-home'))).not.toThrow();
+      expect(() => globalLedgerWriteState(join(tmpdir(), 'g.jsonl'), odd)).not.toThrow();
+    }
+  });
+});
+
+describe('globalLedgerWriteState: a destination that is a file the home keeps for itself (B2a ruling E, design 4.3)', () => {
+  const HOME_FILE = { kind: 'read-only', cause: 'home-control-file' } as const;
+
+  it.each([...CONTROL_FILES])('%s as the ledger path, the file existing: read-only with the cause home-control-file, and asking changes nothing', (name) => {
+    const l = buildControlHome();
+    const ledger = join(l.home, name);
+    expect(lstatSync(ledger).isFile()).toBe(true);                 // the file is there: both conditions are in play
+    const before = homeDigest(l.home);
+    expect(globalLedgerWriteState(ledger, l.home)).toEqual(HOME_FILE);
+    expect(isGlobalLedgerReadOnly(ledger, l.home)).toBe(true);
+    expect(homeDigest(l.home)).toEqual(before);
+  });
+
+  it.each([...CONTROL_LOCKS])('%s as the ledger path, nothing standing there: read-only by the path', (name) => {
+    const l = buildControlHome();
+    const ledger = join(l.home, name);
+    expect(() => lstatSync(ledger)).toThrow();
+    expect(globalLedgerWriteState(ledger, l.home)).toEqual(HOME_FILE);
+  });
+
+  it.each(['witness.json', 'projects.json', 'ledger-mac-master.key', 'config.json', 'witness.json.lock'])('G17/G18: the owner ledger is a link to %s (the last one dangling): read-only', (name) => {
+    const l = buildControlHome();
+    const ledger = linkOwnerLedgerTo(l, name);
+    expect(lstatSync(ledger).isSymbolicLink()).toBe(true);
+    expect(globalLedgerWriteState(ledger, l.home)).toEqual(HOME_FILE);
+  });
+
+  it('a hard link to a control file, outside the home, is read-only by identity', () => {
+    const l = buildControlHome();
+    const alias = join(l.base, 'alias.jsonl');
+    linkSync(join(l.home, 'witness.json'), alias);
+    expect(globalLedgerWriteState(alias, l.home)).toEqual(HOME_FILE);
+  });
+
+  it('controls (Review Focus 3): the owner ledger, a ledger outside the home, another regular file in the home and a link to a file outside stay writable', () => {
+    const l = buildControlHome();
+    const outside = relocatedLedger(l);
+    const inside = join(l.home, 'ledger-2.jsonl');
+    writeFileSync(inside, '');
+    const linked = join(l.home, 'linked.jsonl');
+    symlinkSync(outside, linked);
+    for (const p of [join(l.home, 'memory.jsonl'), outside, inside, linked]) expect(globalLedgerWriteState(p, l.home), p).toEqual({ kind: 'writable' });
+  });
+
+  it('a home that does not exist yet: a control name under it is read-only by its path, the owner ledger is writable, nothing is created', () => {
+    const l = buildControlHome();
+    const fresh = join(l.base, 'fresh', 'home');
+    expect(globalLedgerWriteState(join(fresh, 'projects.json'), fresh)).toEqual(HOME_FILE);
+    expect(globalLedgerWriteState(join(fresh, 'memory.jsonl'), fresh)).toEqual({ kind: 'writable' });
+    expect(() => lstatSync(join(l.base, 'fresh'))).toThrow();
+  });
+
+  it('Review Focus 4: on a file system that reports inode 0 the path decides: a ledger outside the home is writable, a control name is not', () => {
+    const l = buildControlHome();
+    const outside = relocatedLedger(l);
+    const real = pathIdentityMod.fileIdentityAt;
+    vi.spyOn(pathIdentityMod, 'fileIdentityAt').mockImplementation((p, o) => {
+      const id = real(p, o);
+      return id === null ? null : { dev: id.dev, ino: 0n };
+    });
+    expect(globalLedgerWriteState(outside, l.home)).toEqual({ kind: 'writable' });
+    expect(globalLedgerWriteState(join(l.home, 'witness.json'), l.home)).toEqual(HOME_FILE);
   });
 });
 
@@ -93,6 +163,27 @@ describe('GlobalLedgerReadOnlyError and the fixed texts (4.9; final wording of t
     expect(NOTE).not.toMatch(/session|[\\/]/);
     expect(GLOBAL_READ_ONLY_STARTUP_LINE).toBe(STARTUP);
     expect(GLOBAL_READ_ONLY_STARTUP_LINE).toMatch(/^[\x20-\x7e]+$/);
+  });
+
+  it('home-control-file: the same refusal text for every op, typed as a global read-only refusal and as a home refusal', () => {
+    for (const op of OPS) {
+      const e = new GlobalLedgerReadOnlyError(op, 'home-control-file');
+      expect(e.message).toBe(`${op}: ${CAUSE} — nothing was written. ${TAIL}`);
+      expect(e.message).toBe(GLOBAL_WRITE_REFUSAL[op]);
+      expect(e.readOnlyCause).toBe('home-control-file');
+      expect(isGlobalLedgerReadOnlyError(e)).toBe(true);
+      expect(isHomeRefusalError(e)).toBe(true);
+      expect(e.homeRefusalCause).toBe('home-control-file');
+    }
+  });
+
+  it('the other two causes are not home refusals', () => {
+    for (const cause of ['unresolvable', 'target-directory-missing'] as const) {
+      const e = new GlobalLedgerReadOnlyError('commit', cause);
+      expect(isGlobalLedgerReadOnlyError(e)).toBe(true);
+      expect(isHomeRefusalError(e)).toBe(false);
+      expect(e.homeRefusalCause).toBeUndefined();
+    }
   });
 
   it.each(OPS)('%s: the changed-destination text names the global file, not a project (v-global-08: "in progress")', (op) => {

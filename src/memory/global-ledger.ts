@@ -6,19 +6,22 @@
  *    a plain path whose folder is missing has the folder created, as before.
  *  - unresolvable (D3): global memory is READ-ONLY: every write is refused with one fixed text before a lock is tried and
  *    before the store writes anything to the home; a read opens the path as given and adds a fixed note.
+ *  - leads to a file the home keeps for itself (B2a ruling E, design 4.3): the resolved destination is a control file of HELIX_HOME (home-files.ts homeControlFileOf, by path or by device and inode). Global memory is READ-ONLY, refused as in the first case; a read opens the path as given and adds the same fixed note.
  *  - cannot be inspected: the write and the read fail with that fs error, as before.
  *  One shape that RESOLVES is read-only too (FN-25, the third row): the path reaches a folder through a link and that
  *  folder does not exist. Helix never creates a link's target folder (4.2), so a write could only fail; it is refused
  *  the same way and a read answers an empty result with the same note. Since G-R1 the link may be the final name or any
  *  folder link above the file.
  *
- *  Builtins and path-identity.ts only, so the store, the SessionStart hook, the server's start and the re-baseline CLI
+ *  Builtins, path-identity.ts and home-files.ts only (and a type from home-env.ts), so the store, the SessionStart hook, the server's start and the re-baseline CLI
  *  ask the one question the same way. */
 import { lstatSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { resolvePath } from './path-identity.js';
+import { homeControlFileOf } from './home-files.js';
+import type { HomeRefusalCause } from './home-env.js';
 
-export type GlobalReadOnlyCause = 'unresolvable' | 'target-directory-missing';
+export type GlobalReadOnlyCause = 'unresolvable' | 'target-directory-missing' | 'home-control-file';
 
 export type GlobalLedgerWriteState =
   | { kind: 'writable' }
@@ -42,25 +45,29 @@ function danglingFolderLinkAbove(path: string): boolean {
   return false;
 }
 
-/** The state of the global ledger's path for a WRITE (design 4.7, the first table). Lock-free and side-effect free: it
- *  creates nothing, opens nothing and never throws for a string argument. "Cannot be inspected" answers `writable`: the
+/** The state of the global ledger's path for a WRITE (design 4.7, the first table, and 4.3). Lock-free and side-effect free: it
+ *  creates nothing, opens nothing and never throws for a string argument. `home` is the Helix home the destination is compared
+ *  with (required: a caller that has none would silently skip the third cause). "Cannot be inspected" answers `writable`: the
  *  write then fails at the lock with that fs error, as before. */
-export function globalLedgerWriteState(path: string): GlobalLedgerWriteState {
+export function globalLedgerWriteState(path: string, home: string): GlobalLedgerWriteState {
   const r = resolvePath(path);
   if (r.kind === 'unresolvable') return { kind: 'read-only', cause: 'unresolvable' };
   if (r.kind === 'resolved' && r.dirMissing && (isLink(path) || danglingFolderLinkAbove(path))) {
     return { kind: 'read-only', cause: 'target-directory-missing' };
   }
+  // B2a ruling E: a destination that is a file Helix keeps in its home is appended through nowhere. Also for a path whose
+  // folder is missing: a home that does not exist yet has control names too.
+  if (r.kind === 'resolved' && homeControlFileOf(home, r.path) !== null) return { kind: 'read-only', cause: 'home-control-file' };
   return { kind: 'writable' };
 }
 
-export const isGlobalLedgerReadOnly = (path: string): boolean => globalLedgerWriteState(path).kind === 'read-only';
+export const isGlobalLedgerReadOnly = (path: string, home: string): boolean => globalLedgerWriteState(path, home).kind === 'read-only';
 
 /** The operations that write the global ledger, by the name their refusal starts with. */
 export type GlobalWriteOp = 'commit' | 'erase' | 'confirm' | 'recheck' | 'compaction';
 
 const CAUSE =
-  "the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist)";
+  "the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist) or leads to another file of the Helix home";
 const TAIL = 'Tell the user that the global memory path needs repair; do not repair it for them.';
 const refusal = (op: GlobalWriteOp): string => `${op}: ${CAUSE} — nothing was written. ${TAIL}`;
 
@@ -76,9 +83,14 @@ export const GLOBAL_WRITE_REFUSAL: Record<GlobalWriteOp, string> = {
  *  pre-write class 'rejected'. Read by property, never by class. */
 export class GlobalLedgerReadOnlyError extends Error {
   readonly globalLedgerReadOnly = true as const;
+  /** The HomeRefusalError markers (home-env.ts), set only for the control-file cause: design 4.6 makes the 4.3 refusal a home
+   *  refusal, and this keeps the handlers' existing class for this error (`rejected`) valid until B4 classifies the other one. */
+  declare readonly homeRefusal?: true;
+  declare readonly homeRefusalCause?: HomeRefusalCause;
   constructor(readonly op: GlobalWriteOp, readonly readOnlyCause: GlobalReadOnlyCause) {
     super(GLOBAL_WRITE_REFUSAL[op]);
     this.name = 'GlobalLedgerReadOnlyError';
+    if (readOnlyCause === 'home-control-file') Object.assign(this, { homeRefusal: true, homeRefusalCause: 'home-control-file' });
   }
 }
 
@@ -88,8 +100,8 @@ export const isGlobalLedgerReadOnlyError = (e: unknown): boolean =>
 /** The server's one stderr line at its start (design 4.7: "서버는 시작할 때 stderr에 한 줄을 출력한다"). ASCII only,
  *  constant, no path. */
 export const GLOBAL_READ_ONLY_STARTUP_LINE =
-  "helix: NOTE - the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a " +
-  'directory that does not exist), so global memory is read-only: nothing can be stored, erased or re-graded there until ' +
+  "helix: NOTE - the global memory file's path cannot be used for writing (it cannot be resolved, it is a link into a " +
+  'directory that does not exist, or it leads to another file of the Helix home), so global memory is read-only: nothing can be stored, erased or re-graded there until ' +
   'the path is repaired';
 
 /** The changed-destination refusal of a global write (4.1 item 3, the check after the open; FW-R7, v-firstwrite-12: the

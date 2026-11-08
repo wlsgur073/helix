@@ -30,6 +30,7 @@ import { closeHeldDir } from './dir-bound.js';
 import { realFsOps } from './fs-ops.js';
 import { isUnresolvablePathError, fileIdentityAt, resolvePath } from './path-identity.js';
 import { globalLedgerWriteState, GlobalLedgerReadOnlyError, GLOBAL_DESTINATION_CHANGED, type GlobalWriteOp } from './global-ledger.js';
+import { homeControlFileOf } from './home-files.js';
 import { ensureHelixDir } from './home-permissions.js';
 import { MAX_COMMIT_CONTENT_CHARS, RECALL_RECENCY_APPENDIX_COUNT, RECALL_APPENDIX_FUTURE_TOLERANCE_MS } from '../limits.js';
 
@@ -784,13 +785,13 @@ export class MemoryStore {
    *  link)? Asked afresh on every call: the state is the path's, and a path repaired in the middle of a session is
    *  writable again at the next call. Side-effect free. */
   private globalReadOnly(): boolean {
-    return globalLedgerWriteState(this.global).kind === 'read-only';
+    return globalLedgerWriteState(this.global, this.homeDir()).kind === 'read-only';
   }
 
   /** The typed pre-refusal of a write to a read-only global ledger, or nothing. It stands in front of every lock and of
    *  everything the store writes to the home. */
   private refuseReadOnlyGlobal(op: GlobalWriteOp): void {
-    const w = globalLedgerWriteState(this.global);
+    const w = globalLedgerWriteState(this.global, this.homeDir());
     if (w.kind === 'read-only') throw new GlobalLedgerReadOnlyError(op, w.cause);
   }
 
@@ -840,6 +841,9 @@ export class MemoryStore {
         if (r.kind === 'unresolvable') throw new GlobalLedgerReadOnlyError(op, 'unresolvable');
         if (r.kind === 'uninspectable') throw r.error;
         if (r.dirMissing || r.path !== ctx.path) throw this.globalChanged(op);
+        // B2a ruling E: the early refusal above asked before the lock; a link retargeted at a control file since then resolves,
+        // under the lock now held beside THAT file, to a destination the body must not write. Same typed refusal, in front of the body.
+        if (homeControlFileOf(home, r.path) !== null) throw new GlobalLedgerReadOnlyError(op, 'home-control-file');
         return body({ ctx, judged: { path: r.path, identity: fileIdentityAt(r.path) } });
       });
     } catch (e) {

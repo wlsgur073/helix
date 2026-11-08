@@ -125,7 +125,7 @@ export function gatherScopedRecords({ home, globalLedger, cwd, userHome }: Gathe
   }
   return {
     records, integrityAvailable, replays, projectDisposition,
-    witnessNotes: [...(isGlobalLedgerReadOnly(globalLedger) ? [GLOBAL_LEDGER_READ_ONLY_NOTE] : []), ...collectWitnessReadNotes(verdicts), ...(projectReadFailed ? [WITNESS_READ_TRANSIENT_NOTE] : [])],
+    witnessNotes: [...(isGlobalLedgerReadOnly(globalLedger, home) ? [GLOBAL_LEDGER_READ_ONLY_NOTE] : []), ...collectWitnessReadNotes(verdicts), ...(projectReadFailed ? [WITNESS_READ_TRANSIENT_NOTE] : [])],
     everyScopePristine: !projectUnread && verdicts.every((v) => v.witnessFile !== 'unusable' && v.verdict.kind === 'first-contact' && v.verdict.reason === 'pristine'),
   };
 }

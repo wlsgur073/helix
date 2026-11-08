@@ -11,6 +11,7 @@ import { bundleCli } from '../helpers/bundle-cli.js';
 import { GLOBAL_READ_ONLY_STARTUP_LINE, GLOBAL_WRITE_REFUSAL } from '../../src/memory/global-ledger.js';
 import { GLOBAL_LEDGER_READ_ONLY_NOTE } from '../../src/memory/content-frame.js';
 import { buildGlobalLayout, cleanupLayouts, type GlobalLayoutName } from '../helpers/global-layouts.js';
+import { buildControlHome, linkOwnerLedgerTo, sha256Of, cleanupControlLayouts } from '../helpers/home-control-layouts.js';
 
 let server: string;
 beforeAll(async () => { server = await bundleCli('src/server/index.ts'); }, 120_000);
@@ -19,6 +20,7 @@ afterEach(async () => {
   for (const c of open) { try { await c.close(); } catch { /* already closed */ } }
   open = [];
   cleanupLayouts();
+  cleanupControlLayouts();
 });
 
 /** Every inherited HELIX_* is stripped before the case sets its own, so a developer's variables never reach the run. */
@@ -76,5 +78,29 @@ describe('a global ledger whose path cannot be used: the server starts, says so 
     const res = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'a new fact', source: 'user' } });
     expect((res as { isError?: boolean }).isError).toBe(true);
     expect(text(res)).toContain(GLOBAL_WRITE_REFUSAL.commit);
+  }, 60_000);
+});
+
+describe('a global ledger that leads to a file the home keeps for itself (B2a ruling E): the server starts, says so once, serves the read and refuses the write', () => {
+  it.each(['witness.json', 'projects.json', 'config.json'])('HELIX_LEDGER at %s: one stderr line', async (name) => {
+    const c = buildControlHome();
+    const err = await serverStderr(c.home, join(c.home, name), c.base, (e) => e.includes(GLOBAL_READ_ONLY_STARTUP_LINE), 300);
+    expect(err.split('\n').filter((x) => x === GLOBAL_READ_ONLY_STARTUP_LINE)).toHaveLength(1);
+  }, 60_000);
+
+  it.each(['witness-file', 'registry-link'] as const)('%s (G17, G18): recall carries the note, a commit is refused with the typed text and the file keeps its bytes', async (shape) => {
+    const c = buildControlHome();
+    const ledger = shape === 'witness-file' ? join(c.home, 'witness.json') : linkOwnerLedgerTo(c, 'projects.json');
+    const target = join(c.home, shape === 'witness-file' ? 'witness.json' : 'projects.json');
+    const transport = new StdioClientTransport({ command: process.execPath, args: [server], cwd: c.base, env: cleanEnv(c.home, ledger) });
+    const client = new Client({ name: 'helix-b2a-b1', version: '0.0.0' });
+    await client.connect(transport);
+    open.push(client);
+    expect(text(await client.callTool({ name: 'helix_memory_recall', arguments: { query: 'deploy' } }))).toContain(GLOBAL_LEDGER_READ_ONLY_NOTE);
+    const before = sha256Of(target);                                  // after the start and the read: only the commit can change it now
+    const res = await client.callTool({ name: 'helix_memory_commit', arguments: { content: 'a new fact', source: 'user' } });
+    expect((res as { isError?: boolean }).isError).toBe(true);
+    expect(text(res)).toContain(GLOBAL_WRITE_REFUSAL.commit);
+    expect(sha256Of(target)).toBe(before);
   }, 60_000);
 });

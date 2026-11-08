@@ -28,7 +28,7 @@ const UNUSABLE =
 const UNWRITABLE = "this project's memory folder cannot be written (a read-only folder or file system)";
 const GLOBAL_CAUSE =
   "the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, " +
-  'or a link into a directory that does not exist)';
+  'or a link into a directory that does not exist) or leads to another file of the Helix home';
 
 describe('the ledger and lock layers', () => {
   it('the unresolvable-path message names no path and lists the three causes', () => {
@@ -77,15 +77,15 @@ describe('the notes', () => {
   });
   it('WP-9: GLOBAL_LEDGER_READ_ONLY_NOTE says where a rollback witness mismatch beside it can come from', () => {
     expect(GLOBAL_LEDGER_READ_ONLY_NOTE).toBe(
-      "(the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), " +
+      "(the global memory file's path cannot be used for writing (it cannot be resolved, it is a link into a directory that does not exist, or it leads to another file of the Helix home), " +
       'so global memory is read-only: records that can be read through that path are shown, and nothing can be stored, erased or re-graded ' +
       'there until the path is repaired; while the path is broken, a rollback witness mismatch note for global memory can come from the broken ' +
       'path and not from a rollback)');
   });
   it('GLOBAL_READ_ONLY_STARTUP_LINE', () => {
     expect(GLOBAL_READ_ONLY_STARTUP_LINE).toBe(
-      "helix: NOTE - the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does " +
-      'not exist), so global memory is read-only: nothing can be stored, erased or re-graded there until the path is repaired');
+      "helix: NOTE - the global memory file's path cannot be used for writing (it cannot be resolved, it is a link into a directory that does " +
+      'not exist, or it leads to another file of the Helix home), so global memory is read-only: nothing can be stored, erased or re-graded there until the path is repaired');
   });
 });
 

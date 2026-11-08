@@ -135,9 +135,11 @@ const NOTE_APPEND_REFUSED_RETRACTED = 'append refused before any byte landed -- 
 const NOTE_PUBLISH_FAILED_RETRACTED = 'the witness journal was left by a publication that failed -- it was retracted; nothing written\n';
 
 /** `--scope global` over a global ledger that cannot be used (design 4.10, first bullet, last sentence; 4.7 second table):
- *  refused in front of the scope judgement, the folder creation, the lock, the display and the prompt. Exit 2. */
+ *  refused in front of the scope judgement, the folder creation, the lock, the display and the prompt. Exit 2. "Cannot be
+ *  used" is the path that cannot be resolved, is a link into a missing directory, or leads to another file of the Helix home
+ *  (B2a ruling E). */
 const REBASELINE_GLOBAL_READ_ONLY_REFUSAL =
-  "helix-rebaseline: REFUSING - the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist).\n" +
+  "helix-rebaseline: REFUSING - the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist) or leads to another file of the Helix home.\n" +
   'Nothing was written. Repair that path (HELIX_LEDGER, or a link on it), then re-run.\n';
 
 /** The head of the refusal of an environment the resolver does not accept (B2a rulings C and D): the resolver's own constant
@@ -225,7 +227,7 @@ export async function main(argv: string[], deps: RebaselineDeps = {}): Promise<n
     // Design 4.10 and 4.7: `--scope global` over a read-only global ledger is refused HERE, in front of the scope judgement, the
     // folder creation, the lock, the display and the prompt, after the usage and TTY checks (order item 4). A project scope is not
     // affected by the state of the global ledger's path.
-    if (scope === 'global' && isGlobalLedgerReadOnly(globalLedger)) {
+    if (scope === 'global' && isGlobalLedgerReadOnly(globalLedger, home)) {
       process.stderr.write(REBASELINE_GLOBAL_READ_ONLY_REFUSAL);   // ASCII only
       exit(2);
       return 2;

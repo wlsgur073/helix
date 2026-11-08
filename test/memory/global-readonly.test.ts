@@ -252,10 +252,16 @@ describe('what a global write finds when it gets there (4.7 "거부의 위치", 
       return real(t, (ctx) => { plant(); return fn(ctx); }, opts);
     }) as unknown as WithLock);
   }
-  /** Runs `plant` once, right after the store sampled the destination's identity under the lock (no project layer here: that sample is the first call). */
+  const realIdentityAt = pathIdentityMod.fileIdentityAt;   // read at collection, before any spy: a second arm in one case must not call the first
+  /** Runs `plant` once, right after the store sampled the destination's identity under the lock (no project layer here: that
+   *  sample is the first call without options; the control-file comparison of B2a ruling E asks with `{ follow }` before it). */
   function armAfterSample(plant: () => void): void {
-    const real = pathIdentityMod.fileIdentityAt;
-    vi.spyOn(pathIdentityMod, 'fileIdentityAt').mockImplementationOnce((p, o) => { const id = real(p, o); plant(); return id; });
+    let fired = false;
+    vi.spyOn(pathIdentityMod, 'fileIdentityAt').mockImplementation((p, o) => {
+      const id = realIdentityAt(p, o);
+      if (!fired && o === undefined) { fired = true; plant(); }
+      return id;
+    });
   }
   /** The same bytes under a new inode, so the witness gate in front of the append sees nothing and only the identity differs. */
   const swapFile = (ledger: string): void => { copyFileSync(ledger, `${ledger}.copy`); renameSync(`${ledger}.copy`, ledger); };
