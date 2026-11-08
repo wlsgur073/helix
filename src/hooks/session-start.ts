@@ -1,6 +1,7 @@
 // SessionStart hook entry: print the current-truth memory block to stdout (Claude Code
 // injects a SessionStart hook's stdout into the session context). A hook must never
-// break session start: on ANY error it injects nothing and still exits 0.
+// break session start: on ANY error it injects no memory block and still exits 0. The one thing it still prints after a
+// failed read is the constant supersede note of a session that continues an earlier one (IT-M1, ruling G).
 //
 // SECURITY: this auto-load path reads BOTH ledgers through the VERIFYING projection (verifiedLive),
 // NOT a bare buildProjection. A forged or hand-edited ledger record — including one appended to an
@@ -13,7 +14,7 @@ import { join } from 'node:path';
 import { isEntryPoint } from '../entry-point.js';
 import { strayTrustFiles } from '../memory/trust-store-layout.js';
 import { formatSessionStartContext } from './format-context.js';
-import { newNonce, collectWitnessReadNotes, SYMLINKED_HOME_NOTE, WITNESS_READ_TRANSIENT_NOTE, GLOBAL_LEDGER_READ_ONLY_NOTE } from '../memory/content-frame.js';
+import { newNonce, collectWitnessReadNotes, SYMLINKED_HOME_NOTE, SUPERSEDE_NOTE, WITNESS_READ_TRANSIENT_NOTE, GLOBAL_LEDGER_READ_ONLY_NOTE } from '../memory/content-frame.js';
 import { isGlobalLedgerReadOnly } from '../memory/global-ledger.js';
 import { isSymlinkedHome } from '../memory/home-permissions.js';
 import { projectDispositionOf, type ProjectDisposition } from '../memory/ownership.js';
@@ -175,6 +176,8 @@ function resolvedPathsOrNull(): HelixPaths | null {
 }
 
 async function main(): Promise<void> {
+  let supersedesEarlier = false;   // set from the stdin's `source` once it is parsed; declared outside the try so the catch can read it
+  let blockWritten = false;        // set just before the block's write, empty or not: a failure after it must not be answered with a second note
   try {
     const paths = resolvedPathsOrNull();
     if (paths === null) {
@@ -197,7 +200,6 @@ async function main(): Promise<void> {
     for (const note of homeNotes(home)) writeSync(1, `${note}\n`); // ASCII only
 
     let cwd: string | undefined;
-    let supersedesEarlier = false;
     // H3: fail-closed on an over-cap stdin -- proceed exactly as if stdin were `{}` (global scope
     // only, same as garbage/absent stdin below) rather than reading a truncated, possibly-malformed
     // prefix. One stderr note names the cap so an operator can tell "no cwd" from "cwd was dropped".
@@ -220,6 +222,7 @@ async function main(): Promise<void> {
     // Synchronous write to fd 1: process exit must not drop a buffered async pipe write on
     // Windows (which would inject an unterminated DATA block). No explicit exit() needed —
     // natural exit yields code 0 and there are no open handles to keep the loop alive.
+    blockWritten = true;
     if (text !== '') writeSync(1, text + '\n');
 
     // Best-effort sensor emission (spec §5): sync append for the same reason the context write is
@@ -232,7 +235,15 @@ async function main(): Promise<void> {
       });
     }
   } catch {
-    // fail-closed for injection: no memory block rather than a broken session
+    // fail-closed for injection: no memory block rather than a broken session. One thing is still owed: a session that
+    // continues an earlier one (resume, compact, fork) may hold an earlier Helix block, and the note says this one supersedes
+    // it (IT-M1, ruling G). It is a constant, so it can be printed whatever failed. issue #7's pristine test is not consulted
+    // here: the read did not finish, so nothing is known to be empty. SUPERSEDE_NOTE is reused unchanged although its last
+    // clause ("recall returns the current state") is not true while the global ledger is unreadable (ruling G, option A).
+    // The print has its own try: a closed stdout must not turn a swallowed failure into a failed hook.
+    if (supersedesEarlier && !blockWritten) {
+      try { writeSync(1, `${SUPERSEDE_NOTE}\n`); } catch { /* a hook must never break session start */ }
+    }
   }
 }
 
