@@ -382,6 +382,7 @@
       "name": "HELIX_LEDGER",
       "readIn": [
         "bin/helix-mcp.mjs",
+        "bin/hooks/session-end.mjs",
         "bin/hooks/session-start.mjs"
       ]
     },

@@ -410,11 +410,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants8) {
+      optimizeNames(names, constants11) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants8);
+          this.rhs = optimizeExpr(this.rhs, names, constants11);
         return this;
       }
       get names() {
@@ -431,10 +431,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants8) {
+      optimizeNames(names, constants11) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants8);
+        this.rhs = optimizeExpr(this.rhs, names, constants11);
         return this;
       }
       get names() {
@@ -495,8 +495,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants8) {
-        this.code = optimizeExpr(this.code, names, constants8);
+      optimizeNames(names, constants11) {
+        this.code = optimizeExpr(this.code, names, constants11);
         return this;
       }
       get names() {
@@ -525,12 +525,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants8) {
+      optimizeNames(names, constants11) {
         const { nodes } = this;
         let i = nodes.length;
         while (i--) {
           const n = nodes[i];
-          if (n.optimizeNames(names, constants8))
+          if (n.optimizeNames(names, constants11))
             continue;
           subtractNames(names, n.names);
           nodes.splice(i, 1);
@@ -583,12 +583,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants8) {
+      optimizeNames(names, constants11) {
         var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants8);
-        if (!(super.optimizeNames(names, constants8) || this.else))
+        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants11);
+        if (!(super.optimizeNames(names, constants11) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants8);
+        this.condition = optimizeExpr(this.condition, names, constants11);
         return this;
       }
       get names() {
@@ -611,10 +611,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants8) {
-        if (!super.optimizeNames(names, constants8))
+      optimizeNames(names, constants11) {
+        if (!super.optimizeNames(names, constants11))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants8);
+        this.iteration = optimizeExpr(this.iteration, names, constants11);
         return this;
       }
       get names() {
@@ -650,10 +650,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants8) {
-        if (!super.optimizeNames(names, constants8))
+      optimizeNames(names, constants11) {
+        if (!super.optimizeNames(names, constants11))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants8);
+        this.iterable = optimizeExpr(this.iterable, names, constants11);
         return this;
       }
       get names() {
@@ -695,11 +695,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants8) {
+      optimizeNames(names, constants11) {
         var _a, _b;
-        super.optimizeNames(names, constants8);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants8);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants8);
+        super.optimizeNames(names, constants11);
+        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants11);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants11);
         return this;
       }
       get names() {
@@ -1000,7 +1000,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants8) {
+    function optimizeExpr(expr, names, constants11) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -1015,14 +1015,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n) {
-        const c = constants8[n.str];
+        const c = constants11[n.str];
         if (c === void 0 || names[n.str] !== 1)
           return n;
         delete names[n.str];
         return c;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants8[c.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants11[c.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -7200,7 +7200,7 @@ var require_dist = __commonJS({
 
 // src/server/index.ts
 import { homedir as homedir3 } from "node:os";
-import { join as join15, dirname as dirname16 } from "node:path";
+import { join as join16, dirname as dirname17 } from "node:path";
 import { existsSync as existsSync8 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
@@ -13341,13 +13341,13 @@ var StdioServerTransport = class {
 
 // src/memory/store.ts
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync4, lstatSync as lstatSync8, mkdirSync as mkdirSync5, rmdirSync, statSync as statSync6 } from "node:fs";
-import { dirname as dirname10 } from "node:path";
+import { existsSync as existsSync4, lstatSync as lstatSync9, mkdirSync as mkdirSync5, rmdirSync, statSync as statSync5 } from "node:fs";
+import { dirname as dirname11 } from "node:path";
 
 // src/memory/ledger.ts
-import { mkdirSync as mkdirSync3, statSync as statSync4, openSync as openSync5, fstatSync as fstatSync4, readSync as readSync3, closeSync as closeSync5, constants as constants4 } from "node:fs";
+import { mkdirSync as mkdirSync3, statSync as statSync3, openSync as openSync6, fstatSync as fstatSync6, readSync as readSync3, closeSync as closeSync6, constants as constants6 } from "node:fs";
 import { randomBytes as randomBytes4 } from "node:crypto";
-import { basename as basename4, dirname as dirname7 } from "node:path";
+import { basename as basename5, dirname as dirname8 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 // src/memory/firewall.ts
@@ -13703,8 +13703,8 @@ function buildProjection(records) {
 
 // src/memory/ledger-mac.ts
 import { createHash, createHmac, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-import { openSync as openSync3, fsyncSync as fsyncSync2, closeSync as closeSync3, readFileSync as readFileSync2, linkSync as linkSync3, unlinkSync as unlinkSync3, statSync as statSync3, chmodSync as chmodSync2 } from "node:fs";
-import { dirname as dirname5, join as join5 } from "node:path";
+import { openSync as openSync4, fsyncSync as fsyncSync2, closeSync as closeSync4, readFileSync as readFileSync2, linkSync as linkSync3, unlinkSync as unlinkSync3, lstatSync as lstatSync4, fstatSync as fstatSync4, fchmodSync as fchmodSync2, constants as constants3 } from "node:fs";
+import { dirname as dirname6, join as join6 } from "node:path";
 
 // src/memory/lock.ts
 import { writeFileSync, unlinkSync, linkSync, lstatSync as lstatSync2, rmSync, readdirSync, openSync, closeSync, readSync, fstatSync, existsSync, constants } from "node:fs";
@@ -13920,9 +13920,9 @@ function creationAnswer(p) {
   return d.missing === null ? { kind: "resolved", path, dirMissing: false } : { kind: "resolved", path, dirMissing: true, dirError: d.missing };
 }
 function resolvePath(input) {
-  const given = input === "" ? "." : input;
-  if (namesDirectory(given)) return directoryAnswer(given);
-  let p = given;
+  const given2 = input === "" ? "." : input;
+  if (namesDirectory(given2)) return directoryAnswer(given2);
+  let p = given2;
   for (let hops = 0; ; hops++) {
     let isLink2;
     try {
@@ -14211,6 +14211,9 @@ function readLockObject(path) {
     }
   }
 }
+function lockPathHoldsForeignObject(lockPath) {
+  return readLockObject(lockPath).kind === "foreign";
+}
 function lockTokenAt(path) {
   const o = readLockObject(path);
   return o.kind === "payload" && !o.oversized ? tryParsePayload(o.raw)?.token ?? null : null;
@@ -14420,6 +14423,66 @@ function sweepOrphanTmps(artifactPath, opts = {}) {
 // src/memory/home-permissions.ts
 import { lstatSync as lstatSync3, chmodSync, readdirSync as readdirSync3, mkdirSync, existsSync as existsSync2 } from "node:fs";
 import { join as join4, dirname as dirname4, sep } from "node:path";
+
+// src/memory/home-env.ts
+import { posix, win32 } from "node:path";
+var HomeRefusalError = class extends Error {
+  constructor(homeRefusalCause, message) {
+    super(message);
+    this.homeRefusalCause = homeRefusalCause;
+    this.name = "HomeRefusalError";
+  }
+  homeRefusalCause;
+  /** The marker isHomeRefusalError reads (a property, never class identity: a module loaded twice mints two classes). */
+  homeRefusal = true;
+};
+var isHomeRefusalError = (e) => e instanceof Error && e.homeRefusal === true;
+var RELATIVE_VALUE_TEXT = {
+  HELIX_HOME: "HELIX_HOME is not an absolute path, so it is refused",
+  HELIX_LEDGER: "HELIX_LEDGER is not an absolute path, so it is refused",
+  HELIX_SESSIONS: "HELIX_SESSIONS is not an absolute path, so it is refused"
+};
+var UNRESOLVABLE_HOME_TEXT = "the Helix home cannot be resolved (a name that is not valid UTF-8, a path past the system limit, or too many links), so it is refused";
+var given = (v) => v === void 0 || v === "" ? null : v;
+function absoluteOrRefuse(variable, value, isAbsolute4) {
+  if (!isAbsolute4(value)) throw new HomeRefusalError("relative-value", RELATIVE_VALUE_TEXT[variable]);
+  return value;
+}
+function withoutTrailingSlashOrDot(p) {
+  let n = p;
+  for (; ; ) {
+    if (n.length > 1 && n.endsWith("/")) {
+      n = n.slice(0, -1);
+      continue;
+    }
+    if (n.length > 2 && n.endsWith("/.")) {
+      n = n.slice(0, -2);
+      continue;
+    }
+    return n;
+  }
+}
+function kernelWayHome(path) {
+  const name = withoutTrailingSlashOrDot(path);
+  const last = name.slice(name.lastIndexOf("/") + 1);
+  const namesDirectory2 = last === "" || last === "." || last === "..";
+  const r = resolvePath(namesDirectory2 ? name : posix.dirname(name));
+  if (r.kind === "unresolvable") throw new HomeRefusalError("unresolvable-home", UNRESOLVABLE_HOME_TEXT);
+  if (r.kind === "uninspectable") return path;
+  return namesDirectory2 ? r.path : posix.join(r.path, last);
+}
+function resolveHelixPaths(env, userHome, platform = process.platform) {
+  const p = platform === "win32" ? win32 : posix;
+  const homeValue = absoluteOrRefuse("HELIX_HOME", given(env.HELIX_HOME) ?? p.join(userHome, ".helix"), p.isAbsolute);
+  const ledger = given(env.HELIX_LEDGER);
+  if (ledger !== null) absoluteOrRefuse("HELIX_LEDGER", ledger, p.isAbsolute);
+  const sessions = given(env.HELIX_SESSIONS);
+  if (sessions !== null) absoluteOrRefuse("HELIX_SESSIONS", sessions, p.isAbsolute);
+  const home2 = platform === "win32" ? homeValue : kernelWayHome(homeValue);
+  return { home: home2, globalLedger: ledger ?? p.join(home2, "memory.jsonl"), sessionsFile: sessions ?? p.join(home2, "sessions.jsonl") };
+}
+
+// src/memory/home-permissions.ts
 var OWNED_FILES = [
   "memory.jsonl",
   "audit.jsonl",
@@ -14447,6 +14510,9 @@ function finalName(dir) {
     return n;
   }
 }
+function modeText(m) {
+  return `0${m.toString(8).padStart(3, "0")}`;
+}
 function hardenHomePermissions(home2, deps) {
   if (process.platform === "win32") return;
   try {
@@ -14456,8 +14522,9 @@ function hardenHomePermissions(home2, deps) {
       return;
     }
     if (dir.isDirectory() && (dir.mode & 63) !== 0) {
-      chmodSync(finalName(home2), 448);
-      deps.warn(`helix: tightened HELIX_HOME ${home2} from 0${(dir.mode & 511).toString(8)} to 0700 (a group- or world-writable directory lets another local user replace files inside it, whatever their own mode)`);
+      const target = dir.mode & 448;
+      chmodSync(finalName(home2), target);
+      deps.warn(`helix: tightened HELIX_HOME ${home2} from ${modeText(dir.mode & 511)} to ${modeText(target)} (group and other access to the home was removed; another local user could otherwise read or replace files inside it)`);
     }
   } catch {
   }
@@ -14501,18 +14568,17 @@ function ensureHelixDir(dir) {
     st = null;
   }
   if (st !== null) {
-    if (st.isSymbolicLink()) throw new Error(`refusing to use ${dir}: it is a symlink, not a directory Helix owns`);
-    if (!st.isDirectory()) throw new Error(`refusing to use ${dir}: it exists and is not a directory`);
+    if (st.isSymbolicLink()) throw new HomeRefusalError("symlinked-home", `refusing to use ${dir}: it is a symlink, not a directory Helix owns`);
+    if (!st.isDirectory()) throw new HomeRefusalError("not-a-directory", `refusing to use ${dir}: it exists and is not a directory`);
     const uid = process.getuid?.();
     if (uid !== void 0 && st.uid !== uid) {
-      throw new Error(`refusing to use ${dir}: it is owned by uid ${st.uid}, not by this user (${uid})`);
+      throw new HomeRefusalError("foreign-owner", `refusing to use ${dir}: it is owned by uid ${st.uid}, not by this user (${uid})`);
     }
-    if ((st.mode & 63) !== 0) chmodSync(name, 448);
     return;
   }
   const parent = dirname4(name);
   if (!existsSync2(parent)) {
-    throw new Error(`refusing to create ${dir}: its parent ${parent} does not exist (Helix creates one directory, never a chain)`);
+    throw new HomeRefusalError("parent-missing", `refusing to create ${dir}: its parent ${parent} does not exist (Helix creates one directory, never a chain)`);
   }
   try {
     mkdirSync(name, { mode: 448 });
@@ -14527,6 +14593,114 @@ function isSymlinkedHome(home2) {
   } catch {
     return false;
   }
+}
+
+// src/memory/home-files.ts
+import { closeSync as closeSync3, constants as constants2, fstatSync as fstatSync3, openSync as openSync3 } from "node:fs";
+import { basename as basename4, dirname as dirname5, join as join5, win32 as win322 } from "node:path";
+var NOT_REGULAR_HOME_FILE_TEXT = "A Helix data file is not a regular file.";
+var NotRegularHomeFileError = class extends Error {
+  /** The marker isNotRegularHomeFileError reads (a property, never class identity: a module loaded twice mints two classes). */
+  notRegularHomeFile = true;
+  constructor() {
+    super(NOT_REGULAR_HOME_FILE_TEXT);
+    this.name = "NotRegularHomeFileError";
+  }
+};
+var READ_FLAGS = constants2.O_RDONLY | constants2.O_NONBLOCK;
+var APPEND_FLAGS = constants2.O_WRONLY | constants2.O_APPEND | constants2.O_CREAT | constants2.O_NONBLOCK;
+var isEnxio = (e) => e.code === "ENXIO";
+function refuseUnlessRegular(fd) {
+  let regular = false;
+  try {
+    regular = fstatSync3(fd).isFile();
+  } finally {
+    if (!regular) {
+      try {
+        closeSync3(fd);
+      } catch {
+      }
+    }
+  }
+  if (!regular) throw new NotRegularHomeFileError();
+}
+function openHomeFileForRead(path) {
+  let fd;
+  try {
+    fd = openSync3(path, READ_FLAGS);
+  } catch (e) {
+    if (isEnxio(e)) throw new NotRegularHomeFileError();
+    throw e;
+  }
+  refuseUnlessRegular(fd);
+  return fd;
+}
+function openHomeFileForAppend(path, mode, open = (p, f, m) => openSync3(p, f, m)) {
+  let fd;
+  try {
+    fd = open(path, APPEND_FLAGS, mode);
+  } catch (e) {
+    if (isEnxio(e)) throw new NotRegularHomeFileError();
+    throw e;
+  }
+  refuseUnlessRegular(fd);
+  return fd;
+}
+var CONTROL_FILES = [
+  "audit.jsonl",
+  "sessions.jsonl",
+  "metrics.jsonl",
+  "trigger.jsonl",
+  "codex-log.jsonl",
+  "witness.json",
+  "witness-log.jsonl",
+  "projects.json",
+  "ledger-mac-master.key",
+  "config.json"
+];
+var HOME_CONTROL_NAMES = [
+  ...CONTROL_FILES,
+  ...["memory.jsonl", ...CONTROL_FILES].map((name) => `${name}.lock`)
+];
+var HEX322 = "[0-9a-f]{32}";
+var escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var TEMP_FAMILIES = ["memory.jsonl", ...CONTROL_FILES].map((stem) => [stem, new RegExp(`^${escapeRe(stem)}\\.(?:(?:c|lk|k|w)-${HEX322}|[0-9a-f]{16}|\\d+)\\.tmp$`), `${stem}.lock.reap.`]);
+var identityOrNull = (path, follow) => {
+  try {
+    return fileIdentityAt(path, { follow });
+  } catch {
+    return null;
+  }
+};
+function homeControlFileOf(home2, resolved, opts = {}) {
+  const allow = opts.allow;
+  const onWin32 = (opts.platform ?? process.platform) === "win32";
+  let homeDir;
+  let dest;
+  if (onWin32) {
+    homeDir = win322.resolve(home2);
+    dest = win322.resolve(resolved);
+  } else {
+    const h = resolvePath(home2);
+    homeDir = h.kind === "resolved" ? h.path : home2;
+    dest = resolved;
+  }
+  const ops = onWin32 ? win322 : { dirname: dirname5, basename: basename4, join: join5 };
+  if (ops.dirname(dest) === homeDir) {
+    const name = ops.basename(dest);
+    if (name === "memory.jsonl") return null;
+    if (name !== allow && HOME_CONTROL_NAMES.includes(name)) return name;
+    for (const [stem, pattern, gatePrefix] of TEMP_FAMILIES) {
+      if (pattern.test(name) || name.startsWith(gatePrefix)) return stem;
+    }
+  }
+  const id = identityOrNull(dest, false);
+  if (!hasComparableInode(id)) return null;
+  for (const name of CONTROL_FILES) {
+    if (name === allow) continue;
+    if (sameFile(id, identityOrNull(ops.join(homeDir, name), true))) return name;
+  }
+  return null;
 }
 
 // src/memory/ledger-mac.ts
@@ -14548,7 +14722,7 @@ var LedgerMacError = class extends Error {
 };
 var MASTER_LEN = 32;
 function masterPath(home2) {
-  return join5(home2, "ledger-mac-master.key");
+  return join6(home2, "ledger-mac-master.key");
 }
 function ensureMaster(home2) {
   const path = masterPath(home2);
@@ -14561,14 +14735,14 @@ function ensureMaster(home2) {
     sweepOrphanTmps(path, {});
     const key = randomBytes2(MASTER_LEN);
     const tmp = `${path}.k-${randomBytes2(16).toString("hex")}.tmp`;
-    const fd = openSync3(tmp, "wx", 384);
+    const fd = openSync4(tmp, "wx", 384);
     let published = false;
     try {
       try {
         writeAll(realFsOps, fd, key);
         fsyncSync2(fd);
       } finally {
-        closeSync3(fd);
+        closeSync4(fd);
       }
       try {
         linkSync3(tmp, path);
@@ -14582,26 +14756,43 @@ function ensureMaster(home2) {
       } catch {
       }
     }
-    fsyncDir(dirname5(path));
+    fsyncDir(dirname6(path));
     if (published) return key;
     const winner = tryReadMasterStrict(path);
     if (!winner) throw new LedgerMacError("master key vanished during concurrent mint");
     return winner;
   });
 }
-function tryReadMasterStrict(path) {
+var KEY_REPAIR_OPEN = constants3.O_RDONLY | constants3.O_NOFOLLOW | constants3.O_NONBLOCK;
+function tightenMasterKey(path) {
+  try {
+    const seen = lstatSync4(path);
+    if (!seen.isFile() || (seen.mode & 63) === 0) return;
+    if (lstatSync4(dirname6(path)).isSymbolicLink()) return;
+    const fd = openSync4(path, KEY_REPAIR_OPEN);
+    try {
+      if (fstatSync4(fd).isFile()) fchmodSync2(fd, 384);
+    } finally {
+      closeSync4(fd);
+    }
+  } catch {
+  }
+}
+function tryReadMasterStrict(path, tighten = true) {
   let buf;
   try {
-    buf = readFileSync2(path);
+    const fd = openHomeFileForRead(path);
+    try {
+      buf = readFileSync2(fd);
+    } finally {
+      closeSync4(fd);
+    }
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
   }
   if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
-  try {
-    if ((statSync3(path).mode & 63) !== 0) chmodSync2(path, 384);
-  } catch {
-  }
+  if (tighten) tightenMasterKey(path);
   return buf;
 }
 function tryReadMaster(home2) {
@@ -14853,18 +15044,18 @@ function buildVerifiedProjection(records, opts) {
 }
 
 // src/memory/dir-bound.ts
-import { lstatSync as lstatSync4, constants as constants2 } from "node:fs";
-import { join as join6 } from "node:path";
+import { lstatSync as lstatSync5, constants as constants4 } from "node:fs";
+import { join as join7 } from "node:path";
 var PROC_SELF_FD = "/proc/self/fd";
 var memory = /* @__PURE__ */ new WeakMap();
-var DIR_OPEN = constants2.O_RDONLY | constants2.O_DIRECTORY | constants2.O_NOFOLLOW;
+var DIR_OPEN = constants4.O_RDONLY | constants4.O_DIRECTORY | constants4.O_NOFOLLOW;
 var DIR_CHANGED_OPEN_ERRORS = /* @__PURE__ */ new Set(["ELOOP", "ENOTDIR", "ENOENT"]);
 function procFdAvailable(fsOps) {
   return process.platform === "linux" && memory.get(fsOps.procFd ?? realProcFdSyscalls) !== "absent";
 }
 function sampleDirIdentity(dir) {
   try {
-    const st = lstatSync4(dir, { bigint: true });
+    const st = lstatSync5(dir, { bigint: true });
     return st.isDirectory() ? { dev: st.dev, ino: st.ino } : null;
   } catch (e) {
     const code = e.code;
@@ -14919,7 +15110,7 @@ function openJudgedDir(dir, judged, fsOps) {
   }
 }
 function boundPath(held, name) {
-  return held.fd === null ? join6(held.dir, name) : `${PROC_SELF_FD}/${held.fd}/${name}`;
+  return held.fd === null ? join7(held.dir, name) : `${PROC_SELF_FD}/${held.fd}/${name}`;
 }
 function fsyncDir2(held, fsOps) {
   fsOps.fsyncDir(held.fd === null ? held.dir : `${PROC_SELF_FD}/${held.fd}`);
@@ -14980,13 +15171,13 @@ function fenceId(epoch, nonce) {
 
 // src/memory/witness-store.ts
 import { randomBytes as randomBytes3, createHmac as createHmac2, hkdfSync as hkdfSync2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { lstatSync as lstatSync5, openSync as openSync4, fstatSync as fstatSync3, readFileSync as readFileSync3, closeSync as closeSync4, constants as constants3 } from "node:fs";
-import { dirname as dirname6, join as join7 } from "node:path";
+import { lstatSync as lstatSync6, openSync as openSync5, fstatSync as fstatSync5, readFileSync as readFileSync3, closeSync as closeSync5, constants as constants5 } from "node:fs";
+import { dirname as dirname7, join as join8 } from "node:path";
 function witnessPath(home2) {
-  return join7(home2, "witness.json");
+  return join8(home2, "witness.json");
 }
 function witnessLogPath(home2) {
-  return join7(home2, "witness-log.jsonl");
+  return join8(home2, "witness-log.jsonl");
 }
 function scopeKeyOf(home2, projectRoot) {
   return projectRoot === void 0 ? "@global" : canonicalRoot(projectRoot);
@@ -15079,7 +15270,7 @@ var WitnessUnusableError = class extends Error {
 var isWitnessUnusableError = (e) => e instanceof Error && e.witnessUnusable === true;
 var TRANSIENT_READ_CODES = /* @__PURE__ */ new Set(["EMFILE", "ENFILE", "EINTR"]);
 var codeOf2 = (e) => e?.code;
-var WITNESS_READ_OPEN = constants3.O_RDONLY | constants3.O_NONBLOCK | constants3.O_NOFOLLOW;
+var WITNESS_READ_OPEN = constants5.O_RDONLY | constants5.O_NONBLOCK | constants5.O_NOFOLLOW;
 var isEnvelope = (parsed) => {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
   const o = parsed;
@@ -15088,18 +15279,18 @@ var isEnvelope = (parsed) => {
 function readWitnessFile(rawPath, asGiven) {
   const r = resolvePath(rawPath);
   try {
-    const st = lstatSync5(rawPath);
+    const st = lstatSync6(rawPath);
     if (st.isSymbolicLink()) return { kind: "unusable", reason: "link" };
     if (!st.isFile()) return { kind: "unusable", reason: "not-regular" };
   } catch (e) {
     if (TRANSIENT_READ_CODES.has(codeOf2(e) ?? "")) return { kind: "transient" };
   }
   let path;
-  let given = false;
+  let given2 = false;
   if (r.kind === "unresolvable") {
     if (!asGiven) return { kind: "unusable", reason: "unresolvable" };
     path = rawPath;
-    given = true;
+    given2 = true;
   } else if (r.kind === "uninspectable") {
     const code = r.error.code ?? "";
     if (code === "ENOENT") return { kind: "absent", path: null, asGiven: false };
@@ -15109,22 +15300,22 @@ function readWitnessFile(rawPath, asGiven) {
   } else path = r.path;
   let fd;
   try {
-    fd = openSync4(path, WITNESS_READ_OPEN);
+    fd = openSync5(path, WITNESS_READ_OPEN);
   } catch (e) {
     const code = codeOf2(e) ?? "";
-    if (code === "ENOENT") return { kind: "absent", path, asGiven: given };
+    if (code === "ENOENT") return { kind: "absent", path, asGiven: given2 };
     if (code === "ELOOP") return { kind: "unusable", reason: "link" };
     return TRANSIENT_READ_CODES.has(code) ? { kind: "transient" } : { kind: "unusable", reason: "unreadable" };
   }
   let text;
   try {
-    if (!fstatSync3(fd).isFile()) return { kind: "unusable", reason: "not-regular" };
+    if (!fstatSync5(fd).isFile()) return { kind: "unusable", reason: "not-regular" };
     text = readFileSync3(fd, "utf8");
   } catch (e) {
     return TRANSIENT_READ_CODES.has(codeOf2(e) ?? "") ? { kind: "transient" } : { kind: "unusable", reason: "unreadable" };
   } finally {
     try {
-      closeSync4(fd);
+      closeSync5(fd);
     } catch {
     }
   }
@@ -15135,7 +15326,7 @@ function readWitnessFile(rawPath, asGiven) {
     return { kind: "unusable", reason: "unparseable" };
   }
   if (!isEnvelope(parsed)) return { kind: "unusable", reason: "unparseable" };
-  return { kind: "store", path, store: { v: 1, scopes: parsed.scopes }, asGiven: given };
+  return { kind: "store", path, store: { v: 1, scopes: parsed.scopes }, asGiven: given2 };
 }
 function assertWitnessWritable(home2, op, opts = {}) {
   if (opts.homeUnchecked && isSymlinkedHome(home2)) return;
@@ -15146,11 +15337,12 @@ function assertWitnessWritable(home2, op, opts = {}) {
   }
   if (f.kind === "unusable") throw new WitnessUnusableError(op, f.reason);
   if (f.kind === "transient") throw new WitnessUnusableError(op, "transient");
+  if (f.path !== null && lockPathHoldsForeignObject(`${f.path}.lock`)) throw new LockForeignObjectError();
 }
 function assertWitnessPathLockable(rawPath, op) {
   let link = false;
   try {
-    link = lstatSync5(rawPath).isSymbolicLink();
+    link = lstatSync6(rawPath).isSymbolicLink();
   } catch {
   }
   if (link) throw new WitnessUnusableError(op, "link");
@@ -15167,7 +15359,7 @@ function loadStoreLocked(rawPath, op) {
 function assertReplaceTarget(path, op) {
   let st;
   try {
-    st = lstatSync5(path);
+    st = lstatSync6(path);
   } catch (e) {
     const code = codeOf2(e) ?? "";
     if (code === "ENOENT") return;
@@ -15178,7 +15370,7 @@ function assertReplaceTarget(path, op) {
   if (!st.isFile()) throw new WitnessUnusableError(op, "not-regular");
 }
 function writeStoreFileAt(path, store2, fsOps = realFsOps, op = "witness") {
-  const dir = dirname6(path);
+  const dir = dirname7(path);
   const tmp = `${path}.w-${randomBytes3(16).toString("hex")}.tmp`;
   sweepOrphanTmps(path, { fsOps, keep: tmp });
   const fd = fsOps.openSync(tmp, "wx");
@@ -15243,7 +15435,7 @@ function classifyState(state, bytes) {
   return classifyWitness(bytes, state.entry, state.journal);
 }
 function appendWitnessLogLine(home2, line, fsOps) {
-  const fd = fsOps.openSync(witnessLogPath(home2), "a", 384);
+  const fd = openHomeFileForAppend(witnessLogPath(home2), 384, (p, f, m) => fsOps.openSync(p, f, m));
   try {
     writeAll(fsOps, fd, JSON.stringify(line) + "\n");
     fsOps.fsyncSync(fd);
@@ -15438,12 +15630,12 @@ var LedgerProcLostError = class extends Error {
   }
 };
 var isLedgerProcLostError = (e) => e instanceof Error && e.ledgerProcLost === true;
-var APPEND_OPEN = constants4.O_RDWR | constants4.O_APPEND | constants4.O_NOFOLLOW;
+var APPEND_OPEN = constants6.O_RDWR | constants6.O_APPEND | constants6.O_NOFOLLOW;
 var DESTINATION_CHANGED_OPEN_ERRORS = /* @__PURE__ */ new Set(["ELOOP", "EISDIR", "ENOENT"]);
 function openForAppend(path, absentWhenJudged, mustCreate, fsOps) {
   if (absentWhenJudged || mustCreate) {
     try {
-      return { fd: fsOps.openSync(path, APPEND_OPEN | constants4.O_CREAT | constants4.O_EXCL, 384), created: true };
+      return { fd: fsOps.openSync(path, APPEND_OPEN | constants6.O_CREAT | constants6.O_EXCL, 384), created: true };
     } catch (e) {
       const code = e.code;
       if (mustCreate && (code === "EEXIST" || code === "ELOOP")) throw new LedgerCreateRefusedError(code);
@@ -15476,24 +15668,24 @@ function removeOwnCreation(path, opened, fsOps) {
   try {
     if (!sameFile(fileIdentityAt(path), opened)) return;
     fsOps.unlinkSync(path);
-    fsOps.fsyncDir(dirname7(path));
+    fsOps.fsyncDir(dirname8(path));
   } catch {
   }
 }
 function appendRecordUnlocked(rawPath, record2, fsOps = realFsOps, judged) {
-  mkdirSync3(dirname7(rawPath), { recursive: true });
+  mkdirSync3(dirname8(rawPath), { recursive: true });
   const path = resolvedPathOrThrow(rawPath);
   if (judged !== void 0 && judged.path !== path) throw new LedgerDestinationChangedError();
   const before = judged !== void 0 ? judged.identity : fileIdentityAt(path);
-  const dirSample = judged !== void 0 && judged.dir !== void 0 ? judged.dir : sampleDirIdentity(dirname7(path));
-  const bound = openJudgedDir(dirname7(path), dirSample, fsOps);
+  const dirSample = judged !== void 0 && judged.dir !== void 0 ? judged.dir : sampleDirIdentity(dirname8(path));
+  const bound = openJudgedDir(dirname8(path), dirSample, fsOps);
   if (bound.kind === "changed") throw new LedgerDestinationChangedError();
   if (bound.kind === "proc-lost") throw new LedgerProcLostError();
   const held = bound.dir;
   let rowDurable = false;
   try {
     try {
-      const at = boundPath(held, basename4(path));
+      const at = boundPath(held, basename5(path));
       const { fd, created } = openForAppend(at, before === null, judged?.createExclusive === true, fsOps);
       let opened = null;
       const undoCreation = () => {
@@ -15646,12 +15838,12 @@ function ledgerContentKindOfFd(fd) {
   return sawNonBlank ? "other" : "empty";
 }
 function ledgerContentKindAt(path) {
-  const fd = openSync5(path, constants4.O_RDONLY | constants4.O_NOFOLLOW | constants4.O_NONBLOCK);
+  const fd = openSync6(path, constants6.O_RDONLY | constants6.O_NOFOLLOW | constants6.O_NONBLOCK);
   try {
-    if (!fstatSync4(fd).isFile()) return "other";
+    if (!fstatSync6(fd).isFile()) return "other";
     return ledgerContentKindOfFd(fd);
   } finally {
-    closeSync5(fd);
+    closeSync6(fd);
   }
 }
 function parseLedgerText(text) {
@@ -15671,13 +15863,13 @@ var GLOBAL_LEDGER_READ = { unresolvable: "as-given" };
 function readLedgerFileBytesExact(path, flags, shownAs = path) {
   let fd;
   try {
-    fd = openSync5(path, flags);
+    fd = openSync6(path, flags);
   } catch (e) {
     const code = e.code;
     if (code !== "ENOENT" && code !== "ELOOP") {
       let st = null;
       try {
-        st = statSync4(path);
+        st = statSync3(path);
       } catch {
       }
       if (st !== null && !st.isFile()) throw new LedgerNotRegularError(shownAs);
@@ -15685,7 +15877,7 @@ function readLedgerFileBytesExact(path, flags, shownAs = path) {
     throw e;
   }
   try {
-    const st = fstatSync4(fd);
+    const st = fstatSync6(fd);
     if (!st.isFile()) throw new LedgerNotRegularError(shownAs);
     if (st.size > MAX_LEDGER_READ_BYTES) {
       throw Object.assign(new RangeError(`File size (${st.size}) is greater than 2 GiB`), { code: "ERR_FS_FILE_TOO_LARGE" });
@@ -15700,18 +15892,18 @@ function readLedgerFileBytesExact(path, flags, shownAs = path) {
     return len === buf.length ? buf : buf.subarray(0, len);
   } finally {
     try {
-      closeSync5(fd);
+      closeSync6(fd);
     } catch {
     }
   }
 }
 function readLedgerFileBytes(rawPath, opts = {}) {
-  const flags = constants4.O_RDONLY | constants4.O_NONBLOCK;
+  const flags = constants6.O_RDONLY | constants6.O_NONBLOCK;
   const r = resolvePath(rawPath);
   if (r.kind === "uninspectable") throw r.error;
   if (r.kind === "resolved") {
     if (r.dirMissing) throw r.dirError ?? Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
-    return readLedgerFileBytesExact(r.path, flags | constants4.O_NOFOLLOW, rawPath);
+    return readLedgerFileBytesExact(r.path, flags | constants6.O_NOFOLLOW, rawPath);
   }
   if (opts.unresolvable !== "as-given") throw new UnresolvablePathError(r.cause);
   try {
@@ -15744,7 +15936,7 @@ function readLedgerBytes(path, opts) {
 }
 function readLedgerBytesExactly(at) {
   try {
-    return readLedgerFileBytesExact(at, constants4.O_RDONLY | constants4.O_NONBLOCK | constants4.O_NOFOLLOW);
+    return readLedgerFileBytesExact(at, constants6.O_RDONLY | constants6.O_NONBLOCK | constants6.O_NOFOLLOW);
   } catch (err) {
     const code = err.code;
     if (code === "ENOENT") return Buffer.alloc(0);
@@ -15820,7 +16012,7 @@ function serializedBytes(records) {
 }
 function fileSize(path) {
   try {
-    return statSync4(path).size;
+    return statSync3(path).size;
   } catch {
     return 0;
   }
@@ -15835,14 +16027,14 @@ function compactLedgerUnlocked(rawPath, opts, ctx, judged) {
   const fsOps = opts.fsOps ?? realFsOps;
   const path = resolvedPathOrThrow(rawPath);
   if (judged !== void 0 && judged.path !== path) throw new LedgerDestinationChangedError();
-  const dirSample = judged !== void 0 && judged.dir !== void 0 ? judged.dir : sampleDirIdentity(dirname7(path));
-  const opened = openJudgedDir(dirname7(path), dirSample, fsOps);
+  const dirSample = judged !== void 0 && judged.dir !== void 0 ? judged.dir : sampleDirIdentity(dirname8(path));
+  const opened = openJudgedDir(dirname8(path), dirSample, fsOps);
   if (opened.kind === "changed") throw new LedgerDestinationChangedError();
   if (opened.kind === "proc-lost") throw new LedgerProcLostError();
   const held = opened.dir;
   try {
-    const at = boundPath(held, basename4(path));
-    const tmp = boundPath(held, `${basename4(path)}.c-${randomBytes4(16).toString("hex")}.tmp`);
+    const at = boundPath(held, basename5(path));
+    const tmp = boundPath(held, `${basename5(path)}.c-${randomBytes4(16).toString("hex")}.tmp`);
     assertSingleLink(at);
     sweepOrphanTmps(at, { fsOps, keep: tmp });
     const fd = fsOps.openSync(tmp, "wx");
@@ -15953,7 +16145,7 @@ function compactLedgerUnlocked(rawPath, opts, ctx, judged) {
 function assertSingleLink(path) {
   let nlink;
   try {
-    nlink = statSync4(path).nlink;
+    nlink = statSync3(path).nlink;
   } catch {
     return;
   }
@@ -15961,7 +16153,7 @@ function assertSingleLink(path) {
 }
 function modeOf(path) {
   try {
-    return statSync4(path).mode & 511;
+    return statSync3(path).mode & 511;
   } catch {
     return null;
   }
@@ -16101,7 +16293,7 @@ var WITNESS_TRANSITION_NOTE = "(a ledger rewrite for this scope was interrupted;
 var WITNESS_INIT_NOTE = "(rollback witness: this memory scope has no verified baseline, so a rollback of its current contents would go undetected; the next write records them as the baseline)";
 var WITNESS_FILE_UNUSABLE_NOTE = "(the rollback-witness file exists but cannot be read or parsed, or a link stands at its name, so grades cannot be checked against it: elevated grades are shown as Fresh and nothing can be stored until the user restores or resets that file)";
 var WITNESS_PATH_UNRESOLVABLE_NOTE = "(the rollback-witness file's path cannot be resolved, so nothing can be stored, erased or re-graded until that path is repaired: existing records are shown, and their grades are checked against that file as it stands)";
-var GLOBAL_LEDGER_READ_ONLY_NOTE = "(the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), so global memory is read-only: records that can be read through that path are shown, and nothing can be stored, erased or re-graded there until the path is repaired; while the path is broken, a rollback witness mismatch note for global memory can come from the broken path and not from a rollback)";
+var GLOBAL_LEDGER_READ_ONLY_NOTE = "(the global memory file's path cannot be used for writing (it cannot be resolved, it is a link into a directory that does not exist, or it leads to another file of the Helix home), so global memory is read-only: records that can be read through that path are shown, and nothing can be stored, erased or re-graded there until the path is repaired; while the path is broken, a rollback witness mismatch note for global memory can come from the broken path and not from a rollback)";
 function witnessNoteFor(verdict) {
   switch (verdict.kind) {
     case "mismatch":
@@ -16400,14 +16592,14 @@ function selectWriteRedactions(content, spans) {
 }
 
 // src/memory/reality-check.ts
-import { existsSync as existsSync3, openSync as openSync6, fstatSync as fstatSync5, readSync as readSync4, closeSync as closeSync6, constants as constants5 } from "node:fs";
+import { existsSync as existsSync3, openSync as openSync7, fstatSync as fstatSync7, readSync as readSync4, closeSync as closeSync7, constants as constants7 } from "node:fs";
 var INDETERMINATE = { ran: false, indeterminate: true, passed: false };
 var MAX_FILE_BYTES = 5e6;
 function containsBounded(path, pattern) {
   let fd = null;
   try {
-    fd = openSync6(path, constants5.O_RDONLY | constants5.O_NONBLOCK);
-    const st = fstatSync5(fd);
+    fd = openSync7(path, constants7.O_RDONLY | constants7.O_NONBLOCK);
+    const st = fstatSync7(fd);
     if (!st.isFile()) return INDETERMINATE;
     if (st.size > MAX_FILE_BYTES) return INDETERMINATE;
     const cap = Math.min(st.size, MAX_FILE_BYTES) + 1;
@@ -16423,7 +16615,7 @@ function containsBounded(path, pattern) {
   } finally {
     if (fd !== null) {
       try {
-        closeSync6(fd);
+        closeSync7(fd);
       } catch {
       }
     }
@@ -16517,20 +16709,20 @@ function defaultExpansion() {
 
 // src/memory/ownership.ts
 import { randomBytes as randomBytes6 } from "node:crypto";
-import { mkdirSync as mkdirSync4, readFileSync as readFileSync5, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync6, fstatSync as fstatSync6, fchmodSync as fchmodSync2, openSync as openSync7, readSync as readSync5, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync7, constants as constants6 } from "node:fs";
-import { join as join8, resolve as resolve2, dirname as dirname8, basename as basename5, isAbsolute as isAbsolute2 } from "node:path";
+import { mkdirSync as mkdirSync4, readFileSync as readFileSync5, renameSync as renameSync2, unlinkSync as unlinkSync4, lstatSync as lstatSync7, fstatSync as fstatSync8, fchmodSync as fchmodSync3, openSync as openSync8, readSync as readSync5, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync8, constants as constants8 } from "node:fs";
+import { join as join9, resolve as resolve2, dirname as dirname9, basename as basename6, isAbsolute as isAbsolute2 } from "node:path";
 function isReviewableRoot(projectRoot) {
   return isAbsolute2(projectRoot);
 }
 function projectLedgerPath(projectRoot) {
-  return join8(projectRoot, ".helix", "memory.jsonl");
+  return join9(projectRoot, ".helix", "memory.jsonl");
 }
 var GLOBAL_KEY = "@global";
 function registryPath(home2) {
-  return join8(home2, "projects.json");
+  return join9(home2, "projects.json");
 }
 function ownerFile(projectRoot) {
-  return join8(projectRoot, ".helix", ".owner");
+  return join9(projectRoot, ".helix", ".owner");
 }
 function isPlainObject2(x) {
   return typeof x === "object" && x !== null && !Array.isArray(x);
@@ -16548,14 +16740,19 @@ function loadRegistry(home2) {
   const path = registryPath(home2);
   let st;
   try {
-    st = lstatSync6(path);
+    st = lstatSync7(path);
   } catch (e) {
     return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
   }
   if (st.isSymbolicLink()) return { kind: "corrupt" };
   let text;
   try {
-    text = readFileSync5(path, "utf8");
+    const fd = openHomeFileForRead(path);
+    try {
+      text = readFileSync5(fd, "utf8");
+    } finally {
+      closeSync8(fd);
+    }
   } catch {
     return { kind: "corrupt" };
   }
@@ -16575,7 +16772,7 @@ function readRegistry(home2) {
 function assertNotSymlink(path, what) {
   let st;
   try {
-    st = lstatSync6(path);
+    st = lstatSync7(path);
   } catch {
     return;
   }
@@ -16587,9 +16784,9 @@ function writeAll2(fd, data) {
 }
 function atomicWriteFile(path, data, mode, exactMode = false, onReplaced) {
   const tmp = `${path}.${randomBytes6(8).toString("hex")}.tmp`;
-  const fd = openSync7(tmp, "wx", mode);
+  const fd = openSync8(tmp, "wx", mode);
   try {
-    if (exactMode) fchmodSync2(fd, mode);
+    if (exactMode) fchmodSync3(fd, mode);
     writeAll2(fd, data);
     fsyncSync3(fd);
   } catch (e) {
@@ -16599,7 +16796,7 @@ function atomicWriteFile(path, data, mode, exactMode = false, onReplaced) {
     }
     throw e;
   } finally {
-    closeSync7(fd);
+    closeSync8(fd);
   }
   try {
     renameSync2(tmp, path);
@@ -16611,7 +16808,7 @@ function atomicWriteFile(path, data, mode, exactMode = false, onReplaced) {
     throw e;
   }
   onReplaced?.();
-  fsyncDir(dirname8(path));
+  fsyncDir(dirname9(path));
 }
 function atomicWriteRegistry(home2, reg) {
   const path = registryPath(home2);
@@ -16628,8 +16825,8 @@ function atomicWriteOwner(projectRoot, stamp, ownerDir, onReplaced) {
 function readOwner(projectRoot, ownerDir) {
   const path = ownerPlace(projectRoot, ownerDir);
   try {
-    if (!viaDescriptor(ownerDir) && lstatSync6(dirname8(path)).isSymbolicLink()) return null;
-    const st = lstatSync6(path);
+    if (!viaDescriptor(ownerDir) && lstatSync7(dirname9(path)).isSymbolicLink()) return null;
+    const st = lstatSync7(path);
     if (!st.isFile()) return null;
     if (st.nlink > 1) return null;
     return readFileSync5(path, "utf8").trim();
@@ -16645,7 +16842,7 @@ function isOwned(projectRoot, home2) {
 }
 function isHelixDirLinked(projectRoot) {
   try {
-    return lstatSync6(join8(projectRoot, ".helix")).isSymbolicLink();
+    return lstatSync7(join9(projectRoot, ".helix")).isSymbolicLink();
   } catch {
     return false;
   }
@@ -16658,20 +16855,20 @@ function viaDescriptor(ownerDir) {
 }
 function openOwnerDir(projectRoot, judged, fsOps = realFsOps) {
   if (isHelixDirLinked(projectRoot)) return { kind: "changed" };
-  const r = resolvePath(join8(projectRoot, ".helix"));
+  const r = resolvePath(join9(projectRoot, ".helix"));
   if (r.kind !== "resolved" || r.dirMissing) return { kind: "changed" };
-  const identity = judged.destination !== void 0 && judged.dirIdentity !== void 0 && dirname8(judged.destination) === r.path ? judged.dirIdentity : sampleDirIdentity(r.path);
+  const identity = judged.destination !== void 0 && judged.dirIdentity !== void 0 && dirname9(judged.destination) === r.path ? judged.dirIdentity : sampleDirIdentity(r.path);
   return openJudgedDir(r.path, identity, fsOps);
 }
 function ownerBeforeOf(projectRoot, ownerDir) {
   let fd;
   try {
-    fd = openSync7(ownerPlace(projectRoot, ownerDir), constants6.O_RDONLY | constants6.O_NOFOLLOW | constants6.O_NONBLOCK);
+    fd = openSync8(ownerPlace(projectRoot, ownerDir), constants8.O_RDONLY | constants8.O_NOFOLLOW | constants8.O_NONBLOCK);
   } catch {
     return null;
   }
   try {
-    const st = fstatSync6(fd);
+    const st = fstatSync8(fd);
     if (!st.isFile() || st.nlink !== 1) return null;
     const buf = Buffer.alloc(st.size);
     let len = 0;
@@ -16684,7 +16881,7 @@ function ownerBeforeOf(projectRoot, ownerDir) {
   } catch {
     return null;
   } finally {
-    closeSync7(fd);
+    closeSync8(fd);
   }
 }
 var OWNER_UNREACHABLE = /* @__PURE__ */ new Set(["ENOENT", "ENOTDIR", "ELOOP", "EACCES"]);
@@ -16708,7 +16905,7 @@ function putOwnershipBack(projectRoot, home2, snap, ownerDir) {
     const path = ownerPlace(projectRoot, ownerDir);
     let st = null;
     try {
-      st = lstatSync6(path);
+      st = lstatSync7(path);
     } catch (e) {
       if (!OWNER_UNREACHABLE.has(e.code ?? "")) throw e;
     }
@@ -16718,7 +16915,7 @@ function putOwnershipBack(projectRoot, home2, snap, ownerDir) {
       if (snap.ownerBefore !== null) atomicWriteFile(path, snap.ownerBefore.bytes, snap.ownerBefore.mode, true);
       else {
         unlinkSync4(path);
-        fsyncDir(dirname8(path));
+        fsyncDir(dirname9(path));
       }
     } else if (snap.ownerWritten && !beforeIsCalls && snap.entryBefore !== null) {
       throw new Error("restoreOwnership: the .owner this call wrote is not what stands at its name");
@@ -16742,7 +16939,7 @@ function withinDir(dir, path) {
 }
 function standingAt(path) {
   try {
-    const st = lstatSync6(path, { bigint: true });
+    const st = lstatSync7(path, { bigint: true });
     return { dev: st.dev, ino: st.ino, regular: st.isFile(), nlink: st.nlink };
   } catch (e) {
     return e.code === "ENOENT" ? null : "error";
@@ -16764,14 +16961,14 @@ var CONTENT_KIND_SETTLED_NS = 2000000000n;
 var contentKindCache = /* @__PURE__ */ new Map();
 function contentKindOfOpenFile(fd, fresh) {
   if (fresh) return ledgerContentKindOfFd(fd);
-  const before = fstatSync6(fd, { bigint: true });
+  const before = fstatSync8(fd, { bigint: true });
   if (before.ino === 0n) return ledgerContentKindOfFd(fd);
   const key = `${before.dev}:${before.ino}`;
   const hit = contentKindCache.get(key);
   if (hit !== void 0 && hit.size === before.size && hit.mtimeNs === before.mtimeNs && hit.ctimeNs === before.ctimeNs) return hit.kind;
   contentKindCache.delete(key);
   const kind = ledgerContentKindOfFd(fd);
-  const after = fstatSync6(fd, { bigint: true });
+  const after = fstatSync8(fd, { bigint: true });
   const newest = after.mtimeNs > after.ctimeNs ? after.mtimeNs : after.ctimeNs;
   const unchanged = after.size === before.size && after.mtimeNs === before.mtimeNs && after.ctimeNs === before.ctimeNs;
   if (unchanged && BigInt(Date.now()) * 1000000n - newest > CONTENT_KIND_SETTLED_NS) {
@@ -16783,12 +16980,12 @@ function contentKindOfOpenFile(fd, fresh) {
 function openedVerdict(path, readContent, fresh) {
   let fd;
   try {
-    fd = openSync7(path, constants6.O_RDONLY | constants6.O_NOFOLLOW | constants6.O_NONBLOCK);
+    fd = openSync8(path, constants8.O_RDONLY | constants8.O_NOFOLLOW | constants8.O_NONBLOCK);
   } catch {
     return "unreadable";
   }
   try {
-    if (!fstatSync6(fd).isFile()) return "not-regular";
+    if (!fstatSync8(fd).isFile()) return "not-regular";
     if (!readContent) return "ok";
     try {
       return contentKindOfOpenFile(fd, fresh) === "other" ? "not-ledger-content" : "ok";
@@ -16796,17 +16993,17 @@ function openedVerdict(path, readContent, fresh) {
       return "unreadable";
     }
   } finally {
-    closeSync7(fd);
+    closeSync8(fd);
   }
 }
 function isGlobalLedgerEntry(projectLedger, globalLedger2) {
-  if (basename5(projectLedger) !== basename5(globalLedger2)) return false;
+  if (basename6(projectLedger) !== basename6(globalLedger2)) return false;
   if (projectLedger !== globalLedger2) {
-    const da = resolvePath(dirname8(projectLedger)), db = resolvePath(dirname8(globalLedger2));
+    const da = resolvePath(dirname9(projectLedger)), db = resolvePath(dirname9(globalLedger2));
     if (da.kind !== "resolved" || db.kind !== "resolved" || da.path !== db.path) return false;
   }
   try {
-    return !lstatSync6(projectLedger).isSymbolicLink();
+    return !lstatSync7(projectLedger).isSymbolicLink();
   } catch {
     return true;
   }
@@ -16824,7 +17021,7 @@ function judge(project2, forAdopt, freshContent) {
   if (project2.origin === "ancestor" && !owned && !forAdopt) return { state: "ancestor-unadopted", row: "2" };
   let helix = null;
   try {
-    helix = lstatSync6(join8(project2.root, ".helix"));
+    helix = lstatSync7(join9(project2.root, ".helix"));
   } catch {
   }
   if (helix !== null && !helix.isDirectory()) return { state: "unusable", row: "3", cause: "helix-not-directory" };
@@ -16838,7 +17035,7 @@ function judge(project2, forAdopt, freshContent) {
   if (id === "error") return { state: "unusable", row: "9", cause: "unreadable", destination };
   let memoryPathIsLink = false;
   try {
-    memoryPathIsLink = lstatSync6(project2.ledger).isSymbolicLink();
+    memoryPathIsLink = lstatSync7(project2.ledger).isSymbolicLink();
   } catch {
   }
   const isOwnPath = destination === under2(root.path, ".helix/memory.jsonl");
@@ -16870,7 +17067,7 @@ function judge(project2, forAdopt, freshContent) {
     return { state: "unusable", row: "10", cause: "target-directory-missing", destination };
   }
   const identity = id === null ? null : { dev: id.dev, ino: id.ino };
-  const dirIdentity = sampleDirIdentity(dirname8(destination));
+  const dirIdentity = sampleDirIdentity(dirname9(destination));
   if (owned) return { state: "owned", row: "11", destination, identity, dirIdentity };
   if (id !== null) return { state: "unadopted-present", row: "12", destination, identity, dirIdentity };
   return { state: "inactive", row: "13", destination, identity, dirIdentity };
@@ -16899,7 +17096,7 @@ function stampOwnership(projectRoot, home2, opts = {}) {
     const macNonce = existing?.macNonce ?? gen();
     const adoptedAt = existing?.adoptedAt ?? (opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
     if (!viaDescriptor(opts.ownerDir)) {
-      const helixDir = join8(projectRoot, ".helix");
+      const helixDir = join9(projectRoot, ".helix");
       assertNotSymlink(helixDir, ".helix directory");
       mkdirSync4(helixDir, { recursive: true });
     }
@@ -17099,42 +17296,43 @@ function keyVectorEqual(a, b) {
 }
 
 // src/memory/global-ledger.ts
-import { lstatSync as lstatSync7, statSync as statSync5 } from "node:fs";
-import { dirname as dirname9 } from "node:path";
+import { lstatSync as lstatSync8, statSync as statSync4 } from "node:fs";
+import { dirname as dirname10 } from "node:path";
 var isLink = (p) => {
   try {
-    return lstatSync7(p).isSymbolicLink();
+    return lstatSync8(p).isSymbolicLink();
   } catch {
     return false;
   }
 };
 function danglingFolderLinkAbove(path) {
-  for (let dir = dirname9(path); dirname9(dir) !== dir; dir = dirname9(dir)) {
+  for (let dir = dirname10(path); dirname10(dir) !== dir; dir = dirname10(dir)) {
     let link;
     try {
-      link = lstatSync7(dir).isSymbolicLink();
+      link = lstatSync8(dir).isSymbolicLink();
     } catch {
       continue;
     }
     if (!link) continue;
     try {
-      statSync5(dir);
+      statSync4(dir);
     } catch (e) {
       return e.code === "ENOENT";
     }
   }
   return false;
 }
-function globalLedgerWriteState(path) {
+function globalLedgerWriteState(path, home2) {
   const r = resolvePath(path);
   if (r.kind === "unresolvable") return { kind: "read-only", cause: "unresolvable" };
   if (r.kind === "resolved" && r.dirMissing && (isLink(path) || danglingFolderLinkAbove(path))) {
     return { kind: "read-only", cause: "target-directory-missing" };
   }
+  if (r.kind === "resolved" && homeControlFileOf(home2, r.path) !== null) return { kind: "read-only", cause: "home-control-file" };
   return { kind: "writable" };
 }
-var isGlobalLedgerReadOnly = (path) => globalLedgerWriteState(path).kind === "read-only";
-var CAUSE = "the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist)";
+var isGlobalLedgerReadOnly = (path, home2) => globalLedgerWriteState(path, home2).kind === "read-only";
+var CAUSE = "the global memory file's path cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a link into a directory that does not exist) or leads to another file of the Helix home";
 var TAIL = "Tell the user that the global memory path needs repair; do not repair it for them.";
 var refusal = (op) => `${op}: ${CAUSE} \u2014 nothing was written. ${TAIL}`;
 var GLOBAL_WRITE_REFUSAL = {
@@ -17150,13 +17348,14 @@ var GlobalLedgerReadOnlyError = class extends Error {
     this.op = op;
     this.readOnlyCause = readOnlyCause;
     this.name = "GlobalLedgerReadOnlyError";
+    if (readOnlyCause === "home-control-file") Object.assign(this, { homeRefusal: true, homeRefusalCause: "home-control-file" });
   }
   op;
   readOnlyCause;
   globalLedgerReadOnly = true;
 };
 var isGlobalLedgerReadOnlyError = (e) => e instanceof Error && e.globalLedgerReadOnly === true;
-var GLOBAL_READ_ONLY_STARTUP_LINE = "helix: NOTE - the global memory file's path cannot be used for writing (it cannot be resolved, or it is a link into a directory that does not exist), so global memory is read-only: nothing can be stored, erased or re-graded there until the path is repaired";
+var GLOBAL_READ_ONLY_STARTUP_LINE = "helix: NOTE - the global memory file's path cannot be used for writing (it cannot be resolved, it is a link into a directory that does not exist, or it leads to another file of the Helix home), so global memory is read-only: nothing can be stored, erased or re-graded there until the path is repaired";
 var GLOBAL_DESTINATION_CHANGED = {
   commit: "commit: the global memory file changed while the write was in progress \u2014 nothing was written. Try the commit again; if it happens again, tell the user.",
   erase: "erase: the global memory file changed while the erase was in progress \u2014 nothing was erased. Try the erase again; if it happens again, tell the user.",
@@ -17528,8 +17727,8 @@ var MemoryStore = class {
    *  whether the judgement skips row 2 for a project found in a parent directory (the adopt). The compaction asks
    *  no witness question in front of the lock: it is best effort and its own gate refuses an unusable file.
    *
-   *  In front of the lock: the witness file must be usable (design 4.8 item 2; asked before the home is validated or
-   *  tightened and before a lock file is published in the project: FW-R10); the home is validated; a `.helix` that
+   *  In front of the lock: the witness file must be usable (design 4.8 item 2; asked before the home is validated and
+   *  before a lock file is published in the project: FW-R10); the home is validated; a `.helix` that
    *  became a link is refused (row 3's condition, row 3's fixed text); and a memory folder that is missing is created
    *  when the memory path is no link (design 4.2, line 110: row 10 refuses a link whose folder is missing, so only a plain
    *  `.helix/memory.jsonl` reaches the mkdir). The judgement used for the append is taken after the folder exists:
@@ -17563,12 +17762,12 @@ var MemoryStore = class {
     if (op !== "compaction") assertWitnessWritable(home2, op, { homeUnchecked: true });
     ensureHelixDir(home2);
     if (isHelixDirLinked(p.root)) throw this.projectWriteRefusal(op, "unusable");
-    const folder = dirname10(p.ledger);
+    const folder = dirname11(p.ledger);
     let madeFolder = false;
     if (op === "commit" || op === "adopt") {
       let folderThere = true;
       try {
-        lstatSync8(folder);
+        lstatSync9(folder);
       } catch (e) {
         folderThere = e.code !== "ENOENT";
       }
@@ -17609,12 +17808,12 @@ var MemoryStore = class {
    *  link)? Asked afresh on every call: the state is the path's, and a path repaired in the middle of a session is
    *  writable again at the next call. Side-effect free. */
   globalReadOnly() {
-    return globalLedgerWriteState(this.global).kind === "read-only";
+    return globalLedgerWriteState(this.global, this.homeDir()).kind === "read-only";
   }
   /** The typed pre-refusal of a write to a read-only global ledger, or nothing. It stands in front of every lock and of
    *  everything the store writes to the home. */
   refuseReadOnlyGlobal(op) {
-    const w = globalLedgerWriteState(this.global);
+    const w = globalLedgerWriteState(this.global, this.homeDir());
     if (w.kind === "read-only") throw new GlobalLedgerReadOnlyError(op, w.cause);
   }
   /** Order item 3 (4.7, second table, "거부의 위치"): a confirm or recheck whose id names a row of the GLOBAL ledger is
@@ -17641,15 +17840,17 @@ var MemoryStore = class {
    *  permanent erase's rewrite. Five entry points used to reach the global ledger by four routes, each with its own steps
    *  in front of the lock.
    *    1. A read-only global ledger is refused with the operation's fixed text (GlobalLedgerReadOnlyError): before the
-   *       witness check, before ensureHelixDir may create the home or tighten its mode, before the ledger's folder is
+   *       witness check, before ensureHelixDir may create the home, before the ledger's folder is
    *       created and before a lock is tried.
-   *    2. The witness file must be usable (4.8 item 2), asked in front of the home's validation (G-R3). Not for the
-   *       auto-compaction, whose gate is the rewrite's own.
+   *    2. The witness file must be usable and its lock's name (B2a J3) (4.8 item 2), asked in front of the home's
+   *       validation (G-R3). Not for the auto-compaction, whose gate is the rewrite's own.
    *    3. ensureHelixDir and the folder of a plain path (today's creation, unchanged).
    *    4. The ledger lock at the resolved destination. Under it the path is resolved again: it must be the path the lock
    *       stands beside, and the destination's identity is sampled HERE, where the append's check after the open compares
    *       the descriptor with it (G-R7). A path that became read-only while the call waited is refused with step 1's text;
    *       one that resolves elsewhere gets the global changed-destination text.
+   *    5. The key is read or minted under the ledger lock for a commit and an erase, in front of the row (B2a J3), after the
+   *       destination is checked and before its identity is sampled.
    *  Lock order: the global ledger lock first; the body takes the registry lock (the global scope nonce), the key lock (a
    *  first mint) and the witness lock under it and never another ledger lock. */
   underGlobalLedgerLock(op, body) {
@@ -17657,13 +17858,15 @@ var MemoryStore = class {
     const home2 = this.homeDir();
     if (op !== "compaction") assertWitnessWritable(home2, op, { homeUnchecked: true });
     ensureHelixDir(home2);
-    mkdirSync5(dirname10(this.global), { recursive: true });
+    mkdirSync5(dirname11(this.global), { recursive: true });
     try {
       return withFileLock(this.global, (ctx) => {
         const r = resolvePath(this.global);
         if (r.kind === "unresolvable") throw new GlobalLedgerReadOnlyError(op, "unresolvable");
         if (r.kind === "uninspectable") throw r.error;
         if (r.dirMissing || r.path !== ctx.path) throw this.globalChanged(op);
+        if (homeControlFileOf(home2, r.path) !== null) throw new GlobalLedgerReadOnlyError(op, "home-control-file");
+        if (op === "commit" || op === "erase") ensureMaster(home2);
         return body({ ctx, judged: { path: r.path, identity: fileIdentityAt(r.path) } });
       });
     } catch (e) {
@@ -17898,7 +18101,7 @@ var MemoryStore = class {
       let mtimeMs = 0;
       let totalBytes = 0;
       try {
-        const st = statSync6(r.ledger);
+        const st = statSync5(r.ledger);
         mtimeMs = st.mtimeMs;
         totalBytes = st.size;
       } catch {
@@ -18519,7 +18722,7 @@ var MemoryStore = class {
     if (p && this.projectDisposition() === "owned") scopes.push({ ledger: p.ledger, root: p.root });
     const home2 = this.homeDir();
     for (const s of scopes) {
-      if (!existsSync4(dirname10(s.ledger))) continue;
+      if (!existsSync4(dirname11(s.ledger))) continue;
       const scopeKey = scopeKeyOf(home2, s.root);
       try {
         const stateBefore = readScopeWitness(home2, scopeKey);
@@ -18597,8 +18800,8 @@ function classifyLegacyOffenders(records, offenders, keyResolved, subkey) {
 }
 
 // src/memory/project-root.ts
-import { lstatSync as lstatSync9, readdirSync as readdirSync4, statSync as statSync7 } from "node:fs";
-import { dirname as dirname11, isAbsolute as isAbsolute3, join as join9, relative, sep as sep2 } from "node:path";
+import { lstatSync as lstatSync10, readdirSync as readdirSync4, statSync as statSync6 } from "node:fs";
+import { dirname as dirname12, isAbsolute as isAbsolute3, join as join10, relative, sep as sep2 } from "node:path";
 function samePath(a, b) {
   return relative(a, b) === "";
 }
@@ -18608,7 +18811,7 @@ function within(parent, child) {
 }
 function holdsHelixMemory(dir) {
   try {
-    if (!statSync7(dir).isDirectory()) return false;
+    if (!statSync6(dir).isDirectory()) return false;
     const names = readdirSync4(dir);
     return names.length === 0 || names.includes("memory.jsonl") || names.includes(".owner");
   } catch {
@@ -18617,7 +18820,7 @@ function holdsHelixMemory(dir) {
 }
 function hasOwnHelixEntry(dir) {
   try {
-    lstatSync9(join9(dir, ".helix"));
+    lstatSync10(join10(dir, ".helix"));
     return true;
   } catch {
     return false;
@@ -18634,11 +18837,11 @@ function resolveProjectLayer(opts) {
   let dir = canonicalRoot(cwd);
   const insideHome = within(home2, dir);
   for (; ; ) {
-    const parent = dirname11(dir);
+    const parent = dirname12(dir);
     if (parent === dir) return void 0;
     if (insideHome && (samePath(home2, parent) || !within(home2, parent))) return void 0;
     dir = parent;
-    if (holdsHelixMemory(join9(dir, ".helix"))) {
+    if (holdsHelixMemory(join10(dir, ".helix"))) {
       const ledger = projectLedgerPath(dir);
       return isGlobalLedgerEntry(ledger, globalLedger2) ? void 0 : { root: dir, ledger, origin: "ancestor" };
     }
@@ -18646,13 +18849,13 @@ function resolveProjectLayer(opts) {
 }
 
 // src/memory/trust-store-layout.ts
-import { existsSync as existsSync5, readFileSync as readFileSync6, lstatSync as lstatSync10 } from "node:fs";
-import { dirname as dirname12, join as join10 } from "node:path";
+import { closeSync as closeSync9, existsSync as existsSync5, readFileSync as readFileSync6, lstatSync as lstatSync11 } from "node:fs";
+import { dirname as dirname13, join as join11 } from "node:path";
 var TRUST_FILE_NAMES = ["ledger-mac-master.key", "projects.json", "witness.json", "witness-log.jsonl"];
 var MASTER_KEY_LEN = 32;
 function looksLikeOurs(name, path) {
   try {
-    const st = lstatSync10(path);
+    const st = lstatSync11(path);
     if (!st.isFile()) return false;
     if (name === "ledger-mac-master.key") return st.size === MASTER_KEY_LEN;
     if (name === "witness-log.jsonl") {
@@ -18681,7 +18884,7 @@ function looksLikeOurs(name, path) {
 function collidingTrustFiles(home2, stray2) {
   return stray2.filter((name) => {
     try {
-      lstatSync10(join10(home2, name));
+      lstatSync11(join11(home2, name));
       return true;
     } catch {
       return false;
@@ -18689,18 +18892,25 @@ function collidingTrustFiles(home2, stray2) {
   });
 }
 function strayTrustFiles(home2, globalLedger2) {
-  const ledgerDir = dirname12(globalLedger2);
+  const ledgerDir = dirname13(globalLedger2);
   if (canonicalRoot(ledgerDir) === canonicalRoot(home2)) return [];
   return TRUST_FILE_NAMES.filter((name) => {
-    const p = join10(ledgerDir, name);
+    const p = join11(ledgerDir, name);
     return existsSync5(p) && looksLikeOurs(name, p);
   });
 }
 function globalNonceAlreadyEstablished(home2) {
   try {
-    const path = join10(home2, "projects.json");
-    if (!lstatSync10(path).isFile()) return false;
-    const parsed = JSON.parse(readFileSync6(path, "utf8"));
+    const path = join11(home2, "projects.json");
+    if (!lstatSync11(path).isFile()) return false;
+    const fd = openHomeFileForRead(path);
+    let text;
+    try {
+      text = readFileSync6(fd, "utf8");
+    } finally {
+      closeSync9(fd);
+    }
+    const parsed = JSON.parse(text);
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
     const entry = parsed["@global"];
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
@@ -18742,7 +18952,7 @@ function measureGradeLoss(home2, ledger) {
 }
 
 // src/server/helix-server.ts
-import { join as join14 } from "node:path";
+import { join as join15 } from "node:path";
 import { homedir as homedir2 } from "node:os";
 
 // node_modules/zod/v3/external.js
@@ -26844,9 +27054,9 @@ var EMPTY_COMPLETION_RESULT = {
 };
 
 // src/config.ts
-import { openSync as openSync8, fstatSync as fstatSync7, readSync as readSync6, closeSync as closeSync8, constants as constants7 } from "node:fs";
+import { openSync as openSync9, fstatSync as fstatSync9, readSync as readSync6, closeSync as closeSync10, constants as constants9 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join11 } from "node:path";
+import { join as join12 } from "node:path";
 var EGRESS_LEGS = ["memoryEcho", "piiHigh", "piiBulk", "secretHeuristic", "secretEntropy", "secretEntropyExempt"];
 var DEFAULT_COMPACTION = {
   auto: false,
@@ -26902,9 +27112,9 @@ var DEFAULT_CONFIG = {
 };
 var MAX_CONFIG_BYTES = 1048576;
 function readConfigText(path) {
-  const fd = openSync8(path, constants7.O_RDONLY | constants7.O_NONBLOCK);
+  const fd = openSync9(path, constants9.O_RDONLY | constants9.O_NONBLOCK);
   try {
-    const st = fstatSync7(fd);
+    const st = fstatSync9(fd);
     if (!st.isFile()) throw new Error("not a regular file");
     if (st.size > MAX_CONFIG_BYTES) throw new Error(`larger than ${MAX_CONFIG_BYTES} bytes`);
     const buf = Buffer.alloc(st.size);
@@ -26917,7 +27127,7 @@ function readConfigText(path) {
     return buf.subarray(0, len).toString("utf8");
   } finally {
     try {
-      closeSync8(fd);
+      closeSync10(fd);
     } catch {
     }
   }
@@ -26939,7 +27149,7 @@ function readJson(path, onUnusable) {
   }
 }
 function loadConfig(opts = {}) {
-  const globalPath = opts.globalPath ?? join11(homedir(), ".helix", "config.json");
+  const globalPath = opts.globalPath ?? join12(homedir(), ".helix", "config.json");
   const merged = structuredClone(DEFAULT_CONFIG);
   const seen = /* @__PURE__ */ new Set();
   const warn = (msg) => {
@@ -27056,7 +27266,7 @@ function mergeCompaction(raw) {
   return c;
 }
 function compactionConfigFromGlobal(home2) {
-  return mergeCompaction(readJson(join11(home2, "config.json"), () => {
+  return mergeCompaction(readJson(join12(home2, "config.json"), () => {
   })?.compaction);
 }
 
@@ -27779,40 +27989,79 @@ function spansFor(verdict, input, ledger) {
 }
 
 // src/audit.ts
-import { openSync as openSync9, fsyncSync as fsyncSync4, closeSync as closeSync9 } from "node:fs";
-import { dirname as dirname13 } from "node:path";
+import { fsyncSync as fsyncSync4, closeSync as closeSync11, accessSync, statSync as statSync7, constants as constants10 } from "node:fs";
+import { dirname as dirname14 } from "node:path";
 function appendAudit(path, event, io = { fsyncDir }) {
-  ensureHelixDir(dirname13(path));
-  const fd = openSync9(path, "a", 384);
+  ensureHelixDir(dirname14(path));
+  const fd = openHomeFileForAppend(path, 384);
   try {
     writeAll(realFsOps, fd, JSON.stringify(event) + "\n");
     fsyncSync4(fd);
   } finally {
-    closeSync9(fd);
+    closeSync11(fd);
   }
   try {
-    io.fsyncDir(dirname13(path));
+    io.fsyncDir(dirname14(path));
   } catch {
+  }
+}
+var HOME_UNWRITABLE_TEXT = "the Helix home directory cannot be written, so the operation was refused before anything was changed";
+var AUDIT_UNWRITABLE_TEXT = "the Helix audit file cannot be written, so the operation was refused before anything was changed";
+var DENIED = /* @__PURE__ */ new Set(["EACCES", "EPERM", "EROFS"]);
+function assertAuditWritable(path) {
+  const dir = dirname14(path);
+  let dirStat;
+  try {
+    dirStat = statSync7(dir);
+  } catch {
+    return;
+  }
+  if (!dirStat.isDirectory()) return;
+  try {
+    accessSync(dir, constants10.W_OK | constants10.X_OK);
+  } catch (e) {
+    if (DENIED.has(e.code ?? "")) throw new HomeRefusalError("home-unwritable", HOME_UNWRITABLE_TEXT);
+    return;
+  }
+  let st;
+  try {
+    st = statSync7(path);
+  } catch (e) {
+    if (e.code === "ENOENT") return;
+    throw new HomeRefusalError("audit-unwritable", AUDIT_UNWRITABLE_TEXT);
+  }
+  if (!st.isFile()) throw new HomeRefusalError("audit-unwritable", AUDIT_UNWRITABLE_TEXT);
+  try {
+    accessSync(path, constants10.W_OK);
+  } catch {
+    throw new HomeRefusalError("audit-unwritable", AUDIT_UNWRITABLE_TEXT);
   }
 }
 
 // src/server/handlers.ts
-import { readFileSync as readFileSync8 } from "node:fs";
+import { closeSync as closeSync13, readFileSync as readFileSync8 } from "node:fs";
 
 // src/codex-log.ts
-import { readFileSync as readFileSync7, writeFileSync as writeFileSync2, openSync as openSync10, writeSync as writeSync3, closeSync as closeSync10 } from "node:fs";
-import { dirname as dirname14 } from "node:path";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync2, writeSync as writeSync3, closeSync as closeSync12 } from "node:fs";
+import { dirname as dirname15 } from "node:path";
 var MAX_ENTRIES = 1e3;
 function appendCodexLog(path, entry) {
   try {
-    ensureHelixDir(dirname14(path));
-    const fd = openSync10(path, "a", 384);
+    ensureHelixDir(dirname15(path));
+    const fd = openHomeFileForAppend(path, 384);
     try {
       writeSync3(fd, JSON.stringify(entry) + "\n");
     } finally {
-      closeSync10(fd);
+      closeSync12(fd);
     }
-    const lines = readFileSync7(path, "utf8").split("\n").filter((l) => l !== "");
+    const rfd = openHomeFileForRead(path);
+    let text;
+    try {
+      text = readFileSync7(rfd, "utf8");
+    } finally {
+      closeSync12(rfd);
+    }
+    const lines = text.split("\n").filter((l) => l !== "");
     if (lines.length > MAX_ENTRIES) {
       writeFileSync2(path, lines.slice(lines.length - MAX_ENTRIES).join("\n") + "\n");
     }
@@ -27867,9 +28116,10 @@ var REDACTION_NOTICE = "part of this fact was replaced with [redacted:<kind>] ma
 var GLOBAL_WHILE_PROJECT_OFF_NOTICE = "written to global memory, which every project sees, while this session's project memory is off";
 var STORED_THEN_FAILED_RESPONSE = {
   commit: "commit: the record was stored, but a step after the write failed (the rollback witness may not have been updated). Do not commit it again; tell the user what happened.",
-  erase: "erase: the erase was stored, but a step after the write failed (the rollback witness may not have been updated). Do not erase it again; tell the user what happened.",
-  confirm: "confirm: the confirmation was stored, but a step after the write failed (the rollback witness may not have been updated). Do not confirm it again; tell the user what happened.",
-  recheck: "recheck: the check's result was stored, but a step after the write failed (the rollback witness may not have been updated). Do not run the recheck again; tell the user what happened."
+  erase: "erase: the erase was stored, but a step after the write failed (the rollback witness or the audit trail may not have been updated). Do not erase it again; tell the user what happened.",
+  confirm: "confirm: the confirmation was stored, but a step after the write failed (the rollback witness or the audit trail may not have been updated). Do not confirm it again; tell the user what happened.",
+  recheck: "recheck: the check's result was stored, but a step after the write failed (the rollback witness or the audit trail may not have been updated). Do not run the recheck again; tell the user what happened.",
+  adopt: "adopt: the project was adopted, but a step after the write failed (its audit row may not have been written). Do not adopt it again; tell the user what happened."
 };
 var StoredThenFailedError = class extends Error {
   recordStored = true;
@@ -27880,6 +28130,19 @@ var StoredThenFailedError = class extends Error {
 };
 function surfaced(op, e) {
   return isRecordStoredError(e) ? new StoredThenFailedError(op, e) : e;
+}
+function appendAuditAfterFailure(path, row) {
+  try {
+    appendAudit(path, row);
+  } catch {
+  }
+}
+function appendAuditAfterSuccess(op, path, row, stored) {
+  try {
+    appendAudit(path, row);
+  } catch (e) {
+    throw stored ? new StoredThenFailedError(op, e) : e;
+  }
 }
 function handleCommit(store2, args) {
   let committed;
@@ -28028,6 +28291,7 @@ ${n}`);
 }
 function handleErase(store2, args, deps) {
   assertValidId(args.id);
+  assertAuditWritable(deps.auditPath);
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   let outcome;
   try {
@@ -28039,17 +28303,18 @@ function handleErase(store2, args, deps) {
     }
     outcome = found;
   } catch (e) {
-    const row = landedStateOf(e) !== null ? { kind: "erase", ts, id: args.id, soft: true, witnessAdvance: "failed" } : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e) || isWitnessUnusableError(e) && !isRecordStoredError(e) || (isLockForeignObjectError(e) || isLedgerProcLostError(e)) && !isRecordStoredError(e) || isGlobalLedgerReadOnlyError(e) ? { kind: "erase", ts, id: args.id, soft: true, outcome: "rejected" } : { kind: "erase", ts, id: args.id, soft: true, outcome: "indeterminate" };
-    appendAudit(deps.auditPath, row);
+    const row = landedStateOf(e) !== null ? { kind: "erase", ts, id: args.id, soft: true, witnessAdvance: "failed" } : isEraseRefusedError(e) || isWitnessBlockedError(e) || isWitnessAdvanceError(e) || isWitnessUnusableError(e) && !isRecordStoredError(e) || (isLockForeignObjectError(e) || isLedgerProcLostError(e)) && !isRecordStoredError(e) || isGlobalLedgerReadOnlyError(e) || isHomeRefusalError(e) && !isRecordStoredError(e) ? { kind: "erase", ts, id: args.id, soft: true, outcome: "rejected" } : { kind: "erase", ts, id: args.id, soft: true, outcome: "indeterminate" };
+    appendAuditAfterFailure(deps.auditPath, row);
     throw surfaced("erase", e);
   }
-  appendAudit(deps.auditPath, { kind: "erase", ts, id: args.id, soft: true });
+  appendAuditAfterSuccess("erase", deps.auditPath, { kind: "erase", ts, id: args.id, soft: true }, outcome === "erased");
   return ok(`${outcome === "erased" ? "erased" : "unchanged"} ${JSON.stringify({ id: args.id })}`);
 }
 function handleAdopt(store2, args, deps) {
+  assertAuditWritable(deps.auditPath);
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   const scope = store2.adopt(args.projectRoot);
-  appendAudit(deps.auditPath, { kind: "adopt", ts, scope });
+  appendAuditAfterSuccess("adopt", deps.auditPath, { kind: "adopt", ts, scope }, true);
   const note = store2.projectTrustState() === "pending" ? "this project was re-adopted with a lost or mismatched owner stamp, so it is TRUST-PENDING: prior verified grades read as Fresh until you resolve it in a terminal \u2014 helix-trust-resolve --scope <root> --repair (same project) or --fresh (path reused for new content)" : "this project ledger is now trusted by this Helix install";
   return ok(`adopted ${JSON.stringify({ projectRoot: scope, note })}`);
 }
@@ -28065,37 +28330,46 @@ function landedVerifyState(e) {
 }
 function handleRecheck(store2, args, deps) {
   assertValidId(args.id);
+  assertAuditWritable(deps.auditPath);
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
+  let checked;
   try {
-    const { outcome, result } = store2.recheck(args.id, args.check);
-    const resultState = result.kind === "state" ? result.state : result.kind;
-    appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "reality-check", checkKind: args.check.kind, outcome, resultState, bound: true });
-    return ok(`recheck ${JSON.stringify({ id: args.id, state: resultState })}`);
+    checked = store2.recheck(args.id, args.check);
   } catch (e) {
     const landed = landedVerifyState(e);
     const base = { kind: "verify", ts, id: args.id, source: "reality-check", checkKind: args.check.kind };
     const row = landed === null ? { ...base, resultState: "rejected", bound: false } : { ...base, resultState: landed, bound: true, witnessAdvance: "failed" };
-    appendAudit(deps.auditPath, row);
+    appendAuditAfterFailure(deps.auditPath, row);
     throw surfaced("recheck", e);
   }
+  const { outcome, result, record: record2 } = checked;
+  const resultState = result.kind === "state" ? result.state : result.kind;
+  appendAuditAfterSuccess("recheck", deps.auditPath, { kind: "verify", ts, id: args.id, source: "reality-check", checkKind: args.check.kind, outcome, resultState, bound: true }, record2 !== null);
+  return ok(`recheck ${JSON.stringify({ id: args.id, state: resultState })}`);
 }
 function handleConfirm(store2, args, deps) {
   assertValidId(args.id);
+  assertAuditWritable(deps.auditPath);
   const ts = (deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))();
   try {
     store2.confirm(args.id);
   } catch (e) {
     const landed = landedVerifyState(e);
     const row = landed === null ? { kind: "verify", ts, id: args.id, source: "user", resultState: "rejected" } : { kind: "verify", ts, id: args.id, source: "user", resultState: landed, witnessAdvance: "failed" };
-    appendAudit(deps.auditPath, row);
+    appendAuditAfterFailure(deps.auditPath, row);
     throw surfaced("confirm", e);
   }
-  appendAudit(deps.auditPath, { kind: "verify", ts, id: args.id, source: "user", resultState: "Verified" });
+  appendAuditAfterSuccess("confirm", deps.auditPath, { kind: "verify", ts, id: args.id, source: "user", resultState: "Verified" }, true);
   return ok(`confirmed ${JSON.stringify({ id: args.id, state: "Verified" })}`);
 }
 function codexLogCount(path) {
   try {
-    return readFileSync8(path, "utf8").split("\n").filter((l) => l !== "").length;
+    const fd = openHomeFileForRead(path);
+    try {
+      return readFileSync8(fd, "utf8").split("\n").filter((l) => l !== "").length;
+    } finally {
+      closeSync13(fd);
+    }
   } catch {
     return 0;
   }
@@ -28374,13 +28648,13 @@ function serverInstructionsFor(config3) {
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync as existsSync7, mkdtempSync, readFileSync as readFileSync9, rmSync as rmSync3 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join13, win32 as winPath } from "node:path";
+import { join as join14, win32 as winPath } from "node:path";
 import { promisify } from "node:util";
 
 // src/verify/scratch-gc.ts
-import { existsSync as existsSync6, readdirSync as readdirSync5, lstatSync as lstatSync11, statSync as statSync8, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync3 } from "node:fs";
+import { existsSync as existsSync6, readdirSync as readdirSync5, lstatSync as lstatSync12, statSync as statSync8, rmSync as rmSync2, writeFileSync as writeFileSync3, renameSync as renameSync3, unlinkSync as unlinkSync5, mkdirSync as mkdirSync8, chmodSync as chmodSync2 } from "node:fs";
 import { randomBytes as randomBytes7 } from "node:crypto";
-import { join as join12 } from "node:path";
+import { join as join13 } from "node:path";
 var SCRATCH_PREFIX = "codex-";
 var FLOOR_MS = 3 * 24 * 60 * 60 * 1e3;
 var SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
@@ -28399,10 +28673,10 @@ function ensureScratchRoot(root) {
   } catch {
   }
   try {
-    const st = lstatSync11(root);
+    const st = lstatSync12(root);
     if (!st.isDirectory()) return null;
     if (typeof process.getuid === "function" && st.uid !== process.getuid()) return null;
-    if ((st.mode & 63) !== 0) chmodSync3(root, 448);
+    if ((st.mode & 63) !== 0) chmodSync2(root, 448);
     return root;
   } catch {
     return null;
@@ -28423,7 +28697,7 @@ function publishStamp(stampPath) {
 function sweepScratchRoot(root, nowMs = Date.now()) {
   try {
     if (!existsSync6(root)) return;
-    const stampPath = join12(root, STAMP_NAME);
+    const stampPath = join13(root, STAMP_NAME);
     let stampMtimeMs = null;
     try {
       stampMtimeMs = statSync8(stampPath).mtimeMs;
@@ -28435,14 +28709,14 @@ function sweepScratchRoot(root, nowMs = Date.now()) {
     for (const d of readdirSync5(root, { withFileTypes: true })) {
       if (!d.name.startsWith(SCRATCH_PREFIX)) continue;
       try {
-        const st = lstatSync11(join12(root, d.name));
+        const st = lstatSync12(join13(root, d.name));
         entries.push({ name: d.name, isDir: st.isDirectory(), mtimeMs: st.mtimeMs });
       } catch {
       }
     }
     for (const name of selectStaleScratch(entries, nowMs, FLOOR_MS)) {
       try {
-        rmSync2(join12(root, name), { recursive: true, force: true });
+        rmSync2(join13(root, name), { recursive: true, force: true });
       } catch {
       }
     }
@@ -28698,10 +28972,10 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
   return async (question, opts = {}) => {
     const inv = await resolveInv();
     if (!inv) return { ok: false, error: "codex launcher not found on PATH (npm .cmd shim unresolvable)" };
-    const scratchRoot = ensureScratchRoot(join13(tmpdir(), "helix"));
+    const scratchRoot = ensureScratchRoot(join14(tmpdir(), "helix"));
     if (scratchRoot !== null) sweepScratchRoot(scratchRoot);
-    const dir = mkdtempSync(scratchRoot !== null ? join13(scratchRoot, "codex-") : join13(tmpdir(), "helix-codex-"));
-    const outFile = join13(dir, "out.txt");
+    const dir = mkdtempSync(scratchRoot !== null ? join14(scratchRoot, "codex-") : join14(tmpdir(), "helix-codex-"));
+    const outFile = join14(dir, "out.txt");
     try {
       const timeoutMs = Math.min(opts.timeoutMs ?? 12e4, MAX_TIMEOUT_MS);
       const { code, stderr } = await run(inv, buildCodexExecArgs(outFile, opts, dir), question, timeoutMs, dir, opts.signal);
@@ -28731,8 +29005,8 @@ function createCodexRunner(resolveInv = resolveCodexInvocation, run = runCodex) 
 var realCodexRunner = createCodexRunner();
 
 // src/metrics.ts
-import { appendFileSync } from "node:fs";
-import { dirname as dirname15 } from "node:path";
+import { closeSync as closeSync14, writeFileSync as writeFileSync4 } from "node:fs";
+import { dirname as dirname16 } from "node:path";
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 var noopMetricsSink = {
@@ -28745,8 +29019,13 @@ var noopMetricsSink = {
 function createMetricsSink(path, enabled, deps = {}) {
   if (!enabled) return noopMetricsSink;
   const append = deps.append ?? ((p, line) => {
-    ensureHelixDir(dirname15(p));
-    appendFileSync(p, line, { mode: 384 });
+    ensureHelixDir(dirname16(p));
+    const fd = openHomeFileForAppend(p, 384);
+    try {
+      writeFileSync4(fd, line);
+    } finally {
+      closeSync14(fd);
+    }
   });
   const now = deps.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const genId = deps.genId ?? (() => `o_${randomUUID2()}`);
@@ -28849,11 +29128,11 @@ var PROJECT_ROOT_SCHEMA = external_exports.string().refine(isReviewableRoot, {
 });
 function buildServer(store2, dualDeps, metrics2) {
   const m = metrics2 ?? noopMetricsSink;
-  const home2 = process.env.HELIX_HOME ?? join14(homedir2(), ".helix");
+  const home2 = resolveHelixPaths({ HELIX_HOME: process.env.HELIX_HOME }, homedir2()).home;
   const dv = dualDeps ?? {
-    config: loadConfig({ globalPath: join14(home2, "config.json") }),
+    config: loadConfig({ globalPath: join15(home2, "config.json") }),
     // Issue #11: read again on each call; only what narrows the outbound path applies (see index.ts).
-    currentConfig: () => loadConfig({ globalPath: join14(home2, "config.json"), warn: () => {
+    currentConfig: () => loadConfig({ globalPath: join15(home2, "config.json"), warn: () => {
     } }),
     runner: realCodexRunner,
     checkAvailable: checkCodexAvailable,
@@ -28862,8 +29141,8 @@ function buildServer(store2, dualDeps, metrics2) {
     // same pure function `inspect()` already applies rather than fabricating a value, so a record that
     // ever arrives without one is still matchable instead of silently unquotable.
     echo: { mode: "enforce", ledgerTexts: () => store2.inspect().map(({ record: record2, contentDigest }) => ({ id: record2.id, content: record2.content, contentDigest: contentDigest ?? digestContent(record2.content) })) },
-    auditPath: join14(home2, "audit.jsonl"),
-    codexLogPath: join14(home2, "codex-log.jsonl")
+    auditPath: join15(home2, "audit.jsonl"),
+    codexLogPath: join15(home2, "codex-log.jsonl")
   };
   const instructions = serverInstructionsFor(dv.config);
   const server2 = new McpServer({ name: "helix", version: "0.1.0" }, instructions === void 0 ? void 0 : { instructions });
@@ -29048,21 +29327,30 @@ function installSelfTermination(deps) {
 }
 
 // src/server/index.ts
-var home = process.env.HELIX_HOME ?? join15(homedir3(), ".helix");
-var globalLedger = process.env.HELIX_LEDGER ?? join15(home, "memory.jsonl");
+var STARTUP_HOME_REFUSAL_LINE = "helix: REFUSING TO START - HELIX_HOME or HELIX_LEDGER is a relative path or a path that cannot be resolved; only an absolute path is accepted, and an empty value counts as unset";
+var paths;
+try {
+  paths = resolveHelixPaths({ HELIX_HOME: process.env.HELIX_HOME, HELIX_LEDGER: process.env.HELIX_LEDGER }, homedir3());
+} catch (e) {
+  if (!isHomeRefusalError(e)) throw e;
+  process.stderr.write(`${STARTUP_HOME_REFUSAL_LINE}
+`);
+  process.exit(78);
+}
+var { home, globalLedger } = paths;
 var project = resolveProjectLayer({ cwd: process.cwd(), userHome: homedir3(), globalLedger });
 hardenHomePermissions(home, { warn: (m) => process.stderr.write(`${m}
 `) });
-var config2 = loadConfig({ globalPath: join15(home, "config.json") });
+var config2 = loadConfig({ globalPath: join16(home, "config.json") });
 var configRoot = project?.root ?? process.cwd();
-if (existsSync8(join15(configRoot, ".helix", "config.json"))) {
-  process.stderr.write(`helix: NOTE - ${join15(configRoot, ".helix", "config.json")} is not read; dual-verify, egress and logging settings come only from ${join15(home, "config.json")}
+if (existsSync8(join16(configRoot, ".helix", "config.json"))) {
+  process.stderr.write(`helix: NOTE - ${join16(configRoot, ".helix", "config.json")} is not read; dual-verify, egress and logging settings come only from ${join16(home, "config.json")}
 `);
 }
-var metrics = createMetricsSink(join15(home, "metrics.jsonl"), config2.metrics.enabled);
+var metrics = createMetricsSink(join16(home, "metrics.jsonl"), config2.metrics.enabled);
 var stray = strayTrustFiles(home, globalLedger);
 if (stray.length > 0) {
-  const ledgerDir = dirname16(globalLedger);
+  const ledgerDir = dirname17(globalLedger);
   const collide = collidingTrustFiles(home, stray);
   const wouldOverwrite = `     HELIX_HOME ALREADY HAS ${collide.join(", ")} - moving the stray copies
      over ${collide.length === 1 ? "it" : "them"} REPLACES this install's own trust store, and every elevated grade
@@ -29137,7 +29425,7 @@ ${causes.join("")}Two ways out, both deliberate:
     process.exit(78);
   }
 }
-if (isGlobalLedgerReadOnly(globalLedger)) process.stderr.write(`${GLOBAL_READ_ONLY_STARTUP_LINE}
+if (isGlobalLedgerReadOnly(globalLedger, home)) process.stderr.write(`${GLOBAL_READ_ONLY_STARTUP_LINE}
 `);
 var store = new MemoryStore(globalLedger, { home, sessionId: process.env.HELIX_SESSION ?? "cli", project, metricsSink: metrics, compaction: compactionConfigFromGlobal(home), releaseWordChains: config2.persistence.releaseWordChains });
 store.healWitness();
@@ -29177,7 +29465,7 @@ var server = buildServer(store, {
   // only what narrows the outbound path (narrowDualVerify); a widening change waits for a restart.
   // Silent: the start's load above already reported this file once, and helix_codex_status names an
   // unreadable file and every waiting key on the surface an operator reads.
-  currentConfig: () => loadConfig({ globalPath: join15(home, "config.json"), warn: () => {
+  currentConfig: () => loadConfig({ globalPath: join16(home, "config.json"), warn: () => {
   } }),
   runner: realCodexRunner,
   checkAvailable: checkCodexAvailable,
@@ -29186,8 +29474,8 @@ var server = buildServer(store, {
   // same pure function `inspect()` already applies rather than fabricating a value, so a record that
   // ever arrives without one is still matchable instead of silently unquotable.
   echo: { mode: "enforce", ledgerTexts: () => store.inspect().map(({ record: record2, contentDigest }) => ({ id: record2.id, content: record2.content, contentDigest: contentDigest ?? digestContent(record2.content) })) },
-  auditPath: join15(home, "audit.jsonl"),
-  codexLogPath: join15(home, "codex-log.jsonl")
+  auditPath: join16(home, "audit.jsonl"),
+  codexLogPath: join16(home, "codex-log.jsonl")
 }, metrics);
 var transport = new StdioServerTransport();
 await server.connect(transport);
