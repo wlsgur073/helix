@@ -1,6 +1,7 @@
-import { mkdirSync, openSync, fsyncSync, closeSync } from 'node:fs';
+import { mkdirSync, fsyncSync, closeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeAll, realFsOps, fsyncDir } from './memory/fs-ops.js';
+import { openHomeFileForAppend } from './memory/home-files.js';
 import type { EgressLeg } from './config.js';
 import type { GateName } from './verify/dual-verify.js';
 import { ensureHelixDir } from './memory/home-permissions.js';
@@ -147,7 +148,7 @@ export type AuditEvent = DualVerifyAudit | EraseAudit | VerifyAudit | AdoptAudit
  *  it acknowledges. Audit appends are low-frequency; the extra directory fsync is noise. */
 export function appendAudit(path: string, event: AuditEvent, io: { fsyncDir: typeof fsyncDir } = { fsyncDir }): void {
   ensureHelixDir(dirname(path));
-  const fd = openSync(path, 'a', 0o600);   // owner-only ON CREATE (the audit trail is unauthenticated; a group writer could rewrite it)
+  const fd = openHomeFileForAppend(path, 0o600);   // owner-only ON CREATE (the audit trail is unauthenticated; a group writer could rewrite it)
   try {
     // writeAll loops short writes (a truncated row is never fsynced) and guards a zero-progress write.
     writeAll(realFsOps, fd, JSON.stringify(event) + '\n');

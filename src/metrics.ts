@@ -6,11 +6,12 @@
 // HARD RULE (spec §3): records are metadata-only — no memory content, no query text, no paths, no
 // error messages. `error.type` is the exception class name, or the constant 'NonError' for a
 // non-Error throw (NEVER a stringified thrown value — a thrown string would leak verbatim).
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { closeSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ensureHelixDir } from './memory/home-permissions.js';
+import { openHomeFileForAppend } from './memory/home-files.js';
 
 /** One per-scope verifying read, camelCase in code — the sink writes snake_case wire names. */
 export interface ReplayInput {
@@ -72,7 +73,8 @@ export function createMetricsSink(path: string, enabled: boolean, deps: MetricsS
   if (!enabled) return noopMetricsSink;
   const append = deps.append ?? ((p: string, line: string): void => {
     ensureHelixDir(dirname(p));
-    appendFileSync(p, line, { mode: 0o600 }); // owner-only on create; O_APPEND, one line per record
+    const fd = openHomeFileForAppend(p, 0o600);   // owner-only on create; O_APPEND, one line per record
+    try { writeFileSync(fd, line); } finally { closeSync(fd); }
   });
   const now = deps.now ?? ((): string => new Date().toISOString());
   const genId = deps.genId ?? ((): string => `o_${randomUUID()}`);

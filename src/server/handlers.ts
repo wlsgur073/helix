@@ -12,7 +12,8 @@ import { isLedgerProcLostError } from '../memory/ledger.js';
 import { isGlobalLedgerReadOnlyError } from '../memory/global-ledger.js';
 import { appendAudit, type VerifyAudit, type EraseAudit } from '../audit.js';
 import type { MemoryState, ScopedRecord } from '../types.js';
-import { readFileSync } from 'node:fs';
+import { closeSync, readFileSync } from 'node:fs';
+import { openHomeFileForRead } from '../memory/home-files.js';
 import { classifyEmission, type EgressVerdict, type Leg, type QuotedMemory } from '../risk/trifecta.js';
 import { appendCodexLog } from '../codex-log.js';
 import type { RealityCheck } from '../memory/reality-check.js';
@@ -603,7 +604,10 @@ export interface CodexStatusDeps {
 
 /** Count JSONL lines best-effort; a missing/unreadable file is 0 (never throws). */
 function codexLogCount(path: string): number {
-  try { return readFileSync(path, 'utf8').split('\n').filter((l) => l !== '').length; }
+  try {
+    const fd = openHomeFileForRead(path);
+    try { return readFileSync(fd, 'utf8').split('\n').filter((l) => l !== '').length; } finally { closeSync(fd); }
+  }
   catch { return 0; }
 }
 

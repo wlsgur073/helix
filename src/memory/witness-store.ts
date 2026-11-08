@@ -10,6 +10,7 @@ import { withFileLock } from './lock.js';
 import { canonicalRoot, resolvePath, resolvedPathOrThrow } from './path-identity.js';
 import { ensureMaster, tryReadMaster } from './ledger-mac.js';
 import { realFsOps, writeAll, type DurableFsOps } from './fs-ops.js';
+import { openHomeFileForAppend } from './home-files.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import { ensureHelixDir, isSymlinkedHome } from './home-permissions.js';
 import {
@@ -358,7 +359,7 @@ export function classifyScope(home: string, scopeKey: string, bytes: Buffer): Wi
 }
 
 function appendWitnessLogLine(home: string, line: { v: 1; scope: string; epoch: number; kind: JournalEntry['kind']; tx: string; nonce: string; op?: 'discard' }, fsOps: DurableFsOps): void {
-  const fd = fsOps.openSync(witnessLogPath(home), 'a', 0o600);
+  const fd = openHomeFileForAppend(witnessLogPath(home), 0o600, (p, f, m) => fsOps.openSync(p, f, m));
   try {
     writeAll(fsOps, fd, JSON.stringify(line) + '\n');
     fsOps.fsyncSync(fd);

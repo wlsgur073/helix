@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, lstatSync } from 'node:fs';
+import { closeSync, existsSync, readFileSync, lstatSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { canonicalRoot } from './ownership.js';
@@ -6,6 +6,7 @@ import { tryReadMaster, tryReadMasterUntouched, verifyVerify } from './ledger-ma
 import { subkeyForScope, verifiedProjectionWithSubkey } from './verified-read.js';
 import { readLedgerWitnessed } from './witness-read.js';
 import { clampElevatedState } from './verified-projection.js';
+import { openHomeFileForRead } from './home-files.js';
 import { scanLegacyElevated } from './legacy-scan.js';
 
 /** Everything the trust store keeps under `home`. These are the files whose location SECURITY.md
@@ -189,7 +190,10 @@ function globalNonceAlreadyEstablished(home: string): boolean {
   try {
     const path = join(home, 'projects.json');
     if (!lstatSync(path).isFile()) return false;   // absent, or a symlink we will not follow
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    const fd = openHomeFileForRead(path);
+    let text: string;
+    try { text = readFileSync(fd, 'utf8'); } finally { closeSync(fd); }
+    const parsed: unknown = JSON.parse(text);
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
     const entry = (parsed as Record<string, unknown>)['@global'];
     if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return false;

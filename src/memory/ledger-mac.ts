@@ -6,6 +6,7 @@ import { fsyncDir, writeAll, realFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import type { MemoryRecord } from '../types.js';
 import { ensureHelixDir } from './home-permissions.js';
+import { openHomeFileForRead } from './home-files.js';
 
 export const MAC_VERSION = 2;                             // version NEW signatures carry
 const ACCEPTED_MAC_VERSIONS = new Set<number>([1, 2]);   // versions verifyVerify treats as valid
@@ -136,7 +137,10 @@ function tightenMasterKey(path: string): void {
  *  `tighten` false reads a key that is not the home's own and never changes its mode (tryReadMasterUntouched). */
 function tryReadMasterStrict(path: string, tighten = true): Buffer | null {
   let buf: Buffer;
-  try { buf = readFileSync(path); }
+  try {
+    const fd = openHomeFileForRead(path);
+    try { buf = readFileSync(fd); } finally { closeSync(fd); }
+  }
   catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null; throw e; }
   if (buf.length !== MASTER_LEN) throw new LedgerMacError(`corrupt master key (${buf.length} bytes, want ${MASTER_LEN})`);
   if (tighten) tightenMasterKey(path);

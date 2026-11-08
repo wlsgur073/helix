@@ -349,7 +349,7 @@ describe('SECURITY.md states the mode the audit trail is actually created with (
 
     // Recovered by SEARCHING THE SHIPPED SOURCE, never hardcoded: change the literal in src/audit.ts
     // and this test starts demanding the new number from SECURITY.md instead of silently agreeing.
-    const declared = /openSync\(path, 'a', (0o\d+)\)/.exec(readFileSync(join(ROOT, 'src', 'audit.ts'), 'utf8'))?.[1];
+    const declared = /openHomeFileForAppend\(path, (0o\d+)\)/.exec(readFileSync(join(ROOT, 'src', 'audit.ts'), 'utf8'))?.[1];
     expect(declared, 'src/audit.ts no longer opens the audit trail with an explicit mode').toBeDefined();
 
     // The promise is kept on this filesystem — the recovered literal is what the file actually gets.

@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, unlinkSync, lstatSync, fstatSync, 
 import { join, resolve, dirname, basename, isAbsolute } from 'node:path';
 import { withFileLock } from './lock.js';
 import { ensureHelixDir } from './home-permissions.js';
+import { openHomeFileForRead } from './home-files.js';
 import { realFsOps, fsyncDir, type DurableFsOps } from './fs-ops.js';
 import { canonicalRoot, resolvePath, fileIdentityAt, sameFile, type FileIdentity } from './path-identity.js';
 import { ledgerContentKindOfFd, type LedgerContentKind } from './ledger.js';
@@ -92,8 +93,11 @@ function loadRegistry(home: string): RegistryRead {
   catch (e) { return (e as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'absent' } : { kind: 'corrupt' }; }
   if (st.isSymbolicLink()) return { kind: 'corrupt' }; // never FOLLOW a symlinked registry (lock-split)
   let text: string;
-  try { text = readFileSync(path, 'utf8'); }
-  catch { return { kind: 'corrupt' }; } // present but unreadable (EISDIR / EACCES / I/O error)
+  try {
+    const fd = openHomeFileForRead(path);
+    try { text = readFileSync(fd, 'utf8'); } finally { closeSync(fd); }
+  }
+  catch { return { kind: 'corrupt' }; } // present but unreadable or not a regular file (FIFO / directory / EACCES / I/O error)
   let parsed: unknown;
   try { parsed = JSON.parse(text); }
   catch { return { kind: 'corrupt' }; } // present but not JSON
