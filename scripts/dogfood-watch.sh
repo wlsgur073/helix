@@ -125,14 +125,33 @@ else
   exit 0
 fi
 
-# Signal 2: completion gap, in whole KST calendar days. mtime is a faithful
-# "last completion" proxy: the sink is fsync-appended on EVERY service
-# completion (success, TERM, timeout alike) since Phase 2 (2026-07-17).
+# Signal 2: completion gap, in whole KST calendar days. The last completion is dated from the newest
+# `ts` among the sink's evaluation and reporter-failure rows: a run that ends in a timeout or a crash
+# leaves a reporter-failure row, so it counts. The file's mtime is not the source, because
+# `helix-trigger --acknowledge` appends an acknowledgement row, and moves the mtime, without any run
+# completing. The candidates are tried newest first and the first one `date -d` accepts is the answer,
+# so a shape-valid but impossible `ts` (month 13, hour 24) does not hide an older valid row. The mtime
+# is read only when no such row yields a parsable `ts`. Only the evaluation row is fsynced; the
+# reporter-failure row is a plain append.
+last_completion_epoch() {
+  local f="$1" cts epoch
+  while IFS= read -r cts; do
+    [ -n "$cts" ] || continue
+    epoch=$(date -d "$cts" +%s 2>/dev/null) || continue
+    [ -n "$epoch" ] || continue
+    printf '%s\n' "$epoch"
+    return 0
+  done < <(grep -E '"kind":"(evaluation|reporter-failure)"' "$f" 2>/dev/null | grep -o '"ts":"[^"]*"' | cut -d'"' -f4 | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$' | sort -r)
+  return 0
+}
 if [ ! -f "$TRIGGER_FILE" ]; then
   banner "cannot assess last dogfood completion - $TRIGGER_FILE is missing"
   exit 0
 fi
-mt=$(stat -c %Y "$TRIGGER_FILE" 2>/dev/null)
+mt=$(last_completion_epoch "$TRIGGER_FILE")
+if [ -z "$mt" ]; then
+  mt=$(stat -c %Y "$TRIGGER_FILE" 2>/dev/null)
+fi
 if [ -z "$mt" ]; then
   banner "cannot assess last dogfood completion - stat failed on $TRIGGER_FILE"
   exit 0

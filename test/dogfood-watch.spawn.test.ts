@@ -6,7 +6,7 @@
 // (timer state, completion gap, missing sink) may legitimately print too.
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -70,7 +70,7 @@ function runWatch(t: Tree, extra: NodeJS.ProcessEnv = {}): { status: number | nu
     TIMER_UNIT: 'helix-dogfood.timer',
     ...extra,
   };
-  const res = spawnSync('bash', [t.script], { env, encoding: 'utf8', timeout: 10_000 });
+  const res = spawnSync('bash', [t.script], { env, encoding: 'utf8', timeout: 10_000, cwd: t.home });
   return { status: res.status, stdout: res.stdout, stderr: res.stderr };
 }
 
@@ -181,4 +181,101 @@ describe('T1-STICKY: an acknowledged fire stays quiet until new evidence (item 7
       ackLine(ACK_TS, '2026-09-23T08:30:18.147Z', legsWith(null, 'true', 'unavailable')),
       E('2026-09-24T09:00:00.000Z', 50, 'true'),
     ].join('\n') + '\n'));
+});
+
+// Signal 2 (J7): the gap is dated from the newest evaluation or reporter-failure `ts`, never from the sink's mtime, and an
+// acknowledgement row (which moves the mtime without a run completing) is never read. The script reads `date`, so fixtures are
+// built relative to the real clock: a gap of whole days shifts the KST calendar day by exactly that many days at any time of
+// day, so the expected `last:` day is fixed by the fixture and only the day count could differ across a KST midnight.
+const DAY_MS = 86_400_000;
+const isoAgo = (days: number, extraMs = 0): string => new Date(Date.now() - days * DAY_MS - extraMs).toISOString();
+const kstDay = (iso: string): string => new Date(Date.parse(iso) + 9 * 3_600_000).toISOString().slice(0, 10);
+const GAP_PREFIX = '[dogfood-watch] no dogfood run completion for';
+const gapBanner = (lastIso: string): RegExp =>
+  new RegExp(`\\[dogfood-watch\\] no dogfood run completion for \\d+ days \\(last: ${kstDay(lastIso)}\\)`);
+const lines = (...rows: string[]): string => rows.join('\n') + '\n';
+
+/** The reporter-failure line with the byte shape scripts/dogfood-postrun.sh composes (field order, no spaces). */
+function reporterFailureLine(ts: string): string {
+  return JSON.stringify({
+    v: 1, policy: 'T1-2026-07-11', kind: 'reporter-failure', ts, run: 'r-rf',
+    service_result: 'timeout', exit_code: null, exit_status: null, reason: 'timeout',
+  });
+}
+
+/** Writes `text` as the sink, then sets its mtime, so a case fixes the mtime independently of the rows. */
+function writeSink(t: Tree, text: string, mtimeIso: string): void {
+  writeFileSync(t.sink, text);
+  const m = new Date(mtimeIso);
+  utimesSync(t.sink, m, m);
+}
+
+describe('Signal 2: the gap is dated from the newest completion row, not from the sink mtime (J7)', () => {
+  const noGapBanner = (r: { status: number | null; stdout: string }): void => {
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toContain(GAP_PREFIX);
+    expect(r.stdout).not.toContain('cannot assess');
+  };
+  const sameDay = (s: string): string => s.replace(/for \d+ days/, 'for N days');
+
+  it('an acknowledgement after the last evaluation does not move the gap: same banner and same last day as the sink without it', () => {
+    const lastEval = isoAgo(3);
+    const control = buildTree();                      // mtime = the evaluation's instant, what a sink without an ack looks like
+    writeSink(control, lines(evalLine(lastEval, 'not-fired', 'r1')), lastEval);
+    const acked = buildTree();                        // the acknowledgement is appended now: ts now, mtime now
+    writeSink(acked, lines(evalLine(lastEval, 'not-fired', 'r1'), ackLine(isoAgo(0), lastEval, legsWith(5))), isoAgo(0));
+    const c = runWatch(control);
+    expect(c.status).toBe(0);
+    expect(c.stdout).toMatch(gapBanner(lastEval));
+    const a = runWatch(acked);
+    expect(a.status).toBe(0);
+    expect(sameDay(a.stdout)).toBe(sameDay(c.stdout));
+  });
+
+  it('a reporter-failure row is a completion, and the row ts rules over an older mtime -> no gap banner', () => {
+    const t = buildTree();                            // evaluation 3 days ago, a timeout/crash row a minute ago; mtime deliberately old
+    writeSink(t, lines(evalLine(isoAgo(3), 'not-fired', 'r1'), reporterFailureLine(isoAgo(0, 60_000))), isoAgo(3));
+    noGapBanner(runWatch(t));
+  });
+
+  it('the newest ts wins, not the last row: a later row carrying an earlier ts (clock step) -> no gap banner', () => {
+    const t = buildTree();
+    writeSink(t, lines(evalLine(isoAgo(0, 60_000), 'not-fired', 'r1'), evalLine(isoAgo(3), 'not-fired', 'r2')), isoAgo(3));
+    noGapBanner(runWatch(t));
+  });
+
+  it('the newer of the two kinds dates the gap: evaluation 5 days ago, reporter-failure 3 days ago -> last is the failure day, whatever the mtime', () => {
+    const lastFailure = isoAgo(3);
+    const t = buildTree();
+    writeSink(t, lines(evalLine(isoAgo(5), 'not-fired', 'r1'), reporterFailureLine(lastFailure)), isoAgo(0));
+    const r = runWatch(t);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(gapBanner(lastFailure));
+  });
+
+  it.each([
+    ['a single row torn inside its ts', '{"v":1,"policy":"T1-2026-07-11","kind":"evaluation","ts":"2026-11-0'],
+    ['a reporter-failure row whose ts is not a calendar instant', reporterFailureLine('2026-13-45T25:61:61.000Z') + '\n'],
+  ])('no row yields a usable ts (%s) -> the mtime dates the gap, as before', (_name, text) => {
+    const mtime = isoAgo(3);
+    const t = buildTree();
+    writeSink(t, text, mtime);
+    const r = runWatch(t);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(gapBanner(mtime));
+  });
+
+  // A newer row whose ts has the ISO shape but is not a calendar instant sorts above the older valid row; it must not hide that
+  // row and send the script to the mtime (which is now here, so the fallback would print no banner at all).
+  it.each([
+    ['month 13, on a reporter-failure row', (older: string) => reporterFailureLine(`${older.slice(0, 5)}13${older.slice(7)}`)],
+    ['hour 24, on an evaluation row', (older: string) => evalLine(`${older.slice(0, 11)}24${older.slice(13)}`, 'not-fired', 'r2')],
+  ])('a newer row with an impossible ts (%s) does not hide an older valid row -> the older row dates the gap, not the mtime', (_name, newer) => {
+    const older = isoAgo(3);
+    const t = buildTree();
+    writeSink(t, lines(evalLine(older, 'not-fired', 'r1'), newer(older)), isoAgo(0));
+    const r = runWatch(t);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(gapBanner(older));
+  });
 });
