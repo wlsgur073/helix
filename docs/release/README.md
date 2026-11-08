@@ -135,11 +135,15 @@ that ended at T_abort. That run's 14 evidence artifacts, listed in Appendix A of
 | C3, claim honesty | 2026-07-26, `18bee14` | 60 claims, 56 accurate as written. Three overclaims fixed (one in code, so `audit.jsonl` stays content-free), one unverifiable observation accepted, `dualVerify.timeoutMs` raised to 1,500,000 ms, the disclosure channel exercised with a test advisory. |
 | C4 drills | 2026-07-27, `afc29c4`, installed artifact | C4.1–C4.6 pass: the same-version cache trap reproduced; data files survive disable, enable and reinstall; restore, damage and key loss behave as documented. F1 and O5 fixed in `d481893`, Q1 and Q2 closed 2026-09-01, Q3 and Q4 owed (see *Status*), Q5 and Q6 accepted, O2 and O3 tracked for after `v0.1.0`. |
 | C3.1 re-runs | 2026-09-09 `0bcd4d7`, 2026-09-13–17 `abbf7b4`, 2026-09-25 `8abd984` (delta) | 121 claims (1 FALSE, 1 imprecise), then 311 (5 FALSE, 50 imprecise), each corrected before the next certification. The delta audited 280: 258 accurate, 12 empirical, 9 imprecise and 1 FALSE (Δ5-13: fsync failures have four exceptions, not two), corrected in `be0174e`. |
-| C3.3, defaults | 2026-09-25, `8abd984` | 28 defaults, 26 sound. Two gaps disclosed, not fixed: `metrics.jsonl` is on by default and uncapped, and an empty `HELIX_HOME` lets a project's files stand in for the global ones. |
+| C3.3, defaults | 2026-09-25, `8abd984` | 28 defaults, 26 sound. Two gaps disclosed, not fixed: `metrics.jsonl` is on by default and uncapped, and an empty `HELIX_HOME` lets a project's files stand in for the global ones. Resolution note: the second gap is closed in code by the home-contract part of the third fix batch: an empty `HELIX_HOME` counts as unset and gives `~/.helix` (`SECURITY.md`). The note does not cover the `metrics.jsonl` gap. |
 | Dependencies | 2026-09-09 | Advisories 10 → 5: `fast-uri` overridden to 3.1.7, vitest and esbuild upgraded. The five left (`ip-address` high; `hono`, `@hono/node-server`, `qs` moderate; `body-parser` low) come with the MCP SDK's HTTP transports, and `bin/helix-mcp.mjs` holds 0 module paths from any of them. Accepted as unreachable; recount at the next SDK upgrade. |
 
-Two defects stay open in code and are disclosed in `SECURITY.md` for `v0.1.0`: ALIAS-DOTDOT (Δ4-46,
-`..` after a symlinked directory is collapsed as text) and the pre-adopt alias gap (Δ4-37).
+Two defects stayed open in code after the C3.1 delta of 2026-09-25 and were disclosed in
+`SECURITY.md` for `v0.1.0`: ALIAS-DOTDOT (Δ4-46, `..` after a symlinked directory is collapsed as
+text) and the pre-adopt alias gap (Δ4-37). Both are closed in code: ALIAS-DOTDOT and the first part
+of the pre-adopt gap with the second fix batch (2026-10-05), and the window that remained between
+the pre-adopt check and the append with the third fix batch (merged 2026-11-03). `SECURITY.md` no
+longer lists either as open and names the limits that remain.
 
 **Recall latency (readiness §6).** The Stage-1 index trigger's latency arm fired in dogfood from
 2026-08-26. The cause was a fixed first-recall cost, loading the 1.35 MB semantic-neighbour asset,

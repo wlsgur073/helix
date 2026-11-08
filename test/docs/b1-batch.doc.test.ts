@@ -62,7 +62,6 @@ describe('SECURITY.md states the write path the batch built', () => {
       "gives the new file the old one's inode number",
       'a link into the home folder is caught by no rule',
       'a crash can lose the row that the caller was told was stored',
-      "The witness lock's name is not looked at before an append",
       'more than two seconds old',
       'shared writable mapping',
       'Native Windows has no `O_NOFOLLOW`',
@@ -97,6 +96,7 @@ describe('SECURITY.md states the write path the batch built', () => {
       'dangling or not, is the global store rather than a project',
       'so one file is never written under two project scopes',
       'The scan also skips an aliased project layer',
+      "The witness lock's name is not looked at before an append",
     ]) {
       expect(sec, phrase).not.toContain(phrase);
     }

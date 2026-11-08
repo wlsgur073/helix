@@ -110,12 +110,14 @@ First release.
   the same lock, refuses an excluded layer, a file that holds content other than Helix records
   (decided on its first 1 MiB) and a home whose rollback-witness file cannot be used, and puts its
   records back if recording them fails.
-- An unresolvable global ledger path (a name that is not valid UTF-8, a path past the system limit,
-  too many links, or a link into a folder that does not exist) makes global memory read-only: writes
-  are refused before any lock or home write, reads are served with a constant note, the server
-  prints one line at start, and `helix-rebaseline --scope global` refuses with exit status 2. Before
-  this change such a ledger was locked beside the link, and a rewrite replaced the link with a
-  regular file.
+- A global ledger path that cannot be used for writing (a name that is not valid UTF-8, a path past
+  the system limit, too many links, a link into a folder that does not exist, or a path that leads
+  to another file of the Helix home, such as the signing key, the registry or the rollback witness)
+  makes global memory read-only: writes are refused before any lock or home write, reads are served
+  with a constant note, the server prints one line at start, and `helix-rebaseline --scope global`
+  refuses with exit status 2. Before this change an unresolvable ledger was locked beside the link
+  and a rewrite replaced the link with a regular file, and a ledger that led to another file of the
+  home was appended to.
 - A rollback-witness file that cannot be used (a link at its name, a directory, unreadable, not a
   store) refuses writes before anything is appended and clamps reads to `Fresh` with a note; a
   corrupt file is no longer read as an empty store and replaced, and a symlink at `witness.json` is
@@ -126,10 +128,49 @@ First release.
   heal; a refused permanent erase takes the lock budget (5 s), not 7 s.
 - A failure after a record is stored (the rollback-witness update, the file close, the directory
   fsync) is answered with a fixed message that says the record was stored and must not be repeated,
-  for commit, erase, confirm and recheck.
+  for commit, erase, confirm and recheck, and an erase, adopt, recheck or confirm whose audit row
+  cannot be appended after its record was stored is answered the same way (an adopt with a message
+  of its own).
 - `helix-rebaseline` and `helix-trust-resolve` refuse an excluded project layer with a fixed text
   that names the cause, and `helix-rebaseline` prints the resolved destination;
   `helix-trust-resolve` follows `HELIX_LEDGER` for the global ledger.
+- The three home variables are read by one rule in the server, both hooks and the three command-line
+  tools. An empty `HELIX_HOME`, `HELIX_LEDGER` or `HELIX_SESSIONS` counts as unset; a relative
+  value, or a `HELIX_HOME` that cannot be resolved, is refused by each program that reads it (the
+  server prints one line and exits with status 78, a hook prints one note and exits 0,
+  `helix-rebaseline` and `helix-trust-resolve` exit with status 2, `helix-trigger` with status 3).
+  Before this change an empty or relative value made the working directory stand in for the home,
+  and an empty `HELIX_HOME` stopped the server only after it had read the working directory's
+  `config.json`. A `HELIX_HOME` is resolved the way the kernel reaches it, so `<link>/../name` is
+  the directory the kernel reaches and no longer the folded name. `helix-rebaseline --scope global`
+  with no home directory exits with status 2 and creates nothing.
+- Only the server's start changes the mode of an existing directory, and only `HELIX_HOME`'s: it
+  removes the group and other bits and prints the mode it set, so a `0555` home becomes `0500` and
+  owner write permission is never added. The write paths and the SessionEnd hook no longer set an
+  existing folder to `0700` (a `HELIX_SESSIONS` file in a shared folder leaves that folder's mode
+  alone), and a signing key that is a link or lies behind a symlinked home is read as before and no
+  longer tightened.
+- The SessionEnd hook reads `HELIX_LEDGER`. It does not write its record into the global ledger,
+  into `<HELIX_HOME>/memory.jsonl` (also when `HELIX_LEDGER` places the ledger elsewhere), into a
+  project's ledger (a file named `memory.jsonl` directly inside a folder named `.helix`) or into
+  another file of the home (a `HELIX_SESSIONS` that leads there is refused), and it prints one fixed
+  line to stderr for every record it cannot keep.
+- The signing key, the registry and the audit, metrics, Codex-log, rollback-witness-log, trigger and
+  sessions files are opened non-blocking and used only when they are regular files: a FIFO at one of
+  those names no longer stalls the server, a hook or a command-line tool.
+- A global commit or erase creates the signing key before its row when the home has none, and a
+  link, FIFO or other foreign object at the rollback witness's lock name refuses a commit, an erase,
+  a confirm, a recheck or an adopt before any row is stored. Before this change the row could be
+  stored and the call fail after it, and an adopt or a project's first commit went through.
+- A confirm, an erase, a recheck or an adopt looks, before its row, at whether the home and
+  `audit.jsonl` can be written, and refuses with a fixed text when they cannot. An audit row that
+  cannot be appended no longer replaces the refusal or the stored-then-failed answer it follows.
+- `helix-trigger` follows the same home rules: a symlinked, relative or unresolvable home, or a
+  missing parent directory, is refused with exit status 3 and nothing is written (it no longer
+  creates a missing home with its parents at the umask's mode), the sink is opened without following
+  a link and only when it is a regular file, and a record starts on a new line when the sink's last
+  line is torn.
+- A resumed, compacted or forked session whose memory read fails still gets the supersede note.
 - A read that meets a compaction or erase rewrite still in flight waits for the writing process, up
   to two seconds per scope, and reads once more, instead of leaving that scope out at once.
 - Untrusted-content quarantine: NFKC / control / bidi normalization, per-line datamarking, and a
@@ -278,8 +319,9 @@ First release.
   key, the ownership registry, the rollback witness, the audit log and the metrics stream;
   `HELIX_LEDGER` moves the global ledger data file and nothing else; `HELIX_SESSIONS` moves the
   SessionEnd records (default `<HELIX_HOME>/sessions.jsonl`).
-  `HELIX_HOME` must be a directory, not a symlink: commit, erase, confirm, recheck, adopt and the
-  SessionEnd record are refused through a symlinked home before anything is written to a ledger. A
+  `HELIX_HOME` must be a directory, not a symlink: commit, erase, confirm, recheck, adopt, the
+  SessionEnd record and the `helix-trigger` record are refused through a symlinked home before
+  anything is written. A
   home that does not exist yet reads as empty memory until the first write creates it `0700`; its
   parent directory must already exist.
 - Content-free metrics in `~/.helix/metrics.jsonl`, one row per tool call, per verifying ledger read

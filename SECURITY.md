@@ -30,10 +30,14 @@ acknowledgement within a few days.
   durability boundaries* below) — and no grade check stands between the adoption and the next
   recall. It names the project root it is adopting so the prompt has something to review, and
   refuses a root that is not the active scope, but neither substitutes for the prompt — do **not**
-  allow-list it either. Every adoption made through the tool is recorded in `audit.jsonl`,
+  allow-list it either. Do not allow-list the Helix server as a whole, by its name alone or by any
+  rule that covers all of its tools: such a rule covers these two tools as well. Allow-list tools by
+  their full names, and leave `helix_memory_confirm` and `helix_memory_adopt` out. Which rule forms
+  the host accepts is the host's behaviour, which Helix neither controls nor observes.
+  Every adoption made through the tool is recorded in `audit.jsonl`,
   best-effort like every audit row: the row is appended after the adoption lands, so a crash between
-  the two leaves the adoption unrecorded, and a failed append returns an error for an adoption that
-  nonetheless stands.
+  the two leaves the adoption unrecorded, and a failed append is answered with the
+  stored-then-failed message for an adoption that nonetheless stands.
 - **Parent-directory projects:** a session started below a project finds the nearest `.helix/` above
   its directory — never the home directory or anything above it, but up to the filesystem root for a
   directory outside the home, and not at all when the home directory is not an absolute path — and
@@ -197,14 +201,32 @@ HKDF subkey); the unsigned, target-less `verify`-shaped markers and fences a rew
 nothing.
 That location is the home directory itself — `HELIX_HOME` when set — and it is **not** derived from
 where the ledger happens to be: pointing `HELIX_LEDGER` into a repository moves the data file and
-nothing else. `HELIX_HOME`, `HELIX_LEDGER` and `HELIX_SESSIONS` are used exactly as given, so set
-them to absolute paths: an empty or relative value resolves against the working directory, which is
-also where the server starts looking for the project root, and an empty `HELIX_HOME` makes that
-directory stand in for the home, so a `config.json` and a `memory.jsonl` there are read as the
-global ones.
-A `HELIX_HOME` that is a symlink is refused for every write — commit, erase, confirm, recheck,
-adopt and the SessionEnd record — before anything is written to a ledger; the server's startup and the
-SessionStart hook both say so.
+nothing else. `HELIX_HOME`, `HELIX_LEDGER` and `HELIX_SESSIONS` are resolved once, by one rule, in
+each program that reads them. An empty value counts as unset and gives the default (`~/.helix`,
+`<HELIX_HOME>/memory.jsonl`, `<HELIX_HOME>/sessions.jsonl`). A value that is not an absolute path is
+refused, and so is a `HELIX_HOME` that cannot be resolved (a name that is not valid UTF-8, a path
+past the system limit, too many links), so the working directory, which is also where the server
+starts looking for the project root, never stands in for the home or for a file in it. A program
+refuses only a variable it reads: the server and the SessionStart hook read `HELIX_HOME` and
+`HELIX_LEDGER`, the SessionEnd hook reads all three, and `helix-rebaseline`, `helix-trust-resolve`
+and `helix-trigger` read the first two. The server prints one fixed line and exits with status 78
+before it reads a file; a hook prints one fixed note, reads and writes nothing, and exits 0;
+`helix-rebaseline` and `helix-trust-resolve` exit with status 2; `helix-trigger` exits with status
+3. A `HELIX_HOME` is resolved the way the kernel reaches it, so a `..` after a symlinked directory
+leads where the kernel leads, and its final component is looked at and never followed. A
+`HELIX_HOME` that is a symlink is refused for every write Helix makes through it (commit, erase,
+confirm, recheck, adopt, the SessionEnd record and the `helix-trigger` record) before anything is
+written to a ledger or a sink, and no file mode is changed through it, the signing key's included;
+the server's startup and the SessionStart hook say so, and the SessionEnd hook prints its
+dropped-record line at every session end. The SessionEnd hook does not write its record into a file
+Helix keeps for another purpose: a `HELIX_SESSIONS` that leads to the global ledger wherever
+`HELIX_LEDGER` puts it, to `<HELIX_HOME>/memory.jsonl` whatever `HELIX_LEDGER` says, to a project's
+ledger (a file named `memory.jsonl` directly inside a folder named `.helix`), or to any other file
+of the home except `sessions.jsonl` (the signing key, the registry, the rollback witness and its
+log, the audit, metrics, trigger and Codex log files, the configuration file, or a lock or temporary
+file beside one of them) is not written to. A record the hook cannot keep, for that reason or
+because the file or its folder cannot be written or is not a regular file, is reported by one fixed
+line on stderr, and the hook exits 0.
 When trust-store files are found beside a relocated ledger — a layout that a
 pre-release build wrote for every `HELIX_LEDGER` user, and that a hand-assembled setup or a
 repo-writing adversary can also produce — the server measures whether starting would lose a grade
@@ -639,8 +661,14 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   target, the lock a writer that arrives once the file exists takes too. A path Helix cannot resolve
   that way (a name that is not valid UTF-8, a path past the system limit, a chain of more than 40
   links) is refused by the lock, the append and the rewrite alike and is never guessed at. The
-  global ledger follows the same rule: while its path cannot be resolved, or reaches a folder that
-  does not exist through a link, global memory is read-only. A commit, an erase, a confirm, a
+  global ledger follows the same rule: while its path cannot be resolved, reaches a folder that does
+  not exist through a link, or leads to another file of the Helix home (a link at `memory.jsonl`, or
+  a `HELIX_LEDGER`, that names the signing key, the registry, the rollback witness or its log, the
+  audit, metrics, sessions, trigger or Codex log, the configuration file, or a lock or temporary
+  file beside one of them or beside `memory.jsonl`), global memory is read-only. A `HELIX_LEDGER`
+  that names a regular file outside the home stays writable, and `<HELIX_HOME>/memory.jsonl` is the
+  normal path.
+  A commit, an erase, a confirm, a
   recheck and a compaction are refused before any lock is taken and before anything is written to
   the home; the startup heal and the automatic compaction leave that scope alone; reads are served
   from the path as given with a constant note, and are empty, with the note, when the kernel cannot
@@ -704,7 +732,14 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   append, the file close, the directory fsync and the close of the held folder) is returned as a
   fixed message that says the record was stored and must not be repeated, for commit, erase, confirm
   and recheck, instead of the raw error that invited a second copy. A first commit keeps its
-  ownership and its file in that case.
+  ownership and its file in that case. An erase, adopt, recheck or confirm whose row is stored but
+  whose audit row then cannot be appended is answered the same way; an adopt has a fixed message of
+  its own, which says that the adoption stands and must not be repeated. Two failures that used to
+  come after the row now come before it: a global commit or erase creates the signing key, when the
+  home has none, before it appends, and a link, FIFO or other foreign object at the rollback
+  witness's lock name refuses a commit, erase, confirm, recheck or adopt before any row is stored.
+  An adopt and a project's first commit, which went through before this change, are refused by that
+  look before any ownership is recorded.
 - **Lock files are read as objects, not followed.** A lock path is inspected with `lstat` and opened
   `O_RDONLY | O_NONBLOCK | O_NOFOLLOW`, read up to 64 KiB. A link, a FIFO, a socket or a device at a
   lock name is refused at once with a fixed message ("not a lock Helix wrote"). A lock that cannot
@@ -716,6 +751,14 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   rewrite in flight, so a refused permanent erase takes the lock budget (5 s), not 7 s. The startup
   heal classifies a scope without the lock and takes it only when there is something to heal, so a
   held or planted lock delays server start only then, within the 5 s budget, and never blocks it.
+- **Home files are opened as objects too.** The signing key, the registry (`projects.json`),
+  `audit.jsonl`, `metrics.jsonl`, `codex-log.jsonl`, `witness-log.jsonl`, `trigger.jsonl` and the
+  sessions file are opened non-blocking and used only when they are regular files, as `config.json`
+  and `witness.json` already were, so a FIFO planted at one of those names (which takes write access
+  to the home) no longer stalls the server, a hook or a command-line tool. A registry that is not a
+  regular file reads as unreadable; the metrics and Codex-log writers skip their row; the audit
+  append and the signing-key read fail with an error that names no path; the SessionEnd hook reports
+  its dropped record.
 - **Appends are durable:** every append fsyncs the line before success is reported; a torn tail
   (power cut mid-append) is isolated by the next writer's tail repair and counted by parse health,
   and a complete-but-unacknowledged record commits (at-least-once). The **directory** fsync that
@@ -756,9 +799,16 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   the file — stays unconditionally suppressed, so a failed directory fsync on that side channel
   never reports an already-succeeded operation as failed — or, at a rejection site, replaces the
   real rejection error with an unrelated one on its way out. The suppression covers the directory
-  fsync only: the line's own open, write and fsync still propagate, so a failure there (`ENOSPC`,
-  `EIO`) makes the handler throw after its operation already succeeded, and at a rejection site
-  replaces the rejection error. The automatic compaction a recall can trigger (opt-in, off by
+  fsync only: the line's own open, write and fsync still fail, and a failure there (`ENOSPC`, `EIO`)
+  no longer replaces what the handler was about to answer. After a stored erase, adopt, recheck or
+  confirm it is answered with the stored-then-failed message; at a rejection site it is dropped and
+  the rejection error stands, with no audit row. An erase answered `unchanged` and a recheck that
+  stores no row have stored nothing, so a failed append there is answered with its own error.
+  `helix_dual_verify` writes its row after the Codex call and still throws when that append fails.
+  Before the ledger row, an erase, adopt, recheck and confirm look at whether the home and
+  `audit.jsonl` can be written (permissions and file kind, as the running process sees them; root
+  always passes) and refuse with a fixed message when not; `commit` has no audit row and takes no
+  such look. The automatic compaction a recall can trigger (opt-in, off by
   default) is the third: it swallows whatever its rewrite throws, a failed post-rename directory
   fsync or witness write included, so the recall still answers normally and the only record is a
   `compaction` row in `metrics.jsonl` with `"ok": false` (`"landed": true` once the rename had
@@ -809,8 +859,11 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   - When `HELIX_LEDGER` places the global ledger elsewhere and `HELIX_HOME` itself cannot be
     resolved, a link into the home folder is caught by no rule. After a failed directory fsync of a
     new file, a crash can lose the row that the caller was told was stored (not measured).
-  - The witness lock's name is not looked at before an append: a link, FIFO or other object there is
-    met after the row is stored, and is answered with the stored-then-failed message.
+  - The witness lock's name is looked at before every append, a project's first commit and an adopt
+    included: a link, FIFO or other foreign object there refuses a commit, an erase, a confirm, a
+    recheck or an adopt before any row is stored. The look is not a hold, so an object that takes
+    the name between the look and the lock is still met after the row is stored, and is answered
+    with the stored-then-failed message.
   - The answer of the content check for a link target is remembered per process while the file's
     size, mtime and ctime are unchanged and the file is more than two seconds old; a change made
     through a shared writable mapping reaches the content before it reaches the times, so a read can
@@ -834,6 +887,27 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   - When the memory file changes at its name after a rewrite's rename (a compaction or a permanent
     erase) and before the rollback witness is updated, the call fails with an error that says the
     rewrite landed, with the witness transition left open.
+  - The global ledger's path is compared with the home's own files before the lock and again under
+    it, and a link swapped in after the second look is not caught. A link at a control file whose
+    target does not exist, with the ledger resolving to that same missing target, is seen by neither
+    the path rule nor the identity rule. Names are compared case-sensitively, so on a
+    case-insensitive file system a differently cased name is recognized by identity only, once the
+    file exists. A control file that is a second hard link of `<HELIX_HOME>/memory.jsonl` does not
+    make global memory read-only, because that normal path is not compared; the append's hard-link
+    guard refuses the write instead.
+  - The SessionEnd hook compares its destination with the home's files and the global ledger and
+    then opens it: two steps, so a link swapped between them is not caught. The lock file beside a
+    ledger placed outside the home with `HELIX_LEDGER` is not among the files compared. A project's
+    ledger is recognized only by the last two names of the path as given or of its resolved
+    destination, since the hook knows no project: a hard link to one under another name is not
+    recognized, nor is a ledger that is itself a link to a file of another name when the given path
+    reaches it through a `.` or `..` component. The lock file and the temporary files beside a
+    project's ledger are not recognized either, so a `HELIX_SESSIONS` that names one of them is
+    written to.
+  - The look at the home and `audit.jsonl` before an erase, adopt, recheck or confirm reads
+    permissions and file kinds for the running process, so it does not stop a state that arises
+    after it, and root passes it. An audit row that a refused call cannot append is dropped without
+    a note, so such a call, an erase through a symlinked home included, leaves no audit row.
 - **Rollout launch barrier (normative):** old bundles age-steal locks and do not sweep — while any
   old helix-mcp process runs, the new guarantees do not hold. Upgrade procedure: close every Claude
   session and pause anything that starts one on a schedule (for example a timer running
@@ -908,16 +982,27 @@ not acceptable, run it under an OS-level sandbox or leave the feature off.
   gave it (up to 128 printable characters, even when no record has that id) — and is created
   `0o600`. The appender applies that mode at creation and never afterwards, so inside a
   running server a trail loosened from outside stays loosened. A trail that is already
-  group- or world-accessible is repaired at the next start instead: the startup pass
-  tightens every Helix-owned file in `~/.helix` back to `0o600` and names each one it
-  repaired on stderr. It warns rather than refusing, because an over-broad mode is a
+  group- or world-accessible is repaired at the next start instead: the startup pass tightens the
+  eleven files Helix keeps in `HELIX_HOME` (the global ledger, the audit, sessions, metrics, trigger
+  and Codex log files, the rollback witness and its log, the registry, the signing key and the
+  configuration file; not the lock or temporary files beside them) back to `0o600` and names each
+  one it repaired on stderr. Only the server's start runs the pass (the hooks and the command-line
+  tools do not), and when `HELIX_HOME` is itself a symlink it warns and stops, so nothing behind the
+  link is changed, the signing key included. The pass also removes the group and other permission
+  bits from `HELIX_HOME` itself and says which mode it set; it never adds the owner's write
+  permission, so a read-only home (`0555`) becomes `0500` and stays unwritable until you restore
+  write access. It warns rather than refusing, because an over-broad mode is a
   state an interrupted copy or an external tool can leave behind and is not by itself
   evidence of tampering — the MAC check never consults a file's mode, so a forged or edited
   record replays as `Fresh` either way. The repair does not restore trust, though: that guarantee
   assumes no other account could read or write `~/.helix` — an account that can only write there can
   swap in its own signing key and `projects.json` and add rows to the ledger that then replay as
   `Verified` — which a loose mode may already have broken, and `audit.jsonl` carries no MAC, so its
-  integrity rests on the permissions of the file and of `~/.helix` alone.
+  integrity rests on the permissions of the file and of `~/.helix` alone. No other Helix program
+  changes the mode of a directory that already exists: a missing last folder is created `0700`, and
+  a folder that exists, such as the one that holds a `HELIX_SESSIONS` file, keeps its mode. A
+  signing key read through a link at the key's name, or a stray copy beside a ledger that
+  `HELIX_LEDGER` places elsewhere, keeps its mode as well.
 - `~/.helix/codex-log.jsonl` is created only if you opt in (`dualVerify.logContent: true`), and
   turning the option off stops new entries from the next dual-verify call on (a call already running
   keeps the settings it started with) — a running server
