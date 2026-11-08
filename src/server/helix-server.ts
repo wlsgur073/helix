@@ -17,6 +17,7 @@ import { serverInstructionsFor } from './instructions.js';
 import { realCodexRunner, checkCodexAvailable, checkCodexStatus, checkCodexModel } from '../verify/codex.js';
 import { noopMetricsSink, type MetricsSink } from '../metrics.js';
 import { isReviewableRoot } from '../memory/ownership.js';
+import { resolveHelixPaths } from '../memory/home-env.js';
 
 // LEAD-AUDIT-ID-UNCONSTRAINED: mirrors handlers.ts's assertValidId at the MCP tool boundary itself.
 // `.refine(isValidId)` (not a parallel `.min().max().regex()` chain) so the schema and the
@@ -50,7 +51,9 @@ export function buildServer(store: MemoryStore, dualDeps?: DualVerifyHandlerDeps
   // The no-deps fallback must honor HELIX_HOME too, or it would silently read the real
   // ~/.helix/config.json and write the real audit log under test isolation (the index.ts
   // entry always passes explicit deps; this keeps a future caller from breaking isolation).
-  const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
+  // A relative HELIX_HOME makes this fallback throw the resolver's typed home refusal; index.ts
+  // never reaches it, because it passes explicit deps after its own refusal.
+  const home = resolveHelixPaths({ HELIX_HOME: process.env.HELIX_HOME }, homedir()).home;
   const dv: DualVerifyHandlerDeps = dualDeps ?? {
     config: loadConfig({ globalPath: join(home, 'config.json') }),
     // Issue #11: read again on each call; only what narrows the outbound path applies (see index.ts).

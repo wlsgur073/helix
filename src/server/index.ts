@@ -8,6 +8,7 @@ import { parseLedger, isLedgerNotRegularError, GLOBAL_LEDGER_READ } from '../mem
 import { isGlobalLedgerReadOnly, GLOBAL_READ_ONLY_STARTUP_LINE } from '../memory/global-ledger.js';
 import { scanLegacyElevated, classifyLegacyOffenders } from '../memory/legacy-scan.js';
 import { hardenHomePermissions } from '../memory/home-permissions.js';
+import { resolveHelixPaths, isHomeRefusalError, type HelixPaths } from '../memory/home-env.js';
 import { subkeyForScope } from '../memory/verified-read.js';
 import { resolveProjectLayer } from '../memory/project-root.js';
 import { startupScanDecision } from '../memory/ownership.js';
@@ -23,8 +24,20 @@ import { realCodexRunner, checkCodexAvailable } from '../verify/codex.js';
 // HELIX_HOME is where ALL user-level state lives: the ledger by default, the global config, the
 // audit log, and — always, regardless of HELIX_LEDGER — the trust store (signing key, ownership
 // registry, rollback witness). The acceptance suite uses it for hermetic isolation.
-const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
-const globalLedger = process.env.HELIX_LEDGER ?? join(home, 'memory.jsonl');
+// B2a (design 4.1, rulings C and D): HELIX_HOME and HELIX_LEDGER are resolved once, here, by the resolver every entry point
+// shares: an unset or empty value takes the default, a relative value or a home that cannot be resolved stops the start before
+// anything is read or written (exit 78, EX_CONFIG, as for the split trust store below). Only the two variables this entry
+// reads are passed, so a HELIX_SESSIONS that only the SessionEnd hook reads cannot stop the server. FIXED AT THE TEXT REVIEW.
+const STARTUP_HOME_REFUSAL_LINE = 'helix: REFUSING TO START - HELIX_HOME or HELIX_LEDGER is a relative path or a path that cannot be resolved; only an absolute path is accepted, and an empty value counts as unset';
+let paths: HelixPaths;
+try {
+  paths = resolveHelixPaths({ HELIX_HOME: process.env.HELIX_HOME, HELIX_LEDGER: process.env.HELIX_LEDGER }, homedir());
+} catch (e) {
+  if (!isHomeRefusalError(e)) throw e;     // an uninspectable directory part never reaches here: A2 keeps the given path
+  process.stderr.write(`${STARTUP_HOME_REFUSAL_LINE}\n`); // ASCII only
+  process.exit(78); // EX_CONFIG
+}
+const { home, globalLedger } = paths;
 // The project LEDGER layer: the working directory's own .helix/, or — for a session started below a
 // project — the nearest parent's (src/memory/project-root.ts, shared with the SessionStart hook).
 // Helix never creates a .helix/ on its own, so a directory with none at or above it stays global-only,
