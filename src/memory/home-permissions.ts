@@ -1,5 +1,6 @@
 import { lstatSync, chmodSync, readdirSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname, sep } from 'node:path';
+import { HomeRefusalError } from './home-env.js';
 
 /** Files Helix persists under HELIX_HOME. Enumerated rather than globbed so the pass can never
  *  reach a name Helix does not own, and so adding a persisted file is a deliberate edit here.
@@ -40,6 +41,11 @@ function finalName(dir: string): string {
   }
 }
 
+/** `0` and the three octal digits of a permission mode, as the startup line prints it. */
+function modeText(m: number): string {
+  return `0${m.toString(8).padStart(3, '0')}`;
+}
+
 /**
  * Bring an existing HELIX_HOME back to owner-only. Creation-time modes cover new files; this covers
  * everything a shipped version already wrote, which on any pre-existing install is all of them.
@@ -60,6 +66,8 @@ function finalName(dir: string): string {
  * write `<project>/.helix/memory.jsonl` but cannot read `~/.helix`; normalizing a project ledger
  * would contradict the threat model, and a project tree's modes belong to its repository, not to Helix.
  *
+ * It removes group and other bits and sets nothing: a read-only home (0555) becomes 0500 and stays read-only.
+ *
  * Never throws: a startup hardening pass that can break startup is worse than the exposure it fixes.
  */
 export function hardenHomePermissions(home: string, deps: HardenDeps): void {
@@ -75,9 +83,10 @@ export function hardenHomePermissions(home: string, deps: HardenDeps): void {
       return;
     }
     if (dir.isDirectory() && (dir.mode & 0o077) !== 0) {
-      chmodSync(finalName(home), 0o700);
-      deps.warn(`helix: tightened HELIX_HOME ${home} from 0${(dir.mode & 0o777).toString(8)} to 0700 `
-        + '(a group- or world-writable directory lets another local user replace files inside it, whatever their own mode)');
+      const target = dir.mode & 0o700;   // a subset of the bits present: the pass can remove access and cannot add any
+      chmodSync(finalName(home), target);
+      deps.warn(`helix: tightened HELIX_HOME ${home} from ${modeText(dir.mode & 0o777)} to ${modeText(target)} `
+        + '(group and other access to the home was removed; another local user could otherwise read or replace files inside it)');
     }
   } catch { /* absent or unreadable home — nothing to harden, and never a startup error */ }
 
@@ -129,9 +138,12 @@ export function hardenHomePermissions(home: string, deps: HardenDeps): void {
  * The same reasoning `ensureScratchRoot` applies to the scratch root, which refuses rather than
  * adopts. A wrong owner is refused for that reason too: another user's directory is not our state.
  *
- * SCOPED TO CREATION. A home that already ran group-writable may have had its key or registry
- * replaced while it was exposed, and tightening the mode afterwards locks those objects in rather
- * than restoring trust. That is legacy remediation and is deliberately NOT what this closes.
+ * NEVER CHANGES A MODE. An existing directory is validated (not a link, a directory, this user's)
+ * and left as it is: the directory is the user's (a HELIX_SESSIONS file may sit in a home directory
+ * or a shared one), and the only place Helix removes access from one is hardenHomePermissions, at
+ * server start, for HELIX_HOME. A home that ran group-writable may have had its key or registry
+ * replaced while it was exposed; tightening it afterwards would lock those objects in rather than
+ * restore trust, which is legacy remediation and not what this closes.
  *
  * Windows has no POSIX mode bits — `mkdir`'s mode is ignored there and `hardenHomePermissions`
  * returns early for the same reason — so the owner-only guarantee is POSIX-only and this says so by
@@ -146,19 +158,18 @@ export function ensureHelixDir(dir: string): void {
 
   if (st !== null) {
     // lstat, never stat: the question is what the NAME is, never what it points at.
-    if (st.isSymbolicLink()) throw new Error(`refusing to use ${dir}: it is a symlink, not a directory Helix owns`);
-    if (!st.isDirectory()) throw new Error(`refusing to use ${dir}: it exists and is not a directory`);
+    if (st.isSymbolicLink()) throw new HomeRefusalError('symlinked-home', `refusing to use ${dir}: it is a symlink, not a directory Helix owns`);
+    if (!st.isDirectory()) throw new HomeRefusalError('not-a-directory', `refusing to use ${dir}: it exists and is not a directory`);
     const uid = process.getuid?.();
     if (uid !== undefined && st.uid !== uid) {
-      throw new Error(`refusing to use ${dir}: it is owned by uid ${st.uid}, not by this user (${uid})`);
+      throw new HomeRefusalError('foreign-owner', `refusing to use ${dir}: it is owned by uid ${st.uid}, not by this user (${uid})`);
     }
-    if ((st.mode & 0o077) !== 0) chmodSync(name, 0o700);
     return;
   }
 
   const parent = dirname(name);
   if (!existsSync(parent)) {
-    throw new Error(`refusing to create ${dir}: its parent ${parent} does not exist (Helix creates one directory, never a chain)`);
+    throw new HomeRefusalError('parent-missing', `refusing to create ${dir}: its parent ${parent} does not exist (Helix creates one directory, never a chain)`);
   }
   try {
     mkdirSync(name, { mode: 0o700 });

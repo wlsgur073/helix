@@ -49,16 +49,16 @@ describe('the first step of an append: an unusable witness file refuses BEFORE a
     const s = store(h, join(base, 'lg', 'memory.jsonl'));
     const e = thrown(() => s.commit({ content: 'a fact', source: 'user', scope: 'global' })) as Error;
     expect(e.message).toBe(witnessUnusableRefusal('commit'));
-    expect(statSync(h).mode & 0o777).toBe(0o755);                          // ensureHelixDir would have tightened it to 0700
+    expect(statSync(h).mode & 0o777).toBe(0o755);                          // ensureHelixDir leaves a mode alone since B2a A6; this line no longer tells the order, the next one does
     expect(existsSync(join(base, 'lg'))).toBe(false);                      // appendWitnessed's mkdir of the ledger folder stands behind the check
   });
 
-  it('control: with a usable witness file the same open home IS tightened (the check does not skip ensureHelixDir)', () => {
+  it('control: with a usable witness file the same open home keeps its mode (the write path never tightens, ruling A)', () => {
     const h = home(); const s = store(h);
     s.commit({ content: 'first', source: 'user', scope: 'global' });
     chmodSync(h, 0o755);
     s.commit({ content: 'second', source: 'user', scope: 'global' });
-    expect(statSync(h).mode & 0o777).toBe(0o700);
+    expect(statSync(h).mode & 0o777).toBe(0o755);
   });
 
   it('a link at witness.json refuses a PROJECT commit too: the project ledger is unchanged and the link\'s destination is not touched', () => {

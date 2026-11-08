@@ -170,7 +170,7 @@ describe('the order of the checks (G-R3, G-R4)', () => {
     }[op];
     const e = thrownBy(run);
     expect(isWitnessUnusableError(e) || /rollback-witness/.test((e as Error).message)).toBe(true);
-    expect(statSync(l.home).mode & 0o777).toBe(0o755);                      // ensureHelixDir would have tightened it to 0700
+    expect(statSync(l.home).mode & 0o777).toBe(0o755);                      // ensureHelixDir leaves a mode alone since B2a A6; the assertion stays as the check that the refusal path changes nothing
   });
 
   it('a read-only refusal leaves a loose home mode alone too', () => {

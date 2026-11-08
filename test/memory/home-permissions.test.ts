@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync, statSync, writeFileSync, chmodSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
-import { hardenHomePermissions, isSymlinkedHome } from '../../src/memory/home-permissions.js';
+import { hardenHomePermissions, isSymlinkedHome, ensureHelixDir } from '../../src/memory/home-permissions.js';
 
 // Creation-time modes fix new files only. Everything a shipped version already wrote keeps the mode
 // it was born with, so a creation-only fix leaves every existing install untouched — including the
@@ -169,5 +169,82 @@ describe('a symlinked HELIX_HOME (IT-H2)', () => {
         expect(warnings.filter((w) => w.includes('tightened')), home).toEqual([]);
       }
     } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+});
+
+// Third fix batch B2a, task A6 (IT-M7, rulings A and B): the startup pass takes group and other access away and gives
+// nothing; the line names the mode it set; and a write path that ran first no longer hides the line (IT-LOW 17).
+const oct = (m: number): string => `0${(m & 0o777).toString(8).padStart(3, '0')}`;
+const startupLine = (home: string, from: number, to: number): string =>
+  `helix: tightened HELIX_HOME ${home} from ${oct(from)} to ${oct(to)} `
+  + '(group and other access to the home was removed; another local user could otherwise read or replace files inside it)';
+const fullModeOf = (p: string): number => statSync(p).mode & 0o7777;
+
+describe('hardenHomePermissions: only group and other bits go (rulings A and B)', () => {
+  // The last row (fix pass 2026-11-08, disposition 4) pins ruling B read literally: a home with group bits and no owner bit
+  // loses every bit, 0070 to 0000, and the line says so. A later change to the mask is then a decision, not an accident.
+  const rows: Array<{ from: number; to: number }> = [
+    { from: 0o555, to: 0o500 }, { from: 0o550, to: 0o500 }, { from: 0o755, to: 0o700 }, { from: 0o750, to: 0o700 },
+    { from: 0o775, to: 0o700 }, { from: 0o777, to: 0o700 }, { from: 0o1777, to: 0o700 }, { from: 0o2775, to: 0o700 },
+    { from: 0o070, to: 0o000 },
+  ];
+  for (const { from, to } of rows) {
+    it(`a ${from.toString(8)} home becomes ${to.toString(8)} and the line says ${oct(to)}`, () => {
+      if (platform() === 'win32') return;
+      const home = tmpHome();
+      try {
+        chmodSync(home, from);
+        expect(fullModeOf(home), 'premise').toBe(from);
+        const warnings: string[] = [];
+        hardenHomePermissions(home, { warn: (m) => warnings.push(m) });
+        expect(fullModeOf(home)).toBe(to);
+        expect(warnings).toEqual([startupLine(home, from, to)]);
+      } finally { chmodSync(home, 0o700); rmSync(home, { recursive: true, force: true }); }
+    });
+  }
+
+  it('control: homes with no group or other bit are silent and unchanged (0700, and the read-only 0500)', () => {
+    if (platform() === 'win32') return;
+    for (const m of [0o700, 0o500]) {
+      const home = tmpHome();
+      try {
+        chmodSync(home, m);
+        const warnings: string[] = [];
+        hardenHomePermissions(home, { warn: (w) => warnings.push(w) });
+        expect(warnings, m.toString(8)).toEqual([]);
+        expect(fullModeOf(home), m.toString(8)).toBe(m);
+      } finally { chmodSync(home, 0o700); rmSync(home, { recursive: true, force: true }); }
+    }
+  });
+
+  it('a 0555 home still gets its loose files repaired, after the home line', () => {
+    if (platform() === 'win32') return;
+    const home = tmpHome();
+    try {
+      writeFileSync(join(home, 'memory.jsonl'), '{}\n');
+      chmodSync(join(home, 'memory.jsonl'), 0o664);
+      chmodSync(home, 0o555);
+      const warnings: string[] = [];
+      hardenHomePermissions(home, { warn: (m) => warnings.push(m) });
+      expect(warnings).toHaveLength(2);
+      expect(warnings[0]).toBe(startupLine(home, 0o555, 0o500));
+      expect(warnings[1]).toContain(join(home, 'memory.jsonl'));
+      expect(modeOf(join(home, 'memory.jsonl'))).toBe(0o600);
+      expect(fullModeOf(home)).toBe(0o500);
+    } finally { chmodSync(home, 0o700); rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('IT-LOW 17: a write path that runs first leaves a 0777 home as it is, so the startup pass names the repair', () => {
+    if (platform() === 'win32') return;
+    const home = tmpHome();
+    try {
+      chmodSync(home, 0o777);
+      ensureHelixDir(home);                                    // what a hook or a tool call does before the server starts
+      expect(fullModeOf(home)).toBe(0o777);
+      const warnings: string[] = [];
+      hardenHomePermissions(home, { warn: (m) => warnings.push(m) });
+      expect(warnings).toEqual([startupLine(home, 0o777, 0o700)]);
+      expect(fullModeOf(home)).toBe(0o700);
+    } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });

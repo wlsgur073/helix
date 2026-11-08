@@ -41,14 +41,32 @@ describe('ensureHelixDir', () => {
     rmSync(base, { recursive: true, force: true });
   });
 
-  it('repairs an over-broad mode on an existing directory', () => {
+  it('leaves the mode of an existing directory alone, whatever bits it has (IT-M7, ruling A)', () => {
+    if (platform() === 'win32') return;
+    for (const m of [0o775, 0o755, 0o750, 0o555, 0o1777, 0o2775]) {
+      const base = tmp();
+      const home = join(base, '.helix');
+      mkdirSync(home, { mode: 0o700 });
+      chmodSync(home, m);
+      expect(statSync(home).mode & 0o7777, `premise: the directory is ${m.toString(8)}`).toBe(m);
+      try {
+        ensureHelixDir(home);
+        expect(statSync(home).mode & 0o7777, `after ensureHelixDir on ${m.toString(8)}`).toBe(m);
+      } finally {
+        chmodSync(home, 0o700);
+        rmSync(base, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('control: creating the leaf gives it 0700 and leaves a loose parent as it is (IT-M7 E10)', () => {
     if (platform() === 'win32') return;
     const base = tmp();
+    chmodSync(base, 0o755);
     const home = join(base, '.helix');
-    mkdirSync(home, { mode: 0o700 });
-    chmodSync(home, 0o775);                             // what a shipped version already created
     ensureHelixDir(home);
-    expect(mode(home)).toBe(0o700);
+    expect(statSync(home).mode & 0o777).toBe(0o700);
+    expect(statSync(base).mode & 0o777).toBe(0o755);
     rmSync(base, { recursive: true, force: true });
   });
 

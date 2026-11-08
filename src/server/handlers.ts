@@ -484,7 +484,7 @@ export function handleAdopt(
   const ts = (deps.now ?? (() => new Date().toISOString()))();
   // A refusal leaves the project's memory file and the registry as they were (design 4.4), except the one answered
   // with ADOPT_RECORD_FAILED_NOT_UNDONE, whose text says the project may be partly adopted. Any refusal may leave in
-  // the home what a write may leave there (a created or tightened home, a signing key: 14 decision 3; the global
+  // the home what a write may leave there (a created home, a signing key: 14 decision 3; the global
   // nonce). No audit row is written for a refusal, unlike confirm, whose 'rejected' row marks an attempt against a
   // real target id, so that partial adoption has no audit row either.
   const scope = store.adopt(args.projectRoot);

@@ -217,7 +217,7 @@ describe('the checks that do not concern the project file stand in front of the 
     expect(existsSync(join(fx.helix, '.owner'))).toBe(false);
     expect(existsSync(`${fx.ledger}.lock`)).toBe(false);
     expect(existsSync(fx.ledger)).toBe(false);
-    expect(statSync(fx.home).mode & 0o777).toBe(0o755);                  // ensureHelixDir would have tightened it to 0700
+    expect(statSync(fx.home).mode & 0o777).toBe(0o755);                  // ensureHelixDir leaves a mode alone since B2a A6; the assertion stays as the check that the refusal path changes nothing
   });
 
   it('control: a failure after the row is stored keeps the ownership and the row, and carries the stored mark', () => {

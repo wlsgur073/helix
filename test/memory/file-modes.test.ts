@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync, statSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, readdirSync, mkdirSync, chmodSync, readFileSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
@@ -101,5 +101,63 @@ describe('sessions.jsonl is created owner-only (N2-MODE, second site)', () => {
 
     expect(statSync(sessions).mode & 0o777).toBe(0o600);
     rmSync(home, { recursive: true, force: true });
+  }, 30_000);
+});
+
+// Third fix batch B2a, task A6 (IT-M7 E01-E02d, E07c, E10; design 4.2, 4.7): the hook appends into a directory the user
+// named and does not change that directory's mode.
+describe('the SessionEnd hook leaves the mode of the directory it writes into alone', () => {
+  const run = async (env: Record<string, string>, cwd: string): Promise<void> => {
+    const { bundleCli } = await import('../helpers/bundle-cli.js');
+    const { execFileSync } = await import('node:child_process');
+    const cli = await bundleCli('src/hooks/session-end.ts');
+    const clean = Object.fromEntries(Object.entries(process.env).filter(([k, v]) => v !== undefined && !k.startsWith('HELIX_'))) as Record<string, string>;
+    execFileSync(process.execPath, [cli], { cwd, env: { ...clean, ...env }, input: '{"session_id":"s-dir","reason":"clear"}' });
+  };
+  const fixture = (): { base: string; shared: string; home: string; cwd: string } => {
+    const base = mkdtempSync(join(tmpdir(), 'helix-sedir-'));
+    const shared = join(base, 'sh'); const home = join(base, 'hh'); const cwd = join(base, 'cwd');
+    mkdirSync(shared); mkdirSync(home, { mode: 0o700 }); mkdirSync(cwd);
+    return { base, shared, home, cwd };
+  };
+
+  for (const m of [0o755, 0o775, 0o750, 0o1777, 0o2775]) {
+    it(`HELIX_SESSIONS in a ${m.toString(8)} directory: the record is appended 0600 and the directory keeps its mode`, async () => {
+      if (platform() === 'win32') return;
+      const fx = fixture();
+      try {
+        chmodSync(fx.shared, m);
+        expect(statSync(fx.shared).mode & 0o7777, 'premise').toBe(m);
+        const file = join(fx.shared, 's.jsonl');
+        await run({ HELIX_HOME: fx.home, HELIX_SESSIONS: file }, fx.cwd);
+        expect(readFileSync(file, 'utf8').trim().split('\n')).toHaveLength(1);
+        expect(statSync(file).mode & 0o777).toBe(0o600);
+        expect(statSync(fx.shared).mode & 0o7777).toBe(m);
+      } finally { rmSync(fx.base, { recursive: true, force: true }); }
+    }, 30_000);
+  }
+
+  it('a 0755 HELIX_HOME keeps 0755 through a record too (the startup pass is the one place that tightens it)', async () => {
+    if (platform() === 'win32') return;
+    const fx = fixture();
+    try {
+      chmodSync(fx.home, 0o755);
+      await run({ HELIX_HOME: fx.home }, fx.cwd);
+      expect(readFileSync(join(fx.home, 'sessions.jsonl'), 'utf8').trim().split('\n')).toHaveLength(1);
+      expect(statSync(fx.home).mode & 0o777).toBe(0o755);
+    } finally { rmSync(fx.base, { recursive: true, force: true }); }
+  }, 30_000);
+
+  it('control: one missing level under a 0755 directory is created 0700 and the parent keeps 0755 (E10)', async () => {
+    if (platform() === 'win32') return;
+    const fx = fixture();
+    try {
+      chmodSync(fx.shared, 0o755);
+      const file = join(fx.shared, 'new', 's.jsonl');
+      await run({ HELIX_HOME: fx.home, HELIX_SESSIONS: file }, fx.cwd);
+      expect(statSync(join(fx.shared, 'new')).mode & 0o777).toBe(0o700);
+      expect(statSync(fx.shared).mode & 0o777).toBe(0o755);
+      expect(readFileSync(file, 'utf8').trim().split('\n')).toHaveLength(1);
+    } finally { rmSync(fx.base, { recursive: true, force: true }); }
   }, 30_000);
 });

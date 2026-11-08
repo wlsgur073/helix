@@ -713,8 +713,8 @@ export class MemoryStore {
    *  whether the judgement skips row 2 for a project found in a parent directory (the adopt). The compaction asks
    *  no witness question in front of the lock: it is best effort and its own gate refuses an unusable file.
    *
-   *  In front of the lock: the witness file must be usable (design 4.8 item 2; asked before the home is validated or
-   *  tightened and before a lock file is published in the project: FW-R10); the home is validated; a `.helix` that
+   *  In front of the lock: the witness file must be usable (design 4.8 item 2; asked before the home is validated and
+   *  before a lock file is published in the project: FW-R10); the home is validated; a `.helix` that
    *  became a link is refused (row 3's condition, row 3's fixed text); and a memory folder that is missing is created
    *  when the memory path is no link (design 4.2, line 110: row 10 refuses a link whose folder is missing, so only a plain
    *  `.helix/memory.jsonl` reaches the mkdir). The judgement used for the append is taken after the folder exists:
@@ -817,7 +817,7 @@ export class MemoryStore {
    *  permanent erase's rewrite. Five entry points used to reach the global ledger by four routes, each with its own steps
    *  in front of the lock.
    *    1. A read-only global ledger is refused with the operation's fixed text (GlobalLedgerReadOnlyError): before the
-   *       witness check, before ensureHelixDir may create the home or tighten its mode, before the ledger's folder is
+   *       witness check, before ensureHelixDir may create the home, before the ledger's folder is
    *       created and before a lock is tried.
    *    2. The witness file must be usable (4.8 item 2), asked in front of the home's validation (G-R3). Not for the
    *       auto-compaction, whose gate is the rewrite's own.
