@@ -59,3 +59,13 @@ export function buildSessionEndRecord(
     return null;
   }
 }
+
+// Printed by the SessionStart hook when resolveHelixPaths refused the environment: constant (no path, no interpolation,
+// no imperative) and ASCII only.
+export const HOME_REFUSED_START_NOTE =
+  'helix: NOTE - HELIX_HOME or HELIX_LEDGER holds a relative path or a path that cannot be resolved; the session-start hook read and wrote no memory.';
+
+// Printed by the SessionEnd hook when resolveHelixPaths refused the environment: constant (no path, no interpolation,
+// no imperative) and ASCII only.
+export const HOME_REFUSED_END_NOTE =
+  'helix: NOTE - HELIX_HOME, HELIX_LEDGER or HELIX_SESSIONS holds a relative path or a path that cannot be resolved; the session-end hook wrote no record.';

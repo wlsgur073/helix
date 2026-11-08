@@ -18,6 +18,7 @@ import { isGlobalLedgerReadOnly } from '../memory/global-ledger.js';
 import { isSymlinkedHome } from '../memory/home-permissions.js';
 import { projectDispositionOf, type ProjectDisposition } from '../memory/ownership.js';
 import { resolveProjectLayer } from '../memory/project-root.js';
+import { resolveHelixPaths, isHomeRefusalError, type HelixPaths } from '../memory/home-env.js';
 import { verifiedLiveWitnessed, type ReplayStats } from '../memory/verified-read.js';
 import { enforceWitnessProjection } from '../memory/verified-projection.js';
 import type { WitnessFileMark, WitnessVerdict } from '../memory/witness-core.js';
@@ -25,7 +26,7 @@ import { isWitnessUnusableError } from '../memory/witness-store.js';
 import { createMetricsSink } from '../metrics.js';
 import { metricsEnabledFromGlobalConfig } from '../config.js';
 import type { MemoryScope, ScopedRecord } from '../types.js';
-import { readStdinCapped } from './session-record.js';
+import { readStdinCapped, HOME_REFUSED_START_NOTE } from './session-record.js';
 import { HOOK_STDIN_MAX_BYTES } from '../limits.js';
 
 export interface GatherInput {
@@ -159,10 +160,31 @@ export function hookInputOf(stdinText: string): { cwd: string | undefined; super
   }
 }
 
+/** Design 4.1: HELIX_HOME and HELIX_LEDGER resolved once. Null means the resolver refused the environment: main() then
+ *  drains stdin, prints the one constant note and reads and writes nothing else. Only the resolver's own refusal is
+ *  answered here; anything else it throws goes to main()'s catch, and a refusal raised later by anything else
+ *  (ensureHelixDir, a failed read) keeps its own path. */
+function resolvedPathsOrNull(): HelixPaths | null {
+  try {
+    // Decision S1: only the variables this hook reads, as literal process.env reads (the inventory extractor sees this form).
+    return resolveHelixPaths({ HELIX_HOME: process.env.HELIX_HOME, HELIX_LEDGER: process.env.HELIX_LEDGER }, homedir());
+  } catch (e) {
+    if (isHomeRefusalError(e)) return null;
+    throw e;
+  }
+}
+
 async function main(): Promise<void> {
   try {
-    const home = process.env.HELIX_HOME ?? join(homedir(), '.helix');
-    const globalLedger = process.env.HELIX_LEDGER ?? join(home, 'memory.jsonl');
+    const paths = resolvedPathsOrNull();
+    if (paths === null) {
+      // Disposition 9 (fix pass 2026-11-08): drain stdin first, as the normal path reads it below, so the host's write
+      // never meets a closed pipe; then the note alone. What was read is not used, and an over-cap stdin prints no cap note.
+      await readStdinCapped(process.stdin, HOOK_STDIN_MAX_BYTES);
+      writeSync(1, `${HOME_REFUSED_START_NOTE}\n`); // ASCII only
+      return;
+    }
+    const { home, globalLedger } = paths;
 
     // Same split-trust-store condition the server REFUSES to start on, reported here as a note
     // rather than a refusal. This hook is the only surface that can still speak into a session whose
