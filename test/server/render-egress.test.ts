@@ -8,7 +8,7 @@
 // separator, and the proof line's shape — trip no secret leg on their own. The fourth case pins the
 // opposite boundary: a generic label=<hex> pairing still blocks, so a later well-meaning widening of
 // the EH-4 exemption reddens here instead of shipping silently.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,9 +17,22 @@ import { handleCommit, handleRecall, handleInspect } from '../../src/server/hand
 import { classifyEgress } from '../../src/risk/trifecta.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
 import { digestContent } from '../../src/memory/ledger-mac.js';
+import * as contentFrameMod from '../../src/memory/content-frame.js';
 
 const POLICY = DEFAULT_CONFIG.dualVerify.egressPolicy;
 const ENTROPY_LEGS = new Set(['secretEntropy', 'secretEntropyExempt']);
+
+// The frame nonce is randomBytes(16) in hex. About 1.8% of nonces hold a run of 13 to 19 decimal digits
+// and one in ten of those passes the Luhn check, so about 0.18% make detectPII read a credit_card and
+// classifyEgress block the rendering on piiHigh (EGRESS-NONCE-PII). handleRecall and handleInspect mint
+// their own nonce and take no injection, so the cases that classify a framed rendering pin
+// content-frame's newNonce. NONCE has no digit run longer than 4; CARD_NONCE is a 14-digit Luhn-valid run.
+const NONCE = 'c3a9f0e57b2d4816a9e0d3b7f5c1428e';
+const CARD_NONCE = '45391488034364fa3c9e07b52d148e6a';
+function pinNonce(nonce: string): void {
+  vi.spyOn(contentFrameMod, 'newNonce').mockReturnValue(nonce);
+}
+afterEach(() => { vi.restoreAllMocks(); });
 
 function store(): MemoryStore {
   let n = 0;
@@ -43,9 +56,11 @@ describe('the rendered read surfaces and the EH-4 boundary', () => {
     // record-only, and NOT what this test claims. What it claims: the adornments this batch adds —
     // the digest, its colon-space separator, and the proof line's shape — trip no secret leg.
     const s = store();
+    pinNonce(NONCE);
     handleCommit(s, { content: 'the office coffee rota moves to the third floor kitchen', source: 'user' });
     handleCommit(s, { content: 'the office plant watering schedule moves to Mondays', source: 'user' });
     const rendered = text(handleRecall(s, { query: 'office moves' }));
+    expect(rendered).toContain(`===HELIX ${NONCE} END===`); // the pin reached the handler's own nonce
     // Sanity: both rows actually carry a proof line, so this exercises "several rows", not one.
     expect(rendered.match(/contentDigest: [0-9a-f]{64}/g)?.length).toBe(2);
     const v = classifyEgress({ texts: [rendered], outbound: rendered, ledger: null, policy: POLICY, quoted: [] });
@@ -55,13 +70,26 @@ describe('the rendered read surfaces and the EH-4 boundary', () => {
 
   it('a complete inspect rendering clears the entropy leg (short-id fixture)', () => {
     const s = store();
+    pinNonce(NONCE);
     handleCommit(s, { content: 'the office coffee rota moves to the third floor kitchen', source: 'user' });
     handleCommit(s, { content: 'the office plant watering schedule moves to Mondays', source: 'user' });
     const rendered = text(handleInspect(s, {}));
+    expect(rendered).toContain(`===HELIX ${NONCE} END===`);
     expect(rendered.match(/contentDigest: [0-9a-f]{64}/g)?.length).toBe(2);
     const v = classifyEgress({ texts: [rendered], outbound: rendered, ledger: null, policy: POLICY, quoted: [] });
     expect(v.decision).not.toBe('blocked');
     expect(v.blockedLegs.some((l) => ENTROPY_LEGS.has(l))).toBe(false);
+  });
+
+  it('a frame nonce that reads as a card number blocks the rendering on piiHigh (why the cases above pin theirs)', () => {
+    const s = store();
+    pinNonce(CARD_NONCE);
+    handleCommit(s, { content: 'the office coffee rota moves to the third floor kitchen', source: 'user' });
+    const rendered = text(handleRecall(s, { query: 'office moves' }));
+    expect(rendered).toContain(`===HELIX ${CARD_NONCE} END===`); // the precondition: the card-shaped nonce is in the text
+    const v = classifyEgress({ texts: [rendered], outbound: rendered, ledger: null, policy: POLICY, quoted: [] });
+    expect(v.decision).toBe('blocked');
+    expect(v.blockedLegs).toContain('piiHigh');
   });
 
   it('an {id, contentDigest} pair parsed out of a recall rendering resolves against the guard ledger', () => {

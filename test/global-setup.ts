@@ -10,10 +10,11 @@ import { join } from 'node:path';
 //   - there is no aging window that can delete a retained fixture mid-use;
 //   - a real HELIX_HOME that happens to sit under the system temp dir is never swept.
 // The run-root NAME may be high-entropy (mkdtemp) — it is a CLEANUP identity, never committed into
-// ledger content, so it does not interact with the write-path secret scanner. The one test that DOES
-// commit a temp path into content (compaction's file-contains probe) reads HELIX_TEST_SYS_TMP to place
-// that probe under the REAL (unredirected) system temp at a low-entropy fixed name, where it is not
-// redacted and — with constant content and no delete — is harmless to share across runs.
+// ledger content, so it does not interact with the write-path secret scanner. A test whose recheck
+// names a file inside ledger content uses a SHORT RELATIVE path under a throwaway cwd (store.test.ts,
+// compaction.test.ts, symlinked-home.test.ts), never an absolute temp path: the scanner redacts a
+// high-entropy token, and an absolute path is one whenever TMPDIR holds a random or numeric segment.
+// HELIX_TEST_SYS_TMP (the real, unredirected system temp, set below) has no reader but global-setup.test.ts.
 /** Restore an env var to a captured prior value, DELETING it when that value was undefined — because
  *  `process.env.X = undefined` stores the literal string "undefined" (Node 24), which would poison
  *  os.tmpdir() for anything sharing the process after teardown. */

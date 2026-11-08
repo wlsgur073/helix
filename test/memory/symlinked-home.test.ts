@@ -101,22 +101,24 @@ posixOnly('a symlinked HELIX_HOME is refused before any ledger write (IT-H2)', (
 
   it('a recheck through the link is refused and leaves the ledger byte-identical', () => {
     const { base, real, link } = layout();
+    // The recheck names the fact by a SHORT RELATIVE path under `base` as the cwd, never an absolute temp
+    // path: an absolute path is redacted by the write-path secret scanner whenever TMPDIR holds a random or
+    // numeric segment (IT-T2), the file-contains binding then fails, and the case would report that instead
+    // of the symlink refusal. `fact.txt` is 8 chars under any TMPDIR (precedent: store.test.ts recheck cases).
+    const cwd = process.cwd();
+    process.chdir(base);
     try {
-      // The fact path is committed into ledger content, so it is a FIXED, low-entropy name under the
-      // real system temp: a mkdtemp path would be redacted by the write-path scanner and the
-      // file-contains binding would then fail. Constant content and no delete make the one file safe
-      // to share across concurrent runs (precedent: compaction.test.ts, the signed-demotion case).
-      const factDir = join(process.env.HELIX_TEST_SYS_TMP ?? tmpdir(), 'helix-verify-link-probe');
-      mkdirSync(factDir, { recursive: true });
-      const fact = join(factDir, 'fact.txt');
-      writeFileSync(fact, 'staging\n');
-      const id = seeded(real, `the file ${fact} says staging`);
+      writeFileSync(join(base, 'fact.txt'), 'staging\n');
+      const id = seeded(real, 'the file fact.txt says staging');
       expect(existsSync(join(real, 'ledger-mac-master.key'))).toBe(true);
       const before = bytesOf(join(real, 'memory.jsonl'));
       expect(store(link).inspect().map((r) => r.record.id)).toContain(id);
-      expect(() => store(link).recheck(id, { kind: 'file-contains', path: fact, pattern: 'staging' })).toThrow(/symlink/);
+      expect(() => store(link).recheck(id, { kind: 'file-contains', path: 'fact.txt', pattern: 'staging' })).toThrow(/symlink/);
       expect(bytesOf(join(real, 'memory.jsonl')).equals(before)).toBe(true);
-    } finally { rmSync(base, { recursive: true, force: true }); }
+    } finally {
+      process.chdir(cwd);
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
   it('a dangling-symlink home reads as empty memory, refuses a commit, and creates nothing at the target', () => {

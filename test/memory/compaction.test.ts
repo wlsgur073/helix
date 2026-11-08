@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, existsSync, readdirSync, appendFileSync, mkdirSync, writeFileSync, rmSync, statSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, appendFileSync, writeFileSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import {
@@ -390,32 +390,35 @@ describe('compactLedger HMAC-aware (via store permanent-erase)', () => {
 
   it('preserves a genuine SIGNED demotion (Suspect) across compaction; the item stays Suspect on replay', () => {
     const { store, ledger } = tmpStore();
-    // This path is committed into ledger content, and the write-path secret scanner redacts any
-    // high-entropy segment to [redacted:high-entropy] — so the probe must be a FIXED, LOW-ENTROPY
-    // name (a unique/random path would be redacted out and break the file-contains binding, which
-    // needs the path present in content). It is placed under the REAL system temp (HELIX_TEST_SYS_TMP),
-    // NOT the redirected per-run root, so its path stays low-entropy and it is never swept by the
-    // per-run teardown. With constant content and no delete, concurrent runs sharing this one reused
-    // file never flip the recheck outcome (the previous finally-rmSync could delete another run's probe
-    // mid-recheck — the shared-path flake this removes).
-    const probeDir = join(process.env.HELIX_TEST_SYS_TMP ?? tmpdir(), 'helix-demote-probe');
-    mkdirSync(probeDir, { recursive: true });
-    const probe = join(probeDir, 'probe.txt');
-    writeFileSync(probe, 'placeholder file without the marker');
-    const a = store.commit({ content: `deploy note: ${probe} must contain ENABLED_FLAG`, source: 'agent-inference' });
-    const rc = store.recheck(a.id, { kind: 'file-contains', path: probe, pattern: 'ENABLED_FLAG' });
-    expect(rc.record?.type).toBe('verify');
-    expect(rc.record?.state).toBe('Suspect');
-    expect(rc.record?.mac).toBeTruthy();
-    expect(store.recall('deploy').items.find((i) => i.record.id === a.id)!.record.state).toBe('Suspect');
-    const c = store.commit({ content: 'gamma fact', source: 'user' });
-    store.erase(c.id, { permanent: true });
-    const items = store.recall('deploy').items;
-    expect(items.find((i) => i.record.id === a.id)!.record.state).toBe('Suspect');
-    const after = parseLedger(ledger);
-    expect(after.some((r) => r.type === 'verify' && r.supersedes === a.id && r.state === 'Suspect' && !!r.mac)).toBe(true);
-    expect(after.find((r) => r.id.startsWith('integrity_'))).toBeUndefined();
-    expect(items.find((i) => i.record.id === c.id)).toBeUndefined();
+    // The recheck names the probe by a SHORT RELATIVE path under a throwaway cwd, never an absolute temp
+    // path. The write-path secret scanner redacts any whitespace-delimited token that is >= 24 chars, holds
+    // a letter and a digit and has Shannon entropy >= 3.5, and an absolute path crosses that line whenever
+    // TMPDIR holds a random or numeric segment (IT-T2); a redacted path can never bind (checkBinding), so
+    // the recheck would throw. `probe.txt` is 9 chars under any TMPDIR. Same recipe as the recheck cases of
+    // store.test.ts. The cwd is restored before the directory is removed, and nothing is left in the system temp.
+    const probeDir = mkdtempSync(join(tmpdir(), 'helix-probe-'));
+    const cwd = process.cwd();
+    process.chdir(probeDir);
+    try {
+      writeFileSync(join(probeDir, 'probe.txt'), 'placeholder file without the marker');
+      const a = store.commit({ content: 'deploy note: probe.txt must contain ENABLED_FLAG', source: 'agent-inference' });
+      const rc = store.recheck(a.id, { kind: 'file-contains', path: 'probe.txt', pattern: 'ENABLED_FLAG' });
+      expect(rc.record?.type).toBe('verify');
+      expect(rc.record?.state).toBe('Suspect');
+      expect(rc.record?.mac).toBeTruthy();
+      expect(store.recall('deploy').items.find((i) => i.record.id === a.id)!.record.state).toBe('Suspect');
+      const c = store.commit({ content: 'gamma fact', source: 'user' });
+      store.erase(c.id, { permanent: true });
+      const items = store.recall('deploy').items;
+      expect(items.find((i) => i.record.id === a.id)!.record.state).toBe('Suspect');
+      const after = parseLedger(ledger);
+      expect(after.some((r) => r.type === 'verify' && r.supersedes === a.id && r.state === 'Suspect' && !!r.mac)).toBe(true);
+      expect(after.find((r) => r.id.startsWith('integrity_'))).toBeUndefined();
+      expect(items.find((i) => i.record.id === c.id)).toBeUndefined();
+    } finally {
+      process.chdir(cwd);
+      rmSync(probeDir, { recursive: true, force: true });
+    }
   });
 });
 
