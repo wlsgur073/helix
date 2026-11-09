@@ -85,7 +85,7 @@ function pendingScope(home: string): void {
 
 /** The fixed text of ruling N3 (helix-rebaseline, --scope global, no home). */
 const NO_HOME =
-  'helix-rebaseline: REFUSING - the Helix home directory does not exist, so there is no global memory file or rollback witness to re-baseline.\n' +
+  'helix-rebaseline: REFUSING - the Helix home directory does not exist, so there is no rollback witness to re-baseline.\n' +
   'Nothing was created.\n';
 
 // ---- rulings C and D: what the resolver refuses, refused by every CLI --------------------------------------------------

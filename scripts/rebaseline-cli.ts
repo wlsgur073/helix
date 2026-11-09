@@ -146,10 +146,11 @@ const REBASELINE_GLOBAL_READ_ONLY_REFUSAL =
  *  message follows, then a newline. No path. Exit 2, in front of the scope judgement, the folder creation, the lock and the prompt. */
 const REBASELINE_HOME_ENV_HEAD = 'helix-rebaseline: REFUSING - ';
 
-/** `--scope global` over a home that does not exist (B2a ruling N3): there is no global memory file and no witness entry to
- *  re-baseline, and the ceremony would otherwise create the home at the umask's mode (`IT-LOW` 16). Nothing is created. Exit 2. */
+/** `--scope global` over a home that does not exist (B2a ruling N3): there is no witness entry to re-baseline (the global
+ *  memory file may exist elsewhere, through HELIX_LEDGER, so the text names only the witness; final review G5, owner
+ *  2026-11-09), and the ceremony would otherwise create the home at the umask's mode (`IT-LOW` 16). Nothing is created. Exit 2. */
 const REBASELINE_NO_HOME_REFUSAL =
-  'helix-rebaseline: REFUSING - the Helix home directory does not exist, so there is no global memory file or rollback witness to re-baseline.\n' +
+  'helix-rebaseline: REFUSING - the Helix home directory does not exist, so there is no rollback witness to re-baseline.\n' +
   'Nothing was created.\n';
 
 /** Is nothing at the home's own name? `lstat`, so a link is something; every error but ENOENT answers false and the ceremony

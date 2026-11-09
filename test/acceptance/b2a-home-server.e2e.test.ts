@@ -31,7 +31,7 @@ const suite = describe.skipIf(!POSIX);
 // FIXED AT THE TEXT REVIEW (plan A3, text 5): the one line the server prints when it refuses to start on its home variables.
 const STARTUP_REFUSAL_LINE = 'helix: REFUSING TO START - HELIX_HOME or HELIX_LEDGER is a relative path or a path that cannot be resolved; only an absolute path is accepted, and an empty value counts as unset';
 // FIXED AT THE TEXT REVIEW (plan A5, text 9): the first line of the rebaseline CLI's refusal of a home that does not exist.
-const REBASELINE_NO_HOME_LINE = 'helix-rebaseline: REFUSING - the Helix home directory does not exist, so there is no global memory file or rollback witness to re-baseline.';
+const REBASELINE_NO_HOME_LINE = 'helix-rebaseline: REFUSING - the Helix home directory does not exist, so there is no rollback witness to re-baseline.';
 const FACT = 'zeta deploy fact';                    // short, no path: a long segment inside a committed fact is redacted
 const COMMIT = { name: 'helix_memory_commit', args: { content: FACT, source: 'user' } };
 const RECALL = { name: 'helix_memory_recall', args: { query: 'deploy' } };
