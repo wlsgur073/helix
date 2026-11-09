@@ -250,10 +250,12 @@ record=$(printf '{"v":1,"policy":"T1-2026-07-11","kind":"reporter-failure","ts":
 # artifact refuses a relative HELIX_HOME, so a relative one never names a home), not a symlink (every
 # Helix write through a symlinked home is refused; the last component is looked at with trailing
 # slashes and a trailing "/." removed, as resolveHelixPaths cuts them in src/memory/home-env.ts,
-# because "link/" and "link/." would otherwise be followed by the look) and an existing directory
+# because "link/" and "link/." would otherwise be followed by the look), an existing directory
 # (this adapter never creates the home or its parents; the artifact creates a missing home through
-# ensureHelixDir, one 0700 directory under an existing parent). A home reached as "<link>/../name" is
-# the kernel's, as for the server. No check here closes a swap between the look and the append.
+# ensureHelixDir, one 0700 directory under an existing parent) and owned by this user (the artifact
+# refuses a home owned by someone else, so a writable foreign directory such as /dev/shm or /tmp
+# gains no sink either). A home reached as "<link>/../name" is the kernel's, as for the server. No
+# check here closes a swap between the look and the append.
 sink_home_usable() {
   local h="$sink_home"
   while :; do
@@ -262,7 +264,7 @@ sink_home_usable() {
     break
   done
   case "$h" in /*) ;; *) return 1 ;; esac
-  [ ! -L "$h" ] && [ -d "$h" ]
+  [ ! -L "$h" ] && [ -d "$h" ] && [ -O "$h" ]
 }
 
 # Best-effort append: plain `>>`, no fsync -- this IS the failure-reporting path, so it stays as

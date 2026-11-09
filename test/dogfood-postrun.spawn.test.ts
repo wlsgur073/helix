@@ -16,7 +16,7 @@
 // echo if the stdout reader closes early.
 import { describe, it, expect } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, copyFileSync, accessSync, symlinkSync, utimesSync, readdirSync, lstatSync, openSync, closeSync, constants as fsConstants } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, copyFileSync, accessSync, symlinkSync, utimesSync, readdirSync, lstatSync, statSync, unlinkSync, openSync, closeSync, constants as fsConstants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -570,6 +570,42 @@ describe('reporter-failure records and the home rule (B2a ruling F, plan decisio
     expect(status).toBe(0);
     expect(existsSync(join(base, 'x', 'h', 'trigger.jsonl'))).toBe(true);
     expect(existsSync(join(base, 'h', 'trigger.jsonl'))).toBe(false);
+  });
+
+  // Final review G15 (ruling F): the artifact refuses a home owned by another user (exit 3), and the adapter's own append now
+  // checks the owner too. A directory this user can write but does not own is needed: /dev/shm or /tmp (root, 1777) when
+  // they qualify and hold no trigger.jsonl already; otherwise the case is skipped. A trigger.jsonl it made is removed.
+  const foreignWritableDir = ((): string | null => {
+    const uid = process.getuid?.();
+    if (uid === undefined) return null;
+    for (const d of ['/dev/shm', '/tmp']) {
+      try {
+        const st = statSync(d);
+        if (!st.isDirectory() || lstatSync(d).isSymbolicLink() || st.uid === uid) continue;
+        accessSync(d, fsConstants.W_OK | fsConstants.X_OK);
+        if (existsSync(join(d, 'trigger.jsonl'))) continue;
+        return d;
+      } catch { /* not usable */ }
+    }
+    return null;
+  })();
+  it.skipIf(foreignWritableDir === null)('HELIX_HOME is a writable directory owned by another user -> nothing is appended there; the record still reaches stdout with home_refused', () => {
+    const foreign = foreignWritableDir!;
+    const sink = join(foreign, 'trigger.jsonl');
+    const { scriptPath } = buildTree(STUB_REFUSED);
+    const root = mkdtempSync(join(tmpdir(), 'helix-postrun-root-'));
+    const env = { ...baseEnv(foreign), INVOCATION_ID: 'inv-fo' };
+    let made = false;
+    try {
+      const { status, stdout } = runAdapter(scriptPath, root, env);
+      made = existsSync(sink);
+      expect(status).toBe(0);
+      expect(made, `the adapter appended into ${foreign}, a directory this user does not own`).toBe(false);
+      expect(reporterLines(stdout)).toHaveLength(1);
+      expect(reporterLines(stdout)[0]!.endsWith('"reason":"crash","home_refused":true}')).toBe(true);
+    } finally {
+      if (made) { try { unlinkSync(sink); } catch { /* best effort */ } }
+    }
   });
 });
 
