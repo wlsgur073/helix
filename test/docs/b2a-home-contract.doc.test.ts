@@ -46,7 +46,8 @@ describe('SECURITY.md states the home contract', () => {
       'a hook prints one fixed note, reads and writes nothing, and exits 0',
       '`helix-rebaseline` and `helix-trust-resolve` exit with status 2',
       '`helix-trigger` exits with status 3',
-      'its final component is looked at and never followed',
+      'its final component is kept as written, so a home that is itself a symlink stays one: the writes below refuse it, and the reads (the ledger, `config.json`, the registry and the signing key) are served through it, as before',   // final review G13
+      'too many links, or a `..` after a folder that cannot be searched)',   // final review G1
     ]) expect(sec, phrase).toContain(phrase);
   });
   it('a symlinked home is refused for the writes it lists, and no mode is changed through it', () => {
@@ -114,6 +115,7 @@ describe('SECURITY.md states the home contract', () => {
       'does not make global memory read-only, because that normal path is not compared',   // controller ruling after B1, 2026-11-08
       "The lock file and the temporary files beside a project's ledger are not recognized either",   // controller ruling after B2, 2026-11-08
       'reads permissions and file kinds for the running process',
+      'and root passes its permission check',   // final review G14
       'an erase through a symlinked home included, leaves no audit row',
     ]) expect(sec, phrase).toContain(phrase);
   });
@@ -121,13 +123,16 @@ describe('SECURITY.md states the home contract', () => {
     const word = WORDS[OWNED_FILES.length];
     expect(word, `OWNED_FILES has ${OWNED_FILES.length} names; add the word to WORDS and the number to SECURITY.md`).toBeDefined();
     expect(sec).toContain(`tightens the ${word} files Helix keeps in \`HELIX_HOME\``);
+    expect(sec).toContain('by removing their group and other permission bits and names each one it repaired on stderr');   // final review G7
     for (const phrase of [
       "Only the server's start runs the pass",
       'it warns and stops, so nothing behind the link is changed, the signing key included',
       'removes the group and other permission bits from `HELIX_HOME` itself and says which mode it set',
-      "it never adds the owner's write permission",
-      'a read-only home (`0555`) becomes `0500`',
+      "it never adds the owner's write permission, to the home or to a file",
+      'a read-only home (`0555`) becomes `0500` and no file can be created in it',
+      'a read-only file (`0444`) becomes `0400`',
       'No other Helix program changes the mode of a directory that already exists',
+      "The one exception is Helix's own Codex scratch folder (`<temp>/helix`), which a `helix_dual_verify` call sets to `0700` when it belongs to you",   // final review G8
     ]) expect(sec, phrase).toContain(phrase);
   });
   it('a signing key read through a link or a stray key beside a relocated ledger keeps its mode (A7 with Segment A open item 2)', () => {
@@ -156,7 +161,8 @@ describe('README.md states the home contract', () => {
   it('a symlinked home, a dot-dot after a link, and the directory rule', () => {
     expect(readme).toContain('adopt, the SessionEnd record and the `helix-trigger` record before anything is written');
     expect(readme).toContain('A `..` after a symlinked directory in `HELIX_HOME` leads where the kernel leads');
-    expect(readme).toContain("it never adds the owner's write permission, and no other Helix program changes the mode of an existing directory");
+    expect(readme).toContain("it never adds the owner's write permission, to the home or to a file, and no other Helix program changes the mode of an existing directory");
+    expect(readme).toContain("except that a `helix_dual_verify` call sets Helix's own Codex scratch folder (`<temp>/helix`) to `0700` when it belongs to you");   // final review G8
     expect(readme).toContain('Helix leaves the mode of an existing folder alone and creates only a missing last folder, `0700`');
     expect(readme).toContain("The hook does not write into the global ledger, into `<HELIX_HOME>/memory.jsonl` even when `HELIX_LEDGER` places the ledger elsewhere, into a project's ledger (`memory.jsonl` directly inside a `.helix` folder), or into any other file of the home");
   });
@@ -178,7 +184,7 @@ describe('CHANGELOG.md lists the changed behaviour', () => {
       "into a project's ledger (a file named `memory.jsonl` directly inside a folder named `.helix`)",
       'The three home variables are read by one rule in the server, both hooks and the three command-line tools',
       'so `<link>/../name` is the directory the kernel reaches and no longer the folded name',
-      "Only the server's start changes the mode of an existing directory, and only `HELIX_HOME`'s",
+      "Apart from Helix's own Codex scratch folder (`<temp>/helix`), which a `helix_dual_verify` call sets to `0700` when it belongs to you, only the server's start changes the mode of an existing directory, and only `HELIX_HOME`'s",   // final review G8
       'The SessionEnd hook reads `HELIX_LEDGER`',
       'opened non-blocking and used only when they are regular files',
       'Before this change the row could be stored and the call fail after it, and an adopt or a project\'s first commit went through',
@@ -216,6 +222,10 @@ describe('the sentences the batch made false are gone', () => {
       'a failed append returns an error for an adoption that nonetheless stands',
       'makes the handler throw after its operation already succeeded',
       'tightens every Helix-owned file in `~/.helix`',
+      'its final component is looked at and never followed',   // final review G13
+      'root always passes',   // final review G14
+      'back to `0o600` and names each',   // final review G7
+      'stays unwritable',   // final review G7
     ]) expect(sec, phrase).not.toContain(phrase);
   });
   it('from README.md', () => {

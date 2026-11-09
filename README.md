@@ -183,8 +183,10 @@ recheck, adopt, the SessionEnd record and the `helix-trigger` record before anyt
 the server's startup and the SessionStart hook say so. A `..` after a symlinked directory in
 `HELIX_HOME` leads where the kernel leads. A home that does not exist yet is created `0700` by the
 first write, and only when its parent directory already exists. At start the server removes the
-group and other permission bits of an existing home and prints the mode it set; it never adds the
-owner's write permission, and no other Helix program changes the mode of an existing directory.
+group and other permission bits of an existing home and of the files Helix keeps in it, and prints
+the mode it set; it never adds the owner's write permission, to the home or to a file, and no other
+Helix program changes the mode of an existing directory, except that a `helix_dual_verify` call sets
+Helix's own Codex scratch folder (`<temp>/helix`) to `0700` when it belongs to you.
 
 Two further variables the shipped code reads. Neither is something you normally set, but both take
 effect if you do, so they are listed rather than left silent.

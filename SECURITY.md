@@ -205,16 +205,19 @@ nothing else. `HELIX_HOME`, `HELIX_LEDGER` and `HELIX_SESSIONS` are resolved onc
 each program that reads them. An empty value counts as unset and gives the default (`~/.helix`,
 `<HELIX_HOME>/memory.jsonl`, `<HELIX_HOME>/sessions.jsonl`). A value that is not an absolute path is
 refused, and so is a `HELIX_HOME` that cannot be resolved (a name that is not valid UTF-8, a path
-past the system limit, too many links), so the working directory, which is also where the server
-starts looking for the project root, never stands in for the home or for a file in it. A program
+past the system limit, too many links, or a `..` after a folder that cannot be searched), so the
+working directory, which is also where the server starts looking for the project root, never stands
+in for the home or for a file in it. A program
 refuses only a variable it reads: the server and the SessionStart hook read `HELIX_HOME` and
 `HELIX_LEDGER`, the SessionEnd hook reads all three, and `helix-rebaseline`, `helix-trust-resolve`
 and `helix-trigger` read the first two. The server prints one fixed line and exits with status 78
 before it reads a file; a hook prints one fixed note, reads and writes nothing, and exits 0;
 `helix-rebaseline` and `helix-trust-resolve` exit with status 2; `helix-trigger` exits with status
 3. A `HELIX_HOME` is resolved the way the kernel reaches it, so a `..` after a symlinked directory
-leads where the kernel leads, and its final component is looked at and never followed. A
-`HELIX_HOME` that is a symlink is refused for every write Helix makes through it (commit, erase,
+leads where the kernel leads, and its final component is kept as written, so a home that is itself a
+symlink stays one: the writes below refuse it, and the reads (the ledger, `config.json`, the
+registry and the signing key) are served through it, as before. A `HELIX_HOME` that is a symlink
+is refused for every write Helix makes through it (commit, erase,
 confirm, recheck, adopt, the SessionEnd record and the `helix-trigger` record) before anything is
 written to a ledger or a sink, and no file mode is changed through it, the signing key's included;
 the server's startup and the SessionStart hook say so, and the SessionEnd hook prints its
@@ -807,7 +810,8 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   `helix_dual_verify` writes its row after the Codex call and still throws when that append fails.
   Before the ledger row, an erase, adopt, recheck and confirm look at whether the home and
   `audit.jsonl` can be written (permissions and file kind, as the running process sees them; root
-  always passes) and refuse with a fixed message when not; `commit` has no audit row and takes no
+  passes the permission check, not the file kind check or a read-only file system) and refuse with
+  a fixed message when not; `commit` has no audit row and takes no
   such look. The automatic compaction a recall can trigger (opt-in, off by
   default) is the third: it swallows whatever its rewrite throws, a failed post-rename directory
   fsync or witness write included, so the recall still answers normally and the only record is a
@@ -906,7 +910,8 @@ dropped back afterwards. It does not make ownership authenticated against an adv
     written to.
   - The look at the home and `audit.jsonl` before an erase, adopt, recheck or confirm reads
     permissions and file kinds for the running process, so it does not stop a state that arises
-    after it, and root passes it. An audit row that a refused call cannot append is dropped without
+    after it, and root passes its permission check. An audit row that a refused call cannot append
+    is dropped without
     a note, so such a call, an erase through a symlinked home included, leaves no audit row.
 - **Rollout launch barrier (normative):** old bundles age-steal locks and do not sweep — while any
   old helix-mcp process runs, the new guarantees do not hold. Upgrade procedure: close every Claude
@@ -985,13 +990,15 @@ not acceptable, run it under an OS-level sandbox or leave the feature off.
   group- or world-accessible is repaired at the next start instead: the startup pass tightens the
   eleven files Helix keeps in `HELIX_HOME` (the global ledger, the audit, sessions, metrics, trigger
   and Codex log files, the rollback witness and its log, the registry, the signing key and the
-  configuration file; not the lock or temporary files beside them) back to `0o600` and names each
-  one it repaired on stderr. Only the server's start runs the pass (the hooks and the command-line
+  configuration file; not the lock or temporary files beside them) by removing their group and
+  other permission bits and names each one it repaired on stderr. Only the server's start runs the
+  pass (the hooks and the command-line
   tools do not), and when `HELIX_HOME` is itself a symlink it warns and stops, so nothing behind the
   link is changed, the signing key included. The pass also removes the group and other permission
   bits from `HELIX_HOME` itself and says which mode it set; it never adds the owner's write
-  permission, so a read-only home (`0555`) becomes `0500` and stays unwritable until you restore
-  write access. It warns rather than refusing, because an over-broad mode is a
+  permission, to the home or to a file, so a read-only home (`0555`) becomes `0500` and no file can
+  be created in it until you restore write access, and a read-only file (`0444`) becomes `0400`.
+  It warns rather than refusing, because an over-broad mode is a
   state an interrupted copy or an external tool can leave behind and is not by itself
   evidence of tampering — the MAC check never consults a file's mode, so a forged or edited
   record replays as `Fresh` either way. The repair does not restore trust, though: that guarantee
@@ -1000,8 +1007,10 @@ not acceptable, run it under an OS-level sandbox or leave the feature off.
   `Verified` — which a loose mode may already have broken, and `audit.jsonl` carries no MAC, so its
   integrity rests on the permissions of the file and of `~/.helix` alone. No other Helix program
   changes the mode of a directory that already exists: a missing last folder is created `0700`, and
-  a folder that exists, such as the one that holds a `HELIX_SESSIONS` file, keeps its mode. A
-  signing key read through a link at the key's name, or a stray copy beside a ledger that
+  a folder that exists, such as the one that holds a `HELIX_SESSIONS` file, keeps its mode. The
+  one exception is Helix's own Codex scratch folder (`<temp>/helix`), which a `helix_dual_verify`
+  call sets to `0700` when it belongs to you. A signing key read through a link at the key's name,
+  or a stray copy beside a ledger that
   `HELIX_LEDGER` places elsewhere, keeps its mode as well.
 - `~/.helix/codex-log.jsonl` is created only if you opt in (`dualVerify.logContent: true`), and
   turning the option off stops new entries from the next dual-verify call on (a call already running

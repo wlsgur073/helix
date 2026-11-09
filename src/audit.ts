@@ -202,8 +202,8 @@ function danglingIntoMissingFolder(path: string): boolean {
  *  search permission is refused as the home's even when `audit.jsonl` itself could be appended: the witness advance after the row
  *  needs the home too. A missing `audit.jsonl` passes unless its name is a link whose target's folder is not a directory, where
  *  the append could not create the file (final review G12; a link into an existing folder keeps the followed append, ruling L).
- *  The look is advisory (access(2) answers for this process at this instant; root passes it), so a state that changes after it
- *  is the append's own failure. */
+ *  The look is advisory (access(2) answers for this process at this instant; root passes the permission check, not the file
+ *  kind check or a read-only file system), so a state that changes after it is the append's own failure. */
 export function assertAuditWritable(path: string): void {
   const dir = dirname(path);
   let dirLink = false;

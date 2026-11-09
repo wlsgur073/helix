@@ -144,7 +144,9 @@ First release.
   `config.json`. A `HELIX_HOME` is resolved the way the kernel reaches it, so `<link>/../name` is
   the directory the kernel reaches and no longer the folded name. `helix-rebaseline --scope global`
   with no home directory exits with status 2 and creates nothing.
-- Only the server's start changes the mode of an existing directory, and only `HELIX_HOME`'s: it
+- Apart from Helix's own Codex scratch folder (`<temp>/helix`), which a `helix_dual_verify` call
+  sets to `0700` when it belongs to you, only the server's start changes the mode of an existing
+  directory, and only `HELIX_HOME`'s: it
   removes the group and other bits and prints the mode it set, so a `0555` home becomes `0500` and
   owner write permission is never added. The write paths and the SessionEnd hook no longer set an
   existing folder to `0700` (a `HELIX_SESSIONS` file in a shared folder leaves that folder's mode
