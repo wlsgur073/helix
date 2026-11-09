@@ -115,7 +115,8 @@ export function ensureMaster(home: string): Buffer {
  *  it opens instead of blocking, and `fstat` then says it is not a regular file. */
 const KEY_REPAIR_OPEN = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
-/** Defense in depth: tighten an over-broad master key to 0600 (threat model makes the home unreadable; warn-and-fix, not
+/** Defense in depth: remove the group and other bits of an over-broad master key and add nothing, so 0644 becomes 0600 and
+ *  0444 becomes 0400 (ruling B, final review G7; threat model makes the home unreadable; warn-and-fix, not
  *  fail-closed). KEY-CHMOD-LINK (B2a, ruling J1): only a regular file in a directory that is not itself a link is changed. A key
  *  that is a symlink, and a key behind a symlinked home, are read by the caller as before and left at their mode, because a mode
  *  change behind a link is the arbitrary-chmod primitive the startup pass refuses (`home-permissions.ts`,
@@ -128,7 +129,8 @@ function tightenMasterKey(path: string): void {
     if (lstatSync(dirname(path)).isSymbolicLink()) return;      // the key sits behind a symlinked home
     const fd = openSync(path, KEY_REPAIR_OPEN);
     try {
-      if (fstatSync(fd).isFile()) fchmodSync(fd, 0o600);
+      const st = fstatSync(fd);
+      if (st.isFile()) fchmodSync(fd, st.mode & 0o700);         // the mode of the file opened, never more than it had
     } finally { closeSync(fd); }
   } catch { /* best-effort: a failure to repair leaves the mode as it was */ }
 }

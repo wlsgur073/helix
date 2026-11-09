@@ -66,7 +66,8 @@ function modeText(m: number): string {
  * write `<project>/.helix/memory.jsonl` but cannot read `~/.helix`; normalizing a project ledger
  * would contradict the threat model, and a project tree's modes belong to its repository, not to Helix.
  *
- * It removes group and other bits and sets nothing: a read-only home (0555) becomes 0500 and stays read-only.
+ * It removes group and other bits and sets nothing, on the directory and on each file: a read-only home (0555) becomes 0500
+ * and a read-only file (0444) becomes 0400, so neither gains the owner's write permission.
  *
  * Never throws: a startup hardening pass that can break startup is worse than the exposure it fixes.
  */
@@ -109,8 +110,11 @@ export function hardenHomePermissions(home: string, deps: HardenDeps): void {
         continue;
       }
       if ((st.mode & 0o077) === 0) continue; // already owner-only
-      chmodSync(path, 0o600);
-      deps.warn(`helix: tightened ${path} from 0${(st.mode & 0o777).toString(8)} to 0600`);
+      // Ruling B (final review G7): remove group and other bits and add nothing, so a 0444 file becomes 0400 and keeps
+      // its missing owner write, as the directory above does; a 0644 file becomes 0600.
+      const target = st.mode & 0o700;
+      chmodSync(path, target);
+      deps.warn(`helix: tightened ${path} from 0${(st.mode & 0o777).toString(8)} to ${modeText(target)}`);
     } catch {
       deps.warn(`helix: could not repair permissions on ${path} — leaving it as it is`);
     }

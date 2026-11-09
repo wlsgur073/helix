@@ -234,6 +234,45 @@ describe('hardenHomePermissions: only group and other bits go (rulings A and B)'
     } finally { chmodSync(home, 0o700); rmSync(home, { recursive: true, force: true }); }
   });
 
+  // Final review G7 (owner, 2026-11-09, ruling B): the file part of the pass removes group and other bits and adds nothing,
+  // as the directory part does, so a file without the owner's write permission stays without it.
+  const fileRows: Array<{ from: number; to: number }> = [
+    { from: 0o444, to: 0o400 }, { from: 0o440, to: 0o400 }, { from: 0o404, to: 0o400 }, { from: 0o040, to: 0o000 },
+    { from: 0o644, to: 0o600 }, { from: 0o664, to: 0o600 }, { from: 0o666, to: 0o600 },
+  ];
+  for (const { from, to } of fileRows) {
+    it(`a ${from.toString(8).padStart(3, '0')} home file becomes ${to.toString(8).padStart(3, '0')} and the line names the mode set`, () => {
+      if (platform() === 'win32') return;
+      const home = tmpHome();
+      const file = join(home, 'memory.jsonl');
+      try {
+        writeFileSync(file, '{}\n');
+        chmodSync(file, from);
+        expect(fullModeOf(file), 'premise').toBe(from);
+        const warnings: string[] = [];
+        hardenHomePermissions(home, { warn: (m) => warnings.push(m) });
+        expect(fullModeOf(file)).toBe(to);
+        expect(warnings).toEqual([`helix: tightened ${file} from 0${from.toString(8)} to ${oct(to)}`]);
+      } finally { rmSync(home, { recursive: true, force: true }); }
+    });
+  }
+
+  it('a read-only home (0555) of read-only files (0444): the home becomes 0500, every file 0400, none gains owner write', () => {
+    if (platform() === 'win32') return;
+    const home = tmpHome();
+    const names = ['memory.jsonl', 'metrics.jsonl', 'witness.json', 'config.json', 'ledger-mac-master.key'];
+    try {
+      for (const n of names) { writeFileSync(join(home, n), 'x'); chmodSync(join(home, n), 0o444); }
+      chmodSync(home, 0o555);
+      const warnings: string[] = [];
+      hardenHomePermissions(home, { warn: (m) => warnings.push(m) });
+      expect(fullModeOf(home)).toBe(0o500);
+      for (const n of names) expect(fullModeOf(join(home, n)), n).toBe(0o400);
+      expect(warnings).toHaveLength(1 + names.length);
+      for (const w of warnings.slice(1)) expect(w).toMatch(/ from 0444 to 0400$/);
+    } finally { chmodSync(home, 0o700); rmSync(home, { recursive: true, force: true }); }
+  });
+
   it('IT-LOW 17: a write path that runs first leaves a 0777 home as it is, so the startup pass names the repair', () => {
     if (platform() === 'win32') return;
     const home = tmpHome();

@@ -28,6 +28,22 @@ describe('master key permission self-repair', () => {
       expect(second.equals(first)).toBe(true);             // and NOT re-minted: same key bytes
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
+
+  // Final review G7 (owner, 2026-11-09, ruling B): the repair removes group and other bits and adds nothing, so a key the
+  // user made read-only stays read-only (0444 becomes 0400, not 0600).
+  it.each([['0444', 0o444, 0o400], ['0440', 0o440, 0o400], ['0640', 0o640, 0o600]] as const)('a %s key loses its group and other bits on a read, and still reads the same bytes', (_label, from, to) => {
+    if (platform() === 'win32') return;
+    const home = mkdtempSync(join(tmpdir(), 'helix-mkperm-'));
+    try {
+      const first = ensureMaster(home);
+      const keyPath = join(home, 'ledger-mac-master.key');
+      chmodSync(keyPath, from);
+      expect(mode(keyPath)).toBe(from);                    // premise
+      const again = tryReadMaster(home);
+      expect(mode(keyPath)).toBe(to);
+      expect(again?.equals(first)).toBe(true);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
 });
 
 // KEY-CHMOD-LINK (B2a ruling J1): the repair above must stay inside the home. statSync and chmodSync both followed a link, so a
