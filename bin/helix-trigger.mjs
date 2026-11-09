@@ -1,5 +1,5 @@
 // scripts/trigger-measure.ts
-import { constants as constants8, lstatSync as lstatSync8 } from "node:fs";
+import { constants as constants8, lstatSync as lstatSync9 } from "node:fs";
 import { dirname as dirname5, join as join7 } from "node:path";
 import { homedir } from "node:os";
 
@@ -52,7 +52,7 @@ function writeAll(fs, fd, data) {
 }
 
 // src/memory/ownership.ts
-import { mkdirSync as mkdirSync4, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync6, fstatSync as fstatSync6, fchmodSync as fchmodSync3, openSync as openSync6, readSync as readSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync6, constants as constants6 } from "node:fs";
+import { mkdirSync as mkdirSync4, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync3, lstatSync as lstatSync7, fstatSync as fstatSync6, fchmodSync as fchmodSync3, openSync as openSync6, readSync as readSync3, writeSync as writeSync2, fsyncSync as fsyncSync3, closeSync as closeSync6, constants as constants6 } from "node:fs";
 import { join as join4, resolve as resolve2, dirname as dirname3, basename as basename2, isAbsolute as isAbsolute2 } from "node:path";
 
 // src/memory/path-identity.ts
@@ -219,10 +219,11 @@ function sameFile(a, b) {
 var LOCK_READ_MAX_BYTES = 64 * 1024;
 
 // src/memory/home-permissions.ts
-import { lstatSync as lstatSync2, chmodSync, readdirSync as readdirSync2, mkdirSync, existsSync } from "node:fs";
+import { lstatSync as lstatSync3, chmodSync, readdirSync as readdirSync2, mkdirSync, existsSync } from "node:fs";
 import { join as join2, dirname as dirname2, sep } from "node:path";
 
 // src/memory/home-env.ts
+import { lstatSync as lstatSync2 } from "node:fs";
 import { posix, win32 } from "node:path";
 var HomeRefusalError = class extends Error {
   constructor(homeRefusalCause, message) {
@@ -240,7 +241,7 @@ var RELATIVE_VALUE_TEXT = {
   HELIX_LEDGER: "HELIX_LEDGER is not an absolute path, so it is refused",
   HELIX_SESSIONS: "HELIX_SESSIONS is not an absolute path, so it is refused"
 };
-var UNRESOLVABLE_HOME_TEXT = "the Helix home cannot be resolved (a name that is not valid UTF-8, a path past the system limit, or too many links), so it is refused";
+var UNRESOLVABLE_HOME_TEXT = "the Helix home cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a `..` after a folder that cannot be searched), so it is refused";
 var given = (v) => v === void 0 || v === "" ? null : v;
 function absoluteOrRefuse(variable, value, isAbsolute4) {
   if (!isAbsolute4(value)) throw new HomeRefusalError("relative-value", RELATIVE_VALUE_TEXT[variable]);
@@ -260,15 +261,27 @@ function withoutTrailingSlashOrDot(p) {
     return n;
   }
 }
+var unresolvableHome = () => new HomeRefusalError("unresolvable-home", UNRESOLVABLE_HOME_TEXT);
 function kernelWayHome(path) {
   const name = withoutTrailingSlashOrDot(path);
   const last = name.slice(name.lastIndexOf("/") + 1);
   const namesDirectory2 = last === "" || last === "." || last === "..";
   const r = resolvePath(namesDirectory2 ? name : posix.dirname(name));
-  if (r.kind === "unresolvable") throw new HomeRefusalError("unresolvable-home", UNRESOLVABLE_HOME_TEXT);
-  if (r.kind === "uninspectable") return path;
-  return namesDirectory2 ? r.path : posix.join(r.path, last);
+  if (r.kind === "unresolvable") throw unresolvableHome();
+  if (r.kind === "uninspectable") {
+    if (path.split("/").includes("..")) throw unresolvableHome();
+    return path;
+  }
+  const home = namesDirectory2 ? r.path : posix.join(r.path, last);
+  try {
+    lstatSync2(home);
+  } catch (e) {
+    const code = e?.code;
+    if (code === "ENAMETOOLONG" || code === "ELOOP") throw unresolvableHome();
+  }
+  return home;
 }
+var REPLACEMENT_CHARACTER = String.fromCharCode(65533);
 function resolveHelixPaths(env, userHome, platform = process.platform) {
   const p = platform === "win32" ? win32 : posix;
   const homeValue = absoluteOrRefuse("HELIX_HOME", given(env.HELIX_HOME) ?? p.join(userHome, ".helix"), p.isAbsolute);
@@ -276,6 +289,7 @@ function resolveHelixPaths(env, userHome, platform = process.platform) {
   if (ledger !== null) absoluteOrRefuse("HELIX_LEDGER", ledger, p.isAbsolute);
   const sessions = given(env.HELIX_SESSIONS);
   if (sessions !== null) absoluteOrRefuse("HELIX_SESSIONS", sessions, p.isAbsolute);
+  if (platform !== "win32" && homeValue.includes(REPLACEMENT_CHARACTER)) throw unresolvableHome();
   const home = platform === "win32" ? homeValue : kernelWayHome(homeValue);
   return { home, globalLedger: ledger ?? p.join(home, "memory.jsonl"), sessionsFile: sessions ?? p.join(home, "sessions.jsonl") };
 }
@@ -303,7 +317,7 @@ function ensureHelixDir(dir) {
   const name = finalName(dir);
   let st = null;
   try {
-    st = lstatSync2(name);
+    st = lstatSync3(name);
   } catch {
     st = null;
   }
@@ -392,20 +406,20 @@ import { mkdirSync as mkdirSync3, statSync as statSync3, openSync as openSync5, 
 import { StringDecoder } from "node:string_decoder";
 
 // src/memory/ledger-mac.ts
-import { openSync as openSync3, fsyncSync as fsyncSync2, closeSync as closeSync3, readFileSync, linkSync as linkSync2, unlinkSync as unlinkSync2, lstatSync as lstatSync3, fstatSync as fstatSync3, fchmodSync as fchmodSync2, constants as constants2 } from "node:fs";
+import { openSync as openSync3, fsyncSync as fsyncSync2, closeSync as closeSync3, readFileSync, linkSync as linkSync2, unlinkSync as unlinkSync2, lstatSync as lstatSync4, fstatSync as fstatSync3, fchmodSync as fchmodSync2, constants as constants2 } from "node:fs";
 var ILL_FORMED_TAG = Buffer.from([255, 1]);
 var KEY_REPAIR_OPEN = constants2.O_RDONLY | constants2.O_NOFOLLOW | constants2.O_NONBLOCK;
 var DOMAIN = Buffer.from("helix-ledger-mac");
 var NULL_FIELD = Buffer.from([0, 0, 0, 0, 0]);
 
 // src/memory/dir-bound.ts
-import { lstatSync as lstatSync4, constants as constants3 } from "node:fs";
+import { lstatSync as lstatSync5, constants as constants3 } from "node:fs";
 import { join as join3 } from "node:path";
 var PROC_SELF_FD = "/proc/self/fd";
 var DIR_OPEN = constants3.O_RDONLY | constants3.O_DIRECTORY | constants3.O_NOFOLLOW;
 function sampleDirIdentity(dir) {
   try {
-    const st = lstatSync4(dir, { bigint: true });
+    const st = lstatSync5(dir, { bigint: true });
     return st.isDirectory() ? { dev: st.dev, ino: st.ino } : null;
   } catch (e) {
     const code = e.code;
@@ -418,7 +432,7 @@ function boundPath(held, name) {
 }
 
 // src/memory/witness-store.ts
-import { lstatSync as lstatSync5, openSync as openSync4, fstatSync as fstatSync4, readFileSync as readFileSync2, closeSync as closeSync4, constants as constants4 } from "node:fs";
+import { lstatSync as lstatSync6, openSync as openSync4, fstatSync as fstatSync4, readFileSync as readFileSync2, closeSync as closeSync4, constants as constants4 } from "node:fs";
 var WITNESS_READ_OPEN = constants4.O_RDONLY | constants4.O_NONBLOCK | constants4.O_NOFOLLOW;
 
 // src/memory/ledger.ts
@@ -614,7 +628,7 @@ function loadRegistry(home) {
   const path = registryPath(home);
   let st;
   try {
-    st = lstatSync6(path);
+    st = lstatSync7(path);
   } catch (e) {
     return e.code === "ENOENT" ? { kind: "absent" } : { kind: "corrupt" };
   }
@@ -646,8 +660,8 @@ function readRegistry(home) {
 function readOwner(projectRoot, ownerDir) {
   const path = ownerPlace(projectRoot, ownerDir);
   try {
-    if (!viaDescriptor(ownerDir) && lstatSync6(dirname3(path)).isSymbolicLink()) return null;
-    const st = lstatSync6(path);
+    if (!viaDescriptor(ownerDir) && lstatSync7(dirname3(path)).isSymbolicLink()) return null;
+    const st = lstatSync7(path);
     if (!st.isFile()) return null;
     if (st.nlink > 1) return null;
     return readFileSync3(path, "utf8").trim();
@@ -673,7 +687,7 @@ function withinDir(dir, path) {
 }
 function standingAt(path) {
   try {
-    const st = lstatSync6(path, { bigint: true });
+    const st = lstatSync7(path, { bigint: true });
     return { dev: st.dev, ino: st.ino, regular: st.isFile(), nlink: st.nlink };
   } catch (e) {
     return e.code === "ENOENT" ? null : "error";
@@ -743,7 +757,7 @@ function judge(project, forAdopt, freshContent) {
   if (project.origin === "ancestor" && !owned && !forAdopt) return { state: "ancestor-unadopted", row: "2" };
   let helix = null;
   try {
-    helix = lstatSync6(join4(project.root, ".helix"));
+    helix = lstatSync7(join4(project.root, ".helix"));
   } catch {
   }
   if (helix !== null && !helix.isDirectory()) return { state: "unusable", row: "3", cause: "helix-not-directory" };
@@ -757,7 +771,7 @@ function judge(project, forAdopt, freshContent) {
   if (id === "error") return { state: "unusable", row: "9", cause: "unreadable", destination };
   let memoryPathIsLink = false;
   try {
-    memoryPathIsLink = lstatSync6(project.ledger).isSymbolicLink();
+    memoryPathIsLink = lstatSync7(project.ledger).isSymbolicLink();
   } catch {
   }
   const isOwnPath = destination === under2(root.path, ".helix/memory.jsonl");
@@ -796,11 +810,11 @@ function judge(project, forAdopt, freshContent) {
 }
 
 // src/memory/project-root.ts
-import { lstatSync as lstatSync7, readdirSync as readdirSync3, statSync as statSync4 } from "node:fs";
+import { lstatSync as lstatSync8, readdirSync as readdirSync3, statSync as statSync4 } from "node:fs";
 import { dirname as dirname4, isAbsolute as isAbsolute3, join as join5, relative, sep as sep2 } from "node:path";
 function hasOwnHelixEntry(dir) {
   try {
-    lstatSync7(join5(dir, ".helix"));
+    lstatSync8(join5(dir, ".helix"));
     return true;
   } catch {
     return false;
@@ -1068,7 +1082,7 @@ function appendToSink(home, line, fs = realFsOps) {
 }
 function sinkPresent(path) {
   try {
-    lstatSync8(path);
+    lstatSync9(path);
     return true;
   } catch {
     return false;

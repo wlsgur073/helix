@@ -44,6 +44,7 @@ var SESSION_RECORD_DROPPED_NOTE = "helix: NOTE - the session-end hook did not wr
 import { basename as basename3, dirname as dirname3, join as join3 } from "node:path";
 
 // src/memory/home-env.ts
+import { lstatSync as lstatSync2 } from "node:fs";
 import { posix, win32 } from "node:path";
 
 // src/memory/path-identity.ts
@@ -209,7 +210,7 @@ var RELATIVE_VALUE_TEXT = {
   HELIX_LEDGER: "HELIX_LEDGER is not an absolute path, so it is refused",
   HELIX_SESSIONS: "HELIX_SESSIONS is not an absolute path, so it is refused"
 };
-var UNRESOLVABLE_HOME_TEXT = "the Helix home cannot be resolved (a name that is not valid UTF-8, a path past the system limit, or too many links), so it is refused";
+var UNRESOLVABLE_HOME_TEXT = "the Helix home cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a `..` after a folder that cannot be searched), so it is refused";
 var given = (v) => v === void 0 || v === "" ? null : v;
 function absoluteOrRefuse(variable, value, isAbsolute2) {
   if (!isAbsolute2(value)) throw new HomeRefusalError("relative-value", RELATIVE_VALUE_TEXT[variable]);
@@ -229,15 +230,27 @@ function withoutTrailingSlashOrDot(p) {
     return n;
   }
 }
+var unresolvableHome = () => new HomeRefusalError("unresolvable-home", UNRESOLVABLE_HOME_TEXT);
 function kernelWayHome(path) {
   const name = withoutTrailingSlashOrDot(path);
   const last = name.slice(name.lastIndexOf("/") + 1);
   const namesDirectory2 = last === "" || last === "." || last === "..";
   const r = resolvePath(namesDirectory2 ? name : posix.dirname(name));
-  if (r.kind === "unresolvable") throw new HomeRefusalError("unresolvable-home", UNRESOLVABLE_HOME_TEXT);
-  if (r.kind === "uninspectable") return path;
-  return namesDirectory2 ? r.path : posix.join(r.path, last);
+  if (r.kind === "unresolvable") throw unresolvableHome();
+  if (r.kind === "uninspectable") {
+    if (path.split("/").includes("..")) throw unresolvableHome();
+    return path;
+  }
+  const home = namesDirectory2 ? r.path : posix.join(r.path, last);
+  try {
+    lstatSync2(home);
+  } catch (e) {
+    const code = e?.code;
+    if (code === "ENAMETOOLONG" || code === "ELOOP") throw unresolvableHome();
+  }
+  return home;
 }
+var REPLACEMENT_CHARACTER = String.fromCharCode(65533);
 function resolveHelixPaths(env, userHome, platform = process.platform) {
   const p = platform === "win32" ? win32 : posix;
   const homeValue = absoluteOrRefuse("HELIX_HOME", given(env.HELIX_HOME) ?? p.join(userHome, ".helix"), p.isAbsolute);
@@ -245,6 +258,7 @@ function resolveHelixPaths(env, userHome, platform = process.platform) {
   if (ledger !== null) absoluteOrRefuse("HELIX_LEDGER", ledger, p.isAbsolute);
   const sessions = given(env.HELIX_SESSIONS);
   if (sessions !== null) absoluteOrRefuse("HELIX_SESSIONS", sessions, p.isAbsolute);
+  if (platform !== "win32" && homeValue.includes(REPLACEMENT_CHARACTER)) throw unresolvableHome();
   const home = platform === "win32" ? homeValue : kernelWayHome(homeValue);
   return { home, globalLedger: ledger ?? p.join(home, "memory.jsonl"), sessionsFile: sessions ?? p.join(home, "sessions.jsonl") };
 }
@@ -378,7 +392,7 @@ function assertSessionsDestination(paths, probe) {
 }
 
 // src/memory/home-permissions.ts
-import { lstatSync as lstatSync2, chmodSync, readdirSync, mkdirSync, existsSync } from "node:fs";
+import { lstatSync as lstatSync3, chmodSync, readdirSync, mkdirSync, existsSync } from "node:fs";
 import { join as join4, dirname as dirname4, sep } from "node:path";
 function finalName(dir) {
   let n = dir;
@@ -402,7 +416,7 @@ function ensureHelixDir(dir) {
   const name = finalName(dir);
   let st = null;
   try {
-    st = lstatSync2(name);
+    st = lstatSync3(name);
   } catch {
     st = null;
   }
