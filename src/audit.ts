@@ -1,4 +1,4 @@
-import { mkdirSync, fsyncSync, closeSync, accessSync, statSync, constants, type Stats } from 'node:fs';
+import { mkdirSync, fsyncSync, closeSync, accessSync, statSync, lstatSync, readlinkSync, constants, type Stats } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeAll, realFsOps, fsyncDir } from './memory/fs-ops.js';
 import { openHomeFileForAppend } from './memory/home-files.js';
@@ -177,16 +177,38 @@ export const AUDIT_UNWRITABLE_TEXT = 'the Helix audit file cannot be written, so
 
 const DENIED = new Set(['EACCES', 'EPERM', 'EROFS']);
 
+/** Is `path` a symbolic link whose target's folder cannot be stat'ed as a directory? The target is the link body as written,
+ *  joined to the link's folder by concatenation (path.resolve would fold a `..` as text), and its folder is everything before its
+ *  last `/`, so the kernel resolves it. Only the first link is read: a chain of links is the append's own failure. */
+function danglingIntoMissingFolder(path: string): boolean {
+  let body: string;
+  try {
+    if (!lstatSync(path).isSymbolicLink()) return false;
+    body = readlinkSync(path);
+  } catch { return false; }
+  const target = body.startsWith('/') ? body : `${dirname(path)}/${body}`;
+  const folder = target.slice(0, target.lastIndexOf('/')) || '/';
+  try { return !statSync(folder).isDirectory(); } catch { return true; }
+}
+
 /** B2a ruling J4 (design 4.6): confirm, erase, recheck and adopt append their audit row AFTER the ledger row, so an audit file the
  *  process cannot append to used to surface after the row had landed (a confirm then read Verified with no audit row). This is the
  *  look they take first. It reads permissions and kinds only: it opens nothing (an open of a FIFO would block) and creates nothing
- *  (a refused adopt must leave no audit file behind). It decides only what a permission or a kind shows; a directory that is
- *  missing, is not a directory or cannot be reached returns without a refusal, so the operation meets it first and the refusal the
- *  caller sees is the store's own (WBR-global F1). A directory without write and search permission is refused as the home's even
- *  when `audit.jsonl` itself could be appended: the witness advance after the row needs the home too. The look is advisory (access(2)
- *  answers for this process at this instant; root passes it), so a state that changes after it is the append's own failure. */
+ *  (a refused adopt must leave no audit file behind). A home whose own name is a symbolic link is refused first, with the
+ *  refusal `ensureHelixDir` gives it (every write through a symlinked home is refused, and a link that does not resolve left
+ *  the store with no refusal of its own: final review G10, revising plan decision B4-2). Otherwise it decides only what a
+ *  permission or a kind shows; a directory that is missing, is not a directory or cannot be reached returns without a refusal, so
+ *  the operation meets it first and the refusal the caller sees is the store's own (WBR-global F1). A directory without write and
+ *  search permission is refused as the home's even when `audit.jsonl` itself could be appended: the witness advance after the row
+ *  needs the home too. A missing `audit.jsonl` passes unless its name is a link whose target's folder is not a directory, where
+ *  the append could not create the file (final review G12; a link into an existing folder keeps the followed append, ruling L).
+ *  The look is advisory (access(2) answers for this process at this instant; root passes it), so a state that changes after it
+ *  is the append's own failure. */
 export function assertAuditWritable(path: string): void {
   const dir = dirname(path);
+  let dirLink = false;
+  try { dirLink = lstatSync(dir).isSymbolicLink(); } catch { /* a missing name: the operation meets it first */ }
+  if (dirLink) ensureHelixDir(dir);   // throws its symlinked-home refusal
   let dirStat: Stats;
   try { dirStat = statSync(dir); } catch { return; }
   if (!dirStat.isDirectory()) return;
@@ -198,7 +220,8 @@ export function assertAuditWritable(path: string): void {
   let st: Stats;
   try { st = statSync(path); }
   catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return;   // a new file in a directory that can be written
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw new HomeRefusalError('audit-unwritable', AUDIT_UNWRITABLE_TEXT);
+    if (!danglingIntoMissingFolder(path)) return;   // a new file in a directory that can be written
     throw new HomeRefusalError('audit-unwritable', AUDIT_UNWRITABLE_TEXT);
   }
   if (!st.isFile()) throw new HomeRefusalError('audit-unwritable', AUDIT_UNWRITABLE_TEXT);

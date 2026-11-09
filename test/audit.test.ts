@@ -158,12 +158,53 @@ describe.skipIf(process.platform === 'win32')('assertAuditWritable', () => {
   const NOT_DECIDED: Array<[string, (b: string) => string]> = [
     ['a missing directory', (b) => join(b, 'nodir', 'audit.jsonl')],
     ['a "directory" that is a regular file', (b) => { writeFileSync(join(b, 'f'), ''); return join(b, 'f', 'audit.jsonl'); }],
-    ['a directory that is a link loop', (b) => { symlinkSync('loop', join(b, 'loop')); return join(b, 'loop', 'audit.jsonl'); }],
   ];
   it.each(NOT_DECIDED)('leaves %s to the operation, so the store\'s own refusal is the one reported', (_name, plant) => {
     const b = dir(); const p = plant(b); const before = readdirSync(b);
     expect(() => assertAuditWritable(p)).not.toThrow();
     expect(readdirSync(b)).toEqual(before);
+  });
+
+  // Final review G10 (revising plan decision B4-2): a home whose own name is a symbolic link is refused by the look with
+  // ensureHelixDir's existing symlinked-home refusal. A link that does not resolve left the store no refusal of its own (a
+  // confirm or recheck answered "target not found", an erase "no memory has id"), so the look answers it.
+  const LINKED_HOME: Array<[string, (b: string) => string]> = [
+    ['a link loop', (b) => { symlinkSync('loop', join(b, 'loop')); return join(b, 'loop'); }],
+    ['a link to a missing target', (b) => { symlinkSync(join(b, 'gone', 'helix'), join(b, 'h')); return join(b, 'h'); }],
+    ['a link to a real directory', (b) => { mkdirSync(join(b, 'real')); symlinkSync(join(b, 'real'), join(b, 'h')); return join(b, 'h'); }],
+  ];
+  it.each(LINKED_HOME)('a home that is %s is refused as a symlinked home, and nothing is created', (_name, plant) => {
+    const b = dir(); const home = plant(b); const before = readdirSync(b);
+    const e = refusal(() => assertAuditWritable(join(home, 'audit.jsonl')));
+    expect(e.homeRefusalCause).toBe('symlinked-home');
+    expect(e.message).toBe(`refusing to use ${home}: it is a symlink, not a directory Helix owns`);
+    expect(readdirSync(b)).toEqual(before);
+  });
+
+  // Final review G12: a dangling audit.jsonl link whose target's folder is not a directory cannot be created through, so the
+  // look refuses it before the row (a confirm used to land its row and read Verified with no audit row). A dangling link into
+  // a folder that exists keeps the followed append (ruling L).
+  const DANGLING_AUDIT: Array<[string, (d: string) => void]> = [
+    ['an absolute body into a missing folder', (d) => symlinkSync(join(d, 'nowhere', 'x'), join(d, 'audit.jsonl'))],
+    ['a relative body into a missing folder', (d) => symlinkSync('nowhere/x', join(d, 'audit.jsonl'))],
+    ['a body whose folder is a regular file', (d) => { writeFileSync(join(d, 'plain'), ''); symlinkSync(join(d, 'plain', 'x'), join(d, 'audit.jsonl')); }],
+  ];
+  it.each(DANGLING_AUDIT)('an audit.jsonl link with %s is audit-unwritable, and nothing is created', (_name, plant) => {
+    const d = dir(); plant(d); const before = readdirSync(d);
+    const e = refusal(() => assertAuditWritable(join(d, 'audit.jsonl')));
+    expect(e.homeRefusalCause).toBe('audit-unwritable');
+    expect(e.message).toBe(AUDIT_TEXT);
+    expect(readdirSync(d)).toEqual(before);
+  });
+
+  it('a dangling audit.jsonl link into a folder that exists passes (ruling L: the append follows it), and nothing is created', () => {
+    const d = dir(); const other = dir();
+    symlinkSync(join(other, 'x.jsonl'), join(d, 'audit.jsonl'));
+    expect(() => assertAuditWritable(join(d, 'audit.jsonl'))).not.toThrow();
+    const e2 = dir(); symlinkSync('fresh.jsonl', join(e2, 'audit.jsonl'));          // a relative body beside the link
+    expect(() => assertAuditWritable(join(e2, 'audit.jsonl'))).not.toThrow();
+    expect(readdirSync(other)).toEqual([]);
+    expect(readdirSync(e2)).toEqual(['audit.jsonl']);
   });
 
   describe.skipIf(AS_ROOT)('a home without write permission', () => {

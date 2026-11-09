@@ -6,7 +6,7 @@ import { fsyncDir, writeAll, realFsOps } from './fs-ops.js';
 import { sweepOrphanTmps } from './ledger-sweep.js';
 import type { MemoryRecord } from '../types.js';
 import { ensureHelixDir } from './home-permissions.js';
-import { openHomeFileForRead } from './home-files.js';
+import { openHomeFileForRead, NotRegularHomeFileError } from './home-files.js';
 
 export const MAC_VERSION = 2;                             // version NEW signatures carry
 const ACCEPTED_MAC_VERSIONS = new Set<number>([1, 2]);   // versions verifyVerify treats as valid
@@ -83,6 +83,11 @@ export function ensureMaster(home: string): Buffer {
   const path = masterPath(home);
   const existing = tryReadMasterStrict(path);
   if (existing) return existing;
+  // A key name that is a link which does not resolve (the read above answered absent) is refused, never minted around:
+  // the mint would follow the link out of the home, or fail with a cause that is not the link (final review G11).
+  let atName: ReturnType<typeof lstatSync> | null = null;
+  try { atName = lstatSync(path); } catch { atName = null; }
+  if (atName !== null && atName.isSymbolicLink()) throw new NotRegularHomeFileError();
   ensureHelixDir(home);
   return withFileLock(path, () => {
     const again = tryReadMasterStrict(path);   // re-check inside the lock (another process may have won)

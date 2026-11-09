@@ -4,7 +4,7 @@
 // compares a digest (kind, mode, sha256) taken before and after. POSIX only (FIFOs, modes, links). The hooks are in
 // b2a-home-hooks.e2e.test.ts. The same files run on the e279889 bundles at Step 2 of task D1 and must show the old behaviour.
 import { describe, it, expect, afterEach } from 'vitest';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -399,7 +399,9 @@ suite('answers match the ledger (ruling J4)', () => {
     expect(readFileSync(ledger).equals(before)).toBe(true);
   }, 60_000);
 
-  it('HELIX_HOME a self-loop link: erase, confirm and recheck no longer answer the symlinked-home text of the audit append (WBR-global F1)', async () => {
+  // Final review G10 (revising plan decision B4-2): the look in front of the row answers a home whose own name is a link with
+  // ensureHelixDir's symlinked-home refusal. Before, a self-loop home was left to the store, whose answers named another cause.
+  it('HELIX_HOME a self-loop link: erase, confirm and recheck answer the symlinked-home refusal of the look (final review G10)', async () => {
     const w = world();
     const loop = join(w.base, 'hl');
     symlinkSync(loop, loop);
@@ -414,8 +416,33 @@ suite('answers match the ledger (ruling J4)', () => {
     expect(r.timedOut).toBe(false);
     for (const id of [2, 3, 4]) {
       expect(isErr(r.responses.get(id))).toBe(true);
-      expect(textOf(r.responses.get(id))).not.toContain('it is a symlink, not a directory Helix owns');
+      expect(textOf(r.responses.get(id))).toBe(`refusing to use ${loop}: it is a symlink, not a directory Helix owns`);
     }
+  }, 60_000);
+
+  it('the home relinked to a missing target after the start: erase, confirm and recheck answer the symlinked-home refusal and nothing is written (final review G10)', async () => {
+    const w = world();
+    const probe = join(w.work, 'probe.txt');
+    writeFileSync(probe, 'zeta\n');
+    const client = await connect(envFor(w, { HELIX_HOME: w.home }), w.work);
+    const userId = committedId({ result: await client.callTool({ name: 'helix_memory_commit', arguments: { content: FACT, source: 'user', scope: 'global' } }) });
+    const relayedId = committedId({ result: await client.callTool({ name: 'helix_memory_commit', arguments: { content: `${FACT} relayed`, source: 'user-relayed', scope: 'global' } }) });
+    const real = `${w.home}.real`;
+    renameSync(w.home, real);
+    symlinkSync(join(w.base, 'gone', 'helix'), w.home);                   // a link to a target that does not exist
+    expect(lstatSync(w.home).isSymbolicLink()).toBe(true);
+    const before = treeDigest(real);
+    const answers = [
+      await client.callTool({ name: 'helix_memory_erase', arguments: { id: userId } }),
+      await client.callTool({ name: 'helix_memory_confirm', arguments: { id: userId } }),
+      await client.callTool({ name: 'helix_memory_recheck', arguments: { id: relayedId, check: { kind: 'file-contains', path: probe, pattern: 'zeta' } } }),
+    ];
+    for (const res of answers) {
+      expect((res as { isError?: boolean }).isError).toBe(true);
+      expect(textOfCall(res)).toBe(`refusing to use ${w.home}: it is a symlink, not a directory Helix owns`);
+    }
+    expect(treeDigest(real), 'no row and no audit row in the real home').toEqual(before);
+    expect(existsSync(join(w.base, 'gone')), 'nothing was created at the link target').toBe(false);
   }, 60_000);
 
   // Plan decision P5 at the bundle: the server runs under a file-size limit and audit.jsonl already holds that many bytes, so the

@@ -31,6 +31,7 @@ import { realFsOps } from './fs-ops.js';
 import { isUnresolvablePathError, fileIdentityAt, resolvePath } from './path-identity.js';
 import { globalLedgerWriteState, GlobalLedgerReadOnlyError, GLOBAL_DESTINATION_CHANGED, type GlobalWriteOp } from './global-ledger.js';
 import { homeControlFileOf } from './home-files.js';
+import { isHomeRefusalError } from './home-env.js';
 import { ensureHelixDir } from './home-permissions.js';
 import { MAX_COMMIT_CONTENT_CHARS, RECALL_RECENCY_APPENDIX_COUNT, RECALL_APPENDIX_FUTURE_TOLERANCE_MS } from '../limits.js';
 
@@ -851,7 +852,16 @@ export class MemoryStore {
         // so a home was left with a row and no key. Under the ledger lock (lock order: ledger, then key). Before the destination's
         // identity is sampled, so the sample stays the last step before the body. confirm and recheck mint in writeVerifyLocked,
         // the compaction in openTransition.
-        if (op === 'commit' || op === 'erase') ensureMaster(home);
+        if (op === 'commit') ensureMaster(home);
+        // An erase's key failure stands before the tombstone: the typed pre-write refusal the erase handler audits as
+        // 'rejected', with the same message and the failure as its cause (final review G11). A failure that already carries
+        // a marker the handler audits as 'rejected' (a foreign object at the key lock, a lost /proc, a home refusal) keeps it.
+        if (op === 'erase') {
+          try { ensureMaster(home); } catch (e) {
+            if (isLockForeignObjectError(e) || isLedgerProcLostError(e) || isHomeRefusalError(e)) throw e;
+            throw new EraseRefusedError(e instanceof Error ? e.message : String(e), { cause: e });
+          }
+        }
         return body({ ctx, judged: { path: r.path, identity: fileIdentityAt(r.path) } });
       });
     } catch (e) {

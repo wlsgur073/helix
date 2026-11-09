@@ -5,11 +5,11 @@
 // (3) an unwritable home or audit file is refused BEFORE the ledger row, for confirm, erase, recheck and adopt;
 // (4) P5: the audit row after a success that stored a row can fail, and the answer is then the fixed stored-then-failed text.
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, realpathSync, lstatSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, realpathSync, lstatSync, chmodSync, rmSync, symlinkSync, unlinkSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../../src/memory/store.js';
-import { handleErase, handleConfirm, handleRecheck, handleAdopt, STORED_THEN_FAILED_RESPONSE } from '../../src/server/handlers.js';
+import { handleErase, handleConfirm, handleRecheck, handleAdopt, handleCommit, STORED_THEN_FAILED_RESPONSE } from '../../src/server/handlers.js';
 import * as auditMod from '../../src/audit.js';
 import * as witnessStoreMod from '../../src/memory/witness-store.js';
 import { HomeRefusalError, isHomeRefusalError } from '../../src/memory/home-env.js';
@@ -193,5 +193,51 @@ describe.skipIf(AS_ROOT || !POSIX)('a home that became read-only after start is 
     expect(existsSync(join(fx.helix, '.owner'))).toBe(false);
     expect(registryKeys(fx.home)).toEqual([]);
     expect(existsSync(auditPath)).toBe(false);
+  });
+});
+
+// Final review G11: a dangling link at the signing key's name. ensureMaster refuses it with text 11 before any row, for every
+// operation that reaches the key on the global route, and the erase is audited 'rejected' (nothing was written), not
+// 'indeterminate'. Two variants: the link's target folder exists (before: "master key vanished during concurrent mint") or
+// not (before: a raw ENOENT naming the path).
+describe.skipIf(!POSIX)('a dangling link at the signing key\'s name (final review G11)', () => {
+  const TEXT_11 = 'A Helix data file is not a regular file.';
+  const KEY = 'ledger-mac-master.key';
+  for (const folderPresent of [false, true]) {
+    const label = folderPresent ? 'target folder present' : 'target folder absent';
+    it(`${label}: commit, erase, confirm and recheck answer text 11, nothing is written, and the erase is audited rejected`, () => {
+      const { dir, s, ledger, auditPath } = gfx();
+      writeFileSync(join(dir, 'app.json'), 'base /v2/users');
+      const userId = s.commit({ content: FACT, source: 'user', scope: 'global' }).id;
+      const relayedId = s.commit({ content: `${FACT} relayed`, source: 'user-relayed', scope: 'global' }).id;
+      expect(existsSync(join(dir, KEY)), 'precondition: the key was minted').toBe(true);
+      const outside = realpathSync(mkdtempSync(join(tmpdir(), 'agk-'))); made.push(outside);
+      if (folderPresent) mkdirSync(join(outside, 'keys'));
+      unlinkSync(join(dir, KEY));
+      symlinkSync(join(outside, 'keys', 'k'), join(dir, KEY));
+      const rows = lines(ledger);
+      const answers = {
+        commit: thrown(() => handleCommit(s, { content: 'another fact', source: 'user', scope: 'global' })).message,
+        erase: thrown(() => handleErase(s, { id: userId }, { auditPath })).message,
+        confirm: thrown(() => handleConfirm(s, { id: userId }, { auditPath })).message,
+        recheck: inDir(dir, () => thrown(() => handleRecheck(s, { id: relayedId, check: CHECK }, { auditPath })).message),
+      };
+      expect(answers).toEqual({ commit: TEXT_11, erase: TEXT_11, confirm: TEXT_11, recheck: TEXT_11 });
+      expect(lines(ledger), 'no row was written').toBe(rows);
+      const eraseRows = readFileSync(auditPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as EraseAudit).filter((r) => r.kind === 'erase');
+      expect(eraseRows).toEqual([expect.objectContaining({ kind: 'erase', id: userId, outcome: 'rejected' })]);
+      expect(readdirSync(outside).sort()).toEqual(folderPresent ? ['keys'] : []);
+      if (folderPresent) expect(readdirSync(join(outside, 'keys'))).toEqual([]);
+      expect(lstatSync(join(dir, KEY)).isSymbolicLink()).toBe(true);
+    });
+  }
+
+  it('a fresh home whose key name is a dangling link: the first commit answers text 11 and writes no row', () => {
+    const { dir, s, ledger } = gfx();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'agk-'))); made.push(outside);
+    symlinkSync(join(outside, 'keys', 'k'), join(dir, KEY));
+    expect(thrown(() => handleCommit(s, { content: FACT, source: 'user', scope: 'global' })).message).toBe(TEXT_11);
+    expect(lines(ledger)).toBe(0);
+    expect(readdirSync(outside)).toEqual([]);
   });
 });

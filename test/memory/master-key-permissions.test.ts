@@ -7,6 +7,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, chmodSync, statSync
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
 import { ensureMaster, tryReadMaster } from '../../src/memory/ledger-mac.js';
+import { isNotRegularHomeFileError } from '../../src/memory/home-files.js';
 import { compareStrayMasterKey } from '../../src/memory/trust-store-layout.js';
 
 const mode = (p: string): number => statSync(p).mode & 0o777;
@@ -156,6 +157,31 @@ describe.skipIf(platform() === 'win32')('the stray key beside a relocated ledger
 
       expect(compareStrayMasterKey(home, ledgerDir)).toBe('match');
       expect(modeOct(join(real, 'sub', KEY))).toBe('644');             // base: '600'
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+});
+
+// Final review G11: a key name that is a link which does not resolve is refused with text 11, never minted around. Before
+// the fix the mint either failed with a cause that is not the link ("master key vanished during concurrent mint" when the
+// target's folder exists, a raw path-bearing ENOENT from the lock when it does not) or, in a fresh home, created nothing
+// the caller could use.
+describe.skipIf(platform() === 'win32')('a dangling link at the key name (final review G11)', () => {
+  it.each([['absent', false], ['present', true]] as const)('target folder %s: ensureMaster throws text 11 and creates nothing', (_label, folderPresent) => {
+    const base = mkdtempSync(join(tmpdir(), 'helix-mkdl-'));
+    try {
+      const home = join(base, 'h');
+      mkdirSync(home, { mode: 0o700 });
+      if (folderPresent) mkdirSync(join(base, 'keys'));
+      symlinkSync(join(base, 'keys', 'k'), join(home, 'ledger-mac-master.key'));
+      const before = { home: readdirSync(home).sort(), base: readdirSync(base).sort() };
+      let thrown: unknown;
+      try { ensureMaster(home); } catch (e) { thrown = e; }
+      expect(isNotRegularHomeFileError(thrown)).toBe(true);
+      expect((thrown as Error).message).toBe('A Helix data file is not a regular file.');
+      expect(readdirSync(home).sort()).toEqual(before.home);
+      expect(readdirSync(base).sort()).toEqual(before.base);
+      if (folderPresent) expect(readdirSync(join(base, 'keys'))).toEqual([]);
+      expect(lstatSync(join(home, 'ledger-mac-master.key')).isSymbolicLink()).toBe(true);
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
 });
