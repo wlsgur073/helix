@@ -3,7 +3,7 @@
 // home that does not exist and creates nothing. The expected stderr is built from the resolver's own message, so these
 // cases pin the head, the exit code and the "nothing created" outcome, not the wording that task A2 owns.
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, unlinkSync, existsSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, unlinkSync, existsSync, realpathSync, rmSync, chmodSync } from 'node:fs';
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -101,6 +101,28 @@ const ROWS: Row[] = [
       symlinkSync(b, a); symlinkSync(a, b);
       return { HELIX_HOME: join(a, 'h') };
     }, leaks: ['zq-loop-a', 'zq-loop-b'] },
+  // Final review G2: a value that was not valid UTF-8 reaches Helix with U+FFFD in it.
+  { name: 'HELIX_HOME holds U+FFFD (a value that was not valid UTF-8)', cause: 'unresolvable-home',
+    env: (x) => ({ HELIX_HOME: join(x.base, `zq-ff${String.fromCharCode(0xfffd)}h`) }), leaks: ['zq-ff'] },
+  // Final review G3: the composed home past the system limit.
+  { name: 'HELIX_HOME has a final component of 256 bytes', cause: 'unresolvable-home',
+    env: (x) => ({ HELIX_HOME: join(x.base, 'zq'.repeat(128)) }), leaks: ['zqzq'] },
+  { name: 'HELIX_HOME is past PATH_MAX while its directory part is under it', cause: 'unresolvable-home',
+    env: (x) => {
+      let deep = join(x.base, 'zq-deep');
+      while (deep.length < 3880) deep = join(deep, 'd'.repeat(200));
+      mkdirSync(deep, { recursive: true });
+      return { HELIX_HOME: join(deep, 'h'.repeat(250)) };
+    }, leaks: ['zq-deep'] },
+  // Final review G1 (owner, 2026-11-09): a `..` after a folder that cannot be searched. The folder is 0600 (readable, not
+  // searchable), so the before-and-after tree snapshot can still list it; skipped as root, which searches any folder.
+  ...((typeof process.getuid === 'function' && process.getuid() === 0) ? [] : [{
+    name: 'HELIX_HOME has a `..` after a folder that cannot be searched', cause: 'unresolvable-home' as HomeRefusalCause,
+    env: (x: World) => {
+      const locked = join(x.base, 'zq-locked');
+      if (!existsSync(locked)) { mkdirSync(locked); chmodSync(locked, 0o600); }
+      return { HELIX_HOME: `${locked}/../h` };
+    }, leaks: ['zq-locked'] }]),
 ];
 
 for (const row of ROWS) {
@@ -312,6 +334,18 @@ describe('helix-trigger built from source (scripts/trigger-cli.ts), spawned with
     expect(res.status).toBe(0);
     expect(readFileSync(join(home, 'trigger.jsonl'), 'utf8')).toBe(res.stdout);
     expect(snapshotTree(w.cwd)).toEqual([]);
+  });
+
+  // Final review G3: before the fix this home reached the sink's mkdir and the process crashed with exit 1 and a raw,
+  // path-bearing ENAMETOOLONG.
+  it('a HELIX_HOME whose final component is 256 bytes: exit 3, stdout empty, the one REFUSING line without the path, nothing created', () => {
+    const before = snapshotTree(w.base);
+    const res = spawnTrigger({ HELIX_HOME: join(w.base, 'zq'.repeat(128)) });
+    expect(res.status).toBe(3);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toMatch(/^trigger-cli: REFUSING - [\x20-\x7e]+\n$/);
+    expect(res.stderr).not.toContain('zqzq');
+    expect(snapshotTree(w.base)).toEqual(before);
   });
 
   it('a relative HELIX_HOME: the process exit status is 3, stdout is empty, stderr is the one REFUSING line, nothing is created', () => {

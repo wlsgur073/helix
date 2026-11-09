@@ -22,9 +22,13 @@ beforeAll(async () => { server = await bundleCli('src/server/index.ts'); }, 120_
 
 let made: string[] = [];
 let open: Client[] = [];
+let restores: Array<() => void> = [];
+const isRoot = (): boolean => typeof process.getuid === 'function' && process.getuid() === 0;
 afterEach(async () => {
   for (const c of open) { try { await c.close(); } catch { /* already closed */ } }
   open = [];
+  for (const r of restores) { try { r(); } catch { /* best effort */ } }
+  restores = [];
   for (const d of made) rmSync(d, { recursive: true, force: true });
   made = [];
 });
@@ -140,6 +144,32 @@ describe('a HELIX_HOME or HELIX_LEDGER the server cannot accept: one line, exit 
       expect(() => statSync(home), 'precondition: the kernel answers ENAMETOOLONG').toThrow(/ENAMETOOLONG/);
       return { HELIX_HOME: home };
     }],
+    // Final review G3: the final component itself, or the whole value, past the system limit.
+    ['HELIX_HOME whose FINAL component is 256 bytes (unresolvable: ENAMETOOLONG on the composed home)', (w) => {
+      const home = join(w.base, 'n'.repeat(256));
+      expect(() => lstatSync(home), 'precondition: the kernel answers ENAMETOOLONG').toThrow(/ENAMETOOLONG/);
+      return { HELIX_HOME: home };
+    }],
+    ['HELIX_HOME past PATH_MAX whose directory part is under it (unresolvable: ENAMETOOLONG)', (w) => {
+      let deep = join(w.base, 'deep');
+      while (deep.length < 3880) deep = join(deep, 'd'.repeat(200));
+      mkdirSync(deep, { recursive: true });
+      const home = join(deep, 'h'.repeat(250));
+      expect(home.length, 'precondition: the whole value is past PATH_MAX').toBeGreaterThan(4095);
+      expect(() => lstatSync(home), 'precondition: the kernel answers ENAMETOOLONG').toThrow(/ENAMETOOLONG/);
+      return { HELIX_HOME: home };
+    }],
+    // Final review G1 (owner, 2026-11-09): a `..` after a folder that cannot be searched is refused, never folded as text.
+    ...(isRoot() ? [] : [['HELIX_HOME=<a 0000 folder>/../h (unresolvable: a `..` after a folder that cannot be searched)', (w: Ws) => {
+      const locked = join(w.base, 'locked');
+      mkdirSync(locked);
+      mkdirSync(join(w.base, 'h'));                    // where a text fold of `locked/..` goes
+      chmodSync(locked, 0o000);
+      restores.push(() => chmodSync(locked, 0o700));
+      const home = `${locked}/../h`;                   // concatenation: path.join would fold the `..`
+      expect(() => statSync(home), 'precondition: the kernel answers EACCES').toThrow(/EACCES/);
+      return { HELIX_HOME: home };
+    }] as [string, (w: Ws) => Record<string, string>]]),
   ];
 
   it.each(REFUSED)('%s', async (_name, extraOf) => {
@@ -155,6 +185,49 @@ describe('a HELIX_HOME or HELIX_LEDGER the server cannot accept: one line, exit 
     expect(snap(w.cwd), 'the working directory (decoy files, modes) is untouched').toBe(before.cwd);
     expect(snap(w.userHome), 'nothing was created under the user home').toBe(before.userHome);
     expect(snap(w.home)).toBe(before.home);
+    if (existsSync(join(w.base, 'h'))) expect(readdirSync(join(w.base, 'h')), 'nothing at the text-folded home').toEqual([]);
+  }, 60_000);
+
+  // Final review G2: a byte that is not valid UTF-8 reaches Node as U+FFFD. The value is handed over as raw bytes by
+  // /bin/sh's printf, so the server sees what a real non-UTF-8 HELIX_HOME gives it.
+  it.skipIf(process.platform === 'win32')('HELIX_HOME holding the byte 0xff (not valid UTF-8): exit 78, the one line, and no directory at the replaced name', async () => {
+    const w = workspace();
+    const before = { cwd: snap(w.cwd), userHome: snap(w.userHome), base: readdirSync(w.base).sort() };
+    const env = envOf(w.userHome, {});
+    const child = spawn('/bin/sh', ['-c', 'HELIX_HOME="$(printf "%s/a\\377b" "$1")" exec "$0" "$2"', process.execPath, w.base, server],
+      { cwd: w.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (b: Buffer) => { stdout += b.toString(); });
+    child.stderr.on('data', (b: Buffer) => { stderr += b.toString(); });
+    const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.on('close', (code, signal) => resolve({ code, signal })));
+    child.stdin.end();
+    const timer = setTimeout(() => child.kill('SIGKILL'), 10_000);
+    const r = await closed;
+    clearTimeout(timer);
+    expect(r.signal).toBeNull();
+    expect(r.code, stderr).toBe(78);
+    expect(stderr).toBe(`${REFUSAL_LINE}\n`);
+    expect(stdout).toBe('');
+    expect(readdirSync(w.base).sort(), 'no directory at the replaced name (or at the raw one)').toEqual(before.base);
+    expect(snap(w.cwd)).toBe(before.cwd);
+    expect(snap(w.userHome)).toBe(before.userHome);
+  }, 60_000);
+
+  it.skipIf(process.platform === 'win32')('control for the 0xff case: the same /bin/sh hand-over of a valid name starts the server', async () => {
+    const w = workspace();
+    const child = spawn('/bin/sh', ['-c', 'HELIX_HOME="$(printf "%s/ab" "$1")" exec "$0" "$2"', process.execPath, w.base, server],
+      { cwd: w.cwd, env: envOf(w.userHome, {}), stdio: ['pipe', 'pipe', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (b: Buffer) => { stderr += b.toString(); });
+    const closed = new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+    child.stdin.end();
+    const timer = setTimeout(() => child.kill('SIGKILL'), 10_000);
+    const code = await closed;
+    clearTimeout(timer);
+    expect(stderr).not.toContain(REFUSAL_LINE);
+    expect(stderr).toContain('self-terminating');
+    expect(code).toBe(0);
   }, 60_000);
 });
 

@@ -1,5 +1,6 @@
 /** One resolution of HELIX_HOME, HELIX_LEDGER and HELIX_SESSIONS for every entry point, and the one typed home
  *  refusal (B2a design 4.1 and 4.6, decisions C and D). This module imports node builtins and path-identity.ts only. */
+import { lstatSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 import { resolvePath } from './path-identity.js';
 
@@ -35,7 +36,7 @@ export const RELATIVE_VALUE_TEXT: Readonly<Record<HomeVariable, string>> = {
   HELIX_SESSIONS: 'HELIX_SESSIONS is not an absolute path, so it is refused',
 };
 export const UNRESOLVABLE_HOME_TEXT =
-  'the Helix home cannot be resolved (a name that is not valid UTF-8, a path past the system limit, or too many links), so it is refused';
+  'the Helix home cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a `..` after a folder that cannot be searched), so it is refused';
 
 /** The three resolved paths every entry point works from. */
 export interface HelixPaths { home: string; globalLedger: string; sessionsFile: string }
@@ -59,21 +60,39 @@ function withoutTrailingSlashOrDot(p: string): string {
   }
 }
 
+const unresolvableHome = (): HomeRefusalError => new HomeRefusalError('unresolvable-home', UNRESOLVABLE_HOME_TEXT);
+
 /** The home the kernel reaches (decision D): the directory part is resolved by `resolvePath`, the final component is
  *  appended as written and never followed, so a home that is itself a link stays a link (the writes refuse it and the
  *  reads are served, as today). A final component of `..` (or `.`, or none) names a directory, which cannot be a link, so
  *  the whole path is resolved. A directory part the resolver cannot inspect (EACCES, ENOTDIR, ENOENT before a `..`, an
- *  I/O error) keeps the path as given and fails later with its own fs error; one it cannot name (a name that is not
- *  valid UTF-8, a path past the system limit, a link loop) is refused. */
+ *  I/O error) keeps the path as given and fails later with its own fs error, unless the value has a `..` component: every
+ *  file below the home is joined as text, which would fold that `..` over the folder the kernel could not pass, so such a
+ *  value is refused (final review G1, owner 2026-11-09). One the resolver cannot name (a name that is not valid UTF-8, a
+ *  path past the system limit, a link loop) is refused. The composed home is looked at once with `lstat` (design 4.1, the
+ *  final component is not followed): ENAMETOOLONG (a final component or a whole path past the system limit) and ELOOP are
+ *  refused the same way, and every other answer (ENOENT for a home not yet made included) keeps the path (final review
+ *  G3). */
 function kernelWayHome(path: string): string {
   const name = withoutTrailingSlashOrDot(path);
   const last = name.slice(name.lastIndexOf('/') + 1);
   const namesDirectory = last === '' || last === '.' || last === '..';
   const r = resolvePath(namesDirectory ? name : posix.dirname(name));
-  if (r.kind === 'unresolvable') throw new HomeRefusalError('unresolvable-home', UNRESOLVABLE_HOME_TEXT);
-  if (r.kind === 'uninspectable') return path;
-  return namesDirectory ? r.path : posix.join(r.path, last);
+  if (r.kind === 'unresolvable') throw unresolvableHome();
+  if (r.kind === 'uninspectable') {
+    if (path.split('/').includes('..')) throw unresolvableHome();
+    return path;
+  }
+  const home = namesDirectory ? r.path : posix.join(r.path, last);
+  try { lstatSync(home); } catch (e) {
+    const code = (e as NodeJS.ErrnoException | null)?.code;
+    if (code === 'ENAMETOOLONG' || code === 'ELOOP') throw unresolvableHome();
+  }
+  return home;
 }
+
+/** How Node hands Helix an environment value whose bytes are not valid UTF-8: each invalid sequence is U+FFFD. */
+const REPLACEMENT_CHARACTER = String.fromCharCode(0xfffd);
 
 /** Resolve the three variables once (decisions C and D; design 4.1). Reads only `env`, never `process.env`. A value that is
  *  not absolute is refused first, in the order HELIX_HOME, HELIX_LEDGER, HELIX_SESSIONS, before any file system call; then
@@ -90,7 +109,10 @@ export function resolveHelixPaths(env: NodeJS.ProcessEnv, userHome: string, plat
   if (ledger !== null) absoluteOrRefuse('HELIX_LEDGER', ledger, p.isAbsolute);
   const sessions = given(env.HELIX_SESSIONS);
   if (sessions !== null) absoluteOrRefuse('HELIX_SESSIONS', sessions, p.isAbsolute);
-  // After all three are known to be absolute: a relative value is refused before any fs call.
+  // After all three are known to be absolute: a relative value is refused before any fs call. A home value holding U+FFFD
+  // is a name that was not valid UTF-8 before Node decoded it, so it is refused, still before any fs call (final review G2;
+  // HELIX_LEDGER and HELIX_SESSIONS are not judged this way here).
+  if (platform !== 'win32' && homeValue.includes(REPLACEMENT_CHARACTER)) throw unresolvableHome();
   const home = platform === 'win32' ? homeValue : kernelWayHome(homeValue);
   return { home, globalLedger: ledger ?? p.join(home, 'memory.jsonl'), sessionsFile: sessions ?? p.join(home, 'sessions.jsonl') };
 }

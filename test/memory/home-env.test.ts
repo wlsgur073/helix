@@ -180,19 +180,86 @@ posixOnly('a directory part that cannot be named is refused (unresolvable-home)'
     symlinkSync(loop, loop);
     expect(refusedFor('', loop).homeRefusalCause).toBe('unresolvable-home');
   });
+
+  // Final review G2: Node decodes a value whose bytes are not valid UTF-8 with U+FFFD, so a home value holding U+FFFD is
+  // refused before any file system call (the directory at the replaced name is never created or used).
+  it('a HELIX_HOME holding U+FFFD (a value that was not valid UTF-8), and nothing is made at the replaced name', () => {
+    const replaced = join(d, `ff${String.fromCharCode(0xfffd)}home`);
+    expect(Buffer.from(replaced).includes(Buffer.from([0xef, 0xbf, 0xbd]))).toBe(true);   // precondition: U+FFFD itself
+    const e = refusedFor(replaced);
+    expect(e.homeRefusalCause).toBe('unresolvable-home');
+    expect(e.message).toBe(UNRESOLVABLE_HOME_TEXT);
+    expect(existsSync(replaced)).toBe(false);
+    expect(refusedFor(join(replaced, 'sub')).homeRefusalCause).toBe('unresolvable-home');   // anywhere in the value
+  });
+
+  it('U+FFFD is judged after the relative values: a relative HELIX_LEDGER beside it answers the relative value', () => {
+    const e = thrownBy(() => resolveHelixPaths({ HELIX_HOME: join(d, String.fromCharCode(0xfffd)), HELIX_LEDGER: 'rel.jsonl' }, U));
+    expect((e as HomeRefusalError).homeRefusalCause).toBe('relative-value');
+    expect((e as Error).message).toBe(RELATIVE_VALUE_TEXT.HELIX_LEDGER);
+  });
+
+  // Final review G3: the composed home is looked at once with lstat; ENAMETOOLONG and ELOOP are refused there too.
+  it('a final component past the name limit (256 bytes) under a directory that resolves', () => {
+    const home = join(REAL, 'n'.repeat(256));
+    expect(codeThrownBy(() => lstatSync(home))).toBe('ENAMETOOLONG');   // precondition
+    const e = refusedFor(home);
+    expect(e.homeRefusalCause).toBe('unresolvable-home');
+    expect(e.message).toBe(UNRESOLVABLE_HOME_TEXT);
+  });
+
+  it('a whole value past PATH_MAX whose directory part is under it', () => {
+    let deep = join(d, 'deep');
+    while (deep.length < 3880) deep = join(deep, 'd'.repeat(200));
+    mkdirSync(deep, { recursive: true });
+    const home = join(deep, 'h'.repeat(250));
+    expect(deep.length).toBeLessThan(4095);                                // precondition: the directory part resolves
+    expect(home.length).toBeGreaterThan(4095);                             // precondition: the whole value is past PATH_MAX
+    expect(realpathSync.native(deep)).toBe(deep);
+    expect(codeThrownBy(() => lstatSync(home))).toBe('ENAMETOOLONG');
+    expect(refusedFor(home).homeRefusalCause).toBe('unresolvable-home');
+  });
+
+  it('control: a 255-byte final component and a missing home are kept (ENOENT is not a refusal)', () => {
+    const home = join(REAL, 'n'.repeat(255));
+    expect(codeThrownBy(() => lstatSync(home))).toBe('ENOENT');           // precondition
+    expect(homeOf(home)).toBe(home);
+  });
 });
 
-posixOnly('a directory part that cannot be inspected keeps the path as given, and the fs error comes later', () => {
+posixOnly('a directory part that cannot be inspected and no `..`: the path is kept as given, and the fs error comes later', () => {
   it('ENOTDIR: a regular file in the directory part', () => {
     const given = `${FILE}/./home`;                           // resolving would give `${FILE}/home`
     expect(codeThrownBy(() => statSync(`${FILE}/.`))).toBe('ENOTDIR');   // precondition
     expect(homeOf(given)).toBe(given);
   });
 
-  it('ENOENT before a `..`: the kernel refuses the path, so nothing is collapsed as text', () => {
+  it.skipIf(isRoot())('EACCES on the way', () => {
+    const closed = join(d, 'closed-plain');
+    mkdirSync(join(closed, 'sub'), { recursive: true });
+    chmodSync(closed, 0o000);
+    restores.push(() => chmodSync(closed, 0o700));
+    const given = `${closed}/sub/home`;
+    expect(codeThrownBy(() => statSync(`${closed}/sub`))).toBe('EACCES');  // precondition
+    expect(homeOf(given)).toBe(given);
+  });
+});
+
+// Final review G1 (owner, 2026-11-09): every file below the home is joined as text, which folds a `..` over the folder the
+// kernel could not pass, so a value with a `..` and a directory part that cannot be inspected is refused with text 4.
+posixOnly('a directory part that cannot be inspected and a `..` in the value: refused (unresolvable-home)', () => {
+  const refusedFor = (HELIX_HOME: string): HomeRefusalError => {
+    const e = thrownBy(() => resolveHelixPaths({ HELIX_HOME }, U));
+    expect(isHomeRefusalError(e)).toBe(true);
+    expect((e as HomeRefusalError).homeRefusalCause).toBe('unresolvable-home');
+    expect((e as Error).message).toBe(UNRESOLVABLE_HOME_TEXT);
+    return e as HomeRefusalError;
+  };
+
+  it('ENOENT before a `..`: the kernel refuses the path, and the text fold is never used', () => {
     const given = `${d}/nope/../home`;
     expect(codeThrownBy(() => statSync(`${d}/nope/..`))).toBe('ENOENT');   // precondition
-    expect(homeOf(given)).toBe(given);
+    refusedFor(given);
   });
 
   it.skipIf(isRoot())('EACCES on the way', () => {
@@ -202,7 +269,17 @@ posixOnly('a directory part that cannot be inspected keeps the path as given, an
     restores.push(() => chmodSync(closed, 0o700));
     const given = `${closed}/sub/../home`;
     expect(codeThrownBy(() => statSync(`${closed}/sub`))).toBe('EACCES');  // precondition
-    expect(homeOf(given)).toBe(given);
+    refusedFor(given);
+  });
+
+  it('ENOTDIR: a regular file followed by `..`', () => {
+    const given = `${FILE}/../home`;
+    expect(codeThrownBy(() => statSync(`${FILE}/..`))).toBe('ENOTDIR');   // precondition
+    refusedFor(given);
+  });
+
+  it('a final `..` after a folder that cannot be inspected', () => {
+    refusedFor(`${d}/nope/..`);
   });
 });
 
@@ -284,7 +361,7 @@ describe('the constant texts and the module boundary', () => {
       HELIX_SESSIONS: 'HELIX_SESSIONS is not an absolute path, so it is refused',
     });
     expect(UNRESOLVABLE_HOME_TEXT).toBe(
-      'the Helix home cannot be resolved (a name that is not valid UTF-8, a path past the system limit, or too many links), so it is refused');
+      'the Helix home cannot be resolved (a name that is not valid UTF-8, a path past the system limit, too many links, or a `..` after a folder that cannot be searched), so it is refused');
     for (const t of [...Object.values(RELATIVE_VALUE_TEXT), UNRESOLVABLE_HOME_TEXT]) {
       expect(t).toMatch(/^[\x20-\x7e]+$/);
       expect(t).not.toMatch(/[\\/]/);
