@@ -99,6 +99,7 @@ describe('SECURITY.md states the home contract', () => {
     // P5's narrowing, approved at the plan review of 2026-11-08: where nothing was stored, the append's own error is the answer.
     expect(sec).toContain('An erase answered `unchanged` and a recheck that stores no row have stored nothing, so a failed append there is answered with its own error');
     expect(sec).toContain('`helix_dual_verify` writes its row after the Codex call and still throws when that append fails');
+    expect(sec).toContain("The same look refuses a home whose own name is a symbolic link, with the symlinked-home refusal every write through such a home gets, and an `audit.jsonl` that is a link whose target's folder does not exist or is not a directory");   // final review G10, G12
   });
   it("the witness lock's name is looked at before an append (B1's W-R4 reversed), and the look is not a hold", () => {
     expect(sec).toContain("The witness lock's name is looked at before every append, a project's first commit and an adopt included");
@@ -117,6 +118,7 @@ describe('SECURITY.md states the home contract', () => {
       'reads permissions and file kinds for the running process',
       'and root passes its permission check',   // final review G14
       'an erase through a symlinked home included, leaves no audit row',
+      'a link to a missing file in a folder that exists but that this user cannot write (for example `0500`) passes the look',   // re-review, probe danglingAudit rofolder
     ]) expect(sec, phrase).toContain(phrase);
   });
   it('the startup pass names its files (the count recovered from OWNED_FILES), its scope, and the directory rule', () => {
@@ -131,6 +133,7 @@ describe('SECURITY.md states the home contract', () => {
       "it never adds the owner's write permission, to the home or to a file",
       'a read-only home (`0555`) becomes `0500` and no file can be created in it',
       'a read-only file (`0444`) becomes `0400`',
+      "removes the key's group and other permission bits each time it reads it and adds none",   // final review G7, the key read
       'No other Helix program changes the mode of a directory that already exists',
       "The one exception is Helix's own Codex scratch folder (`<temp>/helix`), which a `helix_dual_verify` call sets to `0700` when it belongs to you",   // final review G8
     ]) expect(sec, phrase).toContain(phrase);
@@ -191,6 +194,9 @@ describe('CHANGELOG.md lists the changed behaviour', () => {
       'An audit row that cannot be appended no longer replaces the refusal or the stored-then-failed answer it follows',
       '`helix-trigger` follows the same home rules',
       'A resumed, compacted or forked session whose memory read fails still gets the supersede note',
+      'a read-only `0444` file becomes `0400`; before this change every repaired file became `0600`',   // final review G7
+      'repairs the key the same way each time it reads it, where it used to set the key to `0600`',   // final review G7, the key read
+      'refuses with a fixed text when they show that the home or the file cannot be written',   // re-review, probe danglingAudit rofolder
     ]) expect(changelog, phrase).toContain(phrase);
   });
   it('the surface bullet lists the helix-trigger record among the refused writes', () => {
@@ -236,6 +242,7 @@ describe('the sentences the batch made false are gone', () => {
     const changelog = flat('CHANGELOG.md');
     expect(changelog).not.toContain('adopt and the SessionEnd record are refused through a symlinked home');
     expect(changelog).not.toContain('An unresolvable global ledger path (');
+    expect(changelog).not.toContain('can be written, and refuses with a fixed text when they cannot');   // re-review, probe danglingAudit rofolder
     expect(flat('docs/release/README.md')).not.toContain('Two defects stay open in code and are disclosed');
   });
 });

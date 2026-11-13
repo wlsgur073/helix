@@ -152,6 +152,12 @@ First release.
   existing folder to `0700` (a `HELIX_SESSIONS` file in a shared folder leaves that folder's mode
   alone), and a signing key that is a link or lies behind a symlinked home is read as before and no
   longer tightened.
+- The startup pass sets each file it repairs in `HELIX_HOME` to the file's own mode without the
+  group and other bits, so a `0644` file becomes `0600` and a read-only `0444` file becomes `0400`;
+  before this change every repaired file became `0600`, which gave a read-only file the owner's
+  write permission. Every program that reads the signing key (the server, the SessionStart hook,
+  `helix-rebaseline` and `helix-trust-resolve`) repairs the key the same way each time it reads it,
+  where it used to set the key to `0600`.
 - The SessionEnd hook reads `HELIX_LEDGER`. It does not write its record into the global ledger,
   into `<HELIX_HOME>/memory.jsonl` (also when `HELIX_LEDGER` places the ledger elsewhere), into a
   project's ledger (a file named `memory.jsonl` directly inside a folder named `.helix`) or into
@@ -164,8 +170,9 @@ First release.
   link, FIFO or other foreign object at the rollback witness's lock name refuses a commit, an erase,
   a confirm, a recheck or an adopt before any row is stored. Before this change the row could be
   stored and the call fail after it, and an adopt or a project's first commit went through.
-- A confirm, an erase, a recheck or an adopt looks, before its row, at whether the home and
-  `audit.jsonl` can be written, and refuses with a fixed text when they cannot. An audit row that
+- A confirm, an erase, a recheck or an adopt looks, before its row, at the permissions and file
+  kinds of the home and `audit.jsonl`, and refuses with a fixed text when they show that the home or
+  the file cannot be written. An audit row that
   cannot be appended no longer replaces the refusal or the stored-then-failed answer it follows.
 - `helix-trigger` follows the same home rules: a symlinked, relative or unresolvable home, or a
   missing parent directory, is refused with exit status 3 and nothing is written (it no longer

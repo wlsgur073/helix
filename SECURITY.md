@@ -812,8 +812,11 @@ dropped back afterwards. It does not make ownership authenticated against an adv
   `audit.jsonl` can be written (permissions and file kind, as the running process sees them; root
   passes the permission check, not the file kind check or a read-only file system) and refuse with
   a fixed message when not; `commit` has no audit row and takes no
-  such look. The automatic compaction a recall can trigger (opt-in, off by
-  default) is the third: it swallows whatever its rewrite throws, a failed post-rename directory
+  such look. The same look refuses a home whose own name is a symbolic link, with the
+  symlinked-home refusal every write through such a home gets, and an `audit.jsonl` that is a link
+  whose target's folder does not exist or is not a directory, where the append could not create the
+  file, with the audit file's fixed message. The automatic compaction a recall can trigger (opt-in,
+  off by default) is the third: it swallows whatever its rewrite throws, a failed post-rename directory
   fsync or witness write included, so the recall still answers normally and the only record is a
   `compaction` row in `metrics.jsonl` with `"ok": false` (`"landed": true` once the rename had
   landed), written only while metrics are on. The startup witness heal is the fourth: a failure
@@ -910,7 +913,11 @@ dropped back afterwards. It does not make ownership authenticated against an adv
     written to.
   - The look at the home and `audit.jsonl` before an erase, adopt, recheck or confirm reads
     permissions and file kinds for the running process, so it does not stop a state that arises
-    after it, and root passes its permission check. An audit row that a refused call cannot append
+    after it, and root passes its permission check. It does not ask whether the folder an
+    `audit.jsonl` link leads to can be written: a link to a missing file in a folder that exists but
+    that this user cannot write (for example `0500`) passes the look, and a confirm there stores its
+    row, answers the stored-then-failed message and reads `Verified` with no audit row. An audit row
+    that a refused call cannot append
     is dropped without
     a note, so such a call, an erase through a symlinked home included, leaves no audit row.
 - **Rollout launch barrier (normative):** old bundles age-steal locks and do not sweep — while any
@@ -1009,7 +1016,11 @@ not acceptable, run it under an OS-level sandbox or leave the feature off.
   changes the mode of a directory that already exists: a missing last folder is created `0700`, and
   a folder that exists, such as the one that holds a `HELIX_SESSIONS` file, keeps its mode. The
   one exception is Helix's own Codex scratch folder (`<temp>/helix`), which a `helix_dual_verify`
-  call sets to `0700` when it belongs to you. A signing key read through a link at the key's name,
+  call sets to `0700` when it belongs to you.
+  Apart from the pass, every program that reads the signing key (the server, the SessionStart hook,
+  `helix-rebaseline` and `helix-trust-resolve`) removes the key's group and other permission bits
+  each time it reads it and adds none, so a `0444` key becomes `0400` there too.
+  A signing key read through a link at the key's name,
   or a stray copy beside a ledger that
   `HELIX_LEDGER` places elsewhere, keeps its mode as well.
 - `~/.helix/codex-log.jsonl` is created only if you opt in (`dualVerify.logContent: true`), and
